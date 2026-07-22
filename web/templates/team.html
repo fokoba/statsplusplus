@@ -969,6 +969,7 @@
   <table id="{{ table_id }}">
     <thead>
       <tr>
+        <th>Cut</th>
         <th data-sort="str" class="left">Name</th>
         <th data-sort="str">Pos</th>
         <th data-sort="num">Age</th>
@@ -983,8 +984,9 @@
     </thead>
     <tbody>
       {% for p in rows %}
-      <tr>
-        <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
+      <tr class="cut-row" data-pid="{{ p.pid }}">
+        <td><input type="checkbox" class="cut-checkbox" data-pid="{{ p.pid }}"></td>
+        <td class="left"><a class="player-link cut-name" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
         <td>{{ p.bucket }}</td>
         <td>{{ p.age }}</td>
         <td>{{ p.level }}</td>
@@ -1013,6 +1015,46 @@
     {{ cut_table(cut_candidates.needs_scouting, "No low-confidence candidates pending scouting.", "cuts-needs-scouting") }}
   </div>
 </div>
+
+<style>
+.cut-row.cut-marked .cut-name { color: var(--text-dim); text-decoration: line-through; }
+.cut-row.cut-marked td { opacity: 0.5; }
+</style>
+
+<script>
+/* ── Cut Candidates: mark-as-cut checkboxes, persisted per-player in localStorage ── */
+(function() {
+  var STORAGE_KEY = 'statspp_cut_marks';
+
+  function loadMarks() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
+    catch (e) { return {}; }
+  }
+  function saveMarks(marks) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(marks));
+  }
+
+  var marks = loadMarks();
+  document.querySelectorAll('#tab-cuts .cut-checkbox').forEach(function(cb) {
+    var pid = cb.dataset.pid;
+    var row = cb.closest('.cut-row');
+    if (marks[pid]) {
+      cb.checked = true;
+      row.classList.add('cut-marked');
+    }
+    cb.addEventListener('change', function() {
+      if (cb.checked) {
+        marks[pid] = true;
+        row.classList.add('cut-marked');
+      } else {
+        delete marks[pid];
+        row.classList.remove('cut-marked');
+      }
+      saveMarks(marks);
+    });
+  });
+})();
+</script>
 
 <script>
 /* ── Roster Hitters / Pitchers ── */

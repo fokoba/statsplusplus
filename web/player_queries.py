@@ -1000,27 +1000,38 @@ def get_player(pid):
                 pot=ratings["pot"] if ratings else None,
                 def_rating=valuation.get("def_rating"),
                 **_comp_kw)
-        # Amateur/draft prospect — not in prospect_fv or player_surplus
-        if not valuation and outcome_probs is None and level_str not in ('MLB','AAA','AA','A','A-Short','Rookie','International'):
+        # Affiliated minor leaguer with no prospect_fv row — this happens for
+        # anyone over the batch pipeline's age<=24 prospect cutoff (fv_calc.py),
+        # e.g. an org veteran in A-ball. Compute a valuation on the fly using
+        # their real level/age rather than leaving the page blank. Also covers
+        # true amateurs/draft-eligible players (who never had a real level).
+        if not valuation and outcome_probs is None and level_str != 'MLB':
             try:
                 import prospect_value as _pv
                 from player_utils import assign_bucket, calc_fv, LEVEL_NORM_AGE
-                from fv_calc import RATINGS_SQL
+                from fv_calc import RATINGS_SQL, LEVEL_INT_KEY
                 _conn2 = get_db()
                 _rat = _conn2.execute(RATINGS_SQL + " AND r.player_id = ?", (pid,)).fetchone()
                 if _rat:
                     _p = dict(_rat)
+                    # RATINGS_SQL's Ovr/Pot are the legacy OOTP columns, which this
+                    # evaluation engine never populates — use composite_score/
+                    # true_ceiling (falling back to ceiling_score) instead, same
+                    # override fv_calc.py applies for the batch pipeline.
+                    _p["Ovr"] = _p.get("composite_score") or _p.get("Ovr") or 0
+                    _p["Pot"] = _p.get("true_ceiling") or _p.get("ceiling_score") or _p.get("Pot") or 0
                     _role_map = {str(k): v for k, v in get_cfg().role_map.items()}
                     _p["_role"] = _role_map.get(str(_p.get("role") or 0), "position_player")
                     _p["Pos"] = str(_p.get("pos") or "")
                     _p["_is_pitcher"] = (_p["Pos"] == "P" or _p["_role"] in ("starter","reliever","closer"))
                     _bucket = assign_bucket(_p)
                     _p["_bucket"] = _bucket
-                    _lvl_key = {'11':'intl','10':'a','0':'dsl'}.get(str(_p.get("level","")), 'dsl')
-                    _p["_norm_age"] = _p["Age"] + 4
-                    _p["_level"] = "a-short"
+                    _lvl_key = LEVEL_INT_KEY.get(int(_p.get("level") or 0), "a-short")
+                    _p["_norm_age"] = LEVEL_NORM_AGE.get(_lvl_key, 22)
+                    _p["_level"] = _lvl_key
                     _fv, _fv_plus = calc_fv(_p)
                     _fv_str = f"{_fv}+" if _fv_plus else str(_fv)
+                    _dr = _p.get({'CF':'PotCF','SS':'PotSS','C':'PotC','2B':'Pot2B','3B':'Pot3B'}.get(_bucket, ""), 0)
                     valuation = {
                         "type": "prospect", "bucket": _display_pos(_bucket),
                         "fv": _fv, "fv_str": _fv_str,
@@ -1028,9 +1039,33 @@ def get_player(pid):
                         "surplus": 0, "level": _lvl_key,
                     }
                     outcome_probs = _pv.career_outcome_probs(
-                        _fv, age,
-                        'aaa' if _p["Ovr"] >= 45 else 'aa' if _p["Ovr"] >= 35 else 'a' if _p["Ovr"] >= 28 else 'a-short',
-                        _bucket, ovr=_p["Ovr"], pot=_p["Pot"])
+                        _fv, age, _lvl_key, _bucket, ovr=_p["Ovr"], pot=_p["Pot"], def_rating=_dr)
+                    pv = _pv.prospect_surplus(_fv, age, _lvl_key, _bucket,
+                                              ovr=_p["Ovr"], pot=_p["Pot"], def_rating=_dr)
+                    opt_total = _pv.prospect_surplus_with_option(
+                        _fv, age, _lvl_key, _bucket,
+                        ovr=_p["Ovr"], pot=_p["Pot"], def_rating=_dr)
+                    if pv and pv.get("breakdown"):
+                        cert = pv.get("certainty_mult", 1.0)
+                        scar = pv.get("scarcity_mult", 1.0)
+                        raw_total = sum(b["market_value"] - b["salary"] for b in pv["breakdown"])
+                        eta_yr = int(get_cfg().year + pv["years_to_mlb"])
+                        valuation["surplus"] = round(opt_total / 1e6, 1)
+                        surplus_detail = {
+                            "rows": [{"year": eta_yr + b['control_year'] - 1, "age": b["player_age"],
+                                      "war": round(b["war"], 1),
+                                      "value": b["market_value"],
+                                      "salary": b["salary"],
+                                      "surplus": b["surplus"]}
+                                     for b in pv["breakdown"]],
+                            "total": {"base": opt_total},
+                            "flags": [f"ETA: {pv['years_to_mlb']:.1f} yrs"],
+                            "discount_note": f"× {pv['dev_discount']:.0%} dev"
+                                             + (f" × {scar:.2f} scarcity" if scar < 1.0 else "")
+                                             + (f" × {cert:.2f} certainty" if cert != 1.0 else "")
+                                             + f" = {_fmt_money_py(opt_total)}",
+                            "raw_total": raw_total,
+                        }
             except Exception:
                 pass
     except Exception:

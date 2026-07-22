@@ -77,6 +77,7 @@
   <button class="tab" data-tab="contracts">Contracts</button>
   <button class="tab" data-tab="finances">Finances</button>
   <button class="tab" data-tab="dev">Player Development</button>
+  <button class="tab" data-tab="cuts">Cut Candidates</button>
 </div>
 
 {# ══════ Main ══════ #}
@@ -949,6 +950,67 @@
       </div>
     </div>
     <div></div>
+  </div>
+</div>
+
+{# ══════ Cut Candidates ══════ #}
+<div class="tab-content" id="tab-cuts">
+  <div class="panel" style="margin-bottom:16px; font-size:12px; color:var(--text-dim)">
+    Flagged if: age ≥ 25, OR Low Work Ethic / Low Intelligence, OR (age ≤ 24 with FV ≤ 40 <strong>and</strong> potential in the bottom {{ cut_candidates.potential_percentile_pct }}% of this org's own age ≤ 24 players
+    {%- if cut_candidates.potential_cutoff is not none %} — currently potential ≤ {{ cut_candidates.potential_cutoff }} for {{ team_name }}{% endif %}).
+    A stronger farm system has a higher bar here; a weaker one flags more players by comparison.
+    Ordered so bottom-{{ cut_candidates.potential_percentile_pct }}%-potential players show first, then the rest of the makeup red flags.
+    <strong>Confirmed</strong> = scouting accuracy High/Very High (trust the ratings).
+    <strong>Likely — Needs Scouting Report</strong> = accuracy Average/Low — same red flags, but the underlying ratings may be off, so get a fresh report before acting.
+  </div>
+
+  {% macro cut_table(rows, empty_msg, table_id) %}
+  {% if rows %}
+  <table id="{{ table_id }}">
+    <thead>
+      <tr>
+        <th data-sort="str" class="left">Name</th>
+        <th data-sort="str">Pos</th>
+        <th data-sort="num">Age</th>
+        <th data-sort="str">Level</th>
+        <th data-sort="str" class="left">Affiliate</th>
+        <th data-sort="num">Ovr</th>
+        <th data-sort="num">Pot</th>
+        <th data-sort="str">FV</th>
+        <th data-sort="str">Scout</th>
+        <th class="left">Reasons</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in rows %}
+      <tr>
+        <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
+        <td>{{ p.bucket }}</td>
+        <td>{{ p.age }}</td>
+        <td>{{ p.level }}</td>
+        <td class="left"><a class="team-link" href="/team/{{ p.team_id }}">{{ p.team_name }}</a></td>
+        <td><span class="ovr-color" data-g="{{ p.composite_score }}">{{ p.composite_score if p.composite_score is not none else '-' }}</span></td>
+        <td><span class="ovr-color" data-g="{{ p.potential }}">{{ p.potential if p.potential is not none else '-' }}</span></td>
+        <td>{{ p.fv_str or '-' }}</td>
+        <td>{{ p.acc or '-' }}</td>
+        <td class="left" style="font-size:12px; color:var(--text-dim)">{{ p.reasons|join(", ") }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div style="color:var(--text-dim); font-size:13px; padding:12px 0">{{ empty_msg }}</div>
+  {% endif %}
+  {% endmacro %}
+
+  <div class="panel">
+    <h2>Confirmed Cut Candidates <span style="color:var(--text-dim); font-weight:400; font-size:13px">({{ cut_candidates.confirmed|length }})</span></h2>
+    {{ cut_table(cut_candidates.confirmed, "No confirmed cut candidates — nice farm system.", "cuts-confirmed") }}
+  </div>
+
+  <div class="panel">
+    <h2>Likely Cut Candidates - Needs Scouting Report <span style="color:var(--text-dim); font-weight:400; font-size:13px">({{ cut_candidates.needs_scouting|length }})</span></h2>
+    {{ cut_table(cut_candidates.needs_scouting, "No low-confidence candidates pending scouting.", "cuts-needs-scouting") }}
   </div>
 </div>
 

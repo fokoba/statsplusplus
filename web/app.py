@@ -224,6 +224,7 @@ def dashboard():
     return redirect(f"/team/{queries.get_my_team_id()}")
 
 
+
 def _render_minor_league_team(info):
     """Render a minor league team page."""
     tid = info["team_id"]
@@ -281,6 +282,7 @@ def team(tid):
     org_overview = queries.get_org_overview(tid)
     affiliates = queries.get_affiliates(tid)
     my_abbr = queries.get_my_team_abbr()
+    cut_candidates = queries.get_cut_candidates(tid)
     return render_template("team.html",
                            tid=tid, team_name=name,
                            breadcrumbs=[{"label": cfg.settings.get("league", "League"), "url": "/league"},
@@ -301,7 +303,8 @@ def team(tid):
                            roster_pitchers=roster_pitchers,
                            league_avg=league_avg,
                            org_overview=org_overview,
-                           affiliates=affiliates)
+                           affiliates=affiliates,
+                           cut_candidates=cut_candidates)
 
 
 @app.route("/league")

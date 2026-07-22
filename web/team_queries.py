@@ -558,6 +558,138 @@ def _r3(v):
     return round(v, 3) if v is not None else None
 
 
+# Age at/above which a minor leaguer is a cut candidate on age grounds alone.
+_CUT_AGE_THRESHOLD = 25
+# FV ceiling below which a young (<= 24) player is a cut candidate on ability
+# grounds — a fixed, absolute quality bar (FV 40 = replacement-level tier).
+_CUT_FV_THRESHOLD = 40
+# Potential is judged relative to this org's own system, not an absolute
+# number — see _org_potential_percentile below.
+_CUT_POTENTIAL_PERCENTILE = 0.10
+
+
+def _percentile(sorted_vals, pct):
+    """Value at the given percentile (0-1) of an already-sorted list."""
+    if not sorted_vals:
+        return None
+    idx = int(len(sorted_vals) * pct)
+    idx = min(idx, len(sorted_vals) - 1)
+    return sorted_vals[idx]
+
+
+def get_cut_candidates(team_id=None):
+    """Minor-league cut candidates for one organization, split by scouting
+    confidence.
+
+    Flags a player if any of:
+      - age >= 25 (too old to be a real prospect)
+      - Low Work Ethic or Low Intelligence (makeup red flag)
+      - age <= 24 with BOTH FV <= 40 AND potential in the bottom 20% of this
+        org's own age <= 24 population (a stronger system has a higher bar;
+        a weaker system flags more of its own players by comparison)
+
+    Returns {"confirmed": [...], "needs_scouting": [...], "potential_cutoff": n}
+    — "confirmed" is scouting accuracy High/Very High (trust the ratings),
+    "needs_scouting" is Average/Low (same red flags, but the ratings
+    themselves are unreliable so this should be treated as "go get a fresh
+    scouting report" rather than an actual cut recommendation).
+    """
+    conn = get_db()
+    conn.row_factory = None
+    tid = team_id or my_team_id()
+    ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
+
+    rows = conn.execute("""
+        SELECT p.player_id, p.name, p.age, p.level, p.pos, p.role, p.team_id,
+               r.int_, r.wrk_ethic, r.acc, r.composite_score, r.ceiling_score,
+               r.true_ceiling, pf.fv, pf.fv_str, pf.bucket, t.name
+        FROM players p
+        LEFT JOIN latest_ratings r ON p.player_id = r.player_id
+        LEFT JOIN prospect_fv pf ON pf.player_id = p.player_id AND pf.eval_date = ?
+        LEFT JOIN teams t ON t.team_id = p.team_id
+        WHERE p.parent_team_id = ? AND p.level != '1' AND p.level NOT IN ('7', '8')
+    """, (ed, tid)).fetchall()
+
+    # Org-relative potential floor: bottom 20% of this org's own age <= 24
+    # players (by potential ceiling), computed before any filtering below.
+    _u24_potentials = sorted(
+        (true_ceil if true_ceil is not None else ceil_score)
+        for (_p, _n, age, _l, _pos, _r, _at, _i, _we, _ac, _c, ceil_score,
+             true_ceil, _fv, _fs, _pb, _an) in rows
+        if age is not None and age <= 24
+        and (true_ceil is not None or ceil_score is not None)
+    )
+    potential_cutoff = _percentile(_u24_potentials, _CUT_POTENTIAL_PERCENTILE)
+
+    _pos_letter = pos_map()
+    confirmed, needs_scouting = [], []
+    for r in rows:
+        (pid, name, age, level, pos, role, aff_tid, intel, wrk_ethic, acc,
+         comp, ceil_score, true_ceil, fv, fv_str, pf_bucket, aff_name) = r
+
+        # Prefer the evaluation engine's own bucket (handles COF/SP/RP/CL
+        # correctly); fall back to raw position/role for players with no
+        # prospect_fv row (_display_pos ignores its 2nd arg, so this needs
+        # to be resolved by hand rather than passed through).
+        if pf_bucket:
+            bucket_display = _display_pos(pf_bucket)
+        elif role in ROLE_MAP:
+            bucket_display = ROLE_MAP[role]
+        else:
+            letter = _pos_letter.get(pos, "?")
+            bucket_display = "OF" if letter in ("LF", "RF") else letter
+
+        reasons = []
+        if age is not None and age >= _CUT_AGE_THRESHOLD:
+            reasons.append(f"Age {age}")
+        if wrk_ethic == "L":
+            reasons.append("Low Work Ethic")
+        if intel == "L":
+            reasons.append("Low Intelligence")
+        potential = true_ceil if true_ceil is not None else ceil_score
+        is_bottom_20 = (age is not None and age <= 24 and potential_cutoff is not None
+                        and fv is not None and fv <= _CUT_FV_THRESHOLD
+                        and potential is not None and potential <= potential_cutoff)
+        if is_bottom_20:
+            _pct_label = f"{int(_CUT_POTENTIAL_PERCENTILE * 100)}%"
+            reasons.append(f"Low FV ({fv_str or fv})")
+            reasons.append(f"Bottom {_pct_label} Potential ({potential} ≤ {potential_cutoff} for this org)")
+
+        if not reasons:
+            continue
+
+        entry = {
+            "pid": pid, "name": name, "age": age,
+            "level": level_map().get(str(level), str(level)),
+            "bucket": bucket_display,
+            "team_id": aff_tid,
+            "team_name": aff_name or team_names_map().get(aff_tid, str(aff_tid)),
+            "composite_score": comp, "potential": potential,
+            "fv_str": fv_str, "acc": acc, "reasons": reasons,
+            "_is_bottom_20": is_bottom_20,
+            "_is_personality": wrk_ethic == "L" or intel == "L",
+        }
+        if acc in ("H", "VH"):
+            confirmed.append(entry)
+        else:
+            needs_scouting.append(entry)
+
+    # Priority order: (1) bottom-20%-potential players first, (2) then
+    # everyone else with a makeup red flag, (3) then anyone flagged on age
+    # alone. Within each tier, more red flags and older age sort first.
+    def _tier_key(e):
+        tier = 0 if e["_is_bottom_20"] else (1 if e["_is_personality"] else 2)
+        return (tier, -len(e["reasons"]), -(e["age"] or 0))
+
+    confirmed.sort(key=_tier_key)
+    needs_scouting.sort(key=_tier_key)
+    for e in confirmed + needs_scouting:
+        del e["_is_bottom_20"], e["_is_personality"]
+    return {"confirmed": confirmed, "needs_scouting": needs_scouting,
+            "potential_cutoff": potential_cutoff,
+            "potential_percentile_pct": int(_CUT_POTENTIAL_PERCENTILE * 100)}
+
+
 def get_farm(team_id=None):
     conn = get_db()
     conn.row_factory = None

@@ -690,6 +690,229 @@ def get_cut_candidates(team_id=None):
             "potential_percentile_pct": int(_CUT_POTENTIAL_PERCENTILE * 100)}
 
 
+# Personality trait -> {value: (kind, label)}. "kind" is "buff" or "concern".
+# Greed is inverted vs. the others: high greed is the concern, low is the buff.
+_TRAIT_NOTES = {
+    "wrk_ethic": {"H": ("buff", "Hard Worker"), "L": ("concern", "Low Work Ethic")},
+    "int_":      {"H": ("buff", "High IQ"), "L": ("concern", "Low IQ")},
+    "lead":      {"H": ("buff", "Leader"), "L": ("concern", "Low Leadership")},
+    "loy":       {"H": ("buff", "Loyal"), "L": ("concern", "Low Loyalty")},
+    "greed":     {"H": ("concern", "Greedy"), "L": ("buff", "Not Greedy")},
+}
+
+
+def _personality_notes(intel, wrk_ethic, lead, loy, greed):
+    """Return (buffs, concerns) label lists from the five personality traits."""
+    buffs, concerns = [], []
+    for field, value in (("wrk_ethic", wrk_ethic), ("int_", intel),
+                         ("lead", lead), ("loy", loy), ("greed", greed)):
+        note = _TRAIT_NOTES.get(field, {}).get(value)
+        if not note:
+            continue
+        kind, label = note
+        (buffs if kind == "buff" else concerns).append(label)
+    return buffs, concerns
+
+
+def _bucket_for_display(pf_bucket, role, pos):
+    """Resolve a display bucket the same way get_cut_candidates does."""
+    if pf_bucket:
+        return _display_pos(pf_bucket)
+    if role in ROLE_MAP:
+        return ROLE_MAP[role]
+    letter = pos_map().get(pos, "?")
+    return "OF" if letter in ("LF", "RF") else letter
+
+
+def _weak_positions_for_org(tid):
+    """Positions where this org ranks in the bottom half of the league,
+    reusing the same WAR-based ranking that powers the depth chart."""
+    year = _get_state().get("stats_year", _get_state()["year"])
+    lg_rankings = _league_pos_rankings(get_db(), year)
+    num_teams = max(len(v) for v in lg_rankings.values()) if lg_rankings else 0
+    weak = set()
+    for pos, tw in lg_rankings.items():
+        for i, (tid2, _war) in enumerate(tw):
+            if tid2 == tid:
+                if i + 1 > num_teams / 2:
+                    weak.add(pos)
+                break
+    return weak
+
+
+def _fit_position(bucket, weak_positions):
+    """Where a candidate would fit in the org, or '' if no obvious need.
+
+    _league_pos_rankings ranks LF/RF separately, but a corner-outfield
+    prospect's bucket only tells us "OF" (COF collapsed by _display_pos) —
+    treat that as a fit if either corner is weak.
+    """
+    if not bucket:
+        return ""
+    if bucket == "OF":
+        return "LF/RF" if ("LF" in weak_positions or "RF" in weak_positions) else ""
+    return bucket if bucket in weak_positions else ""
+
+
+def get_waiver_candidates(team_id=None):
+    """Players currently on waivers, excluding this org's own players.
+
+    Shows Ovr/Pot/FV (if evaluated), scouting accuracy, personality
+    buffs/concerns, and where they'd fit in this org (blank if the org
+    doesn't have an obvious need at that position).
+    """
+    conn = get_db()
+    conn.row_factory = None
+    tid = team_id or my_team_id()
+    ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
+    weak_positions = _weak_positions_for_org(tid)
+
+    rows = conn.execute("""
+        SELECT p.player_id, p.name, p.age, p.level, p.pos, p.role, p.team_id,
+               r.int_, r.wrk_ethic, r.lead, r.loy, r.greed, r.acc,
+               r.composite_score, r.ceiling_score, r.true_ceiling,
+               pf.fv, pf.fv_str, pf.bucket, t.name
+        FROM players p
+        LEFT JOIN latest_ratings r ON p.player_id = r.player_id
+        LEFT JOIN prospect_fv pf ON pf.player_id = p.player_id AND pf.eval_date = ?
+        LEFT JOIN teams t ON t.team_id = p.team_id
+        WHERE p.is_on_waivers = 1 AND p.team_id != ?
+    """, (ed, tid)).fetchall()
+
+    out = []
+    for r in rows:
+        (pid, name, age, level, pos, role, cur_tid, intel, wrk_ethic, lead, loy,
+         greed, acc, comp, ceil_score, true_ceil, fv, fv_str, pf_bucket, cur_name) = r
+        bucket = _bucket_for_display(pf_bucket, role, pos)
+        potential = true_ceil if true_ceil is not None else ceil_score
+        buffs, concerns = _personality_notes(intel, wrk_ethic, lead, loy, greed)
+        out.append({
+            "pid": pid, "name": name, "age": age,
+            "level": (level_map().get(str(level)) or ("FA" if str(level)=="0" else str(level))),
+            "bucket": bucket,
+            "cur_team_id": cur_tid, "cur_team_name": cur_name or str(cur_tid),
+            "composite_score": comp, "potential": potential, "fv_str": fv_str,
+            "acc": acc, "buffs": buffs, "concerns": concerns,
+            "fit": _fit_position(bucket, weak_positions),
+        })
+    out.sort(key=lambda e: -(e["composite_score"] or 0))
+    return out
+
+
+_FA_TOP_PCT = 0.05
+
+
+# Nippon-affiliated team IDs: 320-333 are the current 12 NPB clubs plus the
+# Central/Pacific League placeholders; 288-301 is an older/historical
+# numbering of the same 14 entities (confirmed by matching counts). Used to
+# exclude players drafted by an NPB team even when their nationality isn't
+# Japanese (e.g. an American player historically drafted by Nankai).
+_NIPPON_TEAM_IDS = tuple(range(288, 302)) + tuple(range(320, 334))
+
+
+_FA_PROSPECT_AGE_MAX = 24
+
+
+def get_free_agent_candidates(team_id=None):
+    """Top 5% of free-agent hitters and top 5% of free-agent pitchers
+    league-wide, by current Ovr (composite_score), plus a separate top 5%
+    young-prospect cut (age <= 24, ranked by FV/potential instead of Ovr).
+
+    Excludes:
+      - nation_id 98 (Nippon/Japan) — historical NPB players seeded into
+        the world database, not real signable free agents here
+      - anyone drafted by an NPB team (see _NIPPON_TEAM_IDS), regardless
+        of nationality
+      - draft_eligible players — current/future amateur draft class, not
+        actually signable as free agents
+
+    Shows Ovr/Pot/FV (if evaluated), scouting accuracy, personality
+    buffs/concerns, and where they'd fit in this org.
+    """
+    conn = get_db()
+    conn.row_factory = None
+    tid = team_id or my_team_id()
+    ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
+    weak_positions = _weak_positions_for_org(tid)
+
+    _nippon_qs = ",".join("?" * len(_NIPPON_TEAM_IDS))
+    _signable_where = f"""
+        p.free_agent = 1 AND p.retired = 0 AND p.team_id = 0
+        AND (p.nation_id IS NULL OR p.nation_id != 98)
+        AND (p.draft_team_id IS NULL OR p.draft_team_id NOT IN ({_nippon_qs}))
+        AND COALESCE(p.draft_eligible, 0) != 1
+    """
+
+    # Pool transparency counts — how many free agents exist at all vs. how
+    # many are actually signable once Nippon/draft-pool players are excluded.
+    total_fa = conn.execute(
+        "SELECT COUNT(*) FROM players WHERE free_agent=1 AND retired=0 AND team_id=0"
+    ).fetchone()[0]
+    nippon_excluded = conn.execute(
+        "SELECT COUNT(*) FROM players WHERE free_agent=1 AND retired=0 AND team_id=0 "
+        f"AND (nation_id=98 OR draft_team_id IN ({_nippon_qs}))", _NIPPON_TEAM_IDS
+    ).fetchone()[0]
+    draft_pool_excluded = conn.execute(
+        "SELECT COUNT(*) FROM players WHERE free_agent=1 AND retired=0 AND team_id=0 "
+        "AND COALESCE(draft_eligible,0)=1"
+    ).fetchone()[0]
+    signable_pool = conn.execute(
+        f"SELECT COUNT(*) FROM players p WHERE {_signable_where}", _NIPPON_TEAM_IDS
+    ).fetchone()[0]
+
+    rows = conn.execute(f"""
+        SELECT p.player_id, p.name, p.age, p.level, p.pos, p.role,
+               r.int_, r.wrk_ethic, r.lead, r.loy, r.greed, r.acc,
+               r.composite_score, r.ceiling_score, r.true_ceiling,
+               pf.fv, pf.fv_str, pf.bucket
+        FROM players p
+        LEFT JOIN latest_ratings r ON p.player_id = r.player_id
+        LEFT JOIN prospect_fv pf ON pf.player_id = p.player_id AND pf.eval_date = ?
+        WHERE {_signable_where}
+              AND r.composite_score IS NOT NULL
+    """, (ed, *_NIPPON_TEAM_IDS)).fetchall()
+
+    hitters, pitchers = [], []
+    for r in rows:
+        (pid, name, age, level, pos, role, intel, wrk_ethic, lead, loy, greed,
+         acc, comp, ceil_score, true_ceil, fv, fv_str, pf_bucket) = r
+        bucket = _bucket_for_display(pf_bucket, role, pos)
+        potential = true_ceil if true_ceil is not None else ceil_score
+        buffs, concerns = _personality_notes(intel, wrk_ethic, lead, loy, greed)
+        entry = {
+            "pid": pid, "name": name, "age": age,
+            "level": (level_map().get(str(level)) or ("FA" if str(level)=="0" else str(level))),
+            "bucket": bucket, "composite_score": comp, "potential": potential,
+            "fv": fv, "fv_str": fv_str, "acc": acc, "buffs": buffs, "concerns": concerns,
+            "fit": _fit_position(bucket, weak_positions),
+        }
+        (pitchers if role in ROLE_MAP else hitters).append(entry)
+
+    def _top_pct(pool, key):
+        pool = sorted(pool, key=key)
+        n = max(1, int(len(pool) * _FA_TOP_PCT)) if pool else 0
+        return pool[:n]
+
+    def _ovr_key(e):
+        return -(e["composite_score"] or 0)
+
+    def _prospect_key(e):
+        # FV is the more authoritative grade when available; fall back to
+        # raw potential ceiling for players not in prospect_fv.
+        return -(e["fv"] if e["fv"] is not None else (e["potential"] or 0))
+
+    young_hitters = [e for e in hitters if e["age"] is not None and e["age"] <= _FA_PROSPECT_AGE_MAX]
+    young_pitchers = [e for e in pitchers if e["age"] is not None and e["age"] <= _FA_PROSPECT_AGE_MAX]
+
+    return {"hitters": _top_pct(hitters, _ovr_key), "pitchers": _top_pct(pitchers, _ovr_key),
+            "young_hitters": _top_pct(young_hitters, _prospect_key),
+            "young_pitchers": _top_pct(young_pitchers, _prospect_key),
+            "prospect_age_max": _FA_PROSPECT_AGE_MAX,
+            "top_pct": int(_FA_TOP_PCT * 100),
+            "total_fa": total_fa, "nippon_excluded": nippon_excluded,
+            "draft_pool_excluded": draft_pool_excluded, "signable_pool": signable_pool}
+
+
 def get_farm(team_id=None):
     conn = get_db()
     conn.row_factory = None

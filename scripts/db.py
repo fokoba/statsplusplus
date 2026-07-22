@@ -44,7 +44,13 @@ CREATE TABLE IF NOT EXISTS players (
     parent_team_id INTEGER,
     level          TEXT,
     pos            INTEGER,
-    role           INTEGER
+    role           INTEGER,
+    retired        INTEGER,
+    free_agent     INTEGER,
+    is_on_waivers  INTEGER,
+    nation_id      INTEGER,
+    draft_eligible INTEGER,
+    draft_team_id  INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS ratings (
@@ -402,3 +408,9 @@ def init_schema(league_dir: Path | None = None):
         ps_cols = {r[1] for r in conn.execute("PRAGMA table_info(player_surplus)").fetchall()}
         if "surplus_yr1" not in ps_cols:
             conn.execute("ALTER TABLE player_surplus ADD COLUMN surplus_yr1 INTEGER")
+        # players: add roster-status columns if missing (waiver/FA tracking)
+        p_cols = {r[1] for r in conn.execute("PRAGMA table_info(players)").fetchall()}
+        for col in ("retired", "free_agent", "is_on_waivers", "nation_id",
+                    "draft_eligible", "draft_team_id"):
+            if col not in p_cols:
+                conn.execute(f"ALTER TABLE players ADD COLUMN {col} INTEGER")

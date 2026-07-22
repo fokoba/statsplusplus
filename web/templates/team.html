@@ -78,6 +78,7 @@
   <button class="tab" data-tab="finances">Finances</button>
   <button class="tab" data-tab="dev">Player Development</button>
   <button class="tab" data-tab="cuts">Cut Candidates</button>
+  <button class="tab" data-tab="adds">Add Candidates</button>
 </div>
 
 {# ══════ Main ══════ #}
@@ -1013,6 +1014,88 @@
   <div class="panel">
     <h2>Likely Cut Candidates - Needs Scouting Report <span style="color:var(--text-dim); font-weight:400; font-size:13px">({{ cut_candidates.needs_scouting|length }})</span></h2>
     {{ cut_table(cut_candidates.needs_scouting, "No low-confidence candidates pending scouting.", "cuts-needs-scouting") }}
+  </div>
+</div>
+
+{# ══════ Add Candidates ══════ #}
+<div class="tab-content" id="tab-adds">
+  {% macro add_table(rows, table_id, cur_team_col) %}
+  {% if rows %}
+  <table id="{{ table_id }}">
+    <thead>
+      <tr>
+        <th data-sort="str" class="left">Name</th>
+        <th data-sort="str">Pos</th>
+        <th data-sort="num">Age</th>
+        <th data-sort="str">Level</th>
+        {% if cur_team_col %}<th data-sort="str" class="left">Current Team</th>{% endif %}
+        <th data-sort="num">Ovr</th>
+        <th data-sort="num">Pot</th>
+        <th data-sort="str">FV</th>
+        <th data-sort="str">Scout</th>
+        <th data-sort="str">Fits At</th>
+        <th class="left">Personality</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in rows %}
+      <tr>
+        <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
+        <td>{{ p.bucket }}</td>
+        <td>{{ p.age }}</td>
+        <td>{{ p.level }}</td>
+        {% if cur_team_col %}<td class="left"><a class="team-link" href="/team/{{ p.cur_team_id }}">{{ p.cur_team_name }}</a></td>{% endif %}
+        <td><span class="ovr-color" data-g="{{ p.composite_score }}">{{ p.composite_score if p.composite_score is not none else '-' }}</span></td>
+        <td><span class="ovr-color" data-g="{{ p.potential }}">{{ p.potential if p.potential is not none else '-' }}</span></td>
+        <td>{{ p.fv_str or '-' }}</td>
+        <td>{{ p.acc or '-' }}</td>
+        <td>{{ p.fit or '-' }}</td>
+        <td class="left" style="font-size:12px">
+          {%- if p.buffs %}<span style="color:#4caf50">{{ p.buffs|join(", ") }}</span>{% endif -%}
+          {%- if p.buffs and p.concerns %}<br>{% endif -%}
+          {%- if p.concerns %}<span style="color:#f44336">{{ p.concerns|join(", ") }}</span>{% endif -%}
+          {%- if not p.buffs and not p.concerns %}<span style="color:var(--text-dim)">—</span>{% endif -%}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div style="color:var(--text-dim); font-size:13px; padding:12px 0">No candidates right now.</div>
+  {% endif %}
+  {% endmacro %}
+
+  <div class="panel">
+    <h2>Waiver Wire Adds <span style="color:var(--text-dim); font-weight:400; font-size:13px">({{ waiver_candidates|length }})</span></h2>
+    <div style="font-size:12px; color:var(--text-dim); margin-bottom:8px">
+      All players currently on waivers league-wide (excluding your own org). "Fits At" is blank if {{ team_name }} doesn't have an obvious need at that position.
+    </div>
+    {{ add_table(waiver_candidates, "waiver-adds", true) }}
+  </div>
+
+  <div class="panel">
+    <h2>Free Agent Adds <span style="color:var(--text-dim); font-weight:400; font-size:13px">({{ fa_candidates.hitters|length }} hitters, {{ fa_candidates.pitchers|length }} pitchers)</span></h2>
+    <div style="font-size:12px; color:var(--text-dim); margin-bottom:8px">
+      Top {{ fa_candidates.top_pct }}% of free-agent hitters and top {{ fa_candidates.top_pct }}% of free-agent pitchers league-wide, by current Ovr.
+      <br>
+      <strong>Total Signable Pool: {{ fa_candidates.signable_pool }}</strong>
+      (of {{ fa_candidates.total_fa }} total free agents — {{ fa_candidates.nippon_excluded }} excluded as Nippon/international, {{ fa_candidates.draft_pool_excluded }} excluded as current/future draft-pool amateurs; some players fall into both).
+    </div>
+    <h3 style="font-size:13px; margin:12px 0 6px">Hitters</h3>
+    {{ add_table(fa_candidates.hitters, "fa-hitters", false) }}
+    <h3 style="font-size:13px; margin:16px 0 6px">Pitchers</h3>
+    {{ add_table(fa_candidates.pitchers, "fa-pitchers", false) }}
+  </div>
+
+  <div class="panel">
+    <h2>Top Free Agent Prospects (Age ≤ {{ fa_candidates.prospect_age_max }}) <span style="color:var(--text-dim); font-weight:400; font-size:13px">({{ fa_candidates.young_hitters|length }} hitters, {{ fa_candidates.young_pitchers|length }} pitchers)</span></h2>
+    <div style="font-size:12px; color:var(--text-dim); margin-bottom:8px">
+      Top {{ fa_candidates.top_pct }}% of signable free agents age {{ fa_candidates.prospect_age_max }} or under, ranked by FV (or potential ceiling when unevaluated) instead of current Ovr — surfaces high-upside youth the Ovr-based list above misses.
+    </div>
+    <h3 style="font-size:13px; margin:12px 0 6px">Hitters</h3>
+    {{ add_table(fa_candidates.young_hitters, "fa-young-hitters", false) }}
+    <h3 style="font-size:13px; margin:16px 0 6px">Pitchers</h3>
+    {{ add_table(fa_candidates.young_pitchers, "fa-young-pitchers", false) }}
   </div>
 </div>
 

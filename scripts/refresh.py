@@ -36,10 +36,12 @@ def _upsert_teams(conn, teams):
 
 def _upsert_players(conn, players):
     conn.executemany(
-        "INSERT OR REPLACE INTO players VALUES (?,?,?,?,?,?,?,?)",
+        "INSERT OR REPLACE INTO players VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         [(p["ID"], f"{p.get('First Name','')} {p.get('Last Name','')}".strip(),
           p.get("Age"), p.get("Team ID"), p.get("Parent Team ID"),
-          p.get("Level"), p.get("Pos"), p.get("Role"))
+          p.get("Level"), p.get("Pos"), p.get("Role"),
+          p.get("Retired") or 0, p.get("free_agent") or 0, p.get("is_on_waivers") or 0,
+          p.get("nation_id"), p.get("draft_eligible") or 0, p.get("draft_team_id"))
          for p in players]
     )
 

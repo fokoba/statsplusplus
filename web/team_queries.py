@@ -888,9 +888,9 @@ def get_free_agent_candidates(team_id=None):
         }
         (pitchers if role in ROLE_MAP else hitters).append(entry)
 
-    def _top_pct(pool, key):
+    def _top_pct(pool, key, min_count=1):
         pool = sorted(pool, key=key)
-        n = max(1, int(len(pool) * _FA_TOP_PCT)) if pool else 0
+        n = max(min_count, int(len(pool) * _FA_TOP_PCT)) if pool else 0
         return pool[:n]
 
     def _ovr_key(e):
@@ -903,10 +903,18 @@ def get_free_agent_candidates(team_id=None):
 
     young_hitters = [e for e in hitters if e["age"] is not None and e["age"] <= _FA_PROSPECT_AGE_MAX]
     young_pitchers = [e for e in pitchers if e["age"] is not None and e["age"] <= _FA_PROSPECT_AGE_MAX]
+    clean_hitters = [e for e in hitters if not e["concerns"]]
+    clean_pitchers = [e for e in pitchers if not e["concerns"]]
+    clean_young_hitters = [e for e in young_hitters if not e["concerns"]]
+    clean_young_pitchers = [e for e in young_pitchers if not e["concerns"]]
 
     return {"hitters": _top_pct(hitters, _ovr_key), "pitchers": _top_pct(pitchers, _ovr_key),
             "young_hitters": _top_pct(young_hitters, _prospect_key),
             "young_pitchers": _top_pct(young_pitchers, _prospect_key),
+            "clean_hitters": _top_pct(clean_hitters, _ovr_key, min_count=5),
+            "clean_pitchers": _top_pct(clean_pitchers, _ovr_key, min_count=5),
+            "clean_young_hitters": _top_pct(clean_young_hitters, _prospect_key, min_count=5),
+            "clean_young_pitchers": _top_pct(clean_young_pitchers, _prospect_key, min_count=5),
             "prospect_age_max": _FA_PROSPECT_AGE_MAX,
             "top_pct": int(_FA_TOP_PCT * 100),
             "total_fa": total_fa, "nippon_excluded": nippon_excluded,

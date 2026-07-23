@@ -1185,6 +1185,8 @@ def get_positional_rankings():
     """
     conn = get_db()
     teams = team_abbr_map()
+    cfg = get_cfg()
+    stats_year = cfg.year
 
     # Get MLB org IDs for filtering
     try:
@@ -1202,6 +1204,28 @@ def get_positional_rankings():
         WHERE p.level = '1' AND r.composite_score IS NOT NULL
         ORDER BY r.composite_score DESC
     """).fetchall()
+
+    # For pitchers, determine SP/RP from actual usage (GS ratio) rather than
+    # role codes, which are unreliable across leagues (e.g. PPL uses role=12
+    # for some starters).
+    pitcher_is_sp = {}
+    pit_stats = conn.execute("""
+        SELECT player_id, gs, g
+        FROM pitching_stats
+        WHERE split_id = 1 AND year = ?
+    """, (stats_year,)).fetchall()
+    # Fall back to prior year if current year has no data (spring training)
+    if not pit_stats:
+        pit_stats = conn.execute("""
+            SELECT player_id, gs, g
+            FROM pitching_stats
+            WHERE split_id = 1 AND year = ?
+        """, (stats_year - 1,)).fetchall()
+    for r in pit_stats:
+        g = r["g"] or 0
+        gs = r["gs"] or 0
+        if g > 0:
+            pitcher_is_sp[r["player_id"]] = (gs > 3 and gs / g > 0.5)
 
     # Prospects with FV grades — only from MLB orgs
     prospect_rows = conn.execute("""
@@ -1223,15 +1247,33 @@ def get_positional_rankings():
             if len(group["mlb"]) >= 20:
                 break
             pos, role = r["pos"], r["role"]
-            if role in cfg["roles"] or pos in cfg["positions"]:
-                if r["team_id"] not in mlb_org_ids:
+            pid = r["player_id"]
+
+            # For pitchers (pos=1), use stats-based SP/RP classification
+            # rather than role codes which are unreliable across leagues
+            if pos == 1 and key in ("SP", "RP"):
+                is_sp = pitcher_is_sp.get(pid)
+                if is_sp is None:
+                    # No stats — fall back to role code
+                    is_sp = (role == 11)
+                if key == "SP" and not is_sp:
                     continue
-                group["mlb"].append({
-                    "pid": r["player_id"], "name": r["name"], "age": r["age"],
-                    "team": teams.get(r["team_id"], "?"),
-                    "composite": r["composite_score"], "ceiling": r["true_ceiling"],
-                    "rank": len(group["mlb"]) + 1,
-                })
+                if key == "RP" and is_sp:
+                    continue
+                matched = True
+            else:
+                matched = (role in cfg["roles"] or pos in cfg["positions"])
+
+            if not matched:
+                continue
+            if r["team_id"] not in mlb_org_ids:
+                continue
+            group["mlb"].append({
+                "pid": r["player_id"], "name": r["name"], "age": r["age"],
+                "team": teams.get(r["team_id"], "?"),
+                "composite": r["composite_score"], "ceiling": r["true_ceiling"],
+                "rank": len(group["mlb"]) + 1,
+            })
 
         # Assign prospects
         for r in prospect_rows:

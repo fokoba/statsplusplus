@@ -208,7 +208,7 @@
     <tbody><tr>
       <td>{{ s.g }}</td><td>{{ s.gs }}</td><td>{{ s.ip|fmt_ip }}</td><td>{{ "%.2f"|format(s.era) if s.era is not none else "-" }}</td><td>{{ "%.2f"|format(s.fip) }}</td>
       <td>{{ "%.1f"|format(s.k_pct) }}</td><td>{{ "%.1f"|format(s.bb_pct) }}</td><td>{{ "%.1f"|format(s.k_bb_pct) }}</td><td>{{ "%.1f"|format(s.gb_pct) }}</td>
-      <td>{{ s.w }}</td><td>{{ s.sv if s.sv else s.hld }}</td><td>{{ s.war }}</td>
+      <td>{{ s.w }}</td><td>{{ s.sv if s.sv else s.hld }}</td><td>{{ "%.1f"|format(s.war) }}</td>
     </tr></tbody>
   </table>
   {% if svl or svr %}
@@ -240,7 +240,7 @@
     <thead><tr><th>G</th><th>PA</th><th>AVG</th><th>OBP</th><th>SLG</th><th>ISO</th><th>BB%</th><th>K%</th><th>HR</th><th>SB</th><th>WAR</th></tr></thead>
     <tbody><tr>
       <td>{{ s.g }}</td><td>{{ s.pa }}</td><td>{{ "%.3f"|format(s.avg) }}</td><td>{{ "%.3f"|format(s.obp) }}</td><td>{{ "%.3f"|format(s.slg) }}</td><td>{{ "%.3f"|format(s.iso) }}</td>
-      <td>{{ "%.1f"|format(s.bb_pct) }}</td><td>{{ "%.1f"|format(s.so_pct) }}</td><td>{{ s.hr }}</td><td>{{ s.sb }}</td><td>{{ s.war }}</td>
+      <td>{{ "%.1f"|format(s.bb_pct) }}</td><td>{{ "%.1f"|format(s.so_pct) }}</td><td>{{ s.hr }}</td><td>{{ s.sb }}</td><td>{{ "%.1f"|format(s.war) }}</td>
     </tr></tbody>
   </table>
   {% if svl or svr %}
@@ -472,7 +472,7 @@
       {% for r in p.surplus_detail.rows %}
       <tr>
         <td>{{ r.year }}</td><td>{{ r.age }}</td>
-        <td class="{% if r.war >= 4.0 %}war-hot{% elif r.war >= 2.0 %}war-warm{% else %}war-cool{% endif %}">{{ r.war }}</td>
+        <td class="{% if r.war >= 4.0 %}war-hot{% elif r.war >= 2.0 %}war-warm{% else %}war-cool{% endif %}">{{ "%.1f"|format(r.war) }}</td>
         <td>{{ r.value|money }}</td><td>{{ r.salary|money }}</td>
         <td class="{% if r.surplus > 0 %}pos{% elif r.surplus < 0 %}neg{% endif %}">{{ r.surplus|money }}</td>
       </tr>
@@ -911,7 +911,7 @@
   <td>{{ "%.3f"|format(s.avg) }}</td><td>{{ "%.3f"|format(s.obp) }}</td><td>{{ "%.3f"|format(s.slg) }}</td><td>{{ "%.3f"|format(s.ops) }}</td><td>{{ "%.3f"|format(s.iso) }}</td>
   <td>{{ "%.1f"|format(s.bb_pct) }}</td><td>{{ "%.1f"|format(s.so_pct) }}</td><td>{{ "%.3f"|format(s.babip) }}</td>
   <td>{{ s.hr }}</td><td>{{ s.rbi }}</td><td>{{ s.sb }}/{{ s.cs }}</td>
-  <td>{{ s.ops_plus }}</td><td>{{ s.war }}</td>
+  <td>{{ s.ops_plus }}</td><td>{{ "%.1f"|format(s.war) }}</td>
 </tr>
 {% if s.stints is defined %}
 {% for st in s.stints %}
@@ -920,7 +920,7 @@
   <td>{{ "%.3f"|format(st.avg) }}</td><td>{{ "%.3f"|format(st.obp) }}</td><td>{{ "%.3f"|format(st.slg) }}</td><td>{{ "%.3f"|format(st.ops) }}</td><td>{{ "%.3f"|format(st.iso) }}</td>
   <td>{{ "%.1f"|format(st.bb_pct) }}</td><td>{{ "%.1f"|format(st.so_pct) }}</td><td>{{ "%.3f"|format(st.babip) }}</td>
   <td>{{ st.hr }}</td><td>{{ st.rbi }}</td><td>{{ st.sb }}/{{ st.cs }}</td>
-  <td>-</td><td>{{ st.war }}</td>
+  <td>-</td><td>{{ "%.1f"|format(st.war) }}</td>
 </tr>
 {% endfor %}
 {% endif %}
@@ -995,7 +995,7 @@
         <td>{{ "%.1f"|format(s.k_pct) }}</td><td>{{ "%.1f"|format(s.bb_pct) }}</td><td>{{ "%.1f"|format(s.k_bb_pct) }}</td><td>{{ "%.1f"|format(s.gb_pct) }}</td>
         <td>{{ "%.3f"|format(s.babip) }}</td>
         <td>{{ s.w }}</td><td>{{ s.l }}</td><td>{{ s.sv }}</td><td>{{ s.hld }}</td>
-        <td>{{ s.war }}</td>
+        <td>{{ "%.1f"|format(s.war) }}</td>
       </tr>
       {% if s.stints is defined %}
       {% for st in s.stints %}
@@ -1006,7 +1006,7 @@
         <td>{{ "%.1f"|format(st.k_pct) }}</td><td>{{ "%.1f"|format(st.bb_pct) }}</td><td>{{ "%.1f"|format(st.k_bb_pct) }}</td><td>{{ "%.1f"|format(st.gb_pct) }}</td>
         <td>{{ "%.3f"|format(st.babip) }}</td>
         <td>{{ st.w }}</td><td>{{ st.l }}</td><td>{{ st.sv }}</td><td>{{ st.hld }}</td>
-        <td>{{ st.war }}</td>
+        <td>{{ "%.1f"|format(st.war) }}</td>
       </tr>
       {% endfor %}
       {% endif %}

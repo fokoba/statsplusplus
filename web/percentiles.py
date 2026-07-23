@@ -56,6 +56,7 @@ HITTER_PCTILE_STATS = [
     ("so_pct", "K%", True),
     ("babip", "BABIP", False),
     ("war", "WAR", False),
+    ("war_rate", "WAR/600", False),
 ]
 
 HITTER_TAG_MAP = {
@@ -75,6 +76,7 @@ PITCHER_PCTILE_STATS = [
     ("hr9", "HR/9", True),
     ("babip", "BABIP", True),
     ("war", "WAR", False),
+    ("war_rate", "WAR/200", False),
 ]
 
 PITCHER_TAG_MAP = {
@@ -227,6 +229,7 @@ def get_hitter_percentiles(pid, split_id=1, year=None):
             "so_pct": k / pa * 100 if pa else 0,
             "babip": (h - hr) / (ab - k - hr + sf) if (ab - k - hr + sf) > 0 else 0,
             "war": war or 0,
+            "war_rate": (war or 0) * 600 / pa if pa else 0,
         }
         rats = {"cntct": cntct or 0, "pow": pw or 0, "eye": eye or 0, "ks": ks or 0, "speed": speed or 0}
         return stats, rats, pa
@@ -261,7 +264,7 @@ def get_hitter_percentiles(pid, split_id=1, year=None):
 
     result = []
     for key, label, inverted in HITTER_PCTILE_STATS:
-        if key == "war" and split_id != 1:
+        if key in ("war", "war_rate") and split_id != 1:
             continue
         val = player[key]
         pctile = _pctile(val, [pool[p][key] for p in pool])
@@ -291,7 +294,7 @@ def get_hitter_percentiles(pid, split_id=1, year=None):
         result.append({"label": label, "value": val, "pctile": pctile, "tag": tag,
                        "qualified": qualified, "expected": expected,
                        "expected_range": _expected_range(expected, player_pa, min_pa),
-                       "fmt": ".1f" if "pct" in key else (".1f" if label == "WAR" else ".3f")})
+                       "fmt": ".1f" if "pct" in key else (".1f" if key in ("war", "war_rate") else ".3f")})
     return result
 
 # ── pitcher percentiles ──────────────────────────────────────────────────
@@ -386,6 +389,7 @@ def get_pitcher_percentiles(pid, split_id=1, year=None):
         stats = {
             "era": era or 99, "fip": fip, "siera": siera, "era_plus": era_plus,
             "k9": k9, "bb9": bb9, "hr9": hr9, "babip": babip, "war": war or 0,
+            "war_rate": (war or 0) * 200 / ip if ip else 0,
         }
         ctrl = round(((ctrl_r or 0) + (ctrl_l or 0)) / 2)
         rats = {"stf": stf or 0, "mov": mov or 0, "ctrl": ctrl,
@@ -430,7 +434,7 @@ def get_pitcher_percentiles(pid, split_id=1, year=None):
         rat_vals["pbabip"] = [ratings_pool[p].get("pbabip") or 0 for p in pool]
 
     result = []
-    _skip_splits = {"war", "era_plus", "siera"}
+    _skip_splits = {"war", "war_rate", "era_plus", "siera"}
     for key, label, inverted in PITCHER_PCTILE_STATS:
         if key in _skip_splits and split_id != 1:
             continue
@@ -471,7 +475,7 @@ def get_pitcher_percentiles(pid, split_id=1, year=None):
                 thresh = _tag_threshold(r_pctile)
                 tag = "hot" if gap >= thresh else ("cold" if gap <= -thresh else None)
 
-        fmt = "d" if key == "era_plus" else (".1f" if key in ("k9", "bb9", "hr9") else ".2f" if key in ("era", "fip", "siera") else ".3f")
+        fmt = "d" if key == "era_plus" else (".1f" if key in ("k9", "bb9", "hr9", "war", "war_rate") else ".2f" if key in ("era", "fip", "siera") else ".3f")
         result.append({"label": label, "value": val, "pctile": pctile, "tag": tag,
                        "qualified": qualified, "expected": expected,
                        "expected_range": _expected_range(expected, player_ip, rp_min_ip if is_rp else min_ip),

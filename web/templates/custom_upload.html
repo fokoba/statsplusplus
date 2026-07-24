@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h1>Custom Upload</h1>
+  <div style="color:var(--text-dim); font-size:13px; margin-top:4px">
+    Evaluate any OOTP "All Columns" roster CSV export — completely standalone, no StatsPlus data involved.
+  </div>
+</div>
+
+<div class="panel" style="margin-bottom:16px; font-size:12px; color:var(--text-dim)">
+  Upload an OOTP roster export (Export → All Columns, CSV) for any team or organization. Ovr, Potential, and FV are computed with the exact same formulas this app uses everywhere else — but purely from the ratings in your file. There's no stat-performance blending here (the sheet has no game logs to blend from), so every player's Ovr is 100% scouting-tool based.
+</div>
+
+<div class="panel">
+  <form method="post" enctype="multipart/form-data">
+    <input type="file" name="csv_file" accept=".csv" required>
+    <label style="margin-left:16px; font-size:13px">
+      <input type="checkbox" name="show_all_ages" {% if show_all_ages %}checked{% endif %}>
+      Show all ages (default: 24 and under)
+    </label>
+    <button type="submit" class="btn btn-sm" style="margin-left:16px">Evaluate</button>
+  </form>
+</div>
+
+{% if error %}
+<div class="panel" style="color:#f44336">{{ error }}</div>
+{% endif %}
+
+{% if results is not none %}
+<div class="panel">
+  <h2>Results <span id="cu-count" style="color:var(--text-dim); font-weight:400; font-size:13px">({{ results|length }} players{% if not show_all_ages %}, age 24 or under{% endif %})</span></h2>
+  {% if results %}
+  <div style="margin-bottom:8px; display:flex; align-items:center; gap:12px">
+    <label style="font-size:13px">
+      Position:
+      <select id="cu-pos-filter" onchange="cuFilterResults()">
+        <option value="">All</option>
+        {% for pos in results|map(attribute='bucket')|unique|sort %}
+        <option value="{{ pos }}">{{ pos }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label style="font-size:13px">
+      Team:
+      <select id="cu-team-filter" onchange="cuFilterResults()">
+        <option value="">All</option>
+        {% for org in results|map(attribute='org')|reject('equalto', '')|unique|sort %}
+        <option value="{{ org }}">{{ org }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label style="font-size:13px">
+      Type:
+      <select id="cu-type-filter" onchange="cuFilterResults()">
+        <option value="">All</option>
+        <option value="hitter">Hitters</option>
+        <option value="pitcher">Pitchers</option>
+      </select>
+    </label>
+    <label style="font-size:13px">
+      <input type="checkbox" id="cu-r5-filter" onchange="cuFilterResults()">
+      Rule 5 eligible only
+    </label>
+    <button class="btn btn-sm" onclick="exportTableCSV('custom-upload-table', 'custom_upload_results.csv')">⬇ CSV</button>
+  </div>
+  {% endif %}
+  {% if results %}
+  <table id="custom-upload-table">
+    <thead>
+      <tr>
+        <th data-sort="str" class="left">Name</th>
+        <th data-sort="str">Pos</th>
+        <th data-sort="str" class="left">Team</th>
+        <th data-sort="num">Age</th>
+        <th data-sort="str">Level</th>
+        <th data-sort="num">Ovr</th>
+        <th data-sort="num">Pot</th>
+        <th data-sort="str">FV</th>
+        <th data-sort="num">IF Rng</th>
+        <th data-sort="num">OF Rng</th>
+        <th data-sort="str">Risk</th>
+        <th data-sort="str">Scout</th>
+        <th data-sort="str">R5</th>
+        <th data-sort="str">Best Pos</th>
+        <th data-sort="num">Grade</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in results %}
+      <tr data-pos="{{ p.bucket }}" data-org="{{ p.org }}" data-type="{{ 'pitcher' if p.is_pitcher else 'hitter' }}" data-r5="{{ 'yes' if p.rule5_eligible else 'no' }}">
+        <td class="left">{{ p.name }}</td>
+        <td>{{ p.bucket }}</td>
+        <td class="left">{{ p.org_abbr or p.org }}</td>
+        <td>{{ p.age }}</td>
+        <td>{{ p.level }}</td>
+        <td><span class="ovr-color" data-g="{{ p.composite_score }}">{{ p.composite_score }}</span></td>
+        <td><span class="ovr-color" data-g="{{ p.true_ceiling }}">{{ p.true_ceiling }}</span></td>
+        <td>{{ p.fv }}</td>
+        <td>{{ p.if_rng if p.if_rng is not none else '-' }}</td>
+        <td>{{ p.of_rng if p.of_rng is not none else '-' }}</td>
+        <td style="color:{% if p.risk == 'Low' %}#4caf50{% elif p.risk == 'Medium' %}#ffc107{% elif p.risk == 'High' %}#ff9800{% else %}#f44336{% endif %}">{{ p.risk }}</td>
+        <td>{{ p.acc }}</td>
+        <td>{{ 'Yes' if p.rule5_eligible else '' }}</td>
+        <td>{{ p.best_position or '' }}</td>
+        <td>{{ p.best_position_grade if p.best_position_grade is not none else '' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div style="color:var(--text-dim); font-size:13px; padding:12px 0">No players matched (try "Show all ages" if you expected results).</div>
+  {% endif %}
+</div>
+<script>
+function cuFilterResults() {
+  var pos = document.getElementById('cu-pos-filter').value;
+  var org = document.getElementById('cu-team-filter').value;
+  var type = document.getElementById('cu-type-filter').value;
+  var r5Only = document.getElementById('cu-r5-filter').checked;
+  var rows = document.querySelectorAll('#custom-upload-table tbody tr');
+  var shown = 0;
+  rows.forEach(function(tr) {
+    var match = (!pos || tr.dataset.pos === pos)
+      && (!org || tr.dataset.org === org)
+      && (!type || tr.dataset.type === type)
+      && (!r5Only || tr.dataset.r5 === 'yes');
+    tr.style.display = match ? '' : 'none';
+    if (match) shown++;
+  });
+  var parts = [];
+  if (pos) parts.push(pos);
+  if (org) parts.push(org);
+  if (type) parts.push(type + 's');
+  if (r5Only) parts.push('Rule 5 eligible');
+  var countEl = document.getElementById('cu-count');
+  if (countEl) countEl.textContent = '(' + shown + ' shown' + (parts.length ? ' — ' + parts.join(', ') : '') + ')';
+}
+</script>
+{% endif %}
+
+{% endblock %}

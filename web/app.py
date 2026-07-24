@@ -224,6 +224,32 @@ def dashboard():
     return redirect(f"/team/{queries.get_my_team_id()}")
 
 
+@app.route("/custom-upload", methods=["GET", "POST"])
+def custom_upload():
+    import custom_upload as _cu
+
+    results = None
+    error = None
+    show_all_ages = request.form.get("show_all_ages") == "on"
+    if request.method == "POST":
+        f = request.files.get("csv_file")
+        if not f or not f.filename:
+            error = "Choose a CSV file to upload."
+        else:
+            try:
+                results = _cu.evaluate_csv(f.read())
+                results = [r for r in results if "error" not in r]
+                if not show_all_ages:
+                    results = [r for r in results if r.get("age") is not None and r["age"] <= 24]
+                results.sort(key=lambda r: -(r.get("fv") or 0))
+            except Exception as e:
+                error = f"Couldn't process that file: {e}"
+
+    return render_template("custom_upload.html", results=results, error=error,
+                           show_all_ages=show_all_ages,
+                           breadcrumbs=[{"label": "Custom Upload", "url": "/custom-upload"}])
+
+
 
 def _render_minor_league_team(info):
     """Render a minor league team page."""

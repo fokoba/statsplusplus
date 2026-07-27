@@ -42,7 +42,7 @@
       {% if r.pbabip is defined and r.pbabip %}<tr class="grade-sub"><td>BABIP Allow</td><td>{{ grade(r.pbabip[0], r.pbabip[1]) }}</td></tr>{% endif %}
       <tr><td>Control</td><td>{{ grade(r.control[0], r.control[1]) }}</td></tr>
       <tr><td>Stamina</td><td>{{ grade(r.stamina) }}</td></tr>
-      {% if r.gb is defined %}<tr><td>GB%</td><td>{{ r.gb }}%</td></tr>{% endif %}
+      {% if r.gb is defined %}<tr><td>GB%</td><td style="text-align:left; padding-left:4px; font-weight:600; font-size:12px">{{ r.gb }}% <span style="font-weight:400; font-size:11px; color:var(--text-dim); margin-left:6px">{{ r.gb_label }}</span></td></tr>{% endif %}
     </tbody>
   </table>
   {% if r.splits %}
@@ -55,7 +55,7 @@
       {% if r.splits.pbabip is defined %}<tr class="grade-sub"><td>BABIP Allow</td><td>{{ grade(r.splits.pbabip[0]) }}</td><td>{{ grade(r.splits.pbabip[1]) }}</td></tr>{% endif %}
       <tr><td>Control</td><td>{{ grade(r.splits.control[0]) }}</td><td>{{ grade(r.splits.control[1]) }}</td></tr>
       <tr><td>Stamina</td><td colspan="2">{{ grade(r.stamina) }}</td></tr>
-      {% if r.gb is defined %}<tr><td>GB%</td><td colspan="2">{{ r.gb }}%</td></tr>{% endif %}
+      {% if r.gb is defined %}<tr><td>GB%</td><td colspan="2" style="text-align:left; padding-left:4px; font-weight:600; font-size:12px">{{ r.gb }}% <span style="font-weight:400; font-size:11px; color:var(--text-dim); margin-left:6px">{{ r.gb_label }}</span></td></tr>{% endif %}
     </tbody>
   </table>
   {% endif %}

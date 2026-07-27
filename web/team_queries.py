@@ -315,7 +315,7 @@ def get_roster(team_id=None):
 
     bat = {}
     for r in conn.execute(
-        "SELECT player_id, ab, h, d, t, hr, bb, pa, war FROM batting_stats WHERE year=? AND split_id=1", (year,)
+        "SELECT player_id, ab, h, d, t, hr, bb, pa, war FROM batting_stats WHERE year=? AND split_id=1 AND team_id=?", (year, tid)
     ).fetchall():
         pid, ab, h, d, t, hr, bb, pa, war = r
         avg = h / ab if ab else None
@@ -325,7 +325,7 @@ def get_roster(team_id=None):
 
     pit = {}
     for r in conn.execute(
-        "SELECT player_id, era, ip, k, war FROM pitching_stats WHERE year=? AND split_id=1", (year,)
+        "SELECT player_id, era, ip, k, war FROM pitching_stats WHERE year=? AND split_id=1 AND team_id=?", (year, tid)
     ).fetchall():
         pit[r[0]] = (r[1], r[2], r[3], r[4])
 
@@ -2525,13 +2525,22 @@ def get_minor_league_team(team_id):
 
 
 def get_minor_league_roster(team_id):
-    """Full roster for a minor league team, sorted by composite."""
+    """Full roster for a minor league team, split into hitters and pitchers with tool ratings."""
     conn = get_db()
     conn.row_factory = None
+    from ratings import norm as _norm_rating
 
     rows = conn.execute("""
         SELECT p.player_id, p.name, p.age, p.pos, p.role, p.level,
                r.ovr, r.pot, r.composite_score, r.true_ceiling, r.ceiling_score,
+               r.cntct, r.gap, r.pow, r.eye, r.speed,
+               r.pot_cntct, r.pot_gap, r.pot_pow, r.pot_eye,
+               r.stf, r.mov, r.ctrl, r.stm,
+               r.pot_stf, r.pot_mov, r.pot_ctrl,
+               r.bats, r.throws,
+               r.c, r.ss, r.second_b, r.third_b, r.first_b, r.lf, r.cf, r.rf,
+               r.fst, r.snk, r.crv, r.sld, r.chg, r.splt, r.cutt,
+               r.cir_chg, r.scr, r.frk, r.kncrv, r.knbl,
                pf.fv, pf.fv_str, pf.risk, pf.prospect_surplus, pf.bucket
         FROM players p
         LEFT JOIN latest_ratings r ON p.player_id = r.player_id
@@ -2540,33 +2549,86 @@ def get_minor_league_roster(team_id):
         ORDER BY COALESCE(r.composite_score, r.ovr, 0) DESC
     """, (team_id,)).fetchall()
 
-    lmap = level_map()
+    n = _norm_rating
     _pm = pos_map()
-    _role_pos = {11: "SP", 12: "RP", 13: "RP"}
-    result = []
+    _role_pos = {11: "SP", 12: "SP", 13: "RP"}
+    _pos_order = {"C": 1, "1B": 2, "2B": 3, "3B": 4, "SS": 5, "LF": 6, "CF": 7, "RF": 8, "OF": 9, "DH": 10}
+    _role_order = {"SP": 1, "RP": 2}
+
+    hitters = []
+    pitchers = []
+
     for r in rows:
         pid, name, age, pos, role, level = r[0:6]
         ovr, pot, composite, true_ceil, ceil_score = r[6:11]
-        fv, fv_str, risk, prospect_surplus, bucket = r[11:16]
+        cntct, gap, pw, eye, speed = r[11:16]
+        pot_cntct, pot_gap, pot_pw, pot_eye = r[16:20]
+        stf, mov, ctrl, stm = r[20:24]
+        pot_stf, pot_mov, pot_ctrl = r[24:27]
+        bats, throws = r[27:29]
+        c, ss, second_b, third_b, first_b, lf, cf, rf = r[29:37]
+        pitches_raw = r[37:49]  # fst, snk, crv, sld, chg, splt, cutt, cir_chg, scr, frk, kncrv, knbl
+        fv, fv_str, risk, prospect_surplus, bucket = r[49:54]
+
         ceiling = true_ceil or ceil_score
-        # Position display: use bucket if available, else game position
+        is_pitcher = role in (11, 12, 13)
+
+        # Handedness display
+        bt = ""
+        if bats and throws:
+            bt = f"{bats}/{throws}"
+        elif bats:
+            bt = bats
+
+        # Position display
         if bucket:
             display_p = _display_pos(bucket, pos)
-        elif role in _role_pos:
-            display_p = _role_pos[role]
+        elif is_pitcher:
+            display_p = _role_pos.get(role, "P")
         else:
             display_p = _pm.get(pos, "?")
-        result.append({
+
+        base = {
             "pid": pid, "name": name, "age": age,
-            "pos": display_p,
-            "role": role,
-            "level": lmap.get(str(level), str(level)),
-            "ovr": ovr, "pot": pot,
+            "pos": display_p, "bt": bt,
             "composite": composite, "ceiling": ceiling,
             "fv": fv, "fv_str": fv_str, "risk": risk,
             "surplus": round(prospect_surplus / 1e6, 1) if prospect_surplus else None,
-        })
-    return result
+        }
+
+        if is_pitcher:
+            # Count viable pitches (current rating >= 30 on 20-80 scale)
+            num_pitches = sum(1 for p in pitches_raw if p and (n(p) or 0) >= 30)
+            base.update({
+                "stf": n(stf), "pot_stf": n(pot_stf),
+                "mov": n(mov), "pot_mov": n(pot_mov),
+                "ctrl": n(ctrl), "pot_ctrl": n(pot_ctrl),
+                "stm": n(stm),
+                "pitches": num_pitches,
+                "_sort": (_role_order.get(display_p, 3), -(composite or 0)),
+                "_pos_sort": _role_order.get(display_p, 3),
+            })
+            pitchers.append(base)
+        else:
+            # Defensive rating at the player's listed position
+            _pos_def_map = {"C": c, "SS": ss, "2B": second_b, "3B": third_b,
+                            "1B": first_b, "LF": lf, "CF": cf, "RF": rf}
+            pos_def = _pos_def_map.get(display_p)
+            base.update({
+                "con": n(cntct), "pot_con": n(pot_cntct),
+                "gap": n(gap), "pot_gap": n(pot_gap),
+                "pow": n(pw), "pot_pow": n(pot_pw),
+                "eye": n(eye), "pot_eye": n(pot_eye),
+                "spd": n(speed), "def": n(pos_def) if pos_def else None,
+                "_sort": (-_pos_order.get(display_p, 0), -(composite or 0)),
+                "_pos_sort": _pos_order.get(display_p, 99),
+            })
+            hitters.append(base)
+
+    hitters.sort(key=lambda x: x["_sort"])
+    pitchers.sort(key=lambda x: x["_sort"])
+
+    return {"hitters": hitters, "pitchers": pitchers}
 
 
 def get_minor_league_notables(team_id):
@@ -2595,6 +2657,18 @@ def get_minor_league_notables(team_id):
         WHERE p.team_id = ?
         ORDER BY COALESCE(pf.fv, 0) DESC, COALESCE(r.composite_score, r.ovr, 0) DESC
     """, (team_id,)).fetchall()
+
+    # 40-man roster lookup
+    forty_man_pids = set()
+    for r in conn.execute(
+        "SELECT c.player_id FROM contracts c JOIN players p ON c.player_id=p.player_id "
+        "WHERE p.team_id=? AND c.is_major=1", (team_id,)
+    ).fetchall():
+        forty_man_pids.add(r[0])
+
+    # ETA by level
+    lmap = level_map()
+    _eta_map = {"1": 0, "2": 0.5, "3": 1.5, "4": 2.5, "5": 3.5, "6": 4.5, "7": 4.5, "8": 5.0}
 
     notables = []
     for r in rows:
@@ -2648,6 +2722,8 @@ def get_minor_league_notables(team_id):
             "surplus": round(prospect_surplus / 1e6, 1) if prospect_surplus else None,
             "tools": tools, "tags": tags,
             "young_by": age_norm - age if age and age < age_norm else 0,
+            "eta": _eta_map.get(str(team_level), 3.5),
+            "on_40man": pid in forty_man_pids,
         })
 
     return notables

@@ -74,6 +74,7 @@ PITCHER_PCTILE_STATS = [
     ("k9", "K/9", False),
     ("bb9", "BB/9", True),
     ("hr9", "HR/9", True),
+    ("gb_pct", "GB%", False),
     ("babip", "BABIP", True),
     ("war", "WAR", False),
     ("war_rate", "WAR/200", False),
@@ -317,7 +318,9 @@ def get_pitcher_percentiles(pid, split_id=1, year=None):
     rp_min_ip = max(round(0.35 * games), 5) if split_id == 1 else 5
 
     from web_league_context import league_averages as _load_la
-    lg_era = _load_la()["pitching"]["era"]
+    _la = _load_la()
+    lg_era = _la["pitching"]["era"]
+    _gb_reg = _la.get("pitching", {}).get("gb_regression")
 
     tp = conn.execute(
         "SELECT SUM(era*ip)/SUM(ip), SUM(hra), SUM(bb), SUM(k), SUM(ip) "
@@ -328,15 +331,15 @@ def get_pitcher_percentiles(pid, split_id=1, year=None):
     # Use split-specific ratings for L/R expected percentiles
     _ext = has_extended_ratings()
     if split_id == 2:    # vs L batters
-        rcols = "r.stf_l, r.mov_l, r.ctrl_l, r.ctrl_l" + (", r.hra_l, r.pbabip_l" if _ext else ", NULL, NULL")
+        rcols = "r.stf_l, r.mov_l, r.ctrl_l, r.ctrl_l" + (", r.hra_l, r.pbabip_l" if _ext else ", NULL, NULL") + ", r.gb"
     elif split_id == 3:  # vs R batters
-        rcols = "r.stf_r, r.mov_r, r.ctrl_r, r.ctrl_r" + (", r.hra_r, r.pbabip_r" if _ext else ", NULL, NULL")
+        rcols = "r.stf_r, r.mov_r, r.ctrl_r, r.ctrl_r" + (", r.hra_r, r.pbabip_r" if _ext else ", NULL, NULL") + ", r.gb"
     else:
-        rcols = "r.stf, r.mov, r.ctrl, r.ctrl" + (", r.hra, r.pbabip" if _ext else ", NULL, NULL")
+        rcols = "r.stf, r.mov, r.ctrl, r.ctrl" + (", r.hra, r.pbabip" if _ext else ", NULL, NULL") + ", r.gb"
 
     q = ("SELECT ps.player_id, SUM(ps.ip), SUM(ps.era*ps.ip)/NULLIF(SUM(ps.ip),0), "
          "SUM(ps.k), SUM(ps.bb), SUM(ps.ha), SUM(ps.war), SUM(ps.hra), SUM(ps.bf), SUM(ps.hp), "
-         f"{rcols}, SUM(ps.gs), SUM(ps.g) "
+         f"{rcols}, SUM(ps.gs), SUM(ps.g), SUM(ps.gb), SUM(ps.fb) "
          "FROM pitching_stats ps JOIN latest_ratings r ON ps.player_id=r.player_id "
          "WHERE ps.year=? AND ps.split_id=? "
          "GROUP BY ps.player_id "
@@ -371,8 +374,9 @@ def get_pitcher_percentiles(pid, split_id=1, year=None):
         return None
 
     def _parse(r):
-        _, ip, era, k, bb, ha, war, hra, bf, hp, stf, mov, ctrl_r, ctrl_l, hra_rat, pbabip_rat, _gs, _g = r
+        _, ip, era, k, bb, ha, war, hra, bf, hp, stf, mov, ctrl_r, ctrl_l, hra_rat, pbabip_rat, gb_rat, _gs, _g, _gb, _fb = r
         hra = hra or 0; bf = bf or 0; hp = hp or 0; ha = ha or 0
+        _gb = _gb or 0; _fb = _fb or 0
         if not ip:
             return None, None, 0
         k9 = k * 9 / ip
@@ -382,18 +386,20 @@ def get_pitcher_percentiles(pid, split_id=1, year=None):
         era_plus = round(lg_era / era * 100) if era else 0
         babip_d = bf - k - hra - bb - hp
         babip = (ha - hra) / babip_d if babip_d > 0 else 0
+        gb_pct = 100.0 * _gb / (_gb + _fb) if (_gb + _fb) > 0 else 0
         k_pct = k / bf if bf else 0
         bb_pct = bb / bf if bf else 0
         siera = (6.145 - 16.986 * k_pct + 11.434 * bb_pct
                  + 7.653 * k_pct**2 + 6.664 * bb_pct**2 + 0.9) if bf else 0
         stats = {
             "era": era or 99, "fip": fip, "siera": siera, "era_plus": era_plus,
-            "k9": k9, "bb9": bb9, "hr9": hr9, "babip": babip, "war": war or 0,
+            "k9": k9, "bb9": bb9, "hr9": hr9, "gb_pct": gb_pct, "babip": babip,
+            "war": war or 0,
             "war_rate": (war or 0) * 200 / ip if ip else 0,
         }
         ctrl = round(((ctrl_r or 0) + (ctrl_l or 0)) / 2)
         rats = {"stf": stf or 0, "mov": mov or 0, "ctrl": ctrl,
-                "hra": hra_rat, "pbabip": pbabip_rat}
+                "hra": hra_rat, "pbabip": pbabip_rat, "gb": gb_rat or 0}
         return stats, rats, ip
 
     pool, ratings_pool = {}, {}
@@ -433,10 +439,15 @@ def get_pitcher_percentiles(pid, split_id=1, year=None):
     if _has_pbabip:
         rat_vals["pbabip"] = [ratings_pool[p].get("pbabip") or 0 for p in pool]
 
+    # Check if GB% data is available (pitching_stats has gb/fb columns populated)
+    _has_gb_data = any(pool[p].get("gb_pct", 0) > 0 for p in pool)
+
     result = []
-    _skip_splits = {"war", "war_rate", "era_plus", "siera"}
+    _skip_splits = {"war", "war_rate", "era_plus", "siera", "gb_pct"}
     for key, label, inverted in PITCHER_PCTILE_STATS:
         if key in _skip_splits and split_id != 1:
+            continue
+        if key == "gb_pct" and not _has_gb_data:
             continue
         val = player[key]
         pctile = _pctile(val, [pool[p][key] for p in pool])
@@ -467,6 +478,14 @@ def get_pitcher_percentiles(pid, split_id=1, year=None):
                 gap = pctile - expected
                 thresh = _tag_threshold(expected)
                 tag = "lucky" if gap >= thresh else ("unlucky" if gap <= -thresh else None)
+            elif label == "GB%":
+                # GB% expected from regression: actual_gb = intercept + slope * gb_rating
+                if _gb_reg and player_rat.get("gb"):
+                    exp_gb = _gb_reg["intercept"] + _gb_reg["slope"] * player_rat["gb"]
+                    expected = _pctile(exp_gb, [pool[p]["gb_pct"] for p in pool])
+                    gap = pctile - expected
+                    thresh = _tag_threshold(expected)
+                    tag = "hot" if gap >= thresh else ("cold" if gap <= -thresh else None)
             elif label in PITCHER_TAG_MAP:
                 sk, rk, s_inv, r_inv = PITCHER_TAG_MAP[label]
                 r_pctile = _pctile(player_rat[rk], rat_vals[rk])
@@ -475,7 +494,7 @@ def get_pitcher_percentiles(pid, split_id=1, year=None):
                 thresh = _tag_threshold(r_pctile)
                 tag = "hot" if gap >= thresh else ("cold" if gap <= -thresh else None)
 
-        fmt = "d" if key == "era_plus" else (".1f" if key in ("k9", "bb9", "hr9", "war", "war_rate") else ".2f" if key in ("era", "fip", "siera") else ".3f")
+        fmt = "d" if key == "era_plus" else (".1f" if key in ("k9", "bb9", "hr9", "war", "war_rate", "gb_pct") else ".2f" if key in ("era", "fip", "siera") else ".3f")
         result.append({"label": label, "value": val, "pctile": pctile, "tag": tag,
                        "qualified": qualified, "expected": expected,
                        "expected_range": _expected_range(expected, player_ip, rp_min_ip if is_rp else min_ip),

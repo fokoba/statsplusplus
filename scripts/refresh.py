@@ -1034,6 +1034,49 @@ def _refresh_stat_percentiles(year):
         p5_idx = int(0.05 * len(era_minus_vals))
         averages.setdefault("pitching", {})["era_minus_p5"] = round(era_minus_vals[p5_idx], 1)
 
+    # GB% distribution for contextualizing pitcher groundball tendencies
+    for yr in (year - 1, year):
+        gb_rows = conn.execute("""
+            SELECT 100.0 * gb / (gb + fb) as gb_pct
+            FROM pitching_stats
+            WHERE year = ? AND split_id = 1 AND (gb + fb) > 100
+        """, (yr,)).fetchall()
+        if len(gb_rows) >= 20:
+            break
+    if gb_rows:
+        import statistics
+        gb_vals = [r[0] for r in gb_rows]
+        averages.setdefault("pitching", {})["gb_pct_mean"] = round(statistics.mean(gb_vals), 1)
+        averages.setdefault("pitching", {})["gb_pct_stdev"] = round(statistics.stdev(gb_vals), 1)
+
+    # GB% regression: actual_gb = intercept + slope * gb_rating
+    # Used by percentile engine to compute expected GB% from rating
+    for yr in (year - 1, year):
+        gb_reg_rows = conn.execute("""
+            SELECT r.gb as rating, 100.0 * ps.gb / (ps.gb + ps.fb) as actual
+            FROM pitching_stats ps
+            JOIN latest_ratings r ON ps.player_id = r.player_id
+            WHERE ps.year = ? AND ps.split_id = 1 AND (ps.gb + ps.fb) > 100
+              AND r.gb IS NOT NULL AND r.gb > 0
+        """, (yr,)).fetchall()
+        if len(gb_reg_rows) >= 30:
+            break
+    if gb_reg_rows and len(gb_reg_rows) >= 30:
+        ratings = [r[0] for r in gb_reg_rows]
+        actuals = [r[1] for r in gb_reg_rows]
+        mean_x = statistics.mean(ratings)
+        mean_y = statistics.mean(actuals)
+        var_x = statistics.variance(ratings)
+        if var_x > 0:
+            cov = sum((r[0] - mean_x) * (r[1] - mean_y) for r in gb_reg_rows) / (len(gb_reg_rows) - 1)
+            slope = cov / var_x
+            intercept = mean_y - slope * mean_x
+            averages.setdefault("pitching", {})["gb_regression"] = {
+                "intercept": round(intercept, 2),
+                "slope": round(slope, 4),
+                "n": len(gb_reg_rows),
+            }
+
     conn.close()
     avg_path.write_text(json.dumps(averages, indent=2))
     bat_p95 = averages.get("batting", {}).get("ops_plus_p95")

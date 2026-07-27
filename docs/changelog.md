@@ -4,6 +4,32 @@ Completed and deferred work items, organized by session. Moved from `task_list.m
 
 ---
 
+## Session 68 (2026-07-27)
+
+### Bug Fixes
+
+- **Stat history excluded completed season in offseason** (`war_model.py`) — `load_stat_history()` used `year < game_year` to exclude the "current partial season," but when the game date was in the offseason (November+), the just-completed season was incorrectly excluded. Every player's stat-weighted WAR projection ignored their most recent full season. Example: Josh Corr's 2033 season (126 IP, 3.15 ERA, 1.51 blended WAR) was completely invisible, causing his surplus to show as -$1.2M instead of ~+$10M. Affected all player valuations in offseason mode across all leagues.
+
+- **Role-convert pitchers valued only on new-role data** (`war_model.py`) — Pitchers who changed roles (SP→RP or RP→SP) were evaluated only on their new-role seasons. If they had just one bad year in the new role (e.g., Josh Moran: 3 years of solid SP work then one bad RP season), the entire SP history was ignored. Now blends prior-role history (with appropriate discount) when fewer than 2 full seasons exist in the new role. Moran's projection went from -0.42 WAR (one bad RP year only) to 0.13 WAR (blended with discounted SP history).
+
+### Improvements
+
+- **Stat projection model overhaul** (`war_model.py`) — Replaced the 3-year `[3, 2, 1]` weighting scheme with a 4-year `[3, 3, 2, 1]` window. More stable projections — one outlier year doesn't dominate, and equal weight on the two most recent seasons reflects that both are highly relevant. Older data tapers off but still contributes context.
+
+- **Partial-season inclusion** (`war_model.py`) — Current year stats are now always loaded (no blanket exclusion). A `season_pct` field tracks season completeness (games played / 162). The most recent year's weight is scaled by this fraction, so mid-season data influences projections proportionally to sample size. Offseason (month ≥ 11) gets full weight automatically. April data barely registers (~0.12 weight); mid-season (~0.5) is meaningful but not dominant.
+
+- **Standings `--team` flag** (`standings.py`) — Added `--team <ABBR>` option showing a team's actual record, division leaders, wild card race with GB, and pythagorean comparison. Prevents needing ad-hoc SQL against the games table (which has counterintuitive column naming: `runs0` = away, `runs1` = home). Added helper functions `all_actual_records()`, `league_standings_actual()`, `playoff_picture()` as importable utilities.
+
+- **Games table documentation** (`db.py`) — Added inline comments clarifying `runs0 = AWAY team runs` and `runs1 = HOME team runs` to prevent future confusion.
+
+### Documentation
+
+- **Consolidation premium** (`.kiro/steering/trade-analyst.md`, `docs/tools_reference.md`) — Documented that the trade calculator's raw surplus balance doesn't account for consolidation value. In N-for-1 trades, the consolidated side should show a surplus advantage (10-15% for 2-for-1, 15-25% for 3-for-1) before the deal is considered balanced.
+
+- **`actual_record()` docstring** (`standings.py`) — Added explicit documentation of the `runs0`/`runs1` column semantics to prevent recurring W-L reversal bugs.
+
+---
+
 ## Session 67 (2026-07-22)
 
 ### Bug Fixes

@@ -69,7 +69,7 @@ def _get_num_teams():
 def _load_pool_ids():
     pool_path = get_league_dir() / "config" / "draft_pool.json"
     if not pool_path.exists():
-        sys.exit("No draft pool uploaded. Upload via the web UI first.")
+        raise FileNotFoundError("No draft pool uploaded. Upload via the web UI first.")
     return json.loads(pool_path.read_text())["player_ids"]
 
 
@@ -1095,4 +1095,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except FileNotFoundError as e:
+        sys.exit(str(e))

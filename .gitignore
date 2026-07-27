@@ -31,3 +31,4 @@ Thumbs.db
 
 # MCP server config (machine-specific paths)
 .kiro/settings/mcp.json
+.playwright-mcp/

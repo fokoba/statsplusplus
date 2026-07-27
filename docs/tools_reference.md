@@ -20,13 +20,20 @@ League-wide standings with pythagorean expected records.
 
 ```bash
 python3 scripts/standings.py [--year 2033] [--actual]
+python3 scripts/standings.py --team ANA              # Team-specific: actual record + playoff picture
 ```
 
 Output: Ranked table of all teams — W, L, Pct, GB, RS, RA, Diff. User's team marked with `◄`.
 `--actual` adds actual W-L from `games` table alongside pythagorean and shows the delta with
 luck/regression interpretation (Pyth >> actual = bullpen drag; Pyth << actual = regression risk).
 
+`--team <ABBR>` shows a single team's actual record, division leaders, wild card race with GB
+from the last WC spot, and pythagorean comparison. Preferred over ad-hoc SQL for record lookups.
+
 Importable: `actual_record(team_id, year)` returns `(w, l)` from the `games` table.
+`all_actual_records(year)` returns `{team_id: (w, l)}` for all teams.
+`league_standings_actual(year, league_name)` returns sorted standings for a league.
+`playoff_picture(year, team_id)` returns formatted string with division leaders + WC race.
 
 ### `scripts/prospect_query.py`
 
@@ -95,6 +102,12 @@ python3 scripts/trade_calculator.py --trade '{"side_a": [{"type":"mlb","id":232}
 ```
 
 Output: Surplus balance between two trade packages with sensitivity ranges.
+
+**Note on N-for-1 trades:** The calculator reports raw surplus balance but does not
+account for the consolidation premium. When one side sends fewer, higher-value players,
+the consolidated side should show a surplus advantage of ~15-25% (for 3-for-1) to be
+truly balanced. A "even" result on the calculator in a 3-for-1 likely means the team
+sending one player is being shortchanged.
 
 ### `scripts/team_needs.py`
 
@@ -406,6 +419,14 @@ aging_mult(33, 'SP')                  # → float (multiplier on peak WAR)
 bat_hist, pit_hist, two_way = load_stat_history(conn, game_date)
 war = stat_peak_war(pid, 'SP', bat_hist, pit_hist)
 ```
+
+`load_stat_history` includes the current year's stats with a `season_pct` field
+(games_played / 162). Offseason game dates (month ≥ 11) get season_pct = 1.0.
+Mid-season dates get proportional completion.
+
+`stat_peak_war` uses 4-year weighted average `[3, 3, 2, 1]` with the most recent
+year's weight scaled by `season_pct`. Handles SP↔RP role converts by blending
+prior-role history (discounted) with new-role data when < 2 full new-role seasons exist.
 
 ### `arb_model`
 

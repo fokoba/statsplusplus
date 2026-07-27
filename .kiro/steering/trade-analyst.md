@@ -236,6 +236,25 @@ When proposing packages, always state:
 - Surplus delta (what you're giving vs getting)
 - Prospect cost in FV terms (FV 45 vs FV 50 is a meaningful difference)
 - Whether the deal leaves you better or worse in the positions involved
+- Consolidation premium adjustment (see below)
+
+**Consolidation Premium:** A single high-surplus player is worth more than the sum
+of multiple lower-surplus pieces that add up to the same total. This is because:
+- **Roster efficiency** — one player fills one spot at high production
+- **Certainty** — one proven player carries less risk than 3 pieces that all need to work out
+- **Opportunity cost** — acquiring multiple players requires multiple roster spots
+
+When evaluating a trade where one side sends fewer, higher-value players:
+- **2-for-1:** The side receiving the consolidated piece should "lose" the raw surplus
+  calc by ~10-15% to reflect the premium.
+- **3-for-1:** The consolidated side should show +15-25% surplus advantage on the
+  calculator for the deal to be truly balanced.
+- **4+-for-1:** Rarely fair unless the pieces are all individually strong.
+
+In practice: if the calculator shows a 3-for-1 as "even" ($0 net), the team
+sending one player is likely getting shortchanged. Push for the calculator to show
+the consolidated side winning by $5-10M+ (scaled to the deal size) before calling
+it fair.
 
 ### 5. Deal Evaluation
 
@@ -249,6 +268,10 @@ Before recommending a deal:
 - **Arb commitment check?** If the target is ARB-eligible, estimate next year's
   arb salary and present the full two-year cost before recommending. Do not treat
   an arb player as a one-year commitment.
+- **Consolidation check?** If the deal is N-for-1 (N > 1), apply the consolidation
+  premium. The calculator's raw surplus balance is not sufficient — the side sending
+  fewer players should show a surplus advantage to account for roster efficiency and
+  certainty.
 
 ---
 

@@ -399,13 +399,18 @@
             <span class="draft-status" id="draft-status">
               {% if dp_state == 'uploaded' %}{{ draft_pool.players|length }} prospects
               {% elif dp_state == 'active' %}{{ draft_pool.picks|length }} picks
-              {% elif dp_state == 'pre_draft' %}Approximate{% endif %}
+              {% elif dp_state == 'pre_draft' %}{{ draft_pool.players|length }} picks · <span style="color:var(--orange)" title="Upload a draft pool export from OOTP for accurate rankings and auto-draft list generation">Approximate</span>{% endif %}
             </span>
             {% if dp_state in ('uploaded', 'active') %}
             <button class="btn" onclick="updateDraftPicks(this)">⟳ Update Picks</button>
             {% endif %}
+            {% if dp_state in ('uploaded', 'active') %}
             <button class="btn" onclick="runDraftSim()" title="Simulate draft based on your pick position">🎲 Sim</button>
             <button class="btn" onclick="generateUploadList()" title="Generate auto-draft list file">📋 Auto-Draft List</button>
+            {% else %}
+            <button class="btn" style="opacity:0.5" title="Requires uploaded draft pool" onclick="alert('Simulation requires an uploaded draft pool.\n\nUpload an OOTP draft-eligible player export via the 📁 Upload Pool button.')">🎲 Sim</button>
+            <button class="btn" style="opacity:0.5" title="Requires uploaded draft pool" onclick="alert('Auto-draft list requires an uploaded draft pool.\n\nThe current board is an approximation from amateur-level players in the database. Upload an OOTP draft-eligible player export via the 📁 Upload Pool button for accurate list generation.')">📋 Auto-Draft List</button>
+            {% endif %}
             <button class="btn" onclick="exportTableCSV('draft-table', 'draft_board.csv')" title="Export current view as CSV">⬇ CSV</button>
             <button class="btn" onclick="openDraftSettings()" title="Configure auto-draft list preferences">⚙️</button>
             <label class="btn" style="cursor:pointer">📁 Upload Pool

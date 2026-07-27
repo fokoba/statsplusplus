@@ -2222,16 +2222,19 @@ def get_minor_league_roster(team_id):
                 "stf": n(stf), "mov": n(mov), "ctrl": n(ctrl), "stm": n(stm),
                 "pitches": num_pitches,
                 "_sort": (_role_order.get(display_p, 3), -(composite or 0)),
+                "_pos_sort": _role_order.get(display_p, 3),
             })
             pitchers.append(base)
         else:
-            # Best defensive rating
-            def_ratings = [c, ss, second_b, third_b, first_b, lf, cf, rf]
-            best_def = max((n(d) for d in def_ratings if d), default=None)
+            # Defensive rating at the player's listed position
+            _pos_def_map = {"C": c, "SS": ss, "2B": second_b, "3B": third_b,
+                            "1B": first_b, "LF": lf, "CF": cf, "RF": rf}
+            pos_def = _pos_def_map.get(display_p)
             base.update({
                 "con": n(cntct), "gap": n(gap), "pow": n(pw), "eye": n(eye),
-                "spd": n(speed), "def": best_def,
-                "_sort": (_pos_order.get(display_p, 99), -(composite or 0)),
+                "spd": n(speed), "def": n(pos_def) if pos_def else None,
+                "_sort": (-_pos_order.get(display_p, 0), -(composite or 0)),
+                "_pos_sort": _pos_order.get(display_p, 99),
             })
             hitters.append(base)
 

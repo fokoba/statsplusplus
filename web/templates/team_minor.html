@@ -110,7 +110,7 @@
     <tbody>
       {% for p in roster.hitters %}
       <tr>
-        <td class="left">{{ p.pos }}</td>
+        <td class="left" data-sort-value="{{ p._pos_sort }}">{{ p.pos }}</td>
         <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
         <td>{{ p.age }}</td>
         <td>{% if p.composite %}<span class="ovr-color" data-g="{{ p.composite }}">{{ p.composite }}</span>{% else %}—{% endif %}</td>
@@ -122,7 +122,7 @@
         <td>{% if p.eye %}<span class="ovr-color" data-g="{{ p.eye }}">{{ p.eye }}</span>{% else %}—{% endif %}</td>
         <td>{% if p.spd %}<span class="ovr-color" data-g="{{ p.spd }}">{{ p.spd }}</span>{% else %}—{% endif %}</td>
         <td>{% if p.def %}<span class="ovr-color" data-g="{{ p.def }}">{{ p.def }}</span>{% else %}—{% endif %}</td>
-        <td>{% if p.surplus %}${{ p.surplus }}M{% else %}—{% endif %}</td>
+        <td>{% if p.surplus is not none and p.surplus > 0 %}${{ p.surplus }}M{% else %}—{% endif %}</td>
       </tr>
       {% endfor %}
     </tbody>
@@ -149,7 +149,7 @@
     <tbody>
       {% for p in roster.pitchers %}
       <tr>
-        <td class="left">{{ p.pos }}</td>
+        <td class="left" data-sort-value="{{ p._pos_sort }}">{{ p.pos }}</td>
         <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
         <td>{{ p.age }}</td>
         <td>{% if p.composite %}<span class="ovr-color" data-g="{{ p.composite }}">{{ p.composite }}</span>{% else %}—{% endif %}</td>
@@ -160,7 +160,7 @@
         <td>{% if p.ctrl %}<span class="ovr-color" data-g="{{ p.ctrl }}">{{ p.ctrl }}</span>{% else %}—{% endif %}</td>
         <td>{% if p.stm %}<span class="ovr-color" data-g="{{ p.stm }}">{{ p.stm }}</span>{% else %}—{% endif %}</td>
         <td>{{ p.pitches or '—' }}</td>
-        <td>{% if p.surplus %}${{ p.surplus }}M{% else %}—{% endif %}</td>
+        <td>{% if p.surplus is not none and p.surplus > 0 %}${{ p.surplus }}M{% else %}—{% endif %}</td>
       </tr>
       {% endfor %}
     </tbody>

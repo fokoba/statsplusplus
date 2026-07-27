@@ -2290,6 +2290,18 @@ def get_minor_league_notables(team_id):
         ORDER BY COALESCE(pf.fv, 0) DESC, COALESCE(r.composite_score, r.ovr, 0) DESC
     """, (team_id,)).fetchall()
 
+    # 40-man roster lookup
+    forty_man_pids = set()
+    for r in conn.execute(
+        "SELECT c.player_id FROM contracts c JOIN players p ON c.player_id=p.player_id "
+        "WHERE p.team_id=? AND c.is_major=1", (team_id,)
+    ).fetchall():
+        forty_man_pids.add(r[0])
+
+    # ETA by level
+    lmap = level_map()
+    _eta_map = {"1": 0, "2": 0.5, "3": 1.5, "4": 2.5, "5": 3.5, "6": 4.5, "7": 4.5, "8": 5.0}
+
     notables = []
     for r in rows:
         pid, name, age, pos, role, level = r[0:6]
@@ -2342,6 +2354,8 @@ def get_minor_league_notables(team_id):
             "surplus": round(prospect_surplus / 1e6, 1) if prospect_surplus else None,
             "tools": tools, "tags": tags,
             "young_by": age_norm - age if age and age < age_norm else 0,
+            "eta": _eta_map.get(str(team_level), 3.5),
+            "on_40man": pid in forty_man_pids,
         })
 
     return notables

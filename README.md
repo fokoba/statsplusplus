@@ -59,7 +59,18 @@ Full draft pool with position filters, tool thresholds, simulation, auto-draft l
 
 ## Quick Start
 
-### 1. Clone and install
+### Option A: Download (recommended for most users)
+
+1. Download the latest release from the [Releases page](../../releases)
+2. Extract the zip to a folder
+3. Run the launcher:
+   - **Windows:** Double-click `start.bat`
+   - **Mac/Linux:** Open a terminal in the folder and run `./start.sh`
+4. Your browser will open to the onboarding wizard
+
+The launcher handles Python environment setup and dependency installation automatically. You just need [Python 3.10+](https://www.python.org/downloads/) installed.
+
+### Option B: Clone and install (for developers)
 
 ```bash
 git clone <repo-url> statsplusplus

@@ -1012,6 +1012,66 @@ def get_player(pid):
                 "snapshots": snapshots,
                 "tools": _dh_tools,  # [(key, label), ...]
             }
+
+            # Compute chart-ready data: x positions proportional to time
+            from datetime import date as _dtc
+            _dates = [_dtc.fromisoformat(s["date"]) for s in snapshots]
+            _total_days = (_dates[-1] - _dates[0]).days
+            if _total_days > 0:
+                x_positions = [(_d - _dates[0]).days / _total_days for _d in _dates]
+            else:
+                x_positions = [i / max(1, len(snapshots) - 1) for i in range(len(snapshots))]
+
+            # Chart series grouped into 3 panels
+            # Panel 1: Overview (composite + ceiling)
+            overview_series = [
+                {"key": "composite", "label": "Composite", "color": "#42a5f5",
+                 "points": [{"x": x_positions[i], "y": s["composite"], "date": s["date_short"]}
+                            for i, s in enumerate(snapshots) if s["composite"] is not None]},
+                {"key": "ceiling", "label": "Ceiling", "color": "#ffc107",
+                 "points": [{"x": x_positions[i], "y": s["ceiling"], "date": s["date_short"]}
+                            for i, s in enumerate(snapshots) if s["ceiling"] is not None]},
+            ]
+
+            # Panel 2: Current tools
+            _cur_colors = ["#66bb6a", "#42a5f5", "#ffc107", "#ff7043", "#ab47bc", "#26c6da", "#ec407a", "#8d6e63"]
+            cur_tools_series = []
+            _ci = 0
+            for key, label in _dh_tools:
+                if key.startswith("pot_"):
+                    continue
+                pts = [{"x": x_positions[i], "y": s["tools"].get(key), "date": s["date_short"]}
+                       for i, s in enumerate(snapshots) if s["tools"].get(key) is not None]
+                if pts:
+                    cur_tools_series.append({
+                        "key": key, "label": label, "color": _cur_colors[_ci % len(_cur_colors)],
+                        "points": pts,
+                    })
+                    _ci += 1
+
+            # Panel 3: Potential tools
+            _pot_colors = ["#a5d6a7", "#90caf9", "#ffe082", "#ffab91", "#ce93d8", "#80deea", "#f48fb1", "#bcaaa4"]
+            pot_tools_series = []
+            _pi = 0
+            for key, label in _dh_tools:
+                if not key.startswith("pot_"):
+                    continue
+                pts = [{"x": x_positions[i], "y": s["tools"].get(key), "date": s["date_short"]}
+                       for i, s in enumerate(snapshots) if s["tools"].get(key) is not None]
+                if pts:
+                    pot_tools_series.append({
+                        "key": key, "label": label, "color": _pot_colors[_pi % len(_pot_colors)],
+                        "points": pts,
+                    })
+                    _pi += 1
+
+            dev_history["charts"] = {
+                "x_positions": x_positions,
+                "date_labels": [s["date_short"] for s in snapshots],
+                "overview": overview_series,
+                "current": cur_tools_series,
+                "potential": pot_tools_series,
+            }
     except Exception:
         pass
 

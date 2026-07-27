@@ -702,7 +702,123 @@
 {% endif %}
 {% endmacro %}
 
-{# Development tracking panel — merged into evaluation panel #}
+{# Development charts panel — SVG line charts for tool trajectories #}
+{% macro dev_charts_panel() %}
+{% if p.dev_history and p.dev_history.charts %}
+{% set charts = p.dev_history.charts %}
+
+<style>
+  .dev-chart-panel { margin-bottom:16px; }
+  .dev-chart-panel h3 { font-size:13px; margin:0 0 8px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px; }
+  .dev-chart-svg { width:100%; height:180px; display:block; }
+  .dev-chart-legend { display:flex; gap:12px; flex-wrap:wrap; margin-top:6px; font-size:11px; }
+  .dev-chart-legend-item { display:flex; align-items:center; gap:4px; }
+  .dev-chart-legend-swatch { width:12px; height:3px; border-radius:1px; }
+  .dev-chart-gridline { stroke:var(--border); stroke-width:0.5; stroke-dasharray:2,2; }
+  .dev-chart-axis-label { font-size:9px; fill:var(--text-dim); }
+  .dev-chart-date-label { font-size:8px; fill:var(--text-dim); text-anchor:middle; }
+  .dev-chart-line { fill:none; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+  .dev-chart-dot { stroke-width:1.5; cursor:pointer; }
+  .dev-chart-tooltip { position:absolute; background:var(--surface); border:1px solid var(--border); border-radius:4px; padding:4px 8px; font-size:11px; pointer-events:none; display:none; z-index:100; white-space:nowrap; }
+</style>
+
+{% macro render_chart(series_list, chart_id, y_min=20, y_max=80) %}
+{% set pad_l = 30 %}
+{% set pad_r = 10 %}
+{% set pad_t = 10 %}
+{% set pad_b = 22 %}
+{% set w = 600 %}
+{% set h = 180 %}
+{% set plot_w = w - pad_l - pad_r %}
+{% set plot_h = h - pad_t - pad_b %}
+<div style="position:relative">
+<svg class="dev-chart-svg" viewBox="0 0 {{ w }} {{ h }}" preserveAspectRatio="xMidYMid meet">
+  {# Y-axis gridlines and labels #}
+  {% for grade in [20, 30, 40, 50, 60, 70, 80] %}
+  {% if grade >= y_min and grade <= y_max %}
+  {% set y = pad_t + plot_h - (grade - y_min) / (y_max - y_min) * plot_h %}
+  <line x1="{{ pad_l }}" y1="{{ y }}" x2="{{ w - pad_r }}" y2="{{ y }}" class="dev-chart-gridline"/>
+  <text x="{{ pad_l - 4 }}" y="{{ y + 3 }}" class="dev-chart-axis-label" text-anchor="end">{{ grade }}</text>
+  {% endif %}
+  {% endfor %}
+
+  {# X-axis date labels #}
+  {% for i in range(charts.x_positions|length) %}
+  {% set x = pad_l + charts.x_positions[i] * plot_w %}
+  <text x="{{ x }}" y="{{ h - 4 }}" class="dev-chart-date-label">{{ charts.date_labels[i] }}</text>
+  {% endfor %}
+
+  {# Data lines and dots #}
+  {% for series in series_list %}
+  {% if series.points|length >= 2 %}
+  <polyline class="dev-chart-line" stroke="{{ series.color }}" points="{% for pt in series.points %}{{ pad_l + pt.x * plot_w }},{{ pad_t + plot_h - (pt.y - y_min) / (y_max - y_min) * plot_h }} {% endfor %}"/>
+  {% endif %}
+  {% for pt in series.points %}
+  {% set cx = pad_l + pt.x * plot_w %}
+  {% set cy = pad_t + plot_h - (pt.y - y_min) / (y_max - y_min) * plot_h %}
+  <circle cx="{{ cx }}" cy="{{ cy }}" r="4" fill="{{ series.color }}" stroke="var(--bg)" class="dev-chart-dot"
+          data-chart="{{ chart_id }}" data-label="{{ series.label }}" data-value="{{ pt.y }}" data-date="{{ pt.date }}"/>
+  {% endfor %}
+  {% endfor %}
+</svg>
+<div class="dev-chart-tooltip" id="tooltip-{{ chart_id }}"></div>
+</div>
+{# Legend #}
+<div class="dev-chart-legend">
+  {% for series in series_list %}
+  <span class="dev-chart-legend-item"><span class="dev-chart-legend-swatch" style="background:{{ series.color }}"></span>{{ series.label }}</span>
+  {% endfor %}
+</div>
+{% endmacro %}
+
+<div class="panel">
+  <h2>Development Charts</h2>
+
+  <div class="dev-chart-panel">
+    <h3>Overview</h3>
+    {{ render_chart(charts.overview, "overview", y_min=20, y_max=80) }}
+  </div>
+
+  <div class="dev-chart-panel">
+    <h3>Current Tools</h3>
+    {{ render_chart(charts.current, "current", y_min=20, y_max=80) }}
+  </div>
+
+  {% if charts.potential %}
+  <div class="dev-chart-panel">
+    <h3>Potential Tools</h3>
+    {{ render_chart(charts.potential, "potential", y_min=20, y_max=80) }}
+  </div>
+  {% endif %}
+</div>
+
+<script>
+// Hover tooltips for dev charts
+document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
+  dot.addEventListener('mouseenter', function(e) {
+    var chartId = dot.dataset.chart;
+    var tip = document.getElementById('tooltip-' + chartId);
+    tip.textContent = dot.dataset.label + ': ' + dot.dataset.value + ' (' + dot.dataset.date + ')';
+    tip.style.display = 'block';
+    var rect = dot.closest('svg').getBoundingClientRect();
+    var cx = parseFloat(dot.getAttribute('cx'));
+    var cy = parseFloat(dot.getAttribute('cy'));
+    var svgW = dot.closest('svg').viewBox.baseVal.width;
+    var scale = rect.width / svgW;
+    tip.style.left = (cx * scale + rect.left - tip.offsetWidth/2) + 'px';
+    tip.style.top = (cy * scale + rect.top - 24) + 'px';
+  });
+  dot.addEventListener('mouseleave', function(e) {
+    var chartId = dot.dataset.chart;
+    document.getElementById('tooltip-' + chartId).style.display = 'none';
+  });
+});
+</script>
+
+{% endif %}
+{% endmacro %}
+
+{# Development tracking panel — table view #}
 {% macro dev_tracking_panel() %}
 {% if p.dev_history and p.dev_history.snapshots|length >= 2 %}
 <div class="panel" style="margin-top:16px">
@@ -1182,6 +1298,7 @@
 
 <div class="tab-bar">
   <button class="tab active" data-tab="overview">Overview</button>
+  {% if p.dev_history and p.dev_history.snapshots|length >= 2 %}<button class="tab" data-tab="development">Development</button>{% endif %}
   <button class="tab" data-tab="valuation">Valuation</button>
 </div>
 
@@ -1194,12 +1311,18 @@
     </div>
     <div class="panel-stack">
       {{ evaluation_panel() }}
-      {{ dev_tracking_panel() }}
       {{ scouting_panel() }}
       {{ comps_panel() }}
     </div>
   </div>
 </div>
+
+{% if p.dev_history and p.dev_history.snapshots|length >= 2 %}
+<div class="tab-content" id="tab-development">
+  {{ dev_charts_panel() }}
+  {{ dev_tracking_panel() }}
+</div>
+{% endif %}
 
 <div class="tab-content" id="tab-valuation">
   <div class="columns">

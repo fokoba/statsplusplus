@@ -682,19 +682,15 @@
   </div>
   {% endif %}
 
-  {# ── Development tracking (only meaningful changes) ── #}
+  {# ── Development tracking (brief indicator — full detail in Development tab) ── #}
   {% if p.snapshot_deltas and (p.snapshot_deltas.composite_delta|abs >= 3 or p.snapshot_deltas.ceiling_delta|abs >= 3) %}
   <div style="font-size:12px; color:var(--text-dim)">
-    <span style="text-transform:uppercase; letter-spacing:1px; font-size:10px">Development</span>
+    <span style="text-transform:uppercase; letter-spacing:1px; font-size:10px">Since last update</span>
     {% if p.snapshot_deltas.composite_delta|abs >= 3 %}
     <span style="margin-left:8px">Comp <span class="{% if p.snapshot_deltas.composite_delta > 0 %}pos{% else %}neg{% endif %}">{{ "%+d"|format(p.snapshot_deltas.composite_delta) }}</span></span>
     {% endif %}
     {% if p.snapshot_deltas.ceiling_delta|abs >= 3 %}
     <span style="margin-left:8px">Ceil <span class="{% if p.snapshot_deltas.ceiling_delta > 0 %}pos{% else %}neg{% endif %}">{{ "%+d"|format(p.snapshot_deltas.ceiling_delta) }}</span></span>
-    {% endif %}
-    {# Show what's driving the change #}
-    {% if p.snapshot_deltas.top_changes %}
-    <span style="margin-left:12px; font-size:11px; opacity:0.8">({% for t in p.snapshot_deltas.top_changes|sort(attribute='delta') %}{{ t.name }}&nbsp;<span class="{% if t.delta > 0 %}pos{% else %}neg{% endif %}">{{ "%+d"|format(t.delta) }}</span>{% if not loop.last %}, {% endif %}{% endfor %})</span>
     {% endif %}
   </div>
   {% endif %}
@@ -895,6 +891,7 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
   <button class="tab active" data-tab="overview">Overview</button>
   <button class="tab" data-tab="stats">Stats</button>
   {% if p.pctile_history %}<button class="tab" data-tab="advanced">Advanced</button>{% endif %}
+  {% if p.dev_history and p.dev_history.snapshots|length >= 2 %}<button class="tab" data-tab="development">Development</button>{% endif %}
   {% if p.prospect_comps %}<button class="tab" data-tab="outlook">Outlook</button>{% endif %}
   <button class="tab" data-tab="contract">Contract</button>
 </div>
@@ -905,7 +902,6 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
     <div class="panel-stack">
       {{ ratings_panel() }}
       {{ evaluation_panel() }}
-      {{ dev_tracking_panel() }}
       {{ character_panel() }}
       
     </div>
@@ -1071,6 +1067,14 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
     {% endfor %}
   </div>
   {% endif %}
+</div>
+{% endif %}
+
+{% if p.dev_history and p.dev_history.snapshots|length >= 2 %}
+{# ══ Development tab (MLB) ══ #}
+<div class="tab-content" id="tab-development">
+  {{ dev_charts_panel() }}
+  {{ dev_tracking_panel() }}
 </div>
 {% endif %}
 

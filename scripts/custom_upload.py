@@ -102,6 +102,45 @@ def _hitter_tools(d):
     }
 
 
+# web/player_queries.py's "Platoon candidate" insight uses 15 — that's a
+# definitive badge, calibrated conservative on purpose. This is a discovery
+# filter (actively hunting for candidates), so a lower bar serves better;
+# the actual gap size is still shown so you can judge quality yourself.
+_PLATOON_GAP_THRESHOLD = 10
+
+
+def _platoon_split(d, is_pitcher):
+    """(max_gap, strong_side) for whichever tool has the biggest L/R split.
+
+    strong_side is "vs RHB"/"vs LHB" for pitchers (which batter hand they
+    fare better against) or "vs RHP"/"vs LHP" for hitters (which pitcher
+    hand they fare better against). Returns (gap, None) if no split data or
+    the gap doesn't meet the threshold.
+    """
+    if is_pitcher:
+        pairs = [("STU vL", "STU vR")]
+        strong_labels = ("vs LHB", "vs RHB")
+    else:
+        pairs = [("CON vL", "CON vR"), ("POW vL", "POW vR"),
+                 ("GAP vL", "GAP vR"), ("EYE vL", "EYE vR")]
+        strong_labels = ("vs LHP", "vs RHP")
+
+    max_gap, strong_side = 0, None
+    for l_col, r_col in pairs:
+        lv, rv = _num(d.get(l_col)), _num(d.get(r_col))
+        if lv is None or rv is None:
+            continue
+        gap = abs(lv - rv)
+        if gap > max_gap:
+            max_gap = gap
+            # Higher "vL" rating -> stronger facing that side (matches
+            # player_queries.py's convention, generalized to both labels).
+            strong_side = strong_labels[0] if lv > rv else strong_labels[1]
+    if max_gap < _PLATOON_GAP_THRESHOLD:
+        return max_gap, None
+    return max_gap, strong_side
+
+
 def _hitter_potential_tools(d):
     return {
         "contact": _num(d.get("CON P")), "gap": _num(d.get("GAP P")),
@@ -303,6 +342,19 @@ def evaluate_row(d: dict) -> dict | None:
     if_rng = _num(d.get("IF RNG"))
     of_rng = _num(d.get("OF RNG"))
     best_position, best_position_grade = (None, None) if is_pitcher else _best_position(d)
+
+    # NOTE: unverified against a real example. This sample export was your
+    # own signed roster, so Claim/WAIV/DFA/TM never show a free-agent or
+    # waivers row here to confirm against. Best guess based on standard OOTP
+    # convention: a free agent's "TM" field literally reads "Free Agent";
+    # "on waivers" is inferred from the Claim/WAIV/DFA columns being
+    # populated (non "-") rather than blank. Verify once you upload an
+    # export that actually contains such players.
+    tm_field = (d.get("TM") or "").strip()
+    is_free_agent = tm_field.lower() == "free agent"
+    on_waivers = any((d.get(c) or "-").strip() != "-" for c in ("Claim", "WAIV", "DFA"))
+    platoon_gap, platoon_strong_side = _platoon_split(d, is_pitcher)
+
     return {
         "pid": pid, "name": name, "age": age,
         "level": level_abbr, "bucket": role if is_pitcher else bucket,
@@ -313,6 +365,8 @@ def evaluate_row(d: dict) -> dict | None:
         "rule5_eligible": rule5_eligible,
         "if_rng": if_rng, "of_rng": of_rng,
         "best_position": best_position, "best_position_grade": best_position_grade,
+        "is_free_agent": is_free_agent, "on_waivers": on_waivers,
+        "platoon_gap": platoon_gap, "platoon_strong_side": platoon_strong_side,
     }
 
 

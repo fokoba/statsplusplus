@@ -230,7 +230,7 @@ def custom_upload():
 
     results = None
     error = None
-    show_all_ages = request.form.get("show_all_ages") == "on"
+    under_24_only = request.form.get("under_24_only") == "on"
     if request.method == "POST":
         f = request.files.get("csv_file")
         if not f or not f.filename:
@@ -239,14 +239,14 @@ def custom_upload():
             try:
                 results = _cu.evaluate_csv(f.read())
                 results = [r for r in results if "error" not in r]
-                if not show_all_ages:
+                if under_24_only:
                     results = [r for r in results if r.get("age") is not None and r["age"] <= 24]
                 results.sort(key=lambda r: -(r.get("fv") or 0))
             except Exception as e:
                 error = f"Couldn't process that file: {e}"
 
     return render_template("custom_upload.html", results=results, error=error,
-                           show_all_ages=show_all_ages,
+                           under_24_only=under_24_only,
                            breadcrumbs=[{"label": "Custom Upload", "url": "/custom-upload"}])
 
 

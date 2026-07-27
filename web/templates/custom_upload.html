@@ -16,8 +16,8 @@
   <form method="post" enctype="multipart/form-data">
     <input type="file" name="csv_file" accept=".csv" required>
     <label style="margin-left:16px; font-size:13px">
-      <input type="checkbox" name="show_all_ages" {% if show_all_ages %}checked{% endif %}>
-      Show all ages (default: 24 and under)
+      <input type="checkbox" name="under_24_only" {% if under_24_only %}checked{% endif %}>
+      Show 24 and under only
     </label>
     <button type="submit" class="btn btn-sm" style="margin-left:16px">Evaluate</button>
   </form>
@@ -29,7 +29,7 @@
 
 {% if results is not none %}
 <div class="panel">
-  <h2>Results <span id="cu-count" style="color:var(--text-dim); font-weight:400; font-size:13px">({{ results|length }} players{% if not show_all_ages %}, age 24 or under{% endif %})</span></h2>
+  <h2>Results <span id="cu-count" style="color:var(--text-dim); font-weight:400; font-size:13px">({{ results|length }} players{% if under_24_only %}, age 24 or under{% endif %})</span></h2>
   {% if results %}
   <div style="margin-bottom:8px; display:flex; align-items:center; gap:12px">
     <label style="font-size:13px">
@@ -62,6 +62,22 @@
       <input type="checkbox" id="cu-r5-filter" onchange="cuFilterResults()">
       Rule 5 eligible only
     </label>
+    <label style="font-size:13px" title="Best guess: 'TM' field reads 'Free Agent'. Unverified against a real free-agent export — flag if this looks wrong.">
+      <input type="checkbox" id="cu-fa-filter" onchange="cuFilterResults()">
+      All signable free agents
+    </label>
+    <label style="font-size:13px" title="Best guess: Claim/WAIV/DFA columns populated. Unverified against a real waiver-wire export — flag if this looks wrong.">
+      <input type="checkbox" id="cu-waiver-filter" onchange="cuFilterResults()">
+      On waiver wire
+    </label>
+    <label style="font-size:13px" title="10+ point gap: for hitters, biggest split across Contact/Power/Gap/Eye vs RHP/LHP; for pitchers, Stuff vs RHB/LHB.">
+      <input type="checkbox" id="cu-vsright-filter" onchange="cuFilterResults()">
+      Significantly stronger vs RHP/RHB
+    </label>
+    <label style="font-size:13px" title="10+ point gap: for hitters, biggest split across Contact/Power/Gap/Eye vs RHP/LHP; for pitchers, Stuff vs RHB/LHB.">
+      <input type="checkbox" id="cu-vsleft-filter" onchange="cuFilterResults()">
+      Significantly stronger vs LHP/LHB
+    </label>
     <button class="btn btn-sm" onclick="exportTableCSV('custom-upload-table', 'custom_upload_results.csv')">⬇ CSV</button>
   </div>
   {% endif %}
@@ -77,18 +93,17 @@
         <th data-sort="num">Ovr</th>
         <th data-sort="num">Pot</th>
         <th data-sort="str">FV</th>
-        <th data-sort="num">IF Rng</th>
-        <th data-sort="num">OF Rng</th>
         <th data-sort="str">Risk</th>
         <th data-sort="str">Scout</th>
         <th data-sort="str">R5</th>
         <th data-sort="str">Best Pos</th>
         <th data-sort="num">Grade</th>
+        <th data-sort="str">Platoon</th>
       </tr>
     </thead>
     <tbody>
       {% for p in results %}
-      <tr data-pos="{{ p.bucket }}" data-org="{{ p.org }}" data-type="{{ 'pitcher' if p.is_pitcher else 'hitter' }}" data-r5="{{ 'yes' if p.rule5_eligible else 'no' }}">
+      <tr data-pos="{{ p.bucket }}" data-org="{{ p.org }}" data-type="{{ 'pitcher' if p.is_pitcher else 'hitter' }}" data-r5="{{ 'yes' if p.rule5_eligible else 'no' }}" data-fa="{{ 'yes' if p.is_free_agent else 'no' }}" data-waivers="{{ 'yes' if p.on_waivers else 'no' }}" data-platoon="{{ p.platoon_strong_side or '' }}">
         <td class="left">{{ p.name }}</td>
         <td>{{ p.bucket }}</td>
         <td class="left">{{ p.org_abbr or p.org }}</td>
@@ -96,20 +111,19 @@
         <td>{{ p.level }}</td>
         <td><span class="ovr-color" data-g="{{ p.composite_score }}">{{ p.composite_score }}</span></td>
         <td><span class="ovr-color" data-g="{{ p.true_ceiling }}">{{ p.true_ceiling }}</span></td>
-        <td>{{ p.fv }}</td>
-        <td>{{ p.if_rng if p.if_rng is not none else '-' }}</td>
-        <td>{{ p.of_rng if p.of_rng is not none else '-' }}</td>
+        <td>{{ '25+' if p.age is not none and p.age >= 25 else p.fv }}</td>
         <td style="color:{% if p.risk == 'Low' %}#4caf50{% elif p.risk == 'Medium' %}#ffc107{% elif p.risk == 'High' %}#ff9800{% else %}#f44336{% endif %}">{{ p.risk }}</td>
         <td>{{ p.acc }}</td>
         <td>{{ 'Yes' if p.rule5_eligible else '' }}</td>
         <td>{{ p.best_position or '' }}</td>
         <td>{{ p.best_position_grade if p.best_position_grade is not none else '' }}</td>
+        <td>{{ p.platoon_strong_side or '' }}</td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
   {% else %}
-  <div style="color:var(--text-dim); font-size:13px; padding:12px 0">No players matched (try "Show all ages" if you expected results).</div>
+  <div style="color:var(--text-dim); font-size:13px; padding:12px 0">No players matched (try unchecking "Show 24 and under only" if you expected results).</div>
   {% endif %}
 </div>
 <script>
@@ -118,13 +132,22 @@ function cuFilterResults() {
   var org = document.getElementById('cu-team-filter').value;
   var type = document.getElementById('cu-type-filter').value;
   var r5Only = document.getElementById('cu-r5-filter').checked;
+  var faOnly = document.getElementById('cu-fa-filter').checked;
+  var waiversOnly = document.getElementById('cu-waiver-filter').checked;
+  var vsRightOnly = document.getElementById('cu-vsright-filter').checked;
+  var vsLeftOnly = document.getElementById('cu-vsleft-filter').checked;
   var rows = document.querySelectorAll('#custom-upload-table tbody tr');
   var shown = 0;
   rows.forEach(function(tr) {
+    var platoon = tr.dataset.platoon;
     var match = (!pos || tr.dataset.pos === pos)
       && (!org || tr.dataset.org === org)
       && (!type || tr.dataset.type === type)
-      && (!r5Only || tr.dataset.r5 === 'yes');
+      && (!r5Only || tr.dataset.r5 === 'yes')
+      && (!faOnly || tr.dataset.fa === 'yes')
+      && (!waiversOnly || tr.dataset.waivers === 'yes')
+      && (!vsRightOnly || platoon === 'vs RHP' || platoon === 'vs RHB')
+      && (!vsLeftOnly || platoon === 'vs LHP' || platoon === 'vs LHB');
     tr.style.display = match ? '' : 'none';
     if (match) shown++;
   });
@@ -133,6 +156,10 @@ function cuFilterResults() {
   if (org) parts.push(org);
   if (type) parts.push(type + 's');
   if (r5Only) parts.push('Rule 5 eligible');
+  if (faOnly) parts.push('Free Agents');
+  if (waiversOnly) parts.push('Waivers');
+  if (vsRightOnly) parts.push('vs RHP/RHB');
+  if (vsLeftOnly) parts.push('vs LHP/LHB');
   var countEl = document.getElementById('cu-count');
   if (countEl) countEl.textContent = '(' + shown + ' shown' + (parts.length ? ' — ' + parts.join(', ') : '') + ')';
 }

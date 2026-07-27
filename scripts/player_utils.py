@@ -210,7 +210,7 @@ def assign_bucket(p, use_pot=None):
         if stm >= 25 and ((p.get("PotKnbl") or 0) >= 45 or (p.get("PotKncrv") or 0) >= 45):
             return "SP"
         viable = sum(1 for f in PITCH_FIELDS if (p.get("Pot" + f) or 0) >= 45)
-        return "RP" if (viable < 3 or stm < 20) else "SP"
+        return "RP" if (viable < 3 or stm < 30) else "SP"
 
     if pgrade("C")  >= 45:                          return "C"
     if pgrade("SS") >= 50:

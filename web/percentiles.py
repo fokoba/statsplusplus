@@ -439,10 +439,15 @@ def get_pitcher_percentiles(pid, split_id=1, year=None):
     if _has_pbabip:
         rat_vals["pbabip"] = [ratings_pool[p].get("pbabip") or 0 for p in pool]
 
+    # Check if GB% data is available (pitching_stats has gb/fb columns populated)
+    _has_gb_data = any(pool[p].get("gb_pct", 0) > 0 for p in pool)
+
     result = []
     _skip_splits = {"war", "war_rate", "era_plus", "siera", "gb_pct"}
     for key, label, inverted in PITCHER_PCTILE_STATS:
         if key in _skip_splits and split_id != 1:
+            continue
+        if key == "gb_pct" and not _has_gb_data:
             continue
         val = player[key]
         pctile = _pctile(val, [pool[p][key] for p in pool])

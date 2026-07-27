@@ -784,7 +784,7 @@
         {% for yr in p.pctile_history.years %}
         <tr>
           <td class="ph-year">{{ yr }}</td>
-          <td class="ph-sample">{{ p.pctile_history.sample_sizes.get(yr, "—") }}</td>
+          <td class="ph-sample">{% if p.pctile_history.sample_label == "IP" %}{{ p.pctile_history.sample_sizes.get(yr, "—")|fmt_ip }}{% else %}{{ p.pctile_history.sample_sizes.get(yr, "—") }}{% endif %}</td>
           {% for s in p.pctile_history.stats %}
             {% set yr_data = s["values"].get(yr) %}
             {% if yr_data %}
@@ -811,7 +811,7 @@
       <tfoot>
         <tr class="ph-career-row">
           <td class="ph-year">Career</td>
-          <td class="ph-sample">{{ p.pctile_history.sample_sizes.values()|sum }}</td>
+          <td class="ph-sample">{% if p.pctile_history.sample_label == "IP" %}{{ p.pctile_history.sample_sizes.values()|sum|fmt_ip }}{% else %}{{ p.pctile_history.sample_sizes.values()|sum }}{% endif %}</td>
           {% for s in p.pctile_history.stats %}
             {% set career = s.get("career") %}
             {% if career %}
@@ -1253,6 +1253,13 @@ function loadPctileHistory(pid, splitId, btn) {
         return v.toFixed(1);
       }
 
+      function fmtIp(ip) {
+        if (ip == null || ip === '\u2014') return '\u2014';
+        var full = Math.floor(ip);
+        var frac = Math.round((ip - full) * 3);
+        return full + '.' + frac;
+      }
+
       // Build header
       var html = '<table class="pctile-history-table"><thead><tr>';
       html += '<th class="ph-stat-col">Season</th>';
@@ -1263,7 +1270,7 @@ function loadPctileHistory(pid, splitId, btn) {
       // Build rows
       data.years.forEach(function(yr) {
         html += '<tr><td class="ph-year">' + yr + '</td>';
-        html += '<td class="ph-sample">' + (data.sample_sizes[String(yr)] || '\u2014') + '</td>';
+        html += '<td class="ph-sample">' + (data.sample_label === 'IP' ? fmtIp(data.sample_sizes[String(yr)]) : (data.sample_sizes[String(yr)] || '\u2014')) + '</td>';
         data.stats.forEach(function(s) {
           var v = s.values[String(yr)];
           if (v) {
@@ -1285,7 +1292,7 @@ function loadPctileHistory(pid, splitId, btn) {
       html += '<tfoot><tr class="ph-career-row"><td class="ph-year">Career</td>';
       var totalSample = 0;
       data.years.forEach(function(yr) { totalSample += (data.sample_sizes[String(yr)] || 0); });
-      html += '<td class="ph-sample">' + totalSample + '</td>';
+      html += '<td class="ph-sample">' + (data.sample_label === 'IP' ? fmtIp(totalSample) : totalSample) + '</td>';
       data.stats.forEach(function(s) {
         var pctiles = [];
         var weightedSum = 0;

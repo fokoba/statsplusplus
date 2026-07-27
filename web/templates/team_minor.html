@@ -85,14 +85,17 @@
 
 {# ── Full Roster (Tabbed: Hitters / Pitchers) ── #}
 <div class="panel">
-  <h2>Full Roster ({{ roster.hitters|length + roster.pitchers|length }})</h2>
+  <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px">
+    <h2 style="margin:0">Full Roster ({{ roster.hitters|length + roster.pitchers|length }})</h2>
+    <button class="btn btn-sm csv-btn" onclick="exportTableCSV('minor-hitters-table', '{{ info.level|lower }}_hitters.csv')" title="Export hitters as CSV" style="margin-left:auto">⬇ CSV</button>
+  </div>
   <div class="roster-tabs" style="margin-bottom:12px">
     <button class="split-btn active" onclick="switchRosterTab(this, 'hitters')">Hitters ({{ roster.hitters|length }})</button>
     <button class="split-btn" onclick="switchRosterTab(this, 'pitchers')">Pitchers ({{ roster.pitchers|length }})</button>
   </div>
 
   {# Hitters table #}
-  <table class="roster-tab-table" data-roster-tab="hitters">
+  <table id="minor-hitters-table" class="roster-tab-table" data-roster-tab="hitters">
     <thead>
       <tr>
         <th data-sort="pos" class="left">Pos</th>
@@ -134,7 +137,7 @@
   </table>
 
   {# Pitchers table #}
-  <table class="roster-tab-table" data-roster-tab="pitchers" style="display:none">
+  <table id="minor-pitchers-table" class="roster-tab-table" data-roster-tab="pitchers" style="display:none">
     <thead>
       <tr>
         <th data-sort="pos" class="left">Role</th>
@@ -181,6 +184,11 @@ function switchRosterTab(btn, tab) {
   btn.closest('.panel').querySelectorAll('.roster-tab-table').forEach(function(t) {
     t.style.display = t.dataset.rosterTab === tab ? '' : 'none';
   });
+  var csvBtn = btn.closest('.panel').querySelector('.csv-btn');
+  if (csvBtn) {
+    var level = '{{ info.level|lower }}';
+    csvBtn.setAttribute('onclick', "exportTableCSV('minor-" + tab + "-table', '" + level + "_" + tab + ".csv')");
+  }
 }
 </script>
 

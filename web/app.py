@@ -112,8 +112,8 @@ _refresh_status = {"running": False, "result": None, "message": ""}
 
 def _fmt_ip(ip):
     """Format true decimal IP (33.333) as baseball display (33.1)."""
-    if ip is None:
-        return "-"
+    if ip is None or isinstance(ip, str):
+        return ip or "-"
     full = int(ip)
     frac = round((ip - full) * 3)
     return f"{full}.{frac}" if frac else f"{full}.0"

@@ -95,6 +95,7 @@
         <th data-sort="pos" class="left">Pos</th>
         <th data-sort="str" class="left">Name</th>
         <th data-sort="num" data-sort-best="low">Age</th>
+        <th data-sort="str">B/T</th>
         <th data-sort="num">Comp</th>
         <th data-sort="num">Ceil</th>
         <th data-sort="str" data-sort-best="high">FV</th>
@@ -113,13 +114,14 @@
         <td class="left" data-sort-value="{{ p._pos_sort }}">{{ p.pos }}</td>
         <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
         <td>{{ p.age }}</td>
+        <td>{{ p.bt }}</td>
         <td>{% if p.composite %}<span class="ovr-color" data-g="{{ p.composite }}">{{ p.composite }}</span>{% else %}—{% endif %}</td>
         <td>{% if p.ceiling %}<span class="ovr-color" data-g="{{ p.ceiling }}">{{ p.ceiling }}</span>{% else %}—{% endif %}</td>
         <td>{{ p.fv_str or '—' }}{% if p.risk %} <span style="font-size:10px;color:{% if p.risk == 'Low' %}#4caf50{% elif p.risk == 'Medium' %}#ffc107{% elif p.risk == 'High' %}#ff9800{% else %}#f44336{% endif %}">{{ p.risk[0] }}</span>{% endif %}</td>
-        <td>{% if p.con %}<span class="ovr-color" data-g="{{ p.con }}">{{ p.con }}</span>{% else %}—{% endif %}</td>
-        <td>{% if p.gap %}<span class="ovr-color" data-g="{{ p.gap }}">{{ p.gap }}</span>{% else %}—{% endif %}</td>
-        <td>{% if p.pow %}<span class="ovr-color" data-g="{{ p.pow }}">{{ p.pow }}</span>{% else %}—{% endif %}</td>
-        <td>{% if p.eye %}<span class="ovr-color" data-g="{{ p.eye }}">{{ p.eye }}</span>{% else %}—{% endif %}</td>
+        <td>{% if p.con %}<span class="ovr-color" data-g="{{ p.con }}">{{ p.con }}</span>{% if p.pot_con and p.pot_con != p.con %}/<span class="ovr-color" data-g="{{ p.pot_con }}">{{ p.pot_con }}</span>{% endif %}{% else %}—{% endif %}</td>
+        <td>{% if p.gap %}<span class="ovr-color" data-g="{{ p.gap }}">{{ p.gap }}</span>{% if p.pot_gap and p.pot_gap != p.gap %}/<span class="ovr-color" data-g="{{ p.pot_gap }}">{{ p.pot_gap }}</span>{% endif %}{% else %}—{% endif %}</td>
+        <td>{% if p.pow %}<span class="ovr-color" data-g="{{ p.pow }}">{{ p.pow }}</span>{% if p.pot_pow and p.pot_pow != p.pow %}/<span class="ovr-color" data-g="{{ p.pot_pow }}">{{ p.pot_pow }}</span>{% endif %}{% else %}—{% endif %}</td>
+        <td>{% if p.eye %}<span class="ovr-color" data-g="{{ p.eye }}">{{ p.eye }}</span>{% if p.pot_eye and p.pot_eye != p.eye %}/<span class="ovr-color" data-g="{{ p.pot_eye }}">{{ p.pot_eye }}</span>{% endif %}{% else %}—{% endif %}</td>
         <td>{% if p.spd %}<span class="ovr-color" data-g="{{ p.spd }}">{{ p.spd }}</span>{% else %}—{% endif %}</td>
         <td>{% if p.def %}<span class="ovr-color" data-g="{{ p.def }}">{{ p.def }}</span>{% else %}—{% endif %}</td>
         <td>{% if p.surplus is not none and p.surplus > 0 %}${{ p.surplus }}M{% else %}—{% endif %}</td>
@@ -135,6 +137,7 @@
         <th data-sort="pos" class="left">Role</th>
         <th data-sort="str" class="left">Name</th>
         <th data-sort="num" data-sort-best="low">Age</th>
+        <th data-sort="str">T</th>
         <th data-sort="num">Comp</th>
         <th data-sort="num">Ceil</th>
         <th data-sort="str" data-sort-best="high">FV</th>
@@ -152,12 +155,13 @@
         <td class="left" data-sort-value="{{ p._pos_sort }}">{{ p.pos }}</td>
         <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
         <td>{{ p.age }}</td>
+        <td>{{ p.bt.split('/')[1] if '/' in p.bt else p.bt }}</td>
         <td>{% if p.composite %}<span class="ovr-color" data-g="{{ p.composite }}">{{ p.composite }}</span>{% else %}—{% endif %}</td>
         <td>{% if p.ceiling %}<span class="ovr-color" data-g="{{ p.ceiling }}">{{ p.ceiling }}</span>{% else %}—{% endif %}</td>
         <td>{{ p.fv_str or '—' }}{% if p.risk %} <span style="font-size:10px;color:{% if p.risk == 'Low' %}#4caf50{% elif p.risk == 'Medium' %}#ffc107{% elif p.risk == 'High' %}#ff9800{% else %}#f44336{% endif %}">{{ p.risk[0] }}</span>{% endif %}</td>
-        <td>{% if p.stf %}<span class="ovr-color" data-g="{{ p.stf }}">{{ p.stf }}</span>{% else %}—{% endif %}</td>
-        <td>{% if p.mov %}<span class="ovr-color" data-g="{{ p.mov }}">{{ p.mov }}</span>{% else %}—{% endif %}</td>
-        <td>{% if p.ctrl %}<span class="ovr-color" data-g="{{ p.ctrl }}">{{ p.ctrl }}</span>{% else %}—{% endif %}</td>
+        <td>{% if p.stf %}<span class="ovr-color" data-g="{{ p.stf }}">{{ p.stf }}</span>{% if p.pot_stf and p.pot_stf != p.stf %}/<span class="ovr-color" data-g="{{ p.pot_stf }}">{{ p.pot_stf }}</span>{% endif %}{% else %}—{% endif %}</td>
+        <td>{% if p.mov %}<span class="ovr-color" data-g="{{ p.mov }}">{{ p.mov }}</span>{% if p.pot_mov and p.pot_mov != p.mov %}/<span class="ovr-color" data-g="{{ p.pot_mov }}">{{ p.pot_mov }}</span>{% endif %}{% else %}—{% endif %}</td>
+        <td>{% if p.ctrl %}<span class="ovr-color" data-g="{{ p.ctrl }}">{{ p.ctrl }}</span>{% if p.pot_ctrl and p.pot_ctrl != p.ctrl %}/<span class="ovr-color" data-g="{{ p.pot_ctrl }}">{{ p.pot_ctrl }}</span>{% endif %}{% else %}—{% endif %}</td>
         <td>{% if p.stm %}<span class="ovr-color" data-g="{{ p.stm }}">{{ p.stm }}</span>{% else %}—{% endif %}</td>
         <td>{{ p.pitches or '—' }}</td>
         <td>{% if p.surplus is not none and p.surplus > 0 %}${{ p.surplus }}M{% else %}—{% endif %}</td>

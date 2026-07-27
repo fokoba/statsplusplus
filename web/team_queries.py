@@ -2166,7 +2166,10 @@ def get_minor_league_roster(team_id):
         SELECT p.player_id, p.name, p.age, p.pos, p.role, p.level,
                r.ovr, r.pot, r.composite_score, r.true_ceiling, r.ceiling_score,
                r.cntct, r.gap, r.pow, r.eye, r.speed,
+               r.pot_cntct, r.pot_gap, r.pot_pow, r.pot_eye,
                r.stf, r.mov, r.ctrl, r.stm,
+               r.pot_stf, r.pot_mov, r.pot_ctrl,
+               r.bats, r.throws,
                r.c, r.ss, r.second_b, r.third_b, r.first_b, r.lf, r.cf, r.rf,
                r.fst, r.snk, r.crv, r.sld, r.chg, r.splt, r.cutt,
                r.cir_chg, r.scr, r.frk, r.kncrv, r.knbl,
@@ -2191,13 +2194,23 @@ def get_minor_league_roster(team_id):
         pid, name, age, pos, role, level = r[0:6]
         ovr, pot, composite, true_ceil, ceil_score = r[6:11]
         cntct, gap, pw, eye, speed = r[11:16]
-        stf, mov, ctrl, stm = r[16:20]
-        c, ss, second_b, third_b, first_b, lf, cf, rf = r[20:28]
-        pitches_raw = r[28:40]  # fst, snk, crv, sld, chg, splt, cutt, cir_chg, scr, frk, kncrv, knbl
-        fv, fv_str, risk, prospect_surplus, bucket = r[40:45]
+        pot_cntct, pot_gap, pot_pw, pot_eye = r[16:20]
+        stf, mov, ctrl, stm = r[20:24]
+        pot_stf, pot_mov, pot_ctrl = r[24:27]
+        bats, throws = r[27:29]
+        c, ss, second_b, third_b, first_b, lf, cf, rf = r[29:37]
+        pitches_raw = r[37:49]  # fst, snk, crv, sld, chg, splt, cutt, cir_chg, scr, frk, kncrv, knbl
+        fv, fv_str, risk, prospect_surplus, bucket = r[49:54]
 
         ceiling = true_ceil or ceil_score
         is_pitcher = role in (11, 12, 13)
+
+        # Handedness display
+        bt = ""
+        if bats and throws:
+            bt = f"{bats}/{throws}"
+        elif bats:
+            bt = bats
 
         # Position display
         if bucket:
@@ -2209,7 +2222,7 @@ def get_minor_league_roster(team_id):
 
         base = {
             "pid": pid, "name": name, "age": age,
-            "pos": display_p,
+            "pos": display_p, "bt": bt,
             "composite": composite, "ceiling": ceiling,
             "fv": fv, "fv_str": fv_str, "risk": risk,
             "surplus": round(prospect_surplus / 1e6, 1) if prospect_surplus else None,
@@ -2219,7 +2232,10 @@ def get_minor_league_roster(team_id):
             # Count viable pitches (current rating >= 30 on 20-80 scale)
             num_pitches = sum(1 for p in pitches_raw if p and (n(p) or 0) >= 30)
             base.update({
-                "stf": n(stf), "mov": n(mov), "ctrl": n(ctrl), "stm": n(stm),
+                "stf": n(stf), "pot_stf": n(pot_stf),
+                "mov": n(mov), "pot_mov": n(pot_mov),
+                "ctrl": n(ctrl), "pot_ctrl": n(pot_ctrl),
+                "stm": n(stm),
                 "pitches": num_pitches,
                 "_sort": (_role_order.get(display_p, 3), -(composite or 0)),
                 "_pos_sort": _role_order.get(display_p, 3),
@@ -2231,7 +2247,10 @@ def get_minor_league_roster(team_id):
                             "1B": first_b, "LF": lf, "CF": cf, "RF": rf}
             pos_def = _pos_def_map.get(display_p)
             base.update({
-                "con": n(cntct), "gap": n(gap), "pow": n(pw), "eye": n(eye),
+                "con": n(cntct), "pot_con": n(pot_cntct),
+                "gap": n(gap), "pot_gap": n(pot_gap),
+                "pow": n(pw), "pot_pow": n(pot_pw),
+                "eye": n(eye), "pot_eye": n(pot_eye),
                 "spd": n(speed), "def": n(pos_def) if pos_def else None,
                 "_sort": (-_pos_order.get(display_p, 0), -(composite or 0)),
                 "_pos_sort": _pos_order.get(display_p, 99),

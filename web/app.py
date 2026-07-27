@@ -98,7 +98,7 @@ def _inject_globals():
                 league_list.append({"slug": d.name, "name": ls.get("league", d.name)})
     return {
         "statsplus_base": f"https://statsplus.net/{slug}",
-        "all_teams": sorted(cfg.team_names_map.items(), key=lambda x: x[1]),
+        "all_teams": sorted(cfg.team_names_map.items(), key=lambda x: x[1]) if getattr(g, "league_ready", False) else [],
         "league_name": cfg.settings.get("league", "League"),
         "league_list": league_list,
         "active_league_slug": g.league_slug if hasattr(g, "league_slug") else "",

@@ -80,39 +80,101 @@
 </div>
 {% endif %}
 
-{# ── Full Roster ── #}
+{# ── Full Roster (Tabbed: Hitters / Pitchers) ── #}
 <div class="panel">
-  <h2>Full Roster ({{ roster|length }})</h2>
-  <table>
+  <h2>Full Roster ({{ roster.hitters|length + roster.pitchers|length }})</h2>
+  <div class="roster-tabs" style="margin-bottom:12px">
+    <button class="split-btn active" onclick="switchRosterTab(this, 'hitters')">Hitters ({{ roster.hitters|length }})</button>
+    <button class="split-btn" onclick="switchRosterTab(this, 'pitchers')">Pitchers ({{ roster.pitchers|length }})</button>
+  </div>
+
+  {# Hitters table #}
+  <table class="roster-tab-table" data-roster-tab="hitters">
     <thead>
       <tr>
-        <th data-sort="str" class="left">Name</th>
         <th data-sort="pos" class="left">Pos</th>
+        <th data-sort="str" class="left">Name</th>
         <th data-sort="num" data-sort-best="low">Age</th>
-        <th data-sort="num">Ovr</th>
-        <th data-sort="num">Pot</th>
         <th data-sort="num">Comp</th>
         <th data-sort="num">Ceil</th>
         <th data-sort="str" data-sort-best="high">FV</th>
+        <th data-sort="num">Con</th>
+        <th data-sort="num">Gap</th>
+        <th data-sort="num">Pow</th>
+        <th data-sort="num">Eye</th>
+        <th data-sort="num">Spd</th>
+        <th data-sort="num">Def</th>
         <th data-sort="num">Surplus</th>
       </tr>
     </thead>
     <tbody>
-      {% for p in roster %}
+      {% for p in roster.hitters %}
       <tr>
-        <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
         <td class="left">{{ p.pos }}</td>
+        <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
         <td>{{ p.age }}</td>
-        <td>{% if p.ovr %}<span class="ovr-color" data-g="{{ p.ovr }}">{{ p.ovr }}</span>{% else %}—{% endif %}</td>
-        <td>{% if p.pot %}<span class="ovr-color" data-g="{{ p.pot }}">{{ p.pot }}</span>{% else %}—{% endif %}</td>
         <td>{% if p.composite %}<span class="ovr-color" data-g="{{ p.composite }}">{{ p.composite }}</span>{% else %}—{% endif %}</td>
         <td>{% if p.ceiling %}<span class="ovr-color" data-g="{{ p.ceiling }}">{{ p.ceiling }}</span>{% else %}—{% endif %}</td>
         <td>{{ p.fv_str or '—' }}{% if p.risk %} <span style="font-size:10px;color:{% if p.risk == 'Low' %}#4caf50{% elif p.risk == 'Medium' %}#ffc107{% elif p.risk == 'High' %}#ff9800{% else %}#f44336{% endif %}">{{ p.risk[0] }}</span>{% endif %}</td>
+        <td>{% if p.con %}<span class="ovr-color" data-g="{{ p.con }}">{{ p.con }}</span>{% else %}—{% endif %}</td>
+        <td>{% if p.gap %}<span class="ovr-color" data-g="{{ p.gap }}">{{ p.gap }}</span>{% else %}—{% endif %}</td>
+        <td>{% if p.pow %}<span class="ovr-color" data-g="{{ p.pow }}">{{ p.pow }}</span>{% else %}—{% endif %}</td>
+        <td>{% if p.eye %}<span class="ovr-color" data-g="{{ p.eye }}">{{ p.eye }}</span>{% else %}—{% endif %}</td>
+        <td>{% if p.spd %}<span class="ovr-color" data-g="{{ p.spd }}">{{ p.spd }}</span>{% else %}—{% endif %}</td>
+        <td>{% if p.def %}<span class="ovr-color" data-g="{{ p.def }}">{{ p.def }}</span>{% else %}—{% endif %}</td>
+        <td>{% if p.surplus %}${{ p.surplus }}M{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {# Pitchers table #}
+  <table class="roster-tab-table" data-roster-tab="pitchers" style="display:none">
+    <thead>
+      <tr>
+        <th data-sort="pos" class="left">Role</th>
+        <th data-sort="str" class="left">Name</th>
+        <th data-sort="num" data-sort-best="low">Age</th>
+        <th data-sort="num">Comp</th>
+        <th data-sort="num">Ceil</th>
+        <th data-sort="str" data-sort-best="high">FV</th>
+        <th data-sort="num">Stf</th>
+        <th data-sort="num">Mov</th>
+        <th data-sort="num">Ctrl</th>
+        <th data-sort="num">Stm</th>
+        <th data-sort="num">Pit</th>
+        <th data-sort="num">Surplus</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in roster.pitchers %}
+      <tr>
+        <td class="left">{{ p.pos }}</td>
+        <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
+        <td>{{ p.age }}</td>
+        <td>{% if p.composite %}<span class="ovr-color" data-g="{{ p.composite }}">{{ p.composite }}</span>{% else %}—{% endif %}</td>
+        <td>{% if p.ceiling %}<span class="ovr-color" data-g="{{ p.ceiling }}">{{ p.ceiling }}</span>{% else %}—{% endif %}</td>
+        <td>{{ p.fv_str or '—' }}{% if p.risk %} <span style="font-size:10px;color:{% if p.risk == 'Low' %}#4caf50{% elif p.risk == 'Medium' %}#ffc107{% elif p.risk == 'High' %}#ff9800{% else %}#f44336{% endif %}">{{ p.risk[0] }}</span>{% endif %}</td>
+        <td>{% if p.stf %}<span class="ovr-color" data-g="{{ p.stf }}">{{ p.stf }}</span>{% else %}—{% endif %}</td>
+        <td>{% if p.mov %}<span class="ovr-color" data-g="{{ p.mov }}">{{ p.mov }}</span>{% else %}—{% endif %}</td>
+        <td>{% if p.ctrl %}<span class="ovr-color" data-g="{{ p.ctrl }}">{{ p.ctrl }}</span>{% else %}—{% endif %}</td>
+        <td>{% if p.stm %}<span class="ovr-color" data-g="{{ p.stm }}">{{ p.stm }}</span>{% else %}—{% endif %}</td>
+        <td>{{ p.pitches or '—' }}</td>
         <td>{% if p.surplus %}${{ p.surplus }}M{% else %}—{% endif %}</td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
+
+<script>
+function switchRosterTab(btn, tab) {
+  btn.parentNode.querySelectorAll('.split-btn').forEach(function(b) { b.classList.remove('active'); });
+  btn.classList.add('active');
+  btn.closest('.panel').querySelectorAll('.roster-tab-table').forEach(function(t) {
+    t.style.display = t.dataset.rosterTab === tab ? '' : 'none';
+  });
+}
+</script>
 
 {% endblock %}

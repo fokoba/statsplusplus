@@ -1017,6 +1017,14 @@ def get_player(pid):
                 for key, label in _dh_tools:
                     raw = d.get(key)
                     snap["tools"][key] = _norm_hist(raw) if raw is not None else None
+                # Also store all pitch ratings for charts (may not be in _dh_tools)
+                if is_pitcher:
+                    for pk in ["fst","snk","crv","sld","chg","splt","cutt","cir_chg","scr","frk","kncrv","knbl"]:
+                        for prefix in ("", "pot_"):
+                            k = prefix + pk
+                            if k not in snap["tools"]:
+                                raw = d.get(k)
+                                snap["tools"][k] = _norm_hist(raw) if raw is not None else None
                 snapshots.append(snap)
 
             dev_history = {
@@ -1034,7 +1042,25 @@ def get_player(pid):
             else:
                 x_positions = [i / max(1, len(snapshots) - 1) for i in range(len(snapshots))]
 
-            # Chart series grouped into 3 panels
+            def _make_series(key, label, color):
+                pts = [{"x": x_positions[i], "y": s["tools"].get(key), "date": s["date_short"]}
+                       for i, s in enumerate(snapshots) if s["tools"].get(key) is not None]
+                return {"key": key, "label": label, "color": color, "points": pts} if pts else None
+
+            def _auto_range(series_list):
+                """Compute y_min/y_max from data, snapped to 5-grade increments."""
+                all_vals = [pt["y"] for s in series_list for pt in s["points"]]
+                if not all_vals:
+                    return 20, 80
+                lo = min(all_vals) - 5
+                hi = max(all_vals) + 5
+                lo = max(20, (lo // 5) * 5)
+                hi = min(80, ((hi + 4) // 5) * 5)
+                if hi - lo < 15:
+                    mid = (hi + lo) // 2
+                    lo, hi = max(20, mid - 10), min(80, mid + 10)
+                return int(lo), int(hi)
+
             # Panel 1: Overview (composite + ceiling)
             overview_series = [
                 {"key": "composite", "label": "Composite", "color": "#42a5f5",
@@ -1045,44 +1071,91 @@ def get_player(pid):
                             for i, s in enumerate(snapshots) if s["ceiling"] is not None]},
             ]
 
-            # Panel 2: Current tools
-            _cur_colors = ["#66bb6a", "#42a5f5", "#ffc107", "#ff7043", "#ab47bc", "#26c6da", "#ec407a", "#8d6e63"]
-            cur_tools_series = []
-            _ci = 0
-            for key, label in _dh_tools:
-                if key.startswith("pot_"):
-                    continue
-                pts = [{"x": x_positions[i], "y": s["tools"].get(key), "date": s["date_short"]}
-                       for i, s in enumerate(snapshots) if s["tools"].get(key) is not None]
-                if pts:
-                    cur_tools_series.append({
-                        "key": key, "label": label, "color": _cur_colors[_ci % len(_cur_colors)],
-                        "points": pts,
-                    })
-                    _ci += 1
+            # Strong, distinct colors for each tool
+            _primary_colors = {"stf": "#66bb6a", "mov": "#42a5f5", "ctrl": "#ffc107", "stm": "#ff7043",
+                               "cntct": "#66bb6a", "gap": "#42a5f5", "pow": "#ffc107", "eye": "#ff7043", "speed": "#ab47bc"}
+            _pitch_colors = ["#66bb6a", "#42a5f5", "#ffc107", "#ff7043", "#ab47bc", "#26c6da", "#ec407a", "#8d6e63"]
 
-            # Panel 3: Potential tools
-            _pot_colors = ["#a5d6a7", "#90caf9", "#ffe082", "#ffab91", "#ce93d8", "#80deea", "#f48fb1", "#bcaaa4"]
-            pot_tools_series = []
-            _pi = 0
-            for key, label in _dh_tools:
-                if not key.startswith("pot_"):
-                    continue
-                pts = [{"x": x_positions[i], "y": s["tools"].get(key), "date": s["date_short"]}
-                       for i, s in enumerate(snapshots) if s["tools"].get(key) is not None]
-                if pts:
-                    pot_tools_series.append({
-                        "key": key, "label": label, "color": _pot_colors[_pi % len(_pot_colors)],
-                        "points": pts,
-                    })
-                    _pi += 1
+            if is_pitcher:
+                # Panel 2: Primary current (Stuff, Mov, Ctrl, Stm)
+                primary_cur = [s for s in [
+                    _make_series("stf", "Stuff", "#66bb6a"),
+                    _make_series("mov", "Movement", "#42a5f5"),
+                    _make_series("ctrl", "Control", "#ffc107"),
+                    _make_series("stm", "Stamina", "#ff7043"),
+                ] if s]
+
+                # Panel 3: Primary potential (pStuff, pMov, pCtrl)
+                primary_pot = [s for s in [
+                    _make_series("pot_stf", "Stuff", "#66bb6a"),
+                    _make_series("pot_mov", "Movement", "#42a5f5"),
+                    _make_series("pot_ctrl", "Control", "#ffc107"),
+                ] if s]
+
+                # Panel 4: Pitch arsenal - ALL pitches with rating >= 20
+                _all_pitch_keys = ["fst","snk","crv","sld","chg","splt","cutt","cir_chg","scr","frk","kncrv","knbl"]
+                _all_pitch_labels = {"fst":"Fastball","snk":"Sinker","crv":"Curve","sld":"Slider","chg":"Change",
+                                     "splt":"Splitter","cutt":"Cutter","cir_chg":"Circle","scr":"Screwball",
+                                     "frk":"Forkball","kncrv":"Kn-Curve","knbl":"Knuckleball"}
+                pitch_cur = []
+                pitch_pot = []
+                _pi = 0
+                for pk in _all_pitch_keys:
+                    # Check if this pitch exists (any snapshot has a value >= 20)
+                    has_pitch = any(s["tools"].get(pk) and s["tools"][pk] >= 20 for s in snapshots)
+                    if has_pitch:
+                        color = _pitch_colors[_pi % len(_pitch_colors)]
+                        s_cur = _make_series(pk, _all_pitch_labels[pk], color)
+                        s_pot = _make_series("pot_" + pk, _all_pitch_labels[pk], color)
+                        if s_cur:
+                            pitch_cur.append(s_cur)
+                        if s_pot:
+                            pitch_pot.append(s_pot)
+                        _pi += 1
+
+                panels = [
+                    {"title": "Overview", "series": overview_series, "y_min": None, "y_max": None},
+                    {"title": "Primary Ratings", "series": primary_cur, "y_min": None, "y_max": None},
+                    {"title": "Primary Potential", "series": primary_pot, "y_min": None, "y_max": None},
+                    {"title": "Pitch Arsenal", "series": pitch_cur, "y_min": None, "y_max": None},
+                    {"title": "Pitch Potential", "series": pitch_pot, "y_min": None, "y_max": None},
+                ]
+            else:
+                # Hitters: Panel 2: Current tools
+                cur_series = [s for s in [
+                    _make_series("cntct", "Contact", "#66bb6a"),
+                    _make_series("gap", "Gap", "#42a5f5"),
+                    _make_series("pow", "Power", "#ffc107"),
+                    _make_series("eye", "Eye", "#ff7043"),
+                    _make_series("speed", "Speed", "#ab47bc"),
+                ] if s]
+
+                # Panel 3: Potential tools
+                pot_series = [s for s in [
+                    _make_series("pot_cntct", "Contact", "#66bb6a"),
+                    _make_series("pot_gap", "Gap", "#42a5f5"),
+                    _make_series("pot_pow", "Power", "#ffc107"),
+                    _make_series("pot_eye", "Eye", "#ff7043"),
+                ] if s]
+
+                panels = [
+                    {"title": "Overview", "series": overview_series, "y_min": None, "y_max": None},
+                    {"title": "Current Tools", "series": cur_series, "y_min": None, "y_max": None},
+                    {"title": "Potential Tools", "series": pot_series, "y_min": None, "y_max": None},
+                ]
+
+            # Auto-scale y-axis for each panel
+            for panel in panels:
+                if panel["series"]:
+                    panel["y_min"], panel["y_max"] = _auto_range(panel["series"])
+
+            # Remove empty panels
+            panels = [p for p in panels if p["series"]]
 
             dev_history["charts"] = {
                 "x_positions": x_positions,
                 "date_labels": [s["date_short"] for s in snapshots],
-                "overview": overview_series,
-                "current": cur_tools_series,
-                "potential": pot_tools_series,
+                "panels": panels,
             }
     except Exception:
         pass

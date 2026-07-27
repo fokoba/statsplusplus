@@ -723,23 +723,21 @@
 </style>
 
 {% macro render_chart(series_list, chart_id, y_min=20, y_max=80) %}
-{% set pad_l = 30 %}
-{% set pad_r = 10 %}
-{% set pad_t = 10 %}
-{% set pad_b = 22 %}
-{% set w = 600 %}
-{% set h = 180 %}
+{% set pad_l = 28 %}
+{% set pad_r = 8 %}
+{% set pad_t = 8 %}
+{% set pad_b = 20 %}
+{% set w = 700 %}
+{% set h = 160 %}
 {% set plot_w = w - pad_l - pad_r %}
 {% set plot_h = h - pad_t - pad_b %}
 <div style="position:relative">
 <svg class="dev-chart-svg" viewBox="0 0 {{ w }} {{ h }}" preserveAspectRatio="xMidYMid meet">
   {# Y-axis gridlines and labels #}
-  {% for grade in [20, 30, 40, 50, 60, 70, 80] %}
-  {% if grade >= y_min and grade <= y_max %}
+  {% for grade in range(y_min, y_max + 1, 5) %}
   {% set y = pad_t + plot_h - (grade - y_min) / (y_max - y_min) * plot_h %}
   <line x1="{{ pad_l }}" y1="{{ y }}" x2="{{ w - pad_r }}" y2="{{ y }}" class="dev-chart-gridline"/>
   <text x="{{ pad_l - 4 }}" y="{{ y + 3 }}" class="dev-chart-axis-label" text-anchor="end">{{ grade }}</text>
-  {% endif %}
   {% endfor %}
 
   {# X-axis date labels #}
@@ -764,7 +762,7 @@
 <div class="dev-chart-tooltip" id="tooltip-{{ chart_id }}"></div>
 </div>
 {# Legend #}
-<div class="dev-chart-legend">
+<div class="dev-chart-legend" style="justify-content:center">
   {% for series in series_list %}
   <span class="dev-chart-legend-item"><span class="dev-chart-legend-swatch" style="background:{{ series.color }}"></span>{{ series.label }}</span>
   {% endfor %}
@@ -774,22 +772,12 @@
 <div class="panel">
   <h2>Development Charts</h2>
 
+  {% for panel in charts.panels %}
   <div class="dev-chart-panel">
-    <h3>Overview</h3>
-    {{ render_chart(charts.overview, "overview", y_min=20, y_max=80) }}
+    <h3>{{ panel.title }}</h3>
+    {{ render_chart(panel.series, panel.title|lower|replace(' ','_'), y_min=panel.y_min, y_max=panel.y_max) }}
   </div>
-
-  <div class="dev-chart-panel">
-    <h3>Current Tools</h3>
-    {{ render_chart(charts.current, "current", y_min=20, y_max=80) }}
-  </div>
-
-  {% if charts.potential %}
-  <div class="dev-chart-panel">
-    <h3>Potential Tools</h3>
-    {{ render_chart(charts.potential, "potential", y_min=20, y_max=80) }}
-  </div>
-  {% endif %}
+  {% endfor %}
 </div>
 
 <script>

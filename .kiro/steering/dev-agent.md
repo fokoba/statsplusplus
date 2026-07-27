@@ -79,6 +79,7 @@ documentation pass.
    **Format requirements:**
    - **Title**: concise and descriptive of what changed — e.g. "WAR Projection Overhaul & Standings Tools", "Pitcher Evaluation Fixes", "Draft Board UX Improvements". NOT "Session X" or "Stats++ Update".
    - **Content**: write fresh bullet points for this post. Do NOT repeat items already posted in a prior Discord message. Each bullet should be complete (no truncation/ellipsis).
+   - **Tracking**: check `data/discord_posts.json` for `last_posted_commit`. Only include changes from commits AFTER that hash. After posting, update the file with the new commit hash, date, and title.
    - **Sections**: group into Bug Fixes / Improvements / other categories as appropriate. Omit empty sections.
    - **Tone**: concise but informative. One sentence per bullet explaining what changed and why it matters.
    - Post using `discord_post.py message` with a custom formatted embed (not `latest` which parses changelog with truncation). See prior session examples for the Python webhook pattern.

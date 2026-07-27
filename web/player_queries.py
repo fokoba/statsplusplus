@@ -948,6 +948,73 @@ def get_player(pid):
     except Exception:
         pass
 
+    # Development history — full timeline from ratings_history
+    dev_history = None
+    try:
+        from ratings import norm as _norm_hist
+        _dh_rows = conn.execute(
+            "SELECT * FROM ratings_history WHERE player_id=? ORDER BY snapshot_date",
+            (pid,)
+        ).fetchall()
+        if len(_dh_rows) >= 2:
+            _dh_cols = [c[1] for c in conn.execute("PRAGMA table_info(ratings_history)").fetchall()]
+            # Determine which tools to show based on role
+            if is_pitcher:
+                _dh_tools = [
+                    ("stf", "Stuff"), ("mov", "Movement"), ("ctrl", "Control"), ("stm", "Stamina"),
+                    ("pot_stf", "pStuff"), ("pot_mov", "pMov"), ("pot_ctrl", "pCtrl"),
+                ]
+                # Add top 3 pitches by current potential
+                _pitch_keys = ["fst","snk","crv","sld","chg","splt","cutt","cir_chg","scr","frk","kncrv","knbl"]
+                _pitch_labels = {"fst":"FB","snk":"Sinker","crv":"Curve","sld":"Slider","chg":"Change",
+                                 "splt":"Splitter","cutt":"Cutter","cir_chg":"Circle","scr":"Screwball",
+                                 "frk":"Forkball","kncrv":"Kn-Curve","knbl":"Knuckleball"}
+                # Get latest snapshot to find top pitches
+                _latest = dict(zip(_dh_cols, _dh_rows[-1]))
+                _pitch_vals = [(k, _latest.get("pot_" + k) or 0) for k in _pitch_keys]
+                _pitch_vals.sort(key=lambda x: x[1], reverse=True)
+                for pk, pv in _pitch_vals[:3]:
+                    if pv and (_norm_hist(pv) or 0) >= 30:
+                        _dh_tools.append((pk, _pitch_labels.get(pk, pk)))
+                        _dh_tools.append(("pot_" + pk, "p" + _pitch_labels.get(pk, pk)))
+            else:
+                _dh_tools = [
+                    ("cntct", "Contact"), ("gap", "Gap"), ("pow", "Power"), ("eye", "Eye"),
+                    ("speed", "Speed"),
+                    ("pot_cntct", "pContact"), ("pot_gap", "pGap"), ("pot_pow", "pPower"), ("pot_eye", "pEye"),
+                ]
+
+            snapshots = []
+            for i, row in enumerate(_dh_rows):
+                d = dict(zip(_dh_cols, row))
+                snap = {
+                    "date": d["snapshot_date"],
+                    "date_short": d["snapshot_date"][5:],  # "MM-DD"
+                    "composite": d.get("composite_score"),
+                    "ceiling": d.get("ceiling_score"),
+                    "tools": {},
+                }
+                # Days since previous snapshot
+                if i > 0:
+                    from datetime import date as _dt
+                    prev_d = _dt.fromisoformat(snapshots[-1]["date"])
+                    cur_d = _dt.fromisoformat(d["snapshot_date"])
+                    snap["days_since_prev"] = (cur_d - prev_d).days
+                else:
+                    snap["days_since_prev"] = None
+
+                for key, label in _dh_tools:
+                    raw = d.get(key)
+                    snap["tools"][key] = _norm_hist(raw) if raw is not None else None
+                snapshots.append(snap)
+
+            dev_history = {
+                "snapshots": snapshots,
+                "tools": _dh_tools,  # [(key, label), ...]
+            }
+    except Exception:
+        pass
+
     # Composite scores, divergence, archetype, carrying/red-flag tools
     # Determine position bucket for positional context
     _pos_bucket = None
@@ -1269,6 +1336,7 @@ def get_player(pid):
         "pctile_history": pctile_history, "fld_pctile_history": fld_pctile_history,
         "prospect_comps": prospect_comps, "comp_stats": comp_stats, "pap": pap,
         "snapshot_deltas": snapshot_deltas,
+        "dev_history": dev_history,
         "composite_score": composite_score,
         "ceiling_score": ceiling_score,
         "true_ceiling": eval_data.get("true_ceiling"),

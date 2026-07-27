@@ -703,7 +703,95 @@
 {% endmacro %}
 
 {# Development tracking panel — merged into evaluation panel #}
-{% macro dev_tracking_panel() %}{% endmacro %}
+{% macro dev_tracking_panel() %}
+{% if p.dev_history and p.dev_history.snapshots|length >= 2 %}
+<div class="panel" style="margin-top:16px">
+  <h2>Development History</h2>
+  <style>
+    .dev-history-table { width:100%; border-collapse:collapse; font-size:12px; }
+    .dev-history-table th, .dev-history-table td { padding:3px 8px; text-align:center; }
+    .dh-label-col { text-align:left !important; min-width:80px; }
+    .dh-label { text-align:left !important; white-space:nowrap; }
+    .dh-date { font-size:11px; font-weight:600; }
+    .dh-interval { font-size:9px; color:var(--text-dim); opacity:0.7; }
+    .dh-date-col { min-width:52px; }
+    .dh-delta-col { min-width:40px; border-left:1px solid var(--border); }
+    .dh-delta { border-left:1px solid var(--border); font-weight:600; }
+    .dh-summary-row td { border-bottom:none; }
+    .dh-sep td { height:4px; border-bottom:1px solid var(--border); }
+    .dh-pot-row td { opacity:0.7; font-size:11px; }
+    .dh-pot-row .dh-label { padding-left:12px; }
+  </style>
+  <div class="dev-history-wrap" style="overflow-x:auto">
+  <table class="dev-history-table">
+    <thead>
+      <tr>
+        <th class="dh-label-col"></th>
+        {% for snap in p.dev_history.snapshots %}
+        <th class="dh-date-col">
+          <div class="dh-date">{{ snap.date_short }}</div>
+          {% if snap.days_since_prev %}<div class="dh-interval">+{{ snap.days_since_prev }}d</div>{% endif %}
+        </th>
+        {% endfor %}
+        <th class="dh-delta-col">Δ</th>
+      </tr>
+    </thead>
+    <tbody>
+      {# Composite row #}
+      <tr class="dh-summary-row">
+        <td class="dh-label"><strong>Composite</strong></td>
+        {% for snap in p.dev_history.snapshots %}
+        <td class="dh-cell">{% if snap.composite %}<span class="ovr-color" data-g="{{ snap.composite }}">{{ snap.composite }}</span>{% else %}—{% endif %}</td>
+        {% endfor %}
+        {% set ns_comp = namespace(first=none, last=none) %}
+        {% for snap in p.dev_history.snapshots %}
+          {% if snap.composite and ns_comp.first is none %}{% set ns_comp.first = snap.composite %}{% endif %}
+          {% if snap.composite %}{% set ns_comp.last = snap.composite %}{% endif %}
+        {% endfor %}
+        <td class="dh-cell dh-delta">{% if ns_comp.first and ns_comp.last %}<span class="{% if ns_comp.last > ns_comp.first %}pos{% elif ns_comp.last < ns_comp.first %}neg{% endif %}">{{ "%+d"|format(ns_comp.last - ns_comp.first) }}</span>{% else %}—{% endif %}</td>
+      </tr>
+      {# Ceiling row #}
+      <tr class="dh-summary-row">
+        <td class="dh-label"><strong>Ceiling</strong></td>
+        {% for snap in p.dev_history.snapshots %}
+        <td class="dh-cell">{% if snap.ceiling %}<span class="ovr-color" data-g="{{ snap.ceiling }}">{{ snap.ceiling }}</span>{% else %}—{% endif %}</td>
+        {% endfor %}
+        {% set ns_ceil = namespace(first=none, last=none) %}
+        {% for snap in p.dev_history.snapshots %}
+          {% if snap.ceiling and ns_ceil.first is none %}{% set ns_ceil.first = snap.ceiling %}{% endif %}
+          {% if snap.ceiling %}{% set ns_ceil.last = snap.ceiling %}{% endif %}
+        {% endfor %}
+        <td class="dh-cell dh-delta">{% if ns_ceil.first and ns_ceil.last %}<span class="{% if ns_ceil.last > ns_ceil.first %}pos{% elif ns_ceil.last < ns_ceil.first %}neg{% endif %}">{{ "%+d"|format(ns_ceil.last - ns_ceil.first) }}</span>{% else %}—{% endif %}</td>
+      </tr>
+      {# Separator #}
+      <tr class="dh-sep"><td colspan="{{ p.dev_history.snapshots|length + 2 }}"></td></tr>
+      {# Tool rows #}
+      {% for key, label in p.dev_history.tools %}
+      {% set is_pot = key.startswith('pot_') %}
+      <tr class="{% if is_pot %}dh-pot-row{% endif %}">
+        <td class="dh-label">{{ label }}</td>
+        {% for snap in p.dev_history.snapshots %}
+        {% set val = snap.tools.get(key) %}
+        <td class="dh-cell">{% if val %}<span class="ovr-color" data-g="{{ val }}">{{ val }}</span>{% else %}—{% endif %}</td>
+        {% endfor %}
+        {# Delta column: last - first non-null #}
+        {% set ns_t = namespace(first=none, last=none) %}
+        {% for snap in p.dev_history.snapshots %}
+          {% set v = snap.tools.get(key) %}
+          {% if v is not none and v %}
+            {% if ns_t.first is none %}{% set ns_t.first = v %}{% endif %}
+            {% set ns_t.last = v %}
+          {% endif %}
+        {% endfor %}
+        <td class="dh-cell dh-delta">{% if ns_t.first is not none and ns_t.last is not none and ns_t.first != ns_t.last %}<span class="{% if ns_t.last > ns_t.first %}pos{% elif ns_t.last < ns_t.first %}neg{% endif %}">{{ "%+d"|format(ns_t.last - ns_t.first) }}</span>{% elif ns_t.first is not none %}0{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+{% endmacro %}
 
 {# ═══════════════════════════════════════════════════════════════════════ #}
 {# MLB PLAYERS — tabbed layout                                           #}
@@ -724,6 +812,7 @@
     <div class="panel-stack">
       {{ ratings_panel() }}
       {{ evaluation_panel() }}
+      {{ dev_tracking_panel() }}
       {{ character_panel() }}
       
     </div>
@@ -1105,6 +1194,7 @@
     </div>
     <div class="panel-stack">
       {{ evaluation_panel() }}
+      {{ dev_tracking_panel() }}
       {{ scouting_panel() }}
       {{ comps_panel() }}
     </div>

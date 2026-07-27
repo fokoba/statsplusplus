@@ -1,7 +1,7 @@
 {
-  "last_posted_commit": "f3af9e2",
+  "last_posted_commit": "a690a56",
   "last_posted_date": "2026-07-27",
-  "last_posted_title": "Community PR Merges, IP Display Fix & Org-Wide MiLB Page",
+  "last_posted_title": "All MiLB Filters, Development Tracking & IP Fix",
   "history": [
     {
       "date": "2026-07-22",
@@ -27,6 +27,11 @@
       "date": "2026-07-27",
       "commit": "f3af9e2",
       "title": "Community PR Merges, IP Display Fix & Org-Wide MiLB Page"
+    },
+    {
+      "date": "2026-07-27",
+      "commit": "a690a56",
+      "title": "All MiLB Filters, Development Tracking & IP Fix"
     }
   ]
 }

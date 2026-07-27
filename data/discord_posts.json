@@ -1,7 +1,7 @@
 {
-  "last_posted_commit": "a690a56",
+  "last_posted_commit": "86f60fd",
   "last_posted_date": "2026-07-27",
-  "last_posted_title": "All MiLB Filters, Development Tracking & IP Fix",
+  "last_posted_title": "New Development Tab — Player Rating History & Charts",
   "history": [
     {
       "date": "2026-07-22",
@@ -32,6 +32,11 @@
       "date": "2026-07-27",
       "commit": "a690a56",
       "title": "All MiLB Filters, Development Tracking & IP Fix"
+    },
+    {
+      "date": "2026-07-27",
+      "commit": "86f60fd",
+      "title": "New Development Tab — Player Rating History & Charts"
     }
   ]
 }

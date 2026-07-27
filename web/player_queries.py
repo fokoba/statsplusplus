@@ -1152,6 +1152,58 @@ def get_player(pid):
             # Remove empty panels
             panels = [p for p in panels if p["series"]]
 
+            # Compute dot nudges for overlapping points and right-edge label offsets
+            _nudge_px = 6  # pixels to offset overlapping dots
+            for panel in panels:
+                # Group points by x-position index to detect overlaps
+                for xi, xpos in enumerate(x_positions):
+                    # Collect all series that have a point at this x
+                    vals_at_x = []  # [(series_idx, point_idx, y_value)]
+                    for si, series in enumerate(panel["series"]):
+                        for pi, pt in enumerate(series["points"]):
+                            if abs(pt["x"] - xpos) < 0.001:
+                                vals_at_x.append((si, pi, pt["y"]))
+                    # Group by y value
+                    by_y = {}
+                    for si, pi, yv in vals_at_x:
+                        by_y.setdefault(yv, []).append((si, pi))
+                    # Apply nudges to groups with >1 point
+                    for yv, group in by_y.items():
+                        if len(group) <= 1:
+                            continue
+                        # Spread symmetrically: -6, +6 for 2; -6, 0, +6 for 3
+                        n = len(group)
+                        for i, (si, pi) in enumerate(group):
+                            offset = (i - (n - 1) / 2) * _nudge_px
+                            panel["series"][si]["points"][pi]["nudge"] = offset
+
+                # Compute right-edge label offsets (based on last point y-values)
+                label_positions = []  # [(series_idx, y_value)]
+                for si, series in enumerate(panel["series"]):
+                    if series["points"]:
+                        label_positions.append((si, series["points"][-1]["y"]))
+                # Group labels by y-value (within 2 grades = overlap)
+                label_groups = {}  # y_bucket -> [(si, actual_y)]
+                for si, yv in label_positions:
+                    # Find existing bucket within 2 grades
+                    placed = False
+                    for bucket_y in list(label_groups.keys()):
+                        if abs(yv - bucket_y) <= 2:
+                            label_groups[bucket_y].append((si, yv))
+                            placed = True
+                            break
+                    if not placed:
+                        label_groups[yv] = [(si, yv)]
+                # Apply symmetric spread to groups with >1 label
+                _label_spread = 11  # pixels between stacked labels
+                for bucket_y, group in label_groups.items():
+                    if len(group) <= 1:
+                        continue
+                    n = len(group)
+                    for i, (si, actual_y) in enumerate(group):
+                        offset = (i - (n - 1) / 2) * _label_spread
+                        panel["series"][si]["label_nudge"] = offset
+
             dev_history["charts"] = {
                 "x_positions": x_positions,
                 "date_labels": [s["date_short"] for s in snapshots],

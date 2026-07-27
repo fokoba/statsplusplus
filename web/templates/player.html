@@ -745,7 +745,7 @@
     </div>
     <div class="dev-chart-wrap">
       {% set pad_l = 28 %}
-      {% set pad_r = 60 %}
+      {% set pad_r = 10 %}
       {% set pad_t = 6 %}
       {% set pad_b = 20 %}
       {% set w = 700 %}
@@ -779,20 +779,11 @@
         {% for series in panel.series %}
         {% for pt in series.points %}
         {% set cx = pad_l + pt.x * plot_w %}
-        {% set cy = pad_t + plot_h - (pt.y - y_min) / (y_max - y_min) * plot_h %}
+        {% set cy = pad_t + plot_h - (pt.y - y_min) / (y_max - y_min) * plot_h + (pt.get('nudge', 0)) %}
         <circle cx="{{ cx }}" cy="{{ cy }}" r="4.5" fill="{{ series.color }}"
                 class="dev-chart-dot" data-chart="{{ chart_id }}"
                 data-label="{{ series.label }}" data-value="{{ pt.y }}" data-date="{{ pt.date }}" data-color="{{ series.color }}"/>
         {% endfor %}
-        {% endfor %}
-
-        {# Right-edge labels (at last point of each series) #}
-        {% for series in panel.series %}
-        {% if series.points %}
-        {% set last_pt = series.points[-1] %}
-        {% set ly = pad_t + plot_h - (last_pt.y - y_min) / (y_max - y_min) * plot_h %}
-        <text x="{{ w - pad_r + 4 }}" y="{{ ly + 3 }}" style="font-size:9px; fill:{{ series.color }}; font-weight:600">{{ last_pt.y }}</text>
-        {% endif %}
         {% endfor %}
       </svg>
     </div>

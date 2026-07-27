@@ -964,6 +964,11 @@ def get_player(pid):
                     ("stf", "Stuff"), ("mov", "Movement"), ("ctrl", "Control"), ("stm", "Stamina"),
                     ("pot_stf", "pStuff"), ("pot_mov", "pMov"), ("pot_ctrl", "pCtrl"),
                 ]
+                # Tool pairs for table: (cur_key, pot_key, label)
+                _dh_pairs = [
+                    ("stf", "pot_stf", "Stuff"), ("mov", "pot_mov", "Mov"),
+                    ("ctrl", "pot_ctrl", "Ctrl"), ("stm", None, "Stm"),
+                ]
                 # Add top 3 pitches by current potential
                 _pitch_keys = ["fst","snk","crv","sld","chg","splt","cutt","cir_chg","scr","frk","kncrv","knbl"]
                 _pitch_labels = {"fst":"FB","snk":"Sinker","crv":"Curve","sld":"Slider","chg":"Change",
@@ -977,11 +982,17 @@ def get_player(pid):
                     if pv and (_norm_hist(pv) or 0) >= 30:
                         _dh_tools.append((pk, _pitch_labels.get(pk, pk)))
                         _dh_tools.append(("pot_" + pk, "p" + _pitch_labels.get(pk, pk)))
+                        _dh_pairs.append((pk, "pot_" + pk, _pitch_labels.get(pk, pk)))
             else:
                 _dh_tools = [
                     ("cntct", "Contact"), ("gap", "Gap"), ("pow", "Power"), ("eye", "Eye"),
                     ("speed", "Speed"),
                     ("pot_cntct", "pContact"), ("pot_gap", "pGap"), ("pot_pow", "pPower"), ("pot_eye", "pEye"),
+                ]
+                _dh_pairs = [
+                    ("cntct", "pot_cntct", "Con"), ("gap", "pot_gap", "Gap"),
+                    ("pow", "pot_pow", "Pow"), ("eye", "pot_eye", "Eye"),
+                    ("speed", None, "Spd"),
                 ]
 
             snapshots = []
@@ -1011,6 +1022,7 @@ def get_player(pid):
             dev_history = {
                 "snapshots": snapshots,
                 "tools": _dh_tools,  # [(key, label), ...]
+                "tool_pairs": _dh_pairs,  # [(cur_key, pot_key, label), ...]
             }
 
             # Compute chart-ready data: x positions proportional to time

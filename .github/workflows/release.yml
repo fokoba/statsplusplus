@@ -1,0 +1,63 @@
+name: Build Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create release zip
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          ZIPNAME="statsplusplus-${VERSION}.zip"
+
+          # Create a clean zip excluding dev/runtime files
+          zip -r "$ZIPNAME" . \
+            -x ".git/*" \
+            -x ".gitignore" \
+            -x "data/*" \
+            -x "__pycache__/*" \
+            -x "*/__pycache__/*" \
+            -x "*.pyc" \
+            -x ".kiro/*" \
+            -x ".playwright-mcp/*" \
+            -x "tests/*" \
+            -x "docs/screenshots/*" \
+            -x "assets/screenshots/*" \
+            -x "samples/*" \
+            -x "*.PNG" \
+            -x "*.png" \
+            -x "*.jpg" \
+            -x "*.Zone.Identifier" \
+            -x ".venv/*"
+
+          echo "ZIPNAME=$ZIPNAME" >> $GITHUB_ENV
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Stats++ ${{ env.VERSION }}"
+          body: |
+            ## Stats++ ${{ env.VERSION }}
+
+            ### Quick Start
+            1. Download `${{ env.ZIPNAME }}` below
+            2. Extract to a folder
+            3. Run the launcher:
+               - **Windows:** Double-click `start.bat`
+               - **Mac/Linux:** Run `./start.sh`
+            4. Your browser will open to the onboarding wizard
+
+            **Requires:** [Python 3.10+](https://www.python.org/downloads/)
+          files: ${{ env.ZIPNAME }}
+          draft: false
+          prerelease: false

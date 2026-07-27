@@ -692,6 +692,10 @@
     {% if p.snapshot_deltas.ceiling_delta|abs >= 3 %}
     <span style="margin-left:8px">Ceil <span class="{% if p.snapshot_deltas.ceiling_delta > 0 %}pos{% else %}neg{% endif %}">{{ "%+d"|format(p.snapshot_deltas.ceiling_delta) }}</span></span>
     {% endif %}
+    {# Show what's driving the change #}
+    {% if p.snapshot_deltas.top_changes %}
+    <span style="margin-left:12px; font-size:11px; opacity:0.8">({% for t in p.snapshot_deltas.top_changes|sort(attribute='delta') %}{{ t.name }}&nbsp;<span class="{% if t.delta > 0 %}pos{% else %}neg{% endif %}">{{ "%+d"|format(t.delta) }}</span>{% if not loop.last %}, {% endif %}{% endfor %})</span>
+    {% endif %}
   </div>
   {% endif %}
 </div>

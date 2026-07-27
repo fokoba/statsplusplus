@@ -19,13 +19,8 @@
 
 {# ── Full Roster (Tabbed: Hitters / Pitchers) ── #}
 <div class="panel">
-  <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px; flex-wrap:wrap">
-    <h2 style="margin:0">Roster</h2>
-    <button class="btn btn-sm csv-btn" onclick="exportTableCSV('org-hitters-table', '{{ team_name|lower|replace(' ','_') }}_milb_hitters.csv')" title="Export as CSV" style="margin-left:auto">⬇ CSV</button>
-  </div>
-
   {# ── Filters ── #}
-  <div class="milb-filters" style="display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:12px">
+  <div class="milb-filters" style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; margin-bottom:12px">
     <div class="filter-group">
       <label style="font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px">Level</label>
       <div class="level-filter-btns" style="display:flex; gap:2px; margin-top:3px">
@@ -43,27 +38,18 @@
       <label style="font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px">Position</label>
       <select id="pos-filter" onchange="applyFilters()" style="margin-top:3px; padding:3px 6px; font-size:12px; background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:4px">
         <option value="all">All</option>
-        <option value="C">C</option>
-        <option value="1B">1B</option>
-        <option value="2B">2B</option>
-        <option value="3B">3B</option>
-        <option value="SS">SS</option>
-        <option value="LF">LF</option>
-        <option value="CF">CF</option>
-        <option value="RF">RF</option>
-        <option value="OF">OF</option>
-        <option value="SP">SP</option>
-        <option value="RP">RP</option>
       </select>
     </div>
-    <div class="filter-group" style="display:flex; align-items:end">
+    <div class="filter-group">
+      <label style="font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px">&nbsp;</label>
       <label style="font-size:12px; color:var(--text); cursor:pointer; display:flex; align-items:center; gap:4px; margin-top:3px">
         <input type="checkbox" id="forty-man-filter" onchange="applyFilters()"> 40-man only
       </label>
     </div>
-    <div class="filter-group" style="display:flex; align-items:end">
+    <div class="filter-group" style="display:flex; align-items:flex-end">
       <span id="filter-count" style="font-size:11px; color:var(--text-dim); margin-top:3px"></span>
     </div>
+    <button class="btn btn-sm csv-btn" onclick="exportTableCSV('org-hitters-table', '{{ team_name|lower|replace(' ','_') }}_milb_hitters.csv')" title="Export as CSV" style="margin-left:auto">⬇ CSV</button>
   </div>
 
   <div class="roster-tabs" style="margin-bottom:12px">
@@ -209,6 +195,13 @@
 // Age norms by level (what's typical for that level)
 var LEVEL_AGE_NORM = {'2': 25, '3': 23, '4': 22, '5': 20, '6': 19, '8': 18, '0': 18};
 
+// Position options per tab
+var POS_OPTIONS = {
+  hitters: ['All', 'C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'OF'],
+  pitchers: ['All', 'SP', 'RP']
+};
+var currentTab = 'hitters';
+
 // Color age cells based on how far from norm
 document.querySelectorAll('.age-cell').forEach(function(cell) {
   var level = cell.dataset.level;
@@ -219,6 +212,28 @@ document.querySelectorAll('.age-cell').forEach(function(cell) {
   if (delta <= -2) cell.classList.add('age-young');
   else if (delta >= 3) cell.classList.add('age-old');
 });
+
+// Populate position dropdown for current tab
+function updatePosFilter() {
+  var select = document.getElementById('pos-filter');
+  var current = select.value;
+  select.innerHTML = '';
+  POS_OPTIONS[currentTab].forEach(function(pos) {
+    var opt = document.createElement('option');
+    opt.value = pos === 'All' ? 'all' : pos;
+    opt.textContent = pos;
+    select.appendChild(opt);
+  });
+  // Restore selection if it exists in the new options
+  if (select.querySelector('option[value="' + current + '"]')) {
+    select.value = current;
+  } else {
+    select.value = 'all';
+  }
+}
+
+// Initialize position dropdown
+updatePosFilter();
 
 // Active level filter
 var activeLevel = 'all';
@@ -280,7 +295,9 @@ function switchMinorsTab(btn, tab) {
     var prefix = '{{ team_name|lower|replace(" ","_") }}';
     csvBtn.setAttribute('onclick', "exportTableCSV('org-" + tab + "-table', '" + prefix + "_milb_" + tab + ".csv')");
   }
-  // Re-apply filters when switching tabs
+  // Update position dropdown for the new tab and re-apply filters
+  currentTab = tab;
+  updatePosFilter();
   applyFilters();
 }
 </script>

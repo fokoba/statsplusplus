@@ -919,6 +919,24 @@ def get_player(pid):
                 _prev_snap = dict(zip(_hist_col_names, _hist_rows[1]))
                 from evaluation_engine import compute_snapshot_deltas
                 snapshot_deltas = compute_snapshot_deltas(_cur_snap, _prev_snap)
+                # Pre-compute display-ready tool breakdown for the template
+                _TOOL_LABELS = {
+                    "cntct":"Con", "gap":"Gap", "pow":"Pow", "eye":"Eye", "ks":"Avoid K", "speed":"Spd",
+                    "stf":"Stf", "mov":"Mov", "ctrl":"Ctrl", "stm":"Stm",
+                    "pot_cntct":"pCon", "pot_gap":"pGap", "pot_pow":"pPow", "pot_eye":"pEye", "pot_ks":"pAvK",
+                    "pot_stf":"pStf", "pot_mov":"pMov", "pot_ctrl":"pCtrl",
+                    "fst":"FB", "snk":"SNK", "crv":"CRV", "sld":"SLD", "chg":"CHG", "splt":"SPL", "cutt":"CUT",
+                    "pot_fst":"pFB", "pot_snk":"pSNK", "pot_crv":"pCRV", "pot_sld":"pSLD",
+                    "pot_chg":"pCHG", "pot_splt":"pSPL", "pot_cutt":"pCUT",
+                    "babip":"BABIP", "hra":"HR Avd", "pbabip":"pBABIP", "pot_babip":"pBABIP", "pot_hra":"pHR Avd",
+                }
+                sig = []
+                for k, d in snapshot_deltas["tool_deltas"].items():
+                    if abs(d) >= 3 and k in _TOOL_LABELS:
+                        sig.append({"name": _TOOL_LABELS[k], "delta": d})
+                # Sort by magnitude descending, keep top 5
+                sig.sort(key=lambda x: abs(x["delta"]), reverse=True)
+                snapshot_deltas["top_changes"] = sig[:5]
     except Exception:
         pass
 

@@ -74,7 +74,14 @@ documentation pass.
 5. **Guide docs** (`farm_analysis_guide.md`, `roster_analysis_guide.md`, `trade_analysis_guide.md`) — update only if methodology changed.
 6. **`docs/tools_reference.md`** — update if any script, query function, or data source interface changed.
 7. **`RULES.md`** — update only if data pull/storage conventions changed.
-8. **Discord patch notes** — after committing the changelog, run `python3 scripts/discord_post.py preview` and show the user the output. If approved, run `python3 scripts/discord_post.py latest` to post to the Discord channel. Skip if `data/discord_config.json` doesn't exist (webhook not configured on this environment).
+8. **Discord patch notes** — post a summary of the session's changes to Discord. Skip if `data/discord_config.json` doesn't exist (webhook not configured on this environment).
+
+   **Format requirements:**
+   - **Title**: concise and descriptive of what changed — e.g. "WAR Projection Overhaul & Standings Tools", "Pitcher Evaluation Fixes", "Draft Board UX Improvements". NOT "Session X" or "Stats++ Update".
+   - **Content**: write fresh bullet points for this post. Do NOT repeat items already posted in a prior Discord message. Each bullet should be complete (no truncation/ellipsis).
+   - **Sections**: group into Bug Fixes / Improvements / other categories as appropriate. Omit empty sections.
+   - **Tone**: concise but informative. One sentence per bullet explaining what changed and why it matters.
+   - Post using `discord_post.py message` with a custom formatted embed (not `latest` which parses changelog with truncation). See prior session examples for the Python webhook pattern.
 
 ### What does NOT need updating
 

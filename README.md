@@ -19,6 +19,38 @@ An assistant GM dashboard for [OOTP Baseball](https://www.ootpdevelopments.com/)
 - **Discord integration** — Automated patch notes posting to a Discord server for development updates
 - **CLI analysis tools** — Roster scaffolds, farm reports, prospect rankings, free agent analysis, trade calculator
 
+## Screenshots
+
+### League Overview
+Division standings, power rankings with surplus values, and league-wide stat leaders at a glance.
+
+![League Overview](docs/screenshots/league-overview.png)
+
+### Team Page
+Standings context, team batting/pitching stats with league rank, record breakdown, and recent games.
+
+![Team Overview](docs/screenshots/team-overview.png)
+
+### Depth Chart
+3-year roster projection with WAR-based playing time allocation, league rank coloring, and prospect pipeline integration.
+
+![Depth Chart](docs/screenshots/depth-chart.png)
+
+### Player Page
+Ratings with grade bars, current-year stats, and Baseball Savant-style percentile rankings with expected-value tags (Hot/Cold/Lucky/Unlucky).
+
+![Player Page](docs/screenshots/player-page.png)
+
+### Prospect Rankings
+League-wide Top 100 with FV grades, risk labels, composite scores, and surplus values. Filter by team or position.
+
+![Prospects](docs/screenshots/prospects.png)
+
+### Draft Board
+Full draft pool with position filters, tool thresholds, simulation, auto-draft list generation, and ADP-based value labels.
+
+![Draft Board](docs/screenshots/draft-board.png)
+
 ## Prerequisites
 
 - Python 3.10+

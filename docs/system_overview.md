@@ -86,7 +86,7 @@ All other analysis scripts are read-only against the DB.
 | `trade_targets.py` | 350 | Trade target finder — MLB players by position with contract status (RENTAL/ARB/RENTAL+EXT/OPTION/CONTROLLED), seller classification, split ratings, pro-rated salary. |
 | `trade_assets.py` | 150 | Tradeable assets for any team — MLB surplus players + farm prospects ranked by value. |
 | `team_needs.py` | 160 | Positional needs vs league average — OPS/ERA gaps flagged by severity, upgrade priority list, platoon flags, `--aaa-roster` for full AAA depth. Works for any team. |
-| `standings.py` | 115 | League-wide standings — W/L, run differential, pythagorean expected record. `--actual` flag shows actual W-L from `games` table with delta. `actual_record(team_id, year)` importable. |
+| `standings.py` | 160 | League-wide standings — W/L, run differential, pythagorean expected record. `--actual` flag shows actual W-L from `games` table with delta. `--team <ABBR>` shows team-specific actual record + playoff picture (division leaders, WC race with GB). Importable: `actual_record()`, `all_actual_records()`, `league_standings_actual()`, `playoff_picture()`. |
 | `free_agents.py` | 105 | Upcoming free agent class — expiring contracts with FA/ARB/TO status. ARB-eligible players (service time < 6 years) distinguished from true walk-year FAs. |
 | `player_utils.py` | 324 | Shared evaluation logic — bucketing, FV calc, WAR/aging curves, normalization. |
 | `league_config.py` | 120 | Single abstraction for league-specific settings. Loads from `league_settings.json` + `state.json`. |
@@ -181,8 +181,8 @@ Risk labels (Low/Medium/High/Extreme) from development confidence:
 **Contract surplus model** — `contract_value()` in `contract_value.py`:
 - Pending contract extensions: checks `contract_extensions` table. If a pending extension exists, appends extension years and salary schedule after current contract ends instead of estimating arb control.
 - MLB scarcity premium: positional multiplier on market value (`MLB_SCARCITY` in `constants.py`). SS +10%, CF/SP +6%, C/2B/3B +3%, COF/RP −6%, 1B −9%. Makes contract model consistent with prospect scarcity.
-- `stat_peak_war` minimum: 1 qualifying season (was 2). Players with 1 season get stat-based projections instead of pure ratings fallback.
-- Pitcher role-change fallback: when current role (SP/RP) has no qualifying seasons but the opposite role does, falls back to those stats scaled by IP ratio (SP→RP × 0.46, RP→SP × 2.15).
+- `stat_peak_war` minimum: 1 qualifying season (was 2). Players with 1 season get stat-based projections instead of pure ratings fallback. Uses 4-year weighted average `[3, 3, 2, 1]` with the most recent year scaled by season completion fraction (season_pct). Current-year stats always included (no mid-season exclusion) — partial seasons get proportionally reduced weight.
+- Pitcher role-change blending: when current role (SP/RP) has < 2 full seasons but the opposite role has history, blends new-role data with discounted prior-role stats (SP→RP × 0.46, RP→SP × 2.15). Blend weight increases as new-role data accumulates; at 2+ full seasons, prior role is fully phased out. Prevents single-year role converts from losing all track record.
 - Unproven player discount: when `stat_peak_war` is None (0 qualifying seasons), ratings-based WAR is discounted by 0.5×. Data showed low-Ovr players with no track record produce far below ratings projections.
 - Pre-arb control estimation from games-based fractional service time. Uses role-adjusted denominators (hitters: g/162, SP: gs/32, RP: g/65) per year, summed across career. Pre-arb uses floor(svc); arb uses ceil(svc). Age gates: age ≥30 on min salary → veteran minor league deal.
 - Arb salary projection: Ovr-based exponential model (MAE $0.53M/yr); RP-specific model calibrated from 35 arb contracts (566K × e^(0.0294 × Ovr), 25% annual raises)

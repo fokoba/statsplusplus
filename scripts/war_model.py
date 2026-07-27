@@ -90,15 +90,39 @@ def aging_mult(age, bucket):
 # ---------------------------------------------------------------------------
 
 def load_stat_history(conn, game_date):
-    """Load completed-season stats into memory. Excludes current partial season.
-    Aggregates across teams for traded players."""
+    """Load season stats into memory for WAR projection.
+
+    Includes the current year's stats with a season_pct field indicating
+    completeness (games_played / 162). Completed prior seasons have
+    season_pct = 1.0. Aggregates across teams for traded players.
+    """
     game_year = int(game_date[:4])
+    game_month = int(game_date[5:7])
+
+    # Always include current year stats — partial-season weighting is handled
+    # downstream in stat_peak_war via the season_pct field.
+    cutoff_year = game_year + 1
+
+    # Determine season completion fraction for the current year.
+    # Offseason (Nov+): season is complete.
+    # Mid-season: estimate from max games played by any team this year.
+    if game_month >= 11:
+        season_pct = 1.0
+    else:
+        max_g = conn.execute(
+            """SELECT MAX(cnt) FROM (
+                SELECT COUNT(*) as cnt FROM games
+                WHERE date LIKE ? AND played=1 AND game_type=0
+                GROUP BY home_team)""",
+            (f"{game_year}%",)
+        ).fetchone()
+        season_pct = min((max_g[0] or 0) / 162.0, 1.0) if max_g and max_g[0] else 0.0
 
     bat_rows = conn.execute(
         """SELECT player_id, year, SUM(war) as war, SUM(ab) as ab,
                   MAX(stint) as max_stint, COUNT(team_id) as team_count
            FROM batting_stats WHERE split_id=1 AND year < ?
-           GROUP BY player_id, year""", (game_year,)
+           GROUP BY player_id, year""", (cutoff_year,)
     ).fetchall()
     pit_rows = conn.execute(
         """SELECT player_id, year,
@@ -106,7 +130,7 @@ def load_stat_history(conn, game_date):
                   SUM(gs) as gs, SUM(ip) as ip,
                   MAX(stint) as max_stint, COUNT(team_id) as team_count
            FROM pitching_stats WHERE split_id=1 AND year < ?
-           GROUP BY player_id, year""", (game_year,)
+           GROUP BY player_id, year""", (cutoff_year,)
     ).fetchall()
 
     bat_hist = {}
@@ -114,15 +138,19 @@ def load_stat_history(conn, game_date):
         if (r["ab"] or 0) < 130:
             continue
         incomplete = (r["max_stint"] == 1 and r["team_count"] == 1)
+        is_current = r["year"] == game_year
         bat_hist.setdefault(r["player_id"], []).append(
-            {"year": r["year"], "war": r["war"] or 0, "incomplete": incomplete})
+            {"year": r["year"], "war": r["war"] or 0, "incomplete": incomplete,
+             "season_pct": season_pct if is_current else 1.0})
 
     pit_hist = {}
     for r in pit_rows:
         incomplete = (r["max_stint"] == 1 and r["team_count"] == 1)
+        is_current = r["year"] == game_year
         pit_hist.setdefault(r["player_id"], []).append(
             {"year": r["year"], "war": r["war"] or 0,
-             "is_sp": (r["gs"] or 0) >= 10, "incomplete": incomplete})
+             "is_sp": (r["gs"] or 0) >= 10, "incomplete": incomplete,
+             "season_pct": season_pct if is_current else 1.0})
 
     two_way = set()
     bat_by_year = {}
@@ -146,29 +174,78 @@ def load_stat_history(conn, game_date):
     return bat_hist, pit_hist, two_way
 
 
+# Weighting scheme for stat_peak_war: 4-year window, recent-heavy.
+_STAT_WEIGHTS = [3, 3, 2, 1]
+
+# Role-convert discount: applied when blending prior-role seasons.
+_RP_FROM_SP_MULT = 0.46
+_SP_FROM_RP_MULT = 2.15
+
+
 def stat_peak_war(pid, bucket, bat_hist, pit_hist, two_way=None):
-    """3-year weighted WAR average for role-consistent seasons. Returns None if insufficient."""
+    """Weighted WAR average from stat history for peak WAR projection.
+
+    Uses a 4-year window with weights [3, 3, 2, 1]. The most recent year's
+    weight is scaled by its season_pct (e.g., a half-season gets weight 1.5
+    instead of 3). This allows partial current-year data to influence the
+    projection proportionally to sample size.
+
+    For pitchers who recently changed roles (SP↔RP), blends new-role and
+    prior-role history rather than ignoring the prior role entirely.
+    """
     if two_way and pid in two_way:
         return _two_way_peak_war(pid, bucket, bat_hist, pit_hist)
 
-    role_changed = False
     if bucket in ("SP", "RP"):
         is_sp = bucket == "SP"
-        seasons = [s for s in pit_hist.get(pid, []) if s["is_sp"] == is_sp]
-        if not seasons:
-            seasons = [s for s in pit_hist.get(pid, []) if s["is_sp"] != is_sp]
-            role_changed = bool(seasons)
+        new_role_seasons = [s for s in pit_hist.get(pid, []) if s["is_sp"] == is_sp]
+        old_role_seasons = [s for s in pit_hist.get(pid, []) if s["is_sp"] != is_sp]
+
+        if new_role_seasons:
+            # Has data in current role — compute projection from it
+            new_role_war = _weighted_war(new_role_seasons)
+
+            # If there's also prior-role history AND limited new-role data (< 2 full seasons),
+            # blend with discounted prior-role projection for stability.
+            new_role_full_seasons = sum(1 for s in new_role_seasons if s.get("season_pct", 1.0) >= 0.8)
+            if old_role_seasons and new_role_full_seasons < 2:
+                old_role_war = _weighted_war(old_role_seasons)
+                discount = _RP_FROM_SP_MULT if bucket == "RP" else _SP_FROM_RP_MULT
+                old_role_war *= discount
+                # Blend: weight new-role data by number of full-equivalent seasons
+                new_equiv = sum(s.get("season_pct", 1.0) for s in new_role_seasons[:4])
+                blend_weight = min(new_equiv / 2.0, 1.0)  # At 2 full seasons, fully trust new role
+                return blend_weight * new_role_war + (1 - blend_weight) * old_role_war
+            return new_role_war
+
+        elif old_role_seasons:
+            # No data in current role — fall back to prior role with discount
+            result = _weighted_war(old_role_seasons)
+            result *= _RP_FROM_SP_MULT if bucket == "RP" else _SP_FROM_RP_MULT
+            return result
+
+        return None
     else:
         seasons = bat_hist.get(pid, [])
+        if not seasons:
+            return None
+        return _weighted_war(seasons)
 
-    if not seasons:
-        return None
-    weights = [3, 2, 1][:len(seasons)]
+
+def _weighted_war(seasons):
+    """Compute weighted WAR from a list of seasons (most recent first).
+
+    Uses _STAT_WEIGHTS [3, 3, 2, 1] for up to 4 seasons. The most recent
+    season's weight is scaled by its season_pct field.
+    """
+    weights = list(_STAT_WEIGHTS[:len(seasons)])
+    # Scale most recent year's weight by season completion fraction
+    weights[0] = weights[0] * seasons[0].get("season_pct", 1.0)
     effective_wars = [s["war"] / (0.5 if s.get("incomplete") else 1.0) for s in seasons]
-    result = sum(w * ew for w, ew in zip(weights, effective_wars)) / sum(weights)
-    if role_changed:
-        result *= 0.46 if bucket == "RP" else 2.15
-    return result
+    total_weight = sum(weights)
+    if total_weight == 0:
+        return None
+    return sum(w * ew for w, ew in zip(weights, effective_wars)) / total_weight
 
 
 def _two_way_peak_war(pid, bucket, bat_hist, pit_hist):
@@ -177,6 +254,6 @@ def _two_way_peak_war(pid, bucket, bat_hist, pit_hist):
     years = sorted(set(bat_by_yr) | set(pit_by_yr), reverse=True)
     if not years:
         return None
-    combined = [bat_by_yr.get(y, 0) + pit_by_yr.get(y, 0) for y in years[:3]]
-    weights = [3, 2, 1][:len(combined)]
+    combined = [bat_by_yr.get(y, 0) + pit_by_yr.get(y, 0) for y in years[:4]]
+    weights = list(_STAT_WEIGHTS[:len(combined)])
     return sum(w * c for w, c in zip(weights, combined)) / sum(weights)

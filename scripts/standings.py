@@ -76,7 +76,11 @@ def _build_rows(rs_map, ra_map):
 
 
 def actual_record(team_id, year):
-    """Return actual W-L from games table for a team in a given season."""
+    """Return actual W-L from games table for a team in a given season.
+
+    NOTE: In the games table, runs0 = AWAY team runs, runs1 = HOME team runs.
+    Home team wins when runs1 > runs0. Away team wins when runs0 > runs1.
+    """
     conn = _db.get_conn()
     conn.row_factory = None
     row = conn.execute("""
@@ -109,9 +113,141 @@ def print_standings(rows, my_tid=None):
         print(f"{i:>2}  {r['name']:<28} {r['w']:>5} {r['l']:>5} {r['pct']:>6.3f} {gb_str:>5} {r['rs']:>4} {r['ra']:>4} {diff_str:>5}{marker}")
 
 
+def all_actual_records(year):
+    """Return dict of team_id -> (w, l) for all teams from games table."""
+    conn = _db.get_conn()
+    conn.row_factory = None
+    rows = conn.execute("""
+        SELECT home_team, away_team, runs0, runs1
+        FROM games
+        WHERE played=1 AND date >= ? AND game_type=0
+    """, (f"{year}-01-01",)).fetchall()
+    conn.close()
+    records = {}
+    for home, away, r0, r1 in rows:
+        # runs0 = away runs, runs1 = home runs
+        if r1 > r0:
+            records[home] = (records.get(home, (0, 0))[0] + 1, records.get(home, (0, 0))[1])
+            records[away] = (records.get(away, (0, 0))[0], records.get(away, (0, 0))[1] + 1)
+        elif r0 > r1:
+            records[away] = (records.get(away, (0, 0))[0] + 1, records.get(away, (0, 0))[1])
+            records[home] = (records.get(home, (0, 0))[0], records.get(home, (0, 0))[1] + 1)
+    return records
+
+
+def league_standings_actual(year, league_name=None):
+    """
+    Return actual-record standings for a league (AL/NL) or all teams.
+    Each entry: {tid, abbr, w, l, pct, division}.
+    Sorted by win pct descending.
+    """
+    records = all_actual_records(year)
+    settings = _cfg.settings
+    leagues = settings.get("leagues", [])
+
+    results = []
+    for lg in leagues:
+        if league_name and lg["name"] != league_name and lg["short"] != league_name:
+            continue
+        for div_name, team_ids in lg["divisions"].items():
+            for tid in team_ids:
+                w, l = records.get(tid, (0, 0))
+                if w + l == 0:
+                    continue
+                abbr = _cfg.team_abbr(tid)
+                results.append({
+                    "tid": tid, "abbr": abbr, "w": w, "l": l,
+                    "pct": w / (w + l), "division": div_name,
+                    "league": lg["name"],
+                })
+
+    # If no league filter matched, include all teams
+    if not results and not league_name:
+        for tid, (w, l) in records.items():
+            if w + l == 0:
+                continue
+            abbr = _cfg.team_abbr(tid)
+            results.append({
+                "tid": tid, "abbr": abbr, "w": w, "l": l,
+                "pct": w / (w + l), "division": "?", "league": "?",
+            })
+
+    results.sort(key=lambda x: -x["pct"])
+    return results
+
+
+def playoff_picture(year, team_id):
+    """
+    Show a team's league standings with division leaders and wild card race.
+    Returns a formatted string.
+    """
+    settings = _cfg.settings
+    leagues = settings.get("leagues", [])
+    wc_per_league = settings.get("wild_cards_per_league", 3)
+
+    # Find which league this team is in
+    team_league = None
+    for lg in leagues:
+        for div_name, team_ids in lg["divisions"].items():
+            if team_id in team_ids:
+                team_league = lg["name"]
+                break
+        if team_league:
+            break
+
+    if not team_league:
+        return "Team not found in league structure."
+
+    standings = league_standings_actual(year, team_league)
+    if not standings:
+        return "No games played yet."
+
+    # Identify division leaders
+    div_leaders = {}
+    for entry in standings:
+        div = entry["division"]
+        if div not in div_leaders:
+            div_leaders[div] = entry
+
+    # Wild card: everyone except div leaders, sorted by pct
+    div_leader_tids = {e["tid"] for e in div_leaders.values()}
+    wc_teams = [e for e in standings if e["tid"] not in div_leader_tids]
+
+    # WC cutoff
+    wc_cutoff_w = wc_teams[wc_per_league - 1]["w"] if len(wc_teams) >= wc_per_league else 0
+    wc_cutoff_l = wc_teams[wc_per_league - 1]["l"] if len(wc_teams) >= wc_per_league else 0
+
+    lines = []
+    lines.append(f"{team_league} Standings — Actual Record ({year})")
+    lines.append("")
+
+    # Division leaders
+    lines.append("Division Leaders:")
+    for div, entry in sorted(div_leaders.items()):
+        marker = " ◄" if entry["tid"] == team_id else ""
+        lines.append(f"  {div:<10} {entry['abbr']:<5} {entry['w']}-{entry['l']} ({entry['pct']:.3f}){marker}")
+
+    lines.append("")
+    lines.append("Wild Card Race:")
+    lines.append(f"  {'#':<3} {'Team':<6} {'W-L':<8} {'Pct':<7} {'GB from WC{0}'.format(wc_per_league)}")
+    lines.append(f"  {'-'*45}")
+    for i, entry in enumerate(wc_teams[:wc_per_league + 5], 1):
+        gb = ((wc_cutoff_w - entry["w"]) + (entry["l"] - wc_cutoff_l)) / 2
+        gb_str = "-" if abs(gb) < 0.25 else f"{gb:+.1f}"
+        marker = " ◄" if entry["tid"] == team_id else ""
+        in_out = "IN " if i <= wc_per_league else "OUT"
+        lines.append(f"  {i:<3} {entry['abbr']:<6} {entry['w']}-{entry['l']:<5} {entry['pct']:.3f}   {gb_str:>6}  [{in_out}]{marker}")
+        if i == wc_per_league:
+            lines.append(f"  {'─'*45}")
+
+    return "\n".join(lines)
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--year", type=int, default=None)
+    ap.add_argument("--team", type=str, default=None,
+                    help="Team abbreviation to focus on (shows playoff picture)")
     ap.add_argument("--refresh", action="store_true", help="Pull fresh from API")
     ap.add_argument("--actual", action="store_true",
                     help="Show actual W-L for my team alongside pythagorean")
@@ -119,6 +255,35 @@ if __name__ == "__main__":
 
     if args.year is None:
         args.year = _cfg.year
+
+    # If --team is specified, show that team's actual record + playoff picture
+    if args.team:
+        tid = _cfg.team_id_from_abbr(args.team) if hasattr(_cfg, 'team_id_from_abbr') else None
+        if tid is None:
+            # Manual lookup
+            abbr_map = _cfg.team_abbr_map
+            tid = next((int(k) for k, v in abbr_map.items() if v.upper() == args.team.upper()), None)
+        if tid is None:
+            print(f"Unknown team: {args.team}")
+            sys.exit(1)
+        w, l = actual_record(tid, args.year)
+        print(f"\n{_cfg.team_name(tid)} — Actual Record: {w}-{l} ({w/(w+l):.3f})\n")
+        print(playoff_picture(args.year, tid))
+        print()
+        # Also show pythagorean comparison
+        rows = _standings_from_db(args.year)
+        if rows:
+            pyth = next((r for r in rows if r["tid"] == tid), None)
+            if pyth:
+                delta_w = w - pyth["w"]
+                print(f"Pythagorean: {pyth['w']:.1f}-{pyth['l']:.1f} (RS:{pyth['rs']} RA:{pyth['ra']} Diff:{pyth['diff']:+d})")
+                print(f"Delta: {delta_w:+.1f}W vs pythagorean")
+                if delta_w < -2:
+                    print("  → Underperforming pythagorean — likely bullpen/luck drag")
+                elif delta_w > 2:
+                    print("  → Overperforming pythagorean — regression risk")
+        print()
+        sys.exit(0)
 
     rows = None
     if not args.refresh:

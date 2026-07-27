@@ -222,8 +222,8 @@ CREATE TABLE IF NOT EXISTS games (
     home_team INTEGER,
     away_team INTEGER,
     date      TEXT,
-    runs0     INTEGER,
-    runs1     INTEGER,
+    runs0     INTEGER,  -- AWAY team runs (team batting first)
+    runs1     INTEGER,  -- HOME team runs (team batting second)
     game_type INTEGER,
     played    INTEGER,
     winning_pitcher INTEGER,

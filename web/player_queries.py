@@ -919,6 +919,296 @@ def get_player(pid):
                 _prev_snap = dict(zip(_hist_col_names, _hist_rows[1]))
                 from evaluation_engine import compute_snapshot_deltas
                 snapshot_deltas = compute_snapshot_deltas(_cur_snap, _prev_snap)
+                # Pre-compute display-ready tool breakdown for the template
+                # Tool deltas are on raw (1-100) scale; normalize to 20-80 for display
+                from ratings import norm as _norm_r
+                _TOOL_LABELS = {
+                    "cntct":"Con", "gap":"Gap", "pow":"Pow", "eye":"Eye", "ks":"Avoid K", "speed":"Spd",
+                    "stf":"Stf", "mov":"Mov", "ctrl":"Ctrl", "stm":"Stm",
+                    "pot_cntct":"pCon", "pot_gap":"pGap", "pot_pow":"pPow", "pot_eye":"pEye", "pot_ks":"pAvK",
+                    "pot_stf":"pStf", "pot_mov":"pMov", "pot_ctrl":"pCtrl",
+                    "fst":"FB", "snk":"SNK", "crv":"CRV", "sld":"SLD", "chg":"CHG", "splt":"SPL", "cutt":"CUT",
+                    "pot_fst":"pFB", "pot_snk":"pSNK", "pot_crv":"pCRV", "pot_sld":"pSLD",
+                    "pot_chg":"pCHG", "pot_splt":"pSPL", "pot_cutt":"pCUT",
+                    "babip":"BABIP", "hra":"HR Avd", "pbabip":"pBABIP", "pot_babip":"pBABIP", "pot_hra":"pHR Avd",
+                }
+                sig = []
+                for k in _TOOL_LABELS:
+                    cur_raw = _cur_snap.get(k)
+                    prev_raw = _prev_snap.get(k)
+                    if cur_raw is not None and prev_raw is not None:
+                        cur_norm = _norm_r(cur_raw) or 0
+                        prev_norm = _norm_r(prev_raw) or 0
+                        d = cur_norm - prev_norm
+                        if abs(d) >= 5:
+                            sig.append({"name": _TOOL_LABELS[k], "delta": d})
+                # Sort by magnitude descending, keep top 5
+                sig.sort(key=lambda x: abs(x["delta"]), reverse=True)
+                snapshot_deltas["top_changes"] = sig[:5]
+    except Exception:
+        pass
+
+    # Development history — full timeline from ratings_history
+    dev_history = None
+    try:
+        from ratings import norm as _norm_hist
+        _dh_rows = conn.execute(
+            "SELECT * FROM ratings_history WHERE player_id=? ORDER BY snapshot_date",
+            (pid,)
+        ).fetchall()
+        if len(_dh_rows) >= 2:
+            _dh_cols = [c[1] for c in conn.execute("PRAGMA table_info(ratings_history)").fetchall()]
+            # Determine which tools to show based on role
+            if is_pitcher:
+                _dh_tools = [
+                    ("stf", "Stuff"), ("mov", "Movement"), ("ctrl", "Control"), ("stm", "Stamina"),
+                    ("pot_stf", "pStuff"), ("pot_mov", "pMov"), ("pot_ctrl", "pCtrl"),
+                ]
+                # Tool pairs for table: (cur_key, pot_key, label)
+                _dh_pairs = [
+                    ("stf", "pot_stf", "Stuff"), ("mov", "pot_mov", "Mov"),
+                    ("ctrl", "pot_ctrl", "Ctrl"), ("stm", None, "Stm"),
+                ]
+                # Add top 3 pitches by current potential
+                _pitch_keys = ["fst","snk","crv","sld","chg","splt","cutt","cir_chg","scr","frk","kncrv","knbl"]
+                _pitch_labels = {"fst":"FB","snk":"Sinker","crv":"Curve","sld":"Slider","chg":"Change",
+                                 "splt":"Splitter","cutt":"Cutter","cir_chg":"Circle","scr":"Screwball",
+                                 "frk":"Forkball","kncrv":"Kn-Curve","knbl":"Knuckleball"}
+                # Get latest snapshot to find top pitches
+                _latest = dict(zip(_dh_cols, _dh_rows[-1]))
+                _pitch_vals = [(k, _latest.get("pot_" + k) or 0) for k in _pitch_keys]
+                _pitch_vals.sort(key=lambda x: x[1], reverse=True)
+                for pk, pv in _pitch_vals[:3]:
+                    if pv and (_norm_hist(pv) or 0) >= 30:
+                        _dh_tools.append((pk, _pitch_labels.get(pk, pk)))
+                        _dh_tools.append(("pot_" + pk, "p" + _pitch_labels.get(pk, pk)))
+                        _dh_pairs.append((pk, "pot_" + pk, _pitch_labels.get(pk, pk)))
+            else:
+                _dh_tools = [
+                    ("cntct", "Contact"), ("gap", "Gap"), ("pow", "Power"), ("eye", "Eye"),
+                    ("speed", "Speed"),
+                    ("pot_cntct", "pContact"), ("pot_gap", "pGap"), ("pot_pow", "pPower"), ("pot_eye", "pEye"),
+                ]
+                _dh_pairs = [
+                    ("cntct", "pot_cntct", "Con"), ("gap", "pot_gap", "Gap"),
+                    ("pow", "pot_pow", "Pow"), ("eye", "pot_eye", "Eye"),
+                    ("speed", None, "Spd"),
+                ]
+
+            snapshots = []
+            for i, row in enumerate(_dh_rows):
+                d = dict(zip(_dh_cols, row))
+                snap = {
+                    "date": d["snapshot_date"],
+                    "date_short": d["snapshot_date"][5:],  # "MM-DD"
+                    "composite": d.get("composite_score"),
+                    "ceiling": d.get("ceiling_score"),
+                    "tools": {},
+                }
+                # Days since previous snapshot
+                if i > 0:
+                    from datetime import date as _dt
+                    prev_d = _dt.fromisoformat(snapshots[-1]["date"])
+                    cur_d = _dt.fromisoformat(d["snapshot_date"])
+                    snap["days_since_prev"] = (cur_d - prev_d).days
+                else:
+                    snap["days_since_prev"] = None
+
+                for key, label in _dh_tools:
+                    raw = d.get(key)
+                    snap["tools"][key] = _norm_hist(raw) if raw is not None else None
+                # Also store all pitch ratings for charts (may not be in _dh_tools)
+                if is_pitcher:
+                    for pk in ["fst","snk","crv","sld","chg","splt","cutt","cir_chg","scr","frk","kncrv","knbl"]:
+                        for prefix in ("", "pot_"):
+                            k = prefix + pk
+                            if k not in snap["tools"]:
+                                raw = d.get(k)
+                                snap["tools"][k] = _norm_hist(raw) if raw is not None else None
+                snapshots.append(snap)
+
+            dev_history = {
+                "snapshots": snapshots,
+                "tools": _dh_tools,  # [(key, label), ...]
+                "tool_pairs": _dh_pairs,  # [(cur_key, pot_key, label), ...]
+            }
+
+            # Compute chart-ready data: x positions proportional to time
+            from datetime import date as _dtc
+            _dates = [_dtc.fromisoformat(s["date"]) for s in snapshots]
+            _total_days = (_dates[-1] - _dates[0]).days
+            if _total_days > 0:
+                x_positions = [(_d - _dates[0]).days / _total_days for _d in _dates]
+            else:
+                x_positions = [i / max(1, len(snapshots) - 1) for i in range(len(snapshots))]
+
+            def _make_series(key, label, color):
+                pts = [{"x": x_positions[i], "y": s["tools"].get(key), "date": s["date_short"]}
+                       for i, s in enumerate(snapshots) if s["tools"].get(key) is not None]
+                return {"key": key, "label": label, "color": color, "points": pts} if pts else None
+
+            def _auto_range(series_list):
+                """Compute y_min/y_max from data, snapped to 5-grade increments."""
+                all_vals = [pt["y"] for s in series_list for pt in s["points"]]
+                if not all_vals:
+                    return 20, 80
+                lo = min(all_vals) - 5
+                hi = max(all_vals) + 5
+                lo = max(20, (lo // 5) * 5)
+                hi = min(80, ((hi + 4) // 5) * 5)
+                if hi - lo < 15:
+                    mid = (hi + lo) // 2
+                    lo, hi = max(20, mid - 10), min(80, mid + 10)
+                return int(lo), int(hi)
+
+            # Panel 1: Overview (composite + ceiling)
+            overview_series = [
+                {"key": "composite", "label": "Composite", "color": "#42a5f5",
+                 "points": [{"x": x_positions[i], "y": s["composite"], "date": s["date_short"]}
+                            for i, s in enumerate(snapshots) if s["composite"] is not None]},
+                {"key": "ceiling", "label": "Ceiling", "color": "#ffc107",
+                 "points": [{"x": x_positions[i], "y": s["ceiling"], "date": s["date_short"]}
+                            for i, s in enumerate(snapshots) if s["ceiling"] is not None]},
+            ]
+
+            # Strong, distinct colors for each tool
+            _primary_colors = {"stf": "#66bb6a", "mov": "#42a5f5", "ctrl": "#ffc107", "stm": "#ff7043",
+                               "cntct": "#66bb6a", "gap": "#42a5f5", "pow": "#ffc107", "eye": "#ff7043", "speed": "#ab47bc"}
+            _pitch_colors = ["#66bb6a", "#42a5f5", "#ffc107", "#ff7043", "#ab47bc", "#26c6da", "#ec407a", "#8d6e63"]
+
+            if is_pitcher:
+                # Panel 2: Primary current (Stuff, Mov, Ctrl, Stm)
+                primary_cur = [s for s in [
+                    _make_series("stf", "Stuff", "#66bb6a"),
+                    _make_series("mov", "Movement", "#42a5f5"),
+                    _make_series("ctrl", "Control", "#ffc107"),
+                    _make_series("stm", "Stamina", "#ff7043"),
+                ] if s]
+
+                # Panel 3: Primary potential (pStuff, pMov, pCtrl)
+                primary_pot = [s for s in [
+                    _make_series("pot_stf", "Stuff", "#66bb6a"),
+                    _make_series("pot_mov", "Movement", "#42a5f5"),
+                    _make_series("pot_ctrl", "Control", "#ffc107"),
+                ] if s]
+
+                # Panel 4: Pitch arsenal - ALL pitches with rating >= 20
+                _all_pitch_keys = ["fst","snk","crv","sld","chg","splt","cutt","cir_chg","scr","frk","kncrv","knbl"]
+                _all_pitch_labels = {"fst":"Fastball","snk":"Sinker","crv":"Curve","sld":"Slider","chg":"Change",
+                                     "splt":"Splitter","cutt":"Cutter","cir_chg":"Circle","scr":"Screwball",
+                                     "frk":"Forkball","kncrv":"Kn-Curve","knbl":"Knuckleball"}
+                pitch_cur = []
+                pitch_pot = []
+                _pi = 0
+                for pk in _all_pitch_keys:
+                    # Check if this pitch exists (any snapshot has a value >= 20)
+                    has_pitch = any(s["tools"].get(pk) and s["tools"][pk] >= 20 for s in snapshots)
+                    if has_pitch:
+                        color = _pitch_colors[_pi % len(_pitch_colors)]
+                        s_cur = _make_series(pk, _all_pitch_labels[pk], color)
+                        s_pot = _make_series("pot_" + pk, _all_pitch_labels[pk], color)
+                        if s_cur:
+                            pitch_cur.append(s_cur)
+                        if s_pot:
+                            pitch_pot.append(s_pot)
+                        _pi += 1
+
+                panels = [
+                    {"title": "Overview", "series": overview_series, "y_min": None, "y_max": None},
+                    {"title": "Primary Ratings", "series": primary_cur, "y_min": None, "y_max": None},
+                    {"title": "Primary Potential", "series": primary_pot, "y_min": None, "y_max": None},
+                    {"title": "Pitch Arsenal", "series": pitch_cur, "y_min": None, "y_max": None},
+                    {"title": "Pitch Potential", "series": pitch_pot, "y_min": None, "y_max": None},
+                ]
+            else:
+                # Hitters: Panel 2: Current tools
+                cur_series = [s for s in [
+                    _make_series("cntct", "Contact", "#66bb6a"),
+                    _make_series("gap", "Gap", "#42a5f5"),
+                    _make_series("pow", "Power", "#ffc107"),
+                    _make_series("eye", "Eye", "#ff7043"),
+                    _make_series("speed", "Speed", "#ab47bc"),
+                ] if s]
+
+                # Panel 3: Potential tools
+                pot_series = [s for s in [
+                    _make_series("pot_cntct", "Contact", "#66bb6a"),
+                    _make_series("pot_gap", "Gap", "#42a5f5"),
+                    _make_series("pot_pow", "Power", "#ffc107"),
+                    _make_series("pot_eye", "Eye", "#ff7043"),
+                ] if s]
+
+                panels = [
+                    {"title": "Overview", "series": overview_series, "y_min": None, "y_max": None},
+                    {"title": "Current Tools", "series": cur_series, "y_min": None, "y_max": None},
+                    {"title": "Potential Tools", "series": pot_series, "y_min": None, "y_max": None},
+                ]
+
+            # Auto-scale y-axis for each panel
+            for panel in panels:
+                if panel["series"]:
+                    panel["y_min"], panel["y_max"] = _auto_range(panel["series"])
+
+            # Remove empty panels
+            panels = [p for p in panels if p["series"]]
+
+            # Compute dot nudges for overlapping points and right-edge label offsets
+            _nudge_px = 6  # pixels to offset overlapping dots
+            for panel in panels:
+                # Group points by x-position index to detect overlaps
+                for xi, xpos in enumerate(x_positions):
+                    # Collect all series that have a point at this x
+                    vals_at_x = []  # [(series_idx, point_idx, y_value)]
+                    for si, series in enumerate(panel["series"]):
+                        for pi, pt in enumerate(series["points"]):
+                            if abs(pt["x"] - xpos) < 0.001:
+                                vals_at_x.append((si, pi, pt["y"]))
+                    # Group by y value
+                    by_y = {}
+                    for si, pi, yv in vals_at_x:
+                        by_y.setdefault(yv, []).append((si, pi))
+                    # Apply nudges to groups with >1 point
+                    for yv, group in by_y.items():
+                        if len(group) <= 1:
+                            continue
+                        # Spread symmetrically: -6, +6 for 2; -6, 0, +6 for 3
+                        n = len(group)
+                        for i, (si, pi) in enumerate(group):
+                            offset = (i - (n - 1) / 2) * _nudge_px
+                            panel["series"][si]["points"][pi]["nudge"] = offset
+
+                # Compute right-edge label offsets (based on last point y-values)
+                label_positions = []  # [(series_idx, y_value)]
+                for si, series in enumerate(panel["series"]):
+                    if series["points"]:
+                        label_positions.append((si, series["points"][-1]["y"]))
+                # Group labels by y-value (within 2 grades = overlap)
+                label_groups = {}  # y_bucket -> [(si, actual_y)]
+                for si, yv in label_positions:
+                    # Find existing bucket within 2 grades
+                    placed = False
+                    for bucket_y in list(label_groups.keys()):
+                        if abs(yv - bucket_y) <= 2:
+                            label_groups[bucket_y].append((si, yv))
+                            placed = True
+                            break
+                    if not placed:
+                        label_groups[yv] = [(si, yv)]
+                # Apply symmetric spread to groups with >1 label
+                _label_spread = 11  # pixels between stacked labels
+                for bucket_y, group in label_groups.items():
+                    if len(group) <= 1:
+                        continue
+                    n = len(group)
+                    for i, (si, actual_y) in enumerate(group):
+                        offset = (i - (n - 1) / 2) * _label_spread
+                        panel["series"][si]["label_nudge"] = offset
+
+            dev_history["charts"] = {
+                "x_positions": x_positions,
+                "date_labels": [s["date_short"] for s in snapshots],
+                "panels": panels,
+            }
     except Exception:
         pass
 
@@ -1243,6 +1533,7 @@ def get_player(pid):
         "pctile_history": pctile_history, "fld_pctile_history": fld_pctile_history,
         "prospect_comps": prospect_comps, "comp_stats": comp_stats, "pap": pap,
         "snapshot_deltas": snapshot_deltas,
+        "dev_history": dev_history,
         "composite_score": composite_score,
         "ceiling_score": ceiling_score,
         "true_ceiling": eval_data.get("true_ceiling"),

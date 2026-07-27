@@ -198,16 +198,19 @@ def assign_bucket(p, use_pot=None):
         # regardless of ratings that might suggest SP viability.
         if not use_pot and role_str in ("reliever", "closer"):
             return "RP"
-        # Trust the game's starter assignment unless stamina is truly
-        # reliever-level (< 35). Covers leagues where SP go deeper.
-        if role_str == "starter" and (p.get("Stm") or 0) >= 35:
+        # Trust the game's starter assignment broadly. Empirical analysis shows
+        # stamina barely correlates with IP/GS in most leagues — pitchers with
+        # raw stm 30+ still average 5.5+ IP/GS (clearly starters). Only override
+        # the game's role when stamina is egregiously low (sub-20 raw, where a
+        # pitcher literally cannot get through 3-4 innings).
+        if role_str == "starter" and (p.get("Stm") or 0) >= 20:
             return "SP"
         stm    = p.get("Stm") or 0
         # Knuckleball/knuckle-curve alone qualifies as SP if stamina is sufficient
-        if stm >= 40 and ((p.get("PotKnbl") or 0) >= 45 or (p.get("PotKncrv") or 0) >= 45):
+        if stm >= 25 and ((p.get("PotKnbl") or 0) >= 45 or (p.get("PotKncrv") or 0) >= 45):
             return "SP"
         viable = sum(1 for f in PITCH_FIELDS if (p.get("Pot" + f) or 0) >= 45)
-        return "RP" if (viable < 3 or stm < 40) else "SP"
+        return "RP" if (viable < 3 or stm < 30) else "SP"
 
     if pgrade("C")  >= 45:                          return "C"
     if pgrade("SS") >= 50:

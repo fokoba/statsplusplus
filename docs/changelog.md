@@ -28,6 +28,37 @@ Completed and deferred work items, organized by session. Moved from `task_list.m
 
 - **`actual_record()` docstring** (`standings.py`) — Added explicit documentation of the `runs0`/`runs1` column semantics to prevent recurring W-L reversal bugs.
 
+### Bug Fixes (continued — Jul 27)
+
+- **Traded player stats showing wrong team** (`team_queries.py`) — `get_roster()`, `get_roster_hitters()`, `get_roster_pitchers()` loaded stats without `team_id` filter, causing traded players' prior-team stats to overwrite current-team stats.
+
+- **SP rankings missing role=12 starters** (`queries.py`) — Positional rankings hardcoded `role=11` as SP. Leagues like PPL use role=12 for some full-time starters. Now classifies from actual GS/G ratio with role-code fallback.
+
+- **Draft board crash on missing pool** (`draft_board.py`) — `sys.exit()` raised `SystemExit` (not caught by `except Exception`) crashing Flask. Replaced with `FileNotFoundError`. Sim/Auto-Draft buttons disabled in UI when no pool uploaded.
+
+- **Onboarding crash on brand-new leagues** (`db.py`, `app.py`) — Merged PR #2 from fokoba. `get_conn()` crashed when `data/<slug>/` didn't exist; template context queried DB before league was configured.
+
+- **Blank valuation tab for older non-MLB players** (`player_queries.py`) — Merged PR #4 from fokoba. Players over age 24 at non-MLB levels (e.g. 26yo A-ball catcher) had no `prospect_fv` row and fell through all fallback paths. Now computes real valuation using actual level/age.
+
+### Features (continued — Jul 27)
+
+- **WAR display limited to 1 decimal** (`percentiles.py`, `player.html`) — Pitcher percentile history showed 3 decimals (e.g. 10.023). Fixed format across all WAR displays.
+
+- **WAR rate stats** (`percentiles.py`) — WAR/600 PA (hitters) and WAR/200 IP (pitchers) in the Advanced tab percentile history. Contextualizes raw WAR by playing time.
+
+- **GB% context label on pitcher ratings** (`player_queries.py`, `refresh.py`) — Shows "Extreme GB / High GB / Average / Fly ball / Extreme FB" based on z-score against league distribution. League-normalized (not hardcoded).
+
+- **GB% in pitcher percentile rankings** (`percentiles.py`, `refresh.py`) — New stat with expected value from league-calibrated regression (gb_rating → actual GB%). Hot/Cold tags. Gracefully hidden for leagues without GB data.
+
+- **Minor league roster redesign** (`team_queries.py`, `team_minor.html`) — Tabbed Hitters/Pitchers view with position first, cur/pot tool format, B/T handedness, position-specific defense, positional sorting with data-sort-value. 40-man badges on notable cards.
+
+- **README screenshots** — Added 6 screenshots (league overview, team page, depth chart, player page, prospects, draft board) and updated project structure + CLI tools section.
+
+### Known Issues (for next session)
+
+- **IP display as 3.3 instead of 3.1** — Advanced tab career row uses float formatting instead of baseball fractional notation. Also causes floating point drift (581.3000000000001).
+- **CSV export for minor league rosters** — Feature request from beta tester. Extend export to MiLB team pages or add "all minor leagues" org view.
+
 ---
 
 ## Session 67 (2026-07-22)

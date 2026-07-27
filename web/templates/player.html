@@ -648,12 +648,12 @@
     </div>
     {% endmacro %}
     {% if p.is_pitcher %}
-      {{ comp_bar("Pitching", p.offensive_grade, p.offensive_ceiling) }}
-      {% if p.durability_score %}{{ comp_bar("Durability", p.durability_score, none) }}{% endif %}
+      {{ comp_bar("Pitching", p.offensive_grade|round|int, p.offensive_ceiling|round|int if p.offensive_ceiling else none) }}
+      {% if p.durability_score %}{{ comp_bar("Durability", p.durability_score|round|int, none) }}{% endif %}
     {% else %}
-      {{ comp_bar("Offense", p.offensive_grade, p.offensive_ceiling) }}
-      {% if p.baserunning_value is not none %}{{ comp_bar("Baserunning", p.baserunning_value, none) }}{% endif %}
-      {% if p.defensive_value is not none %}{{ comp_bar("Defense", p.defensive_value, none) }}{% endif %}
+      {{ comp_bar("Offense", p.offensive_grade|round|int, p.offensive_ceiling|round|int if p.offensive_ceiling else none) }}
+      {% if p.baserunning_value is not none %}{{ comp_bar("Baserunning", p.baserunning_value|round|int, none) }}{% endif %}
+      {% if p.defensive_value is not none %}{{ comp_bar("Defense", p.defensive_value|round|int, none) }}{% endif %}
     {% endif %}
   </div>
   {% endif %}
@@ -682,10 +682,10 @@
   </div>
   {% endif %}
 
-  {# ── Development tracking (only meaningful changes) ── #}
+  {# ── Development tracking (brief indicator — full detail in Development tab) ── #}
   {% if p.snapshot_deltas and (p.snapshot_deltas.composite_delta|abs >= 3 or p.snapshot_deltas.ceiling_delta|abs >= 3) %}
   <div style="font-size:12px; color:var(--text-dim)">
-    <span style="text-transform:uppercase; letter-spacing:1px; font-size:10px">Development</span>
+    <span style="text-transform:uppercase; letter-spacing:1px; font-size:10px">Since last update</span>
     {% if p.snapshot_deltas.composite_delta|abs >= 3 %}
     <span style="margin-left:8px">Comp <span class="{% if p.snapshot_deltas.composite_delta > 0 %}pos{% else %}neg{% endif %}">{{ "%+d"|format(p.snapshot_deltas.composite_delta) }}</span></span>
     {% endif %}
@@ -698,8 +698,225 @@
 {% endif %}
 {% endmacro %}
 
-{# Development tracking panel — merged into evaluation panel #}
-{% macro dev_tracking_panel() %}{% endmacro %}
+{# Development charts panel — SVG line charts for tool trajectories #}
+{% macro dev_charts_panel() %}
+{% if p.dev_history and p.dev_history.charts %}
+{% set charts = p.dev_history.charts %}
+
+<style>
+  .dev-chart-wrap { position:relative; }
+  .dev-chart-tabs { display:flex; gap:2px; margin-bottom:8px; }
+  .dev-chart-tab { font-size:11px; padding:4px 10px; border:1px solid var(--border); background:var(--surface);
+    color:var(--text-dim); border-radius:3px; cursor:pointer; transition:all 0.15s; }
+  .dev-chart-tab:hover { border-color:var(--accent); color:var(--text); }
+  .dev-chart-tab.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .dev-chart-svg { width:100%; height:220px; display:block; }
+  .dev-chart-gridline { stroke:var(--border); stroke-width:0.5; stroke-dasharray:2,2; }
+  .dev-chart-axis-label { font-size:9px; fill:var(--text-dim); }
+  .dev-chart-date-label { font-size:9px; fill:var(--text-dim); text-anchor:middle; }
+  .dev-chart-line { fill:none; stroke-width:2.5; stroke-linecap:round; stroke-linejoin:round; }
+  .dev-chart-dot { stroke:var(--bg); stroke-width:2; cursor:pointer; }
+  .dev-chart-dot:hover { r:6; }
+  .dev-chart-info { height:20px; font-size:11px; color:var(--text-dim); margin-bottom:4px; display:flex; align-items:center; gap:12px; }
+  .dev-chart-info-item { display:flex; align-items:center; gap:3px; }
+  .dev-chart-info-swatch { width:8px; height:8px; border-radius:50%; }
+  .dev-chart-legend { display:flex; gap:12px; flex-wrap:wrap; margin-top:4px; font-size:11px; justify-content:center; }
+  .dev-chart-legend-item { display:flex; align-items:center; gap:4px; }
+  .dev-chart-legend-swatch { width:12px; height:3px; border-radius:1px; }
+  .dev-chart-panel-content { display:none; }
+  .dev-chart-panel-content.active { display:block; }
+</style>
+
+<div class="panel">
+  <h2>Development Charts</h2>
+  <div class="dev-chart-tabs">
+    {% for panel in charts.panels %}
+    <button class="dev-chart-tab{% if loop.first %} active{% endif %}" onclick="switchDevChart(this, '{{ loop.index0 }}')">{{ panel.title }}</button>
+    {% endfor %}
+  </div>
+
+  {% for panel in charts.panels %}
+  {% set chart_id = "devchart_" ~ loop.index0 %}
+  <div class="dev-chart-panel-content{% if loop.first %} active{% endif %}" data-panel-idx="{{ loop.index0 }}">
+    <div class="dev-chart-info" id="info-{{ chart_id }}">
+      {% for series in panel.series %}
+      <span class="dev-chart-info-item"><span class="dev-chart-info-swatch" style="background:{{ series.color }}"></span>{{ series.label }}</span>
+      {% endfor %}
+    </div>
+    <div class="dev-chart-wrap">
+      {% set pad_l = 28 %}
+      {% set pad_r = 10 %}
+      {% set pad_t = 6 %}
+      {% set pad_b = 20 %}
+      {% set w = 700 %}
+      {% set h = 200 %}
+      {% set plot_w = w - pad_l - pad_r %}
+      {% set plot_h = h - pad_t - pad_b %}
+      {% set y_min = panel.y_min %}
+      {% set y_max = panel.y_max %}
+      <svg class="dev-chart-svg" viewBox="0 0 {{ w }} {{ h }}" preserveAspectRatio="xMidYMid meet" data-chart-id="{{ chart_id }}">
+        {# Y-axis gridlines #}
+        {% for grade in range(y_min, y_max + 1, 5) %}
+        {% set y = pad_t + plot_h - (grade - y_min) / (y_max - y_min) * plot_h %}
+        <line x1="{{ pad_l }}" y1="{{ y }}" x2="{{ w - pad_r }}" y2="{{ y }}" class="dev-chart-gridline"/>
+        <text x="{{ pad_l - 4 }}" y="{{ y + 3 }}" class="dev-chart-axis-label" text-anchor="end">{{ grade }}</text>
+        {% endfor %}
+
+        {# X-axis date labels #}
+        {% for i in range(charts.x_positions|length) %}
+        {% set x = pad_l + charts.x_positions[i] * plot_w %}
+        <text x="{{ x }}" y="{{ h - 4 }}" class="dev-chart-date-label">{{ charts.date_labels[i] }}</text>
+        {% endfor %}
+
+        {# Data lines #}
+        {% for series in panel.series %}
+        {% if series.points|length >= 2 %}
+        <polyline class="dev-chart-line" stroke="{{ series.color }}" points="{% for pt in series.points %}{{ pad_l + pt.x * plot_w }},{{ pad_t + plot_h - (pt.y - y_min) / (y_max - y_min) * plot_h }} {% endfor %}"/>
+        {% endif %}
+        {% endfor %}
+
+        {# Dots (rendered after lines so they appear on top) #}
+        {% for series in panel.series %}
+        {% for pt in series.points %}
+        {% set cx = pad_l + pt.x * plot_w %}
+        {% set cy = pad_t + plot_h - (pt.y - y_min) / (y_max - y_min) * plot_h + (pt.get('nudge', 0)) %}
+        <circle cx="{{ cx }}" cy="{{ cy }}" r="4.5" fill="{{ series.color }}"
+                class="dev-chart-dot" data-chart="{{ chart_id }}"
+                data-label="{{ series.label }}" data-value="{{ pt.y }}" data-date="{{ pt.date }}" data-color="{{ series.color }}"/>
+        {% endfor %}
+        {% endfor %}
+      </svg>
+    </div>
+    {# Legend below #}
+    <div class="dev-chart-legend">
+      {% for series in panel.series %}
+      <span class="dev-chart-legend-item"><span class="dev-chart-legend-swatch" style="background:{{ series.color }}"></span>{{ series.label }}</span>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<script>
+function switchDevChart(btn, idx) {
+  var parent = btn.closest('.panel');
+  parent.querySelectorAll('.dev-chart-tab').forEach(function(b) { b.classList.remove('active'); });
+  btn.classList.add('active');
+  parent.querySelectorAll('.dev-chart-panel-content').forEach(function(p) {
+    p.classList.toggle('active', p.dataset.panelIdx === idx);
+  });
+}
+
+// Hover: show all values at the hovered x-position in the info bar
+document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
+  dot.addEventListener('mouseenter', function() {
+    var chartId = dot.dataset.chart;
+    var date = dot.dataset.date;
+    var infoBar = document.getElementById('info-' + chartId);
+    // Find all dots at this date in this chart
+    var svg = dot.closest('svg');
+    var dots = svg.querySelectorAll('.dev-chart-dot[data-date="' + date + '"]');
+    var html = '<span style="font-weight:600; margin-right:4px">' + date + '</span>';
+    dots.forEach(function(d) {
+      html += '<span class="dev-chart-info-item"><span class="dev-chart-info-swatch" style="background:' + d.dataset.color + '"></span>' + d.dataset.label + ' ' + d.dataset.value + '</span>';
+    });
+    infoBar.innerHTML = html;
+  });
+  dot.addEventListener('mouseleave', function() {
+    var chartId = dot.dataset.chart;
+    var infoBar = document.getElementById('info-' + chartId);
+    // Restore default legend display
+    var panel = dot.closest('.dev-chart-panel-content');
+    var legends = panel.querySelectorAll('.dev-chart-legend-item');
+    var html = '';
+    legends.forEach(function(l) { html += l.outerHTML.replace('dev-chart-legend-item', 'dev-chart-info-item').replace('dev-chart-legend-swatch', 'dev-chart-info-swatch'); });
+    infoBar.innerHTML = html;
+  });
+});
+</script>
+
+{% endif %}
+{% endmacro %}
+
+{# Development tracking panel — table view (dates as rows, tools as columns) #}
+{% macro dev_tracking_panel() %}
+{% if p.dev_history and p.dev_history.snapshots|length >= 2 %}
+<div class="panel" style="margin-top:16px">
+  <h2>Rating History</h2>
+  <style>
+    .dh-table { width:100%; border-collapse:collapse; font-size:12px; }
+    .dh-table th { padding:4px 6px; text-align:center; font-size:11px; color:var(--text-dim); border-bottom:1px solid var(--border); }
+    .dh-table td { padding:4px 6px; text-align:center; }
+    .dh-table .dh-date-cell { text-align:left; white-space:nowrap; font-weight:600; }
+    .dh-table .dh-interval { font-size:9px; color:var(--text-dim); font-weight:normal; margin-left:4px; }
+    .dh-table .dh-pot { font-size:10px; opacity:0.6; }
+    .dh-table tr:not(:last-child) td { border-bottom:1px solid var(--border); }
+    .dh-table .dh-delta-row td { border-top:2px solid var(--border); font-weight:600; font-size:11px; }
+  </style>
+  <div style="overflow-x:auto">
+  <table class="dh-table">
+    <thead>
+      <tr>
+        <th style="text-align:left">Date</th>
+        <th>Comp</th>
+        <th>Ceil</th>
+        {% for cur_key, pot_key, label in p.dev_history.tool_pairs %}
+        <th>{{ label }}</th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for snap in p.dev_history.snapshots|reverse %}
+      <tr>
+        <td class="dh-date-cell">
+          {{ snap.date_short }}
+          {% if snap.days_since_prev %}<span class="dh-interval">+{{ snap.days_since_prev }}d</span>{% endif %}
+        </td>
+        <td>{% if snap.composite %}<span class="ovr-color" data-g="{{ snap.composite }}">{{ snap.composite }}</span>{% else %}—{% endif %}</td>
+        <td>{% if snap.ceiling %}<span class="ovr-color" data-g="{{ snap.ceiling }}">{{ snap.ceiling }}</span>{% else %}—{% endif %}</td>
+        {% for cur_key, pot_key, label in p.dev_history.tool_pairs %}
+          {% set cur_val = snap.tools.get(cur_key) %}
+          {% set pot_val = snap.tools.get(pot_key) if pot_key else none %}
+          <td>
+            {% if cur_val %}<span class="ovr-color" data-g="{{ cur_val }}">{{ cur_val }}</span>{% else %}—{% endif %}{% if pot_val and pot_val != cur_val %} <span class="dh-pot">({{ pot_val }})</span>{% endif %}
+          </td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+      {# Delta row #}
+      <tr class="dh-delta-row">
+        <td class="dh-date-cell">Δ</td>
+        {# Composite delta #}
+        {% set ns_comp = namespace(first=none, last=none) %}
+        {% for snap in p.dev_history.snapshots %}
+          {% if snap.composite and ns_comp.first is none %}{% set ns_comp.first = snap.composite %}{% endif %}
+          {% if snap.composite %}{% set ns_comp.last = snap.composite %}{% endif %}
+        {% endfor %}
+        <td>{% if ns_comp.first and ns_comp.last and ns_comp.first != ns_comp.last %}<span class="{% if ns_comp.last > ns_comp.first %}pos{% elif ns_comp.last < ns_comp.first %}neg{% endif %}">{{ "%+d"|format(ns_comp.last - ns_comp.first) }}</span>{% else %}0{% endif %}</td>
+        {# Ceiling delta #}
+        {% set ns_ceil = namespace(first=none, last=none) %}
+        {% for snap in p.dev_history.snapshots %}
+          {% if snap.ceiling and ns_ceil.first is none %}{% set ns_ceil.first = snap.ceiling %}{% endif %}
+          {% if snap.ceiling %}{% set ns_ceil.last = snap.ceiling %}{% endif %}
+        {% endfor %}
+        <td>{% if ns_ceil.first and ns_ceil.last and ns_ceil.first != ns_ceil.last %}<span class="{% if ns_ceil.last > ns_ceil.first %}pos{% elif ns_ceil.last < ns_ceil.first %}neg{% endif %}">{{ "%+d"|format(ns_ceil.last - ns_ceil.first) }}</span>{% else %}0{% endif %}</td>
+        {# Tool deltas #}
+        {% for cur_key, pot_key, label in p.dev_history.tool_pairs %}
+          {% set ns_t = namespace(first=none, last=none) %}
+          {% for snap in p.dev_history.snapshots %}
+            {% set v = snap.tools.get(cur_key) %}
+            {% if v and ns_t.first is none %}{% set ns_t.first = v %}{% endif %}
+            {% if v %}{% set ns_t.last = v %}{% endif %}
+          {% endfor %}
+          <td>{% if ns_t.first and ns_t.last and ns_t.first != ns_t.last %}<span class="{% if ns_t.last > ns_t.first %}pos{% elif ns_t.last < ns_t.first %}neg{% endif %}">{{ "%+d"|format(ns_t.last - ns_t.first) }}</span>{% else %}0{% endif %}</td>
+        {% endfor %}
+      </tr>
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+{% endmacro %}
 
 {# ═══════════════════════════════════════════════════════════════════════ #}
 {# MLB PLAYERS — tabbed layout                                           #}
@@ -710,6 +927,7 @@
   <button class="tab active" data-tab="overview">Overview</button>
   <button class="tab" data-tab="stats">Stats</button>
   {% if p.pctile_history %}<button class="tab" data-tab="advanced">Advanced</button>{% endif %}
+  {% if p.dev_history and p.dev_history.snapshots|length >= 2 %}<button class="tab" data-tab="development">Development</button>{% endif %}
   {% if p.prospect_comps %}<button class="tab" data-tab="outlook">Outlook</button>{% endif %}
   <button class="tab" data-tab="contract">Contract</button>
 </div>
@@ -784,7 +1002,7 @@
         {% for yr in p.pctile_history.years %}
         <tr>
           <td class="ph-year">{{ yr }}</td>
-          <td class="ph-sample">{{ p.pctile_history.sample_sizes.get(yr, "—") }}</td>
+          <td class="ph-sample">{% if p.pctile_history.sample_label == "IP" %}{{ p.pctile_history.sample_sizes.get(yr, "—")|fmt_ip }}{% else %}{{ p.pctile_history.sample_sizes.get(yr, "—") }}{% endif %}</td>
           {% for s in p.pctile_history.stats %}
             {% set yr_data = s["values"].get(yr) %}
             {% if yr_data %}
@@ -811,7 +1029,7 @@
       <tfoot>
         <tr class="ph-career-row">
           <td class="ph-year">Career</td>
-          <td class="ph-sample">{{ p.pctile_history.sample_sizes.values()|sum }}</td>
+          <td class="ph-sample">{% if p.pctile_history.sample_label == "IP" %}{{ p.pctile_history.sample_sizes.values()|sum|fmt_ip }}{% else %}{{ p.pctile_history.sample_sizes.values()|sum }}{% endif %}</td>
           {% for s in p.pctile_history.stats %}
             {% set career = s.get("career") %}
             {% if career %}
@@ -885,6 +1103,14 @@
     {% endfor %}
   </div>
   {% endif %}
+</div>
+{% endif %}
+
+{% if p.dev_history and p.dev_history.snapshots|length >= 2 %}
+{# ══ Development tab (MLB) ══ #}
+<div class="tab-content" id="tab-development">
+  {{ dev_charts_panel() }}
+  {{ dev_tracking_panel() }}
 </div>
 {% endif %}
 
@@ -1089,6 +1315,7 @@
 
 <div class="tab-bar">
   <button class="tab active" data-tab="overview">Overview</button>
+  {% if p.dev_history and p.dev_history.snapshots|length >= 2 %}<button class="tab" data-tab="development">Development</button>{% endif %}
   <button class="tab" data-tab="valuation">Valuation</button>
 </div>
 
@@ -1106,6 +1333,13 @@
     </div>
   </div>
 </div>
+
+{% if p.dev_history and p.dev_history.snapshots|length >= 2 %}
+<div class="tab-content" id="tab-development">
+  {{ dev_charts_panel() }}
+  {{ dev_tracking_panel() }}
+</div>
+{% endif %}
 
 <div class="tab-content" id="tab-valuation">
   <div class="columns">
@@ -1253,6 +1487,13 @@ function loadPctileHistory(pid, splitId, btn) {
         return v.toFixed(1);
       }
 
+      function fmtIp(ip) {
+        if (ip == null || ip === '\u2014') return '\u2014';
+        var full = Math.floor(ip);
+        var frac = Math.round((ip - full) * 3);
+        return full + '.' + frac;
+      }
+
       // Build header
       var html = '<table class="pctile-history-table"><thead><tr>';
       html += '<th class="ph-stat-col">Season</th>';
@@ -1263,7 +1504,7 @@ function loadPctileHistory(pid, splitId, btn) {
       // Build rows
       data.years.forEach(function(yr) {
         html += '<tr><td class="ph-year">' + yr + '</td>';
-        html += '<td class="ph-sample">' + (data.sample_sizes[String(yr)] || '\u2014') + '</td>';
+        html += '<td class="ph-sample">' + (data.sample_label === 'IP' ? fmtIp(data.sample_sizes[String(yr)]) : (data.sample_sizes[String(yr)] || '\u2014')) + '</td>';
         data.stats.forEach(function(s) {
           var v = s.values[String(yr)];
           if (v) {
@@ -1285,7 +1526,7 @@ function loadPctileHistory(pid, splitId, btn) {
       html += '<tfoot><tr class="ph-career-row"><td class="ph-year">Career</td>';
       var totalSample = 0;
       data.years.forEach(function(yr) { totalSample += (data.sample_sizes[String(yr)] || 0); });
-      html += '<td class="ph-sample">' + totalSample + '</td>';
+      html += '<td class="ph-sample">' + (data.sample_label === 'IP' ? fmtIp(totalSample) : totalSample) + '</td>';
       data.stats.forEach(function(s) {
         var pctiles = [];
         var weightedSum = 0;

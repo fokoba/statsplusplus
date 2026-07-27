@@ -1,0 +1,47 @@
+{
+  "last_posted_commit": "328060b",
+  "last_posted_date": "2026-07-27",
+  "last_posted_title": "Stats++ v1.0.0 Released — Easy Install for Everyone",
+  "history": [
+    {
+      "date": "2026-07-22",
+      "commit": "ff8087c",
+      "title": "Stats++ Update — Session 67"
+    },
+    {
+      "date": "2026-07-23",
+      "commit": "fdcc24c",
+      "title": "Stats++ Update — July 22-23"
+    },
+    {
+      "date": "2026-07-27",
+      "commit": "8ecfa4d",
+      "title": "WAR Projection Overhaul & Standings Tools"
+    },
+    {
+      "date": "2026-07-27",
+      "commit": "a9e700f",
+      "title": "Minor League Roster Redesign & Pitcher GB% Percentiles"
+    },
+    {
+      "date": "2026-07-27",
+      "commit": "f3af9e2",
+      "title": "Community PR Merges, IP Display Fix & Org-Wide MiLB Page"
+    },
+    {
+      "date": "2026-07-27",
+      "commit": "a690a56",
+      "title": "All MiLB Filters, Development Tracking & IP Fix"
+    },
+    {
+      "date": "2026-07-27",
+      "commit": "86f60fd",
+      "title": "New Development Tab — Player Rating History & Charts"
+    },
+    {
+      "date": "2026-07-27",
+      "commit": "328060b",
+      "title": "Stats++ v1.0.0 Released — Easy Install for Everyone"
+    }
+  ]
+}

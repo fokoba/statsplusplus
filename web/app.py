@@ -112,8 +112,8 @@ _refresh_status = {"running": False, "result": None, "message": ""}
 
 def _fmt_ip(ip):
     """Format true decimal IP (33.333) as baseball display (33.1)."""
-    if ip is None:
-        return "-"
+    if ip is None or isinstance(ip, str):
+        return ip or "-"
     full = int(ip)
     frac = round((ip - full) * 3)
     return f"{full}.{frac}" if frac else f"{full}.0"
@@ -335,6 +335,35 @@ def team(tid):
                            cut_candidates=cut_candidates,
                            waiver_candidates=waiver_candidates,
                            fa_candidates=fa_candidates)
+
+
+@app.route("/team/<int:tid>/minors")
+def team_minors_all(tid):
+    """All minor leaguers across all levels for a given MLB org."""
+    cfg = _get_cfg()
+    name = cfg.team_names_map.get(tid)
+    if not name:
+        return "Team not found", 404
+    roster = queries.get_org_minor_league_roster(tid)
+    # Get affiliate info for the org nav
+    from web_league_context import get_db
+    conn = get_db()
+    conn.row_factory = None
+    lmap = cfg.level_map
+    aff_rows = conn.execute("""
+        SELECT DISTINCT t.team_id, t.name, p.level
+        FROM teams t
+        JOIN players p ON p.team_id = t.team_id
+        WHERE t.parent_team_id = ? AND p.level != '1'
+        GROUP BY t.team_id
+        ORDER BY p.level
+    """, (tid,)).fetchall()
+    affiliates = [{"team_id": a[0], "name": a[1],
+                   "level": lmap.get(str(a[2]), str(a[2])),
+                   "level_num": a[2]} for a in aff_rows]
+    return render_template("team_minors_all.html",
+                           team_name=name, team_id=tid,
+                           roster=roster, affiliates=affiliates)
 
 
 @app.route("/league")

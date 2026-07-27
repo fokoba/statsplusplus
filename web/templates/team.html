@@ -62,6 +62,7 @@
 {% if affiliates %}
 <nav class="org-nav">
   <a href="/team/{{ tid }}" class="org-nav-item active">MLB</a>
+  <a href="/team/{{ tid }}/minors" class="org-nav-item">All MiLB</a>
   {% for aff in affiliates %}
   <a href="/team/{{ aff.team_id }}" class="org-nav-item" title="{{ aff.name }}">{{ aff.level }}</a>
   {% endfor %}

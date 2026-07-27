@@ -460,7 +460,28 @@ def get_player(pid):
             ratings["control"] = (_norm(ctrl), _norm(g("pot_ctrl")))
             ratings["stamina"] = _norm(stm)
             ratings["velocity"] = vel
-            if gb: ratings["gb"] = gb
+            if gb:
+                # GB% context from league averages (computed during refresh)
+                from web_league_context import league_averages as _load_la
+                _la = _load_la()
+                _gb_mean = _la.get("pitching", {}).get("gb_pct_mean")
+                _gb_stdev = _la.get("pitching", {}).get("gb_pct_stdev")
+                if _gb_mean and _gb_stdev and _gb_stdev > 0:
+                    _z = (gb - _gb_mean) / _gb_stdev
+                    if _z >= 2.0:
+                        gb_label = "Extreme GB"
+                    elif _z >= 1.0:
+                        gb_label = "High GB"
+                    elif _z <= -2.0:
+                        gb_label = "Extreme FB"
+                    elif _z <= -1.0:
+                        gb_label = "Fly ball"
+                    else:
+                        gb_label = "Average"
+                else:
+                    gb_label = ""
+                ratings["gb"] = gb
+                ratings["gb_label"] = gb_label
             if hra is not None:
                 ratings["hra"] = (_norm(hra), _norm(pot_hra))
             if pbabip is not None:

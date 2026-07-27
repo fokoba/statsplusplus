@@ -1032,6 +1032,21 @@ def _refresh_stat_percentiles(year):
         p5_idx = int(0.05 * len(era_minus_vals))
         averages.setdefault("pitching", {})["era_minus_p5"] = round(era_minus_vals[p5_idx], 1)
 
+    # GB% distribution for contextualizing pitcher groundball tendencies
+    for yr in (year - 1, year):
+        gb_rows = conn.execute("""
+            SELECT 100.0 * gb / (gb + fb) as gb_pct
+            FROM pitching_stats
+            WHERE year = ? AND split_id = 1 AND (gb + fb) > 100
+        """, (yr,)).fetchall()
+        if len(gb_rows) >= 20:
+            break
+    if gb_rows:
+        import statistics
+        gb_vals = [r[0] for r in gb_rows]
+        averages.setdefault("pitching", {})["gb_pct_mean"] = round(statistics.mean(gb_vals), 1)
+        averages.setdefault("pitching", {})["gb_pct_stdev"] = round(statistics.stdev(gb_vals), 1)
+
     conn.close()
     avg_path.write_text(json.dumps(averages, indent=2))
     bat_p95 = averages.get("batting", {}).get("ops_plus_p95")

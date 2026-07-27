@@ -71,11 +71,6 @@
         {% if p.on_40man %}
         <span style="font-size:10px; padding:1px 5px; border-radius:3px; background:#5c6bc0; color:#fff" title="On 40-man roster">40-man</span>
         {% endif %}
-        {% if p.eta is not none and p.eta > 0 %}
-        <span style="font-size:10px; color:var(--text-dim); margin-left:auto" title="Estimated time to MLB">ETA {{ p.eta }}yr</span>
-        {% elif p.eta == 0 or p.eta == 0.5 %}
-        <span style="font-size:10px; color:#4caf50; margin-left:auto" title="MLB-ready">ETA now</span>
-        {% endif %}
       </div>
     </div>
     {% endfor %}

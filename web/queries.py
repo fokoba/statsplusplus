@@ -819,6 +819,7 @@ from team_queries import (get_summary, get_standings, get_division_standings,
                           get_org_overview, get_draft_org_depth,
                           get_minor_league_team, get_minor_league_roster,
                           get_minor_league_notables, get_affiliates,
+                          get_org_minor_league_roster,
                           get_head_to_head_matrix)
 from player_queries import get_player
 from percentiles import get_hitter_percentiles, get_pitcher_percentiles

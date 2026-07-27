@@ -2,103 +2,37 @@
 {% block content %}
 
 <div class="page-header">
-  <h1>{{ info.level }} {{ info.name }}</h1>
+  <h1>{{ team_name }} — All Minor Leaguers</h1>
   <div style="color:var(--text-dim); font-size:13px; margin-top:4px">
-    {{ info.parent_name }} organization
+    {{ roster.hitters|length + roster.pitchers|length }} players across {{ affiliates|length }} affiliate{{ "s" if affiliates|length != 1 }}
   </div>
 </div>
 
 {# ── Org Navigation ── #}
-{% if info.affiliates %}
 <nav class="org-nav">
-  <a href="/team/{{ info.parent_id }}" class="org-nav-item">MLB</a>
-  <a href="/team/{{ info.parent_id }}/minors" class="org-nav-item">All MiLB</a>
-  {% for aff in info.affiliates %}
-  <a href="/team/{{ aff.team_id }}" class="org-nav-item{% if aff.current %} active{% endif %}" title="{{ aff.name }}">{{ aff.level }}</a>
+  <a href="/team/{{ team_id }}" class="org-nav-item">MLB</a>
+  <a href="/team/{{ team_id }}/minors" class="org-nav-item active">All MiLB</a>
+  {% for aff in affiliates %}
+  <a href="/team/{{ aff.team_id }}" class="org-nav-item" title="{{ aff.name }}">{{ aff.level }}</a>
   {% endfor %}
 </nav>
-{% endif %}
-
-{# ── Notables Section ── #}
-{% if notables %}
-<div class="panel">
-  <h2>Notables</h2>
-  <div class="notables-grid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:12px">
-    {% for p in notables %}
-    <div class="notable-card" style="background:var(--surface); border-radius:8px; padding:12px; border-left:3px solid {% if 'prospect' in p.tags %}var(--accent){% elif 'young' in p.tags %}#4caf50{% elif 'upside' in p.tags %}#ffc107{% else %}var(--border){% endif %}">
-      <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px">
-        <a href="/player/{{ p.pid }}" class="player-link" style="font-weight:600; font-size:14px">{{ p.name }}</a>
-        <span style="font-size:11px; color:var(--text-dim)">{{ p.pos }} · {{ p.age }}</span>
-      </div>
-
-      {# FV + Risk #}
-      {% if p.fv_str %}
-      <div style="margin-bottom:6px; font-size:12px">
-        <span style="font-weight:600">FV {{ p.fv_str }}</span>
-        {% if p.risk %}<span style="color:{% if p.risk == 'Low' %}#4caf50{% elif p.risk == 'Medium' %}#ffc107{% elif p.risk == 'High' %}#ff9800{% else %}#f44336{% endif %}; margin-left:4px">{{ p.risk }}</span>{% endif %}
-        {% if p.surplus %}<span style="color:var(--text-dim); margin-left:8px">${{ p.surplus }}M</span>{% endif %}
-      </div>
-      {% endif %}
-
-      {# Composite / Ceiling #}
-      <div style="font-size:12px; margin-bottom:6px">
-        {% if p.composite %}<span>Comp <span class="ovr-color" data-g="{{ p.composite }}">{{ p.composite }}</span></span>{% endif %}
-        {% if p.ceiling %}<span style="margin-left:8px">Ceil <span class="ovr-color" data-g="{{ p.ceiling }}">{{ p.ceiling }}</span></span>{% endif %}
-      </div>
-
-      {# Tools #}
-      <div style="font-size:11px; color:var(--text-dim); display:flex; gap:6px; flex-wrap:wrap">
-        {% if p.is_pitcher %}
-          {% if p.tools.stf %}<span title="Stuff">ST {{ p.tools.stf }}{% if p.tools.pot_stf and p.tools.pot_stf != p.tools.stf %}/{{ p.tools.pot_stf }}{% endif %}</span>{% endif %}
-          {% if p.tools.mov %}<span title="Movement">MV {{ p.tools.mov }}{% if p.tools.pot_mov and p.tools.pot_mov != p.tools.mov %}/{{ p.tools.pot_mov }}{% endif %}</span>{% endif %}
-          {% if p.tools.ctrl %}<span title="Control">CT {{ p.tools.ctrl }}{% if p.tools.pot_ctrl and p.tools.pot_ctrl != p.tools.ctrl %}/{{ p.tools.pot_ctrl }}{% endif %}</span>{% endif %}
-        {% else %}
-          {% if p.tools.con %}<span title="Contact">C {{ p.tools.con }}{% if p.tools.pot_con and p.tools.pot_con != p.tools.con %}/{{ p.tools.pot_con }}{% endif %}</span>{% endif %}
-          {% if p.tools.gap %}<span title="Gap">G {{ p.tools.gap }}{% if p.tools.pot_gap and p.tools.pot_gap != p.tools.gap %}/{{ p.tools.pot_gap }}{% endif %}</span>{% endif %}
-          {% if p.tools.pow %}<span title="Power">P {{ p.tools.pow }}{% if p.tools.pot_pow and p.tools.pot_pow != p.tools.pow %}/{{ p.tools.pot_pow }}{% endif %}</span>{% endif %}
-          {% if p.tools.eye %}<span title="Eye">E {{ p.tools.eye }}{% if p.tools.pot_eye and p.tools.pot_eye != p.tools.eye %}/{{ p.tools.pot_eye }}{% endif %}</span>{% endif %}
-          {% if p.tools.spd %}<span title="Speed">S {{ p.tools.spd }}</span>{% endif %}
-        {% endif %}
-      </div>
-
-      {# Tags #}
-      <div style="margin-top:6px; display:flex; gap:4px; align-items:center">
-        {% for tag in p.tags %}
-        <span style="font-size:10px; padding:1px 5px; border-radius:3px; background:{% if tag == 'prospect' %}var(--accent){% elif tag == 'young' %}#4caf50{% elif tag == 'upside' %}#ffc107{% else %}#666{% endif %}; color:{% if tag == 'upside' %}#000{% else %}#fff{% endif %}">{{ tag }}</span>
-        {% endfor %}
-        {% if p.young_by > 0 %}
-        <span style="font-size:10px; padding:1px 5px; border-radius:3px; background:#4caf50; color:#fff">-{{ p.young_by }}yr</span>
-        {% endif %}
-        {% if p.on_40man %}
-        <span style="font-size:10px; padding:1px 5px; border-radius:3px; background:#5c6bc0; color:#fff" title="On 40-man roster">40-man</span>
-        {% endif %}
-      </div>
-    </div>
-    {% endfor %}
-  </div>
-</div>
-{% else %}
-<div class="panel">
-  <h2>Notables</h2>
-  <p style="color:var(--text-dim)">No notable prospects or players on this roster.</p>
-</div>
-{% endif %}
 
 {# ── Full Roster (Tabbed: Hitters / Pitchers) ── #}
 <div class="panel">
   <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px">
-    <h2 style="margin:0">Full Roster ({{ roster.hitters|length + roster.pitchers|length }})</h2>
-    <button class="btn btn-sm csv-btn" onclick="exportTableCSV('minor-hitters-table', '{{ info.level|lower }}_hitters.csv')" title="Export hitters as CSV" style="margin-left:auto">⬇ CSV</button>
+    <h2 style="margin:0">Roster</h2>
+    <button class="btn btn-sm csv-btn" onclick="exportTableCSV('org-hitters-table', '{{ team_name|lower|replace(' ','_') }}_milb_hitters.csv')" title="Export hitters as CSV" style="margin-left:auto">⬇ CSV</button>
   </div>
   <div class="roster-tabs" style="margin-bottom:12px">
-    <button class="split-btn active" onclick="switchRosterTab(this, 'hitters')">Hitters ({{ roster.hitters|length }})</button>
-    <button class="split-btn" onclick="switchRosterTab(this, 'pitchers')">Pitchers ({{ roster.pitchers|length }})</button>
+    <button class="split-btn active" onclick="switchMinorsTab(this, 'hitters')">Hitters ({{ roster.hitters|length }})</button>
+    <button class="split-btn" onclick="switchMinorsTab(this, 'pitchers')">Pitchers ({{ roster.pitchers|length }})</button>
   </div>
 
   {# Hitters table #}
-  <table id="minor-hitters-table" class="roster-tab-table" data-roster-tab="hitters">
+  <table id="org-hitters-table" class="roster-tab-table sortable" data-roster-tab="hitters">
     <thead>
       <tr>
+        <th data-sort="str">Level</th>
         <th data-sort="pos" class="left">Pos</th>
         <th data-sort="str" class="left">Name</th>
         <th data-sort="num" data-sort-best="low">Age</th>
@@ -118,8 +52,12 @@
     <tbody>
       {% for p in roster.hitters %}
       <tr>
+        <td data-sort-value="{{ p.level_num }}"><span class="level-badge level-{{ p.level|lower|replace('-','') }}">{{ p.level }}</span></td>
         <td class="left" data-sort-value="{{ p._pos_sort }}">{{ p.pos }}</td>
-        <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
+        <td class="left">
+          <a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a>
+          {% if p.on_40man %}<span class="badge-40man" title="On 40-man roster">40</span>{% endif %}
+        </td>
         <td>{{ p.age }}</td>
         <td>{{ p.bt }}</td>
         <td>{% if p.composite %}<span class="ovr-color" data-g="{{ p.composite }}">{{ p.composite }}</span>{% else %}—{% endif %}</td>
@@ -138,9 +76,10 @@
   </table>
 
   {# Pitchers table #}
-  <table id="minor-pitchers-table" class="roster-tab-table" data-roster-tab="pitchers" style="display:none">
+  <table id="org-pitchers-table" class="roster-tab-table sortable" data-roster-tab="pitchers" style="display:none">
     <thead>
       <tr>
+        <th data-sort="str">Level</th>
         <th data-sort="pos" class="left">Role</th>
         <th data-sort="str" class="left">Name</th>
         <th data-sort="num" data-sort-best="low">Age</th>
@@ -159,8 +98,12 @@
     <tbody>
       {% for p in roster.pitchers %}
       <tr>
+        <td data-sort-value="{{ p.level_num }}"><span class="level-badge level-{{ p.level|lower|replace('-','') }}">{{ p.level }}</span></td>
         <td class="left" data-sort-value="{{ p._pos_sort }}">{{ p.pos }}</td>
-        <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
+        <td class="left">
+          <a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a>
+          {% if p.on_40man %}<span class="badge-40man" title="On 40-man roster">40</span>{% endif %}
+        </td>
         <td>{{ p.age }}</td>
         <td>{{ p.bt.split('/')[1] if '/' in p.bt else p.bt }}</td>
         <td>{% if p.composite %}<span class="ovr-color" data-g="{{ p.composite }}">{{ p.composite }}</span>{% else %}—{% endif %}</td>
@@ -178,8 +121,35 @@
   </table>
 </div>
 
+<style>
+.level-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+.level-aaa { background: #5c6bc0; color: #fff; }
+.level-aa { background: #42a5f5; color: #fff; }
+.level-a { background: #66bb6a; color: #fff; }
+.level-ashort { background: #8bc34a; color: #000; }
+.level-rookie { background: #ffc107; color: #000; }
+.level-intl { background: #ff9800; color: #000; }
+.level-dsl { background: #ff7043; color: #fff; }
+.badge-40man {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 3px;
+  border-radius: 2px;
+  background: #5c6bc0;
+  color: #fff;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+</style>
+
 <script>
-function switchRosterTab(btn, tab) {
+function switchMinorsTab(btn, tab) {
   btn.parentNode.querySelectorAll('.split-btn').forEach(function(b) { b.classList.remove('active'); });
   btn.classList.add('active');
   btn.closest('.panel').querySelectorAll('.roster-tab-table').forEach(function(t) {
@@ -187,8 +157,8 @@ function switchRosterTab(btn, tab) {
   });
   var csvBtn = btn.closest('.panel').querySelector('.csv-btn');
   if (csvBtn) {
-    var level = '{{ info.level|lower }}';
-    csvBtn.setAttribute('onclick', "exportTableCSV('minor-" + tab + "-table', '" + level + "_" + tab + ".csv')");
+    var prefix = '{{ team_name|lower|replace(" ","_") }}';
+    csvBtn.setAttribute('onclick', "exportTableCSV('org-" + tab + "-table', '" + prefix + "_milb_" + tab + ".csv')");
   }
 }
 </script>

@@ -920,6 +920,8 @@ def get_player(pid):
                 from evaluation_engine import compute_snapshot_deltas
                 snapshot_deltas = compute_snapshot_deltas(_cur_snap, _prev_snap)
                 # Pre-compute display-ready tool breakdown for the template
+                # Tool deltas are on raw (1-100) scale; normalize to 20-80 for display
+                from ratings import norm as _norm_r
                 _TOOL_LABELS = {
                     "cntct":"Con", "gap":"Gap", "pow":"Pow", "eye":"Eye", "ks":"Avoid K", "speed":"Spd",
                     "stf":"Stf", "mov":"Mov", "ctrl":"Ctrl", "stm":"Stm",
@@ -931,9 +933,15 @@ def get_player(pid):
                     "babip":"BABIP", "hra":"HR Avd", "pbabip":"pBABIP", "pot_babip":"pBABIP", "pot_hra":"pHR Avd",
                 }
                 sig = []
-                for k, d in snapshot_deltas["tool_deltas"].items():
-                    if abs(d) >= 3 and k in _TOOL_LABELS:
-                        sig.append({"name": _TOOL_LABELS[k], "delta": d})
+                for k in _TOOL_LABELS:
+                    cur_raw = _cur_snap.get(k)
+                    prev_raw = _prev_snap.get(k)
+                    if cur_raw is not None and prev_raw is not None:
+                        cur_norm = _norm_r(cur_raw) or 0
+                        prev_norm = _norm_r(prev_raw) or 0
+                        d = cur_norm - prev_norm
+                        if abs(d) >= 5:
+                            sig.append({"name": _TOOL_LABELS[k], "delta": d})
                 # Sort by magnitude descending, keep top 5
                 sig.sort(key=lambda x: abs(x["delta"]), reverse=True)
                 snapshot_deltas["top_changes"] = sig[:5]

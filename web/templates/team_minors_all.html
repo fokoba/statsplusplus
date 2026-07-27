@@ -19,10 +19,53 @@
 
 {# ── Full Roster (Tabbed: Hitters / Pitchers) ── #}
 <div class="panel">
-  <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px">
+  <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px; flex-wrap:wrap">
     <h2 style="margin:0">Roster</h2>
-    <button class="btn btn-sm csv-btn" onclick="exportTableCSV('org-hitters-table', '{{ team_name|lower|replace(' ','_') }}_milb_hitters.csv')" title="Export hitters as CSV" style="margin-left:auto">⬇ CSV</button>
+    <button class="btn btn-sm csv-btn" onclick="exportTableCSV('org-hitters-table', '{{ team_name|lower|replace(' ','_') }}_milb_hitters.csv')" title="Export as CSV" style="margin-left:auto">⬇ CSV</button>
   </div>
+
+  {# ── Filters ── #}
+  <div class="milb-filters" style="display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:12px">
+    <div class="filter-group">
+      <label style="font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px">Level</label>
+      <div class="level-filter-btns" style="display:flex; gap:2px; margin-top:3px">
+        <button class="filter-btn active" data-level="all" onclick="filterLevel(this)">All</button>
+        {% set seen_levels = [] %}
+        {% for aff in affiliates %}
+        {% if aff.level_num not in seen_levels %}
+        <button class="filter-btn" data-level="{{ aff.level_num }}" onclick="filterLevel(this)">{{ aff.level }}</button>
+        {% if seen_levels.append(aff.level_num) %}{% endif %}
+        {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+    <div class="filter-group">
+      <label style="font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px">Position</label>
+      <select id="pos-filter" onchange="applyFilters()" style="margin-top:3px; padding:3px 6px; font-size:12px; background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:4px">
+        <option value="all">All</option>
+        <option value="C">C</option>
+        <option value="1B">1B</option>
+        <option value="2B">2B</option>
+        <option value="3B">3B</option>
+        <option value="SS">SS</option>
+        <option value="LF">LF</option>
+        <option value="CF">CF</option>
+        <option value="RF">RF</option>
+        <option value="OF">OF</option>
+        <option value="SP">SP</option>
+        <option value="RP">RP</option>
+      </select>
+    </div>
+    <div class="filter-group" style="display:flex; align-items:end">
+      <label style="font-size:12px; color:var(--text); cursor:pointer; display:flex; align-items:center; gap:4px; margin-top:3px">
+        <input type="checkbox" id="forty-man-filter" onchange="applyFilters()"> 40-man only
+      </label>
+    </div>
+    <div class="filter-group" style="display:flex; align-items:end">
+      <span id="filter-count" style="font-size:11px; color:var(--text-dim); margin-top:3px"></span>
+    </div>
+  </div>
+
   <div class="roster-tabs" style="margin-bottom:12px">
     <button class="split-btn active" onclick="switchMinorsTab(this, 'hitters')">Hitters ({{ roster.hitters|length }})</button>
     <button class="split-btn" onclick="switchMinorsTab(this, 'pitchers')">Pitchers ({{ roster.pitchers|length }})</button>
@@ -51,14 +94,14 @@
     </thead>
     <tbody>
       {% for p in roster.hitters %}
-      <tr>
+      <tr data-level="{{ p.level_num }}" data-pos="{{ p.pos }}" data-40man="{{ '1' if p.on_40man else '0' }}">
         <td data-sort-value="{{ p.level_num }}"><span class="level-badge level-{{ p.level|lower|replace('-','') }}">{{ p.level }}</span></td>
         <td class="left" data-sort-value="{{ p._pos_sort }}">{{ p.pos }}</td>
         <td class="left">
           <a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a>
           {% if p.on_40man %}<span class="badge-40man" title="On 40-man roster">40</span>{% endif %}
         </td>
-        <td>{{ p.age }}</td>
+        <td class="age-cell" data-level="{{ p.level_num }}" data-age="{{ p.age }}">{{ p.age }}</td>
         <td>{{ p.bt }}</td>
         <td>{% if p.composite %}<span class="ovr-color" data-g="{{ p.composite }}">{{ p.composite }}</span>{% else %}—{% endif %}</td>
         <td>{% if p.ceiling %}<span class="ovr-color" data-g="{{ p.ceiling }}">{{ p.ceiling }}</span>{% else %}—{% endif %}</td>
@@ -97,14 +140,14 @@
     </thead>
     <tbody>
       {% for p in roster.pitchers %}
-      <tr>
+      <tr data-level="{{ p.level_num }}" data-pos="{{ p.pos }}" data-40man="{{ '1' if p.on_40man else '0' }}">
         <td data-sort-value="{{ p.level_num }}"><span class="level-badge level-{{ p.level|lower|replace('-','') }}">{{ p.level }}</span></td>
         <td class="left" data-sort-value="{{ p._pos_sort }}">{{ p.pos }}</td>
         <td class="left">
           <a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a>
           {% if p.on_40man %}<span class="badge-40man" title="On 40-man roster">40</span>{% endif %}
         </td>
-        <td>{{ p.age }}</td>
+        <td class="age-cell" data-level="{{ p.level_num }}" data-age="{{ p.age }}">{{ p.age }}</td>
         <td>{{ p.bt.split('/')[1] if '/' in p.bt else p.bt }}</td>
         <td>{% if p.composite %}<span class="ovr-color" data-g="{{ p.composite }}">{{ p.composite }}</span>{% else %}—{% endif %}</td>
         <td>{% if p.ceiling %}<span class="ovr-color" data-g="{{ p.ceiling }}">{{ p.ceiling }}</span>{% else %}—{% endif %}</td>
@@ -146,9 +189,86 @@
   margin-left: 4px;
   vertical-align: middle;
 }
+.filter-btn {
+  font-size: 11px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-dim);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.filter-btn:hover { border-color: var(--accent); color: var(--text); }
+.filter-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.age-young { color: #4caf50; font-weight: 600; }
+.age-old { color: #f44336; font-weight: 600; }
 </style>
 
 <script>
+// Age norms by level (what's typical for that level)
+var LEVEL_AGE_NORM = {'2': 25, '3': 23, '4': 22, '5': 20, '6': 19, '8': 18, '0': 18};
+
+// Color age cells based on how far from norm
+document.querySelectorAll('.age-cell').forEach(function(cell) {
+  var level = cell.dataset.level;
+  var age = parseInt(cell.dataset.age);
+  var norm = LEVEL_AGE_NORM[level];
+  if (!norm) return;
+  var delta = age - norm;
+  if (delta <= -2) cell.classList.add('age-young');
+  else if (delta >= 3) cell.classList.add('age-old');
+});
+
+// Active level filter
+var activeLevel = 'all';
+
+function filterLevel(btn) {
+  btn.parentNode.querySelectorAll('.filter-btn').forEach(function(b) { b.classList.remove('active'); });
+  btn.classList.add('active');
+  activeLevel = btn.dataset.level;
+  applyFilters();
+}
+
+function applyFilters() {
+  var posFilter = document.getElementById('pos-filter').value;
+  var fortyOnly = document.getElementById('forty-man-filter').checked;
+  var visibleCount = 0;
+
+  // Get the currently visible table
+  document.querySelectorAll('.roster-tab-table').forEach(function(table) {
+    if (table.style.display === 'none') return;
+    table.querySelectorAll('tbody tr').forEach(function(tr) {
+      var show = true;
+      // Level filter
+      if (activeLevel !== 'all' && tr.dataset.level !== activeLevel) show = false;
+      // Position filter
+      if (show && posFilter !== 'all') {
+        var rowPos = tr.dataset.pos;
+        if (posFilter === 'OF') {
+          if (rowPos !== 'LF' && rowPos !== 'CF' && rowPos !== 'RF' && rowPos !== 'OF') show = false;
+        } else {
+          if (rowPos !== posFilter) show = false;
+        }
+      }
+      // 40-man filter
+      if (show && fortyOnly && tr.dataset['40man'] !== '1') show = false;
+
+      tr.style.display = show ? '' : 'none';
+      if (show) visibleCount++;
+    });
+  });
+
+  // Update count display
+  var countEl = document.getElementById('filter-count');
+  var total = document.querySelector('.roster-tab-table:not([style*="display: none"]) tbody').querySelectorAll('tr').length;
+  if (activeLevel !== 'all' || posFilter !== 'all' || fortyOnly) {
+    countEl.textContent = 'Showing ' + visibleCount + ' of ' + total;
+  } else {
+    countEl.textContent = '';
+  }
+}
+
 function switchMinorsTab(btn, tab) {
   btn.parentNode.querySelectorAll('.split-btn').forEach(function(b) { b.classList.remove('active'); });
   btn.classList.add('active');
@@ -160,6 +280,8 @@ function switchMinorsTab(btn, tab) {
     var prefix = '{{ team_name|lower|replace(" ","_") }}';
     csvBtn.setAttribute('onclick', "exportTableCSV('org-" + tab + "-table', '" + prefix + "_milb_" + tab + ".csv')");
   }
+  // Re-apply filters when switching tabs
+  applyFilters();
 }
 </script>
 

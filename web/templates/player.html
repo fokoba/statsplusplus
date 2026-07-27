@@ -648,12 +648,12 @@
     </div>
     {% endmacro %}
     {% if p.is_pitcher %}
-      {{ comp_bar("Pitching", p.offensive_grade, p.offensive_ceiling) }}
-      {% if p.durability_score %}{{ comp_bar("Durability", p.durability_score, none) }}{% endif %}
+      {{ comp_bar("Pitching", p.offensive_grade|round|int, p.offensive_ceiling|round|int if p.offensive_ceiling else none) }}
+      {% if p.durability_score %}{{ comp_bar("Durability", p.durability_score|round|int, none) }}{% endif %}
     {% else %}
-      {{ comp_bar("Offense", p.offensive_grade, p.offensive_ceiling) }}
-      {% if p.baserunning_value is not none %}{{ comp_bar("Baserunning", p.baserunning_value, none) }}{% endif %}
-      {% if p.defensive_value is not none %}{{ comp_bar("Defense", p.defensive_value, none) }}{% endif %}
+      {{ comp_bar("Offense", p.offensive_grade|round|int, p.offensive_ceiling|round|int if p.offensive_ceiling else none) }}
+      {% if p.baserunning_value is not none %}{{ comp_bar("Baserunning", p.baserunning_value|round|int, none) }}{% endif %}
+      {% if p.defensive_value is not none %}{{ comp_bar("Defense", p.defensive_value|round|int, none) }}{% endif %}
     {% endif %}
   </div>
   {% endif %}

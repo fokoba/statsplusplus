@@ -315,7 +315,7 @@ def get_roster(team_id=None):
 
     bat = {}
     for r in conn.execute(
-        "SELECT player_id, ab, h, d, t, hr, bb, pa, war FROM batting_stats WHERE year=? AND split_id=1", (year,)
+        "SELECT player_id, ab, h, d, t, hr, bb, pa, war FROM batting_stats WHERE year=? AND split_id=1 AND team_id=?", (year, tid)
     ).fetchall():
         pid, ab, h, d, t, hr, bb, pa, war = r
         avg = h / ab if ab else None
@@ -325,7 +325,7 @@ def get_roster(team_id=None):
 
     pit = {}
     for r in conn.execute(
-        "SELECT player_id, era, ip, k, war FROM pitching_stats WHERE year=? AND split_id=1", (year,)
+        "SELECT player_id, era, ip, k, war FROM pitching_stats WHERE year=? AND split_id=1 AND team_id=?", (year, tid)
     ).fetchall():
         pit[r[0]] = (r[1], r[2], r[3], r[4])
 
@@ -394,8 +394,8 @@ def get_roster_hitters(team_id=None):
     bat = {}  # pid -> {split_id -> dict}
     for r in conn.execute("""
         SELECT player_id, split_id, ab, h, d, t, hr, r, rbi, sb, bb, k, pa, war, g, cs, hbp, sf
-        FROM batting_stats WHERE year=? AND split_id IN (1,2,3)
-    """, (year,)):
+        FROM batting_stats WHERE year=? AND split_id IN (1,2,3) AND team_id=?
+    """, (year, tid)):
         bat.setdefault(r["player_id"], {})[r["split_id"]] = dict(r)
 
     # For two-way players: primary non-pitcher fielding position
@@ -485,8 +485,8 @@ def get_roster_pitchers(team_id=None):
     for r in conn.execute("""
         SELECT player_id, split_id, ip, g, gs, w, l, sv, era, k, bb, ha, war,
                hra, bf, hld, bs, qs, er, r AS runs, cg, sho, ir, irs
-        FROM pitching_stats WHERE year=? AND split_id IN (1,2,3)
-    """, (year,)):
+        FROM pitching_stats WHERE year=? AND split_id IN (1,2,3) AND team_id=?
+    """, (year, tid)):
         pit.setdefault(r["player_id"], {})[r["split_id"]] = dict(r)
 
     # Detect two-way pitchers

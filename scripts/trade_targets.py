@@ -276,7 +276,7 @@ def find_targets(bucket, min_ovr=50, sellers_only=False, include_controlled=Fals
         status = _contract_status(
             r["years"] or 1, r["current_year"] or 0,
             r["last_year_team_option"], r["last_year_player_option"],
-            vesting_opt=r.get("last_year_vesting_option"),
+            vesting_opt=r["last_year_vesting_option"],
         )
         ext_salary_m = (r["ext_salary"] or 0) / 1e6
         # A "rental" with a signed extension is actually a commitment

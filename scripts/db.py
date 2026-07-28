@@ -383,14 +383,19 @@ def _migrate_ratings_components(conn: sqlite3.Connection):
 def _migrate_positional_context(conn: sqlite3.Connection):
     """Add positional context columns to ratings table.
 
-    Adds nullable ``positional_percentile`` (REAL) and
-    ``positional_median`` (INTEGER) columns used by the two-pass
-    evaluation pipeline to store per-player positional context.
+    Adds nullable ``positional_percentile`` (REAL), ``positional_median``
+    (INTEGER), and ``true_ceiling`` (INTEGER) columns used by the two-pass
+    evaluation pipeline to store per-player positional context. These are
+    also added lazily inside evaluation_engine.py's enrichment pass, but
+    only once that pass has run against an existing ratings snapshot — a
+    freshly onboarded league queries these columns (e.g. get_cut_candidates)
+    before that pass ever runs, so they must exist unconditionally here too.
     """
     existing = {row[1] for row in conn.execute("PRAGMA table_info(ratings)").fetchall()}
     new_cols = [
         ("positional_percentile", "REAL"),
         ("positional_median", "INTEGER"),
+        ("true_ceiling", "INTEGER"),
     ]
     for col, typ in new_cols:
         if col not in existing:

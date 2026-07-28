@@ -811,6 +811,10 @@ _NIPPON_TEAM_IDS = tuple(range(288, 302)) + tuple(range(320, 334))
 
 
 _FA_PROSPECT_AGE_MAX = 24
+# Prospect (age <= 24) free agents are shown if they clear this FV bar,
+# rather than a top-N%-of-pool cut — a fresh draft class landing in the
+# pool shouldn't get squeezed out by an arbitrary percentage.
+_FA_PROSPECT_MIN_FV = 30
 
 
 def get_free_agent_candidates(team_id=None):
@@ -908,13 +912,18 @@ def get_free_agent_candidates(team_id=None):
     clean_young_hitters = [e for e in young_hitters if not e["concerns"]]
     clean_young_pitchers = [e for e in young_pitchers if not e["concerns"]]
 
+    def _fv_min(pool):
+        qualifying = [e for e in pool if e["fv"] is not None and e["fv"] >= _FA_PROSPECT_MIN_FV]
+        return sorted(qualifying, key=_prospect_key)
+
     return {"hitters": _top_pct(hitters, _ovr_key), "pitchers": _top_pct(pitchers, _ovr_key),
-            "young_hitters": _top_pct(young_hitters, _prospect_key),
-            "young_pitchers": _top_pct(young_pitchers, _prospect_key),
+            "young_hitters": _fv_min(young_hitters),
+            "young_pitchers": _fv_min(young_pitchers),
             "clean_hitters": _top_pct(clean_hitters, _ovr_key, min_count=5),
             "clean_pitchers": _top_pct(clean_pitchers, _ovr_key, min_count=5),
-            "clean_young_hitters": _top_pct(clean_young_hitters, _prospect_key, min_count=5),
-            "clean_young_pitchers": _top_pct(clean_young_pitchers, _prospect_key, min_count=5),
+            "clean_young_hitters": _fv_min(clean_young_hitters),
+            "clean_young_pitchers": _fv_min(clean_young_pitchers),
+            "prospect_min_fv": _FA_PROSPECT_MIN_FV,
             "prospect_age_max": _FA_PROSPECT_AGE_MAX,
             "top_pct": int(_FA_TOP_PCT * 100),
             "total_fa": total_fa, "nippon_excluded": nippon_excluded,

@@ -1091,7 +1091,7 @@
   <div class="panel">
     <h2>Top Free Agent Prospects (Age ≤ {{ fa_candidates.prospect_age_max }}) <span style="color:var(--text-dim); font-weight:400; font-size:13px">({{ fa_candidates.young_hitters|length }} hitters, {{ fa_candidates.young_pitchers|length }} pitchers)</span></h2>
     <div style="font-size:12px; color:var(--text-dim); margin-bottom:8px">
-      Top {{ fa_candidates.top_pct }}% of signable free agents age {{ fa_candidates.prospect_age_max }} or under, ranked by FV (or potential ceiling when unevaluated) instead of current Ovr — surfaces high-upside youth the Ovr-based list above misses.
+      All signable free agents age {{ fa_candidates.prospect_age_max }} or under with FV {{ fa_candidates.prospect_min_fv }} or higher, ranked by FV (or potential ceiling when unevaluated) instead of current Ovr — surfaces high-upside youth the Ovr-based list above misses.
     </div>
     <h3 style="font-size:13px; margin:12px 0 6px">Hitters</h3>
     {{ add_table(fa_candidates.young_hitters, "fa-young-hitters", false) }}
@@ -1113,7 +1113,7 @@
   <div class="panel">
     <h2>Clean Prospect Personalities <span style="color:var(--text-dim); font-weight:400; font-size:13px">({{ fa_candidates.clean_young_hitters|length }} hitters, {{ fa_candidates.clean_young_pitchers|length }} pitchers)</span></h2>
     <div style="font-size:12px; color:var(--text-dim); margin-bottom:8px">
-      Top {{ fa_candidates.top_pct }}% (minimum 5 each) of signable free agents age {{ fa_candidates.prospect_age_max }} or under with zero personality concerns, ranked by FV (or potential ceiling when unevaluated).
+      All signable free agents age {{ fa_candidates.prospect_age_max }} or under with FV {{ fa_candidates.prospect_min_fv }} or higher and zero personality concerns, ranked by FV (or potential ceiling when unevaluated).
     </div>
     <h3 style="font-size:13px; margin:12px 0 6px">Hitters</h3>
     {{ add_table(fa_candidates.clean_young_hitters, "fa-clean-young-hitters", false) }}

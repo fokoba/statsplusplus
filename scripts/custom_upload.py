@@ -30,6 +30,11 @@ from evaluation_engine import (
 from fv_model import calc_fv, DEFENSIVE_WEIGHTS, LEVEL_NORM_AGE
 from constants import PITCH_FIELDS
 from player_utils import display_pos
+from db import get_conn
+
+# Same exclusion set as web/team_queries.py's get_free_agent_candidates —
+# NPB-drafted players aren't actually signable even when marked a free agent.
+_NIPPON_TEAM_IDS = tuple(range(288, 302)) + tuple(range(320, 334))
 
 
 # ---------------------------------------------------------------------------
@@ -370,14 +375,57 @@ def evaluate_row(d: dict) -> dict | None:
     }
 
 
+def _db_free_agent_status(pids: list[str]) -> dict[str, bool]:
+    """Look up each pid in this league's own DB and return whether it's a
+    truly signable free agent there (same criteria as get_free_agent_candidates
+    in team_queries.py: free_agent, not retired, unattached, not NPB-drafted,
+    not in the draft-eligible amateur pool). Pids not found in the DB at all
+    are omitted from the result so the caller can fall back to a CSV-only
+    guess for players this league hasn't seen yet (e.g. a brand new signee).
+    """
+    try:
+        conn = get_conn()
+    except Exception:
+        return {}
+    nippon_qs = ",".join("?" * len(_NIPPON_TEAM_IDS))
+    pid_qs = ",".join("?" * len(pids))
+    rows = conn.execute(
+        f"""SELECT player_id, free_agent, retired, team_id, nation_id,
+                   draft_team_id, draft_eligible
+            FROM players WHERE player_id IN ({pid_qs})""",
+        pids,
+    ).fetchall()
+    conn.close()
+    status = {}
+    for r in rows:
+        signable = (
+            r["free_agent"] == 1 and r["retired"] == 0 and r["team_id"] == 0
+            and (r["nation_id"] is None or r["nation_id"] != 98)
+            and (r["draft_team_id"] is None or r["draft_team_id"] not in _NIPPON_TEAM_IDS)
+            and (r["draft_eligible"] or 0) != 1
+        )
+        status[str(r["player_id"])] = signable
+    return status
+
+
 def evaluate_csv(file_bytes: bytes) -> list[dict]:
     rows = parse_rows(file_bytes)
-    out = []
+    parsed = []
     for d in rows:
         try:
             r = evaluate_row(d)
         except Exception as e:
             r = {"pid": d.get("ID", "?"), "name": d.get("Name", "?"), "error": str(e)}
         if r:
-            out.append(r)
-    return out
+            parsed.append(r)
+
+    pids = [r["pid"] for r in parsed if "error" not in r]
+    db_status = _db_free_agent_status(pids) if pids else {}
+    for r in parsed:
+        if "error" in r:
+            continue
+        known = db_status.get(r["pid"])
+        if known is not None:
+            r["is_free_agent"] = known
+
+    return parsed

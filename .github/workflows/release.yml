@@ -32,10 +32,9 @@ jobs:
             -x "tests/*" \
             -x "docs/screenshots/*" \
             -x "assets/screenshots/*" \
+            -x "assets/*.png" \
+            -x "assets/*.jpg" \
             -x "samples/*" \
-            -x "*.PNG" \
-            -x "*.png" \
-            -x "*.jpg" \
             -x "*.Zone.Identifier" \
             -x ".venv/*"
 

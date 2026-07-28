@@ -953,6 +953,10 @@ td.stat-bad  { color: var(--red); }
 .pp-pitches { display: flex; gap: 8px; width: 100%; margin-top: 2px; }
 .pp-pitch { font-size: 12px; }
 .tw-badge { font-size: 10px; padding: 1px 4px; border-radius: 3px; background: var(--border); color: var(--green); vertical-align: middle; margin-left: 4px; }
+.status-badge { font-size: 10px; padding: 1px 4px; border-radius: 3px; vertical-align: middle; margin-left: 4px; font-weight: 600; }
+.status-badge.dl { background: #4a2020; color: #ff6b6b; }
+.status-badge.dfa { background: #3a3020; color: #ffa500; }
+.status-badge.wvr { background: #20303a; color: #6bb5ff; }
 .tw-toggle { margin-left: 8px; }
 .tw-btn { font-size: 11px; padding: 2px 8px; border: 1px solid var(--border); background: transparent; color: var(--text-dim); cursor: pointer; border-radius: 3px; }
 .tw-btn.active { background: var(--border); color: var(--green); }

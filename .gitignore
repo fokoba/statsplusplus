@@ -32,3 +32,7 @@ Thumbs.db
 # MCP server config (machine-specific paths)
 .kiro/settings/mcp.json
 .playwright-mcp/
+
+# Reference/temp files
+faq-tmp.md
+docs/StatsPlus APIs*

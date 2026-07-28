@@ -1,17 +1,17 @@
 {
-  "last_posted_commit": "328060b",
+  "last_posted_commit": "660875e",
   "last_posted_date": "2026-07-27",
-  "last_posted_title": "Stats++ v1.0.0 Released — Easy Install for Everyone",
+  "last_posted_title": "StatsPlus API Integration \u2014 Injury, Service Time, Roster Status & MiLB Stats",
   "history": [
     {
       "date": "2026-07-22",
       "commit": "ff8087c",
-      "title": "Stats++ Update — Session 67"
+      "title": "Stats++ Update \u2014 Session 67"
     },
     {
       "date": "2026-07-23",
       "commit": "fdcc24c",
-      "title": "Stats++ Update — July 22-23"
+      "title": "Stats++ Update \u2014 July 22-23"
     },
     {
       "date": "2026-07-27",
@@ -36,12 +36,17 @@
     {
       "date": "2026-07-27",
       "commit": "86f60fd",
-      "title": "New Development Tab — Player Rating History & Charts"
+      "title": "New Development Tab \u2014 Player Rating History & Charts"
     },
     {
       "date": "2026-07-27",
       "commit": "328060b",
-      "title": "Stats++ v1.0.0 Released — Easy Install for Everyone"
+      "title": "Stats++ v1.0.0 Released \u2014 Easy Install for Everyone"
+    },
+    {
+      "date": "2026-07-27",
+      "commit": "660875e",
+      "title": "StatsPlus API Integration \u2014 Injury, Service Time, Roster Status & MiLB Stats"
     }
   ]
 }

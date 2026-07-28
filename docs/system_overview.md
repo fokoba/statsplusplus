@@ -16,8 +16,10 @@ StatsPlus API
      ▼
 refresh.py ─────────────────────────────────────────────────────────────────────┐
   Writes: players, teams, ratings, contracts, batting_stats, pitching_stats,    │
-          team_batting_stats, team_pitching_stats,                              │
-          league_averages.json, state.json                                      │
+          fielding_stats, team_batting_stats, team_pitching_stats, games,       │
+          league_averages.json, league_settings.json, state.json                │
+  Pulls:  /players, /ratings, /contracts, /batting, /pitching, /fielding,       │
+          /lgdata (league hierarchy + MiLB league IDs), /gamehistory            │
      │                                                                          │
      ▼                                                                          │
 calibrate.py (pass 1) ──────────────────────────────────────────────────────── │
@@ -100,18 +102,18 @@ All other analysis scripts are read-only against the DB.
 
 | Table | Owner | Description |
 |---|---|---|
-| `players` | `refresh.py` | All players across all orgs and levels |
+| `players` | `refresh.py` | All players across all orgs and levels. Expanded fields: injury (DL status, days), service time (exact years/days), roster status (DFA/waivers/traded/FA), draft history, demographics. |
 | `teams` | `refresh.py` | Team ID → name mapping (34 MLB orgs) |
 | `ratings` | `refresh.py` | Scouting ratings (latest snapshot only). Full 121 columns. Old snapshots pruned on refresh. |
 | `ratings_history` | `refresh.py` | Monthly in-game rating snapshots (53 cols). Ovr/pot, hitter/pitcher tools (cur+pot), all pitch types (cur+pot), extended ratings. ~1.3MB/snapshot. |
 | `contracts` | `refresh.py` | Active contracts league-wide |
 | `contract_extensions` | `refresh.py` | Pending contract extensions (only rows with years > 0) |
-| `batting_stats` | `refresh.py` | MLB batting stats by player/year/split (32 cols, 2020-2033) |
-| `pitching_stats` | `refresh.py` | MLB pitching stats by player/year/split (52 cols, 2020-2033) |
+| `batting_stats` | `refresh.py` | Batting stats by player/year/split (33 cols). `league_id` NULL = MLB, non-null = MiLB league. |
+| `pitching_stats` | `refresh.py` | Pitching stats by player/year/split (53 cols). `league_id` NULL = MLB, non-null = MiLB league. |
 | `team_batting_stats` | `refresh.py` | Team-level batting aggregates (34 teams × 3 splits) |
 | `team_pitching_stats` | `refresh.py` | Team-level pitching aggregates (34 teams × 3 splits) |
 | `games` | `refresh.py` | Game results (23K+ games, 2024-2033). runs0=away, runs1=home |
-| `fielding_stats` | `refresh.py` | Player fielding stats by position (G, IP, TC, E, ZR, framing, arm) |
+| `fielding_stats` | `refresh.py` | Player fielding stats by position (G, IP, TC, E, ZR, framing, arm). `league_id` column for MiLB. |
 | `prospect_fv` | `fv_calc.py` | FV grades for prospects and rookie-eligible MLB players (<130 AB, <50 IP, age ≤ 24). Cleared and rewritten each run. |
 | `player_surplus` | `fv_calc.py` | Surplus value for all MLB players. Cleared and rewritten each run. |
 

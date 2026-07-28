@@ -94,6 +94,7 @@ CREATE TABLE IF NOT EXISTS ratings (
     height INTEGER, bats TEXT, throws TEXT,
     stl_rt INTEGER, run INTEGER, sac_bunt INTEGER, bunt_hit INTEGER, hold INTEGER,
     composite_score INTEGER, ceiling_score INTEGER, tool_only_score INTEGER, secondary_composite INTEGER,
+    true_ceiling INTEGER, positional_percentile REAL, positional_median INTEGER,
     PRIMARY KEY (player_id, snapshot_date)
 );
 
@@ -402,6 +403,50 @@ def _migrate_positional_context(conn: sqlite3.Connection):
             conn.execute(f"ALTER TABLE ratings ADD COLUMN {col} {typ}")
 
 
+def _migrate_players(conn: sqlite3.Connection):
+    """Add expanded player fields from StatsPlus API (Phase 1, July 2026)."""
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(players)").fetchall()}
+    new_cols = [
+        # Injury
+        ("injury_is_injured", "INTEGER"),
+        ("injury_dl_left", "INTEGER"),
+        ("injury_left", "INTEGER"),
+        ("is_on_dl", "INTEGER"),
+        ("is_on_dl60", "INTEGER"),
+        ("dl_days_this_year", "INTEGER"),
+        # Service time
+        ("mlb_service_years", "INTEGER"),
+        ("mlb_service_days", "INTEGER"),
+        ("mlb_service_days_this_year", "INTEGER"),
+        ("pro_service_years", "INTEGER"),
+        ("pro_service_days", "INTEGER"),
+        # Roster status
+        ("is_active", "INTEGER"),
+        ("is_on_secondary", "INTEGER"),
+        ("is_on_waivers", "INTEGER"),
+        ("designated_for_assignment", "INTEGER"),
+        ("free_agent", "INTEGER"),
+        ("was_traded", "INTEGER"),
+        ("days_on_waivers", "INTEGER"),
+        ("days_on_waivers_left", "INTEGER"),
+        ("has_received_arbitration", "INTEGER"),
+        # Draft info
+        ("draft_year", "INTEGER"),
+        ("draft_round", "INTEGER"),
+        ("draft_pick", "INTEGER"),
+        ("draft_overall_pick", "INTEGER"),
+        ("draft_team_id", "INTEGER"),
+        # Demographics
+        ("date_of_birth", "TEXT"),
+        ("weight", "INTEGER"),
+        ("nation_id", "INTEGER"),
+        ("uniform_number", "INTEGER"),
+    ]
+    for col, typ in new_cols:
+        if col not in existing:
+            conn.execute(f"ALTER TABLE players ADD COLUMN {col} {typ}")
+
+
 def init_schema(league_dir: Path | None = None):
     with get_conn(league_dir) as conn:
         conn.executescript(SCHEMA)
@@ -413,9 +458,21 @@ def init_schema(league_dir: Path | None = None):
         ps_cols = {r[1] for r in conn.execute("PRAGMA table_info(player_surplus)").fetchall()}
         if "surplus_yr1" not in ps_cols:
             conn.execute("ALTER TABLE player_surplus ADD COLUMN surplus_yr1 INTEGER")
-        # players: add roster-status columns if missing (waiver/FA tracking)
+        _migrate_players(conn)
+        _migrate_stats_league_id(conn)
+        # players: "retired" isn't part of the base schema or _migrate_players'
+        # StatsPlus-API column set, but is used by our own free-agent tracking.
         p_cols = {r[1] for r in conn.execute("PRAGMA table_info(players)").fetchall()}
-        for col in ("retired", "free_agent", "is_on_waivers", "nation_id",
-                    "draft_eligible", "draft_team_id"):
-            if col not in p_cols:
-                conn.execute(f"ALTER TABLE players ADD COLUMN {col} INTEGER")
+        if "retired" not in p_cols:
+            conn.execute("ALTER TABLE players ADD COLUMN retired INTEGER")
+
+
+def _migrate_stats_league_id(conn: sqlite3.Connection):
+    """Add league_id column to stat tables for minor league stats (Phase 2, July 2026).
+
+    NULL = MLB (backward compatible). Non-null = minor league ID from /lgdata.
+    """
+    for table in ("batting_stats", "pitching_stats", "fielding_stats"):
+        existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        if "league_id" not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN league_id INTEGER")

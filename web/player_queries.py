@@ -706,7 +706,7 @@ def get_player(pid):
             "_d": d, "_t": t, "_hbp": hbp, "_sf": sf,
         }
 
-    _bat_sql = "SELECT year, ab, h, d, t, hr, rbi, bb, k, sb, pa, war, hbp, sf, g, cs FROM batting_stats WHERE player_id=? AND split_id=? ORDER BY year"
+    _bat_sql = "SELECT year, ab, h, d, t, hr, rbi, bb, k, sb, pa, war, hbp, sf, g, cs FROM batting_stats WHERE player_id=? AND split_id=? AND league_id IS NULL ORDER BY year"
 
     def _aggregate_bat_stints(rows):
         """Aggregate multi-team stints into one row per year, preserving per-team breakdown."""
@@ -762,7 +762,7 @@ def get_player(pid):
     # Attach team info to each stint row
     _team_rows = conn.execute(
         "SELECT year, team_id, pa, ab, h, d, t, hr, rbi, bb, k, sb, pa, war, hbp, sf, g, cs "
-        "FROM batting_stats WHERE player_id=? AND split_id=1 ORDER BY year, stint",
+        "FROM batting_stats WHERE player_id=? AND split_id=1 AND league_id IS NULL ORDER BY year, stint",
         (pid,)).fetchall()
     _bat_with_teams = []
     for r in _team_rows:
@@ -816,7 +816,7 @@ def get_player(pid):
             "_gb": gb, "_fb": fb,
         }
 
-    _pit_sql = "SELECT year, ip, era, k, bb, w, l, sv, war, gs, g, hra, bf, hp, ha, hld, bs, qs, gb, fb, r, er FROM pitching_stats WHERE player_id=? AND split_id=? ORDER BY year"
+    _pit_sql = "SELECT year, ip, era, k, bb, w, l, sv, war, gs, g, hra, bf, hp, ha, hld, bs, qs, gb, fb, r, er FROM pitching_stats WHERE player_id=? AND split_id=? AND league_id IS NULL ORDER BY year"
 
     def _aggregate_pit_stints(rows):
         from collections import defaultdict
@@ -879,7 +879,7 @@ def get_player(pid):
 
     _pit_team_rows = conn.execute(
         "SELECT year, team_id, ip, era, k, bb, w, l, sv, war, gs, g, hra, bf, hp, ha, hld, bs, qs, gb, fb, r, er "
-        "FROM pitching_stats WHERE player_id=? AND split_id=1 ORDER BY year, stint",
+        "FROM pitching_stats WHERE player_id=? AND split_id=1 AND league_id IS NULL ORDER BY year, stint",
         (pid,)).fetchall()
     _pit_with_teams = []
     for r in _pit_team_rows:
@@ -1516,6 +1516,58 @@ def get_player(pid):
     # ── Insights ──
     insights = _compute_insights(rd, is_pitcher, composite_score, _norm)
 
+    # ── Minor league stats ──
+    milb_bat_stats = []
+    milb_pit_stats = []
+    try:
+        _milb_conn = get_db()
+        _milb_bat = _milb_conn.execute("""
+            SELECT b.year, b.league_id, b.ab, b.h, b.hr, b.rbi, b.bb, b.k, b.sb,
+                   b.pa, b.war, b.g, b.d, b.t, b.hbp, b.sf
+            FROM batting_stats b
+            WHERE b.player_id=? AND b.split_id=1 AND b.league_id IS NOT NULL
+            ORDER BY b.year, b.league_id
+        """, (pid,)).fetchall()
+        for r in _milb_bat:
+            ab = r["ab"] or 0
+            h = r["h"] or 0
+            hr = r["hr"] or 0
+            bb = r["bb"] or 0
+            k = r["k"] or 0
+            pa = r["pa"] or 0
+            milb_bat_stats.append({
+                "year": r["year"], "league_id": r["league_id"],
+                "g": r["g"] or 0, "pa": pa, "ab": ab, "h": h, "hr": hr,
+                "rbi": r["rbi"] or 0, "bb": bb, "k": k, "sb": r["sb"] or 0,
+                "avg": round(h / ab, 3) if ab else 0,
+                "obp": round((h + bb + (r["hbp"] or 0)) / (ab + bb + (r["hbp"] or 0) + (r["sf"] or 0)), 3)
+                       if (ab + bb + (r["hbp"] or 0) + (r["sf"] or 0)) else 0,
+                "slg": round((h + (r["d"] or 0) + 2*(r["t"] or 0) + 3*hr) / ab, 3) if ab else 0,
+                "war": round(r["war"], 1) if r["war"] else 0,
+            })
+
+        _milb_pit = _milb_conn.execute("""
+            SELECT p.year, p.league_id, p.ip, p.era, p.k, p.bb, p.w, p.l, p.sv,
+                   p.war, p.gs, p.g, p.hra, p.ha, p.er, p.r
+            FROM pitching_stats p
+            WHERE p.player_id=? AND p.split_id=1 AND p.league_id IS NOT NULL
+            ORDER BY p.year, p.league_id
+        """, (pid,)).fetchall()
+        for r in _milb_pit:
+            ip = r["ip"] or 0
+            milb_pit_stats.append({
+                "year": r["year"], "league_id": r["league_id"],
+                "g": r["g"] or 0, "gs": r["gs"] or 0,
+                "ip": round(ip, 1), "era": round(r["era"], 2) if r["era"] else 0,
+                "k": r["k"] or 0, "bb": r["bb"] or 0,
+                "w": r["w"] or 0, "l": r["l"] or 0, "sv": r["sv"] or 0,
+                "war": round(r["war"], 1) if r["war"] else 0,
+                "k9": round((r["k"] or 0) * 9 / ip, 1) if ip else 0,
+                "bb9": round((r["bb"] or 0) * 9 / ip, 1) if ip else 0,
+            })
+    except Exception:
+        pass
+
     return {
         "pid": pid, "player_id": pid, "name": name, "age": age, "pos": pos_str,
         "year": get_cfg().year,
@@ -1556,6 +1608,8 @@ def get_player(pid):
         "positional_median": eval_data["positional_median"],
         "mlb_context": mlb_ctx,
         "insights": insights,
+        "milb_bat_stats": milb_bat_stats,
+        "milb_pit_stats": milb_pit_stats,
     }
 
 

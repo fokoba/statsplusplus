@@ -1209,11 +1209,15 @@
     hitData.forEach(function(p) {
       var s = p.splits[split];
       var twBadge = p.is_two_way ? ' <span class="tw-badge" title="Two-way player">TW</span>' : '';
+      var statusBadge = '';
+      if (p.status === 'DL') statusBadge = ' <span class="status-badge dl" title="Injured' + (p.injury_days ? ' — ' + p.injury_days + 'd left' : '') + '">DL</span>';
+      else if (p.status === 'DFA') statusBadge = ' <span class="status-badge dfa" title="Designated for assignment">DFA</span>';
+      else if (p.status === 'WVR') statusBadge = ' <span class="status-badge wvr" title="On waivers">WVR</span>';
       var tr = document.createElement('tr');
       if (!s) {
         tr.innerHTML =
           '<td data-sort-value="' + p.pos_order + '">' + p.pos + '</td>' +
-          '<td class="left"><a class="player-link" href="/player/' + p.pid + '">' + p.name + '</a>' + twBadge + '</td>' +
+          '<td class="left"><a class="player-link" href="/player/' + p.pid + '">' + p.name + '</a>' + twBadge + statusBadge + '</td>' +
           '<td>' + p.age + '</td><td>' + p.ovr + '</td>' +
           '<td class="col-sep">-</td><td class="col-sep">-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td class="col-sep">-</td><td>-</td><td>-</td><td>-</td><td>-</td><td class="col-sep">-</td><td>-</td>' +
           '<td class="col-sep ' + papCls(p.pap) + '">' + fmtPap(p.pap) + '</td>';
@@ -1221,7 +1225,7 @@
         var L = lgAvg;
         tr.innerHTML =
           '<td data-sort-value="' + p.pos_order + '">' + p.pos + '</td>' +
-          '<td class="left"><a class="player-link" href="/player/' + p.pid + '">' + p.name + '</a>' + twBadge + '</td>' +
+          '<td class="left"><a class="player-link" href="/player/' + p.pid + '">' + p.name + '</a>' + twBadge + statusBadge + '</td>' +
           '<td>' + p.age + '</td>' +
           '<td>' + p.ovr + '</td>' +
           td(s.war, isOvr ? s.war : '-', undefined, false, true) +
@@ -1253,11 +1257,15 @@
     pitData.forEach(function(p) {
       var s = p.splits[split];
       var twBadge = p.is_two_way ? ' <span class="tw-badge" title="Two-way player">TW</span>' : '';
+      var statusBadge = '';
+      if (p.status === 'DL') statusBadge = ' <span class="status-badge dl" title="Injured' + (p.injury_days ? ' — ' + p.injury_days + 'd left' : '') + '">DL</span>';
+      else if (p.status === 'DFA') statusBadge = ' <span class="status-badge dfa" title="Designated for assignment">DFA</span>';
+      else if (p.status === 'WVR') statusBadge = ' <span class="status-badge wvr" title="On waivers">WVR</span>';
       var tr = document.createElement('tr');
       if (!s) {
         tr.innerHTML =
           '<td data-sort-value="' + p.role_order + '">' + p.role + '</td>' +
-          '<td class="left"><a class="player-link" href="/player/' + p.pid + '">' + p.name + '</a>' + twBadge + '</td>' +
+          '<td class="left"><a class="player-link" href="/player/' + p.pid + '">' + p.name + '</a>' + twBadge + statusBadge + '</td>' +
           '<td>' + p.age + '</td><td>' + p.ovr + '</td>' +
           '<td class="col-sep">-</td><td class="col-sep">-</td><td>-</td><td>-</td><td class="col-sep">-</td><td>-</td><td>-</td><td>-</td><td>-</td><td class="col-sep">-</td><td>-</td><td>-</td><td>-</td><td>-</td>' +
           '<td class="col-sep ' + papCls(p.pap) + '">' + fmtPap(p.pap) + '</td>';
@@ -1266,7 +1274,7 @@
         var L = lgAvg;
         tr.innerHTML =
           '<td data-sort-value="' + p.role_order + '">' + p.role + '</td>' +
-          '<td class="left"><a class="player-link" href="/player/' + p.pid + '">' + p.name + '</a>' + twBadge + '</td>' +
+          '<td class="left"><a class="player-link" href="/player/' + p.pid + '">' + p.name + '</a>' + twBadge + statusBadge + '</td>' +
           '<td>' + p.age + '</td>' +
           '<td>' + p.ovr + '</td>' +
           td(s.war, isOvr ? s.war : '-', undefined, false, true) +

@@ -150,11 +150,14 @@ python3 scripts/trade_targets.py --bucket SP --min-ovr 58
 python3 scripts/trade_targets.py --bucket 3B --sellers-only
 python3 scripts/trade_targets.py --bucket COF --include-controlled  # Include multi-year players
 python3 scripts/trade_targets.py --bucket SS --max-salary 10        # Max pro-rated salary ($M)
+python3 scripts/trade_targets.py --bucket SP --exclude-injured      # Hide injured players
+python3 scripts/trade_targets.py --bucket C --vs-hand R             # Sort by vs-RHP splits
 ```
 
 Output: Ranked target list grouped by contract status (RENTAL / OPTION / CONTROLLED). Shows
 OVR/Pot, team, pro-rated and full salary, surplus value, production stats, CF grade for OF.
-Seller teams (>8 GB from last playoff spot) flagged with `SELL`.
+Seller teams (>8 GB from last playoff spot) flagged with `SELL`. Injured players annotated
+with 🏥 and DL days remaining. DFA'd players excluded automatically.
 
 
 
@@ -430,7 +433,9 @@ prior-role history (discounted) with new-role data when < 2 full new-role season
 
 ### `arb_model`
 
-Arb salary estimation and service time calculation.
+Arb salary estimation and service time calculation. Service time now reads exact
+values from the `players` table (`mlb_service_days / 172.0`), falling back to the
+games-based heuristic when the data isn't available (pre-Phase 1 leagues).
 
 ```python
 from arb_model import arb_salary, arb_salary_perpetual, estimate_service_time, estimate_control
@@ -442,7 +447,7 @@ arb_salary(60, 'SS', arb_year=1, prior_salary=825000, min_sal=825000)  # → int
 arb_salary_perpetual(age=26, projected_war=4.0, dpw=21743, min_sal=6600,
                      career_war=12.0, model=None)  # → int
 
-svc = estimate_service_time(conn, player_id)                            # → float (years)
+svc = estimate_service_time(conn, player_id)                            # → float (years, exact from DB)
 ctrl, sals, pre_arb = estimate_control(conn, player_id, age, salary)   # → (int, list, int) or (None,None,None)
 ```
 
@@ -627,10 +632,19 @@ All accessed via the query functions above. Direct SQL is rarely needed.
 
 ## Known Data Limitations
 
-- **No minor league stats** — the StatsPlus API returns empty for minor league player IDs.
-  Farm analysis relies on ratings + age-vs-level context only.
+- **Minor league stats available but not yet integrated** — The StatsPlus API now supports
+  batting/pitching/fielding stats for all minor league levels via the `lid` parameter on
+  `/playerbatstatsv2` etc. Includes WAR. Until Phase 2 of the API Integration Roadmap is
+  complete, farm analysis still relies on ratings + age/level context only.
+  *(Tracked: API Roadmap Phase 2)*
 - **No play-by-play or box scores** — game results include final score and pitchers only.
-- **No injury data** — StatsPlus doesn't expose DL/IL status.
-- **No transaction log** — trades, callups, DFA are not tracked historically.
+- **Injury data available but not yet stored** — The `/players` endpoint now exposes
+  `injury_is_injured`, `injury_dl_left`, `injury_left` (added April 2026). Until Phase 1a
+  integration is complete, injury status is not in the DB.
+  *(Tracked: API Roadmap Phase 1a)*
+- **Roster status flags available but not yet stored** — The `/players` endpoint now exposes
+  `designated_for_assignment`, `is_on_waivers`, `was_traded`, `free_agent` flags. Until
+  Phase 1c integration, recent transactions are not reflected in the DB.
+  *(Tracked: API Roadmap Phase 1c)*
 - **Ratings are scouted** — accuracy varies by scout quality. `Acc` field indicates
   reliability (VH/H/A/L). Only mention low accuracy when `Acc = L`.

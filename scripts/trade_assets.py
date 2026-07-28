@@ -58,9 +58,9 @@ def get_assets(team_id=None, bucket=None, min_surplus_m=0,
             JOIN players p ON s.player_id = p.player_id
             LEFT JOIN contracts c ON s.player_id = c.player_id
             LEFT JOIN contract_extensions ce ON s.player_id = ce.player_id
-            LEFT JOIN batting_stats b ON s.player_id = b.player_id
+            LEFT JOIN mlb_batting_stats b ON s.player_id = b.player_id
                 AND b.year = ? AND b.split_id = 1
-            LEFT JOIN pitching_stats pi ON s.player_id = pi.player_id
+            LEFT JOIN mlb_pitching_stats pi ON s.player_id = pi.player_id
                 AND pi.year = ? AND pi.split_id = 1
             WHERE s.eval_date = ?
               AND s.team_id = ?

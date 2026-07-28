@@ -151,7 +151,7 @@ def _calibrate_tool_weights(conn, game_year, role_map):
                bs.war, bs.obp, bs.slg, bs.sb, bs.cs
         FROM latest_ratings r
         JOIN players p ON r.player_id = p.player_id
-        JOIN batting_stats bs ON bs.player_id = p.player_id
+        JOIN mlb_batting_stats bs ON bs.player_id = p.player_id
         WHERE p.level = 1 AND bs.split_id = 1
           AND bs.year > ? AND bs.year <= ? AND bs.ab >= 300
     """, (year_lo, year_hi)).fetchall()
@@ -225,7 +225,7 @@ def _calibrate_tool_weights(conn, game_year, role_map):
                fs.zr, fs.ip
         FROM latest_ratings r
         JOIN players p ON r.player_id = p.player_id
-        JOIN fielding_stats fs ON fs.player_id = p.player_id
+        JOIN mlb_fielding_stats fs ON fs.player_id = p.player_id
         WHERE p.level = 1 AND fs.ip >= 400
           AND fs.year > ? AND fs.year <= ?
     """, (year_lo, year_hi)).fetchall()
@@ -282,7 +282,7 @@ def _calibrate_tool_weights(conn, game_year, role_map):
                ps.ip, ps.k, ps.bb, ps.hra, ps.hp, ps.gs
         FROM latest_ratings r
         JOIN players p ON r.player_id = p.player_id
-        JOIN pitching_stats ps ON ps.player_id = p.player_id
+        JOIN mlb_pitching_stats ps ON ps.player_id = p.player_id
         WHERE p.level = 1 AND ps.split_id = 1
           AND ps.year > ? AND ps.year <= ?
           AND ((p.role IN (12,13) AND ps.ip >= 20 AND ps.gs <= 3)
@@ -492,7 +492,7 @@ def _calibrate_ovr_to_war(conn, game_year, role_map):
                bs.war
         FROM latest_ratings r
         JOIN players p ON r.player_id = p.player_id
-        JOIN batting_stats bs ON bs.player_id = p.player_id
+        JOIN mlb_batting_stats bs ON bs.player_id = p.player_id
         WHERE p.level = 1 AND bs.split_id = 1
           AND bs.year > ? AND bs.year <= ? AND bs.ab >= 300
           AND r.ovr IS NOT NULL
@@ -509,7 +509,7 @@ def _calibrate_ovr_to_war(conn, game_year, role_map):
                ps.gs, ps.ip
         FROM latest_ratings r
         JOIN players p ON r.player_id = p.player_id
-        JOIN pitching_stats ps ON ps.player_id = p.player_id
+        JOIN mlb_pitching_stats ps ON ps.player_id = p.player_id
         WHERE p.level = 1 AND ps.split_id = 1
           AND ps.year > ? AND ps.year <= ?
           AND r.ovr IS NOT NULL
@@ -741,7 +741,7 @@ def _calibrate_composite_to_war(conn, game_year, role_map):
                bs.war
         FROM latest_ratings r
         JOIN players p ON r.player_id = p.player_id
-        JOIN batting_stats bs ON bs.player_id = p.player_id
+        JOIN mlb_batting_stats bs ON bs.player_id = p.player_id
         WHERE p.level = 1 AND bs.split_id = 1
           AND bs.year > ? AND bs.year <= ? AND bs.ab >= 300
           AND r.composite_score IS NOT NULL
@@ -758,7 +758,7 @@ def _calibrate_composite_to_war(conn, game_year, role_map):
                ps.gs, ps.ip
         FROM latest_ratings r
         JOIN players p ON r.player_id = p.player_id
-        JOIN pitching_stats ps ON ps.player_id = p.player_id
+        JOIN mlb_pitching_stats ps ON ps.player_id = p.player_id
         WHERE p.level = 1 AND ps.split_id = 1
           AND ps.year > ? AND ps.year <= ?
           AND r.composite_score IS NOT NULL
@@ -899,18 +899,18 @@ def _calibrate_arb_pct(conn, game_year, dpw):
         pid = r["player_id"]
         svc = conn.execute("""
             SELECT COUNT(DISTINCT year) FROM (
-                SELECT year FROM batting_stats WHERE player_id=? AND split_id=1 AND ab >= 100
+                SELECT year FROM mlb_batting_stats WHERE player_id=? AND split_id=1 AND ab >= 100
                 UNION
-                SELECT year FROM pitching_stats WHERE player_id=? AND split_id=1 AND ip >= 20
+                SELECT year FROM mlb_pitching_stats WHERE player_id=? AND split_id=1 AND ip >= 20
             )
         """, (pid, pid)).fetchone()[0]
 
         # Get prior year WAR
         bat = conn.execute(
-            "SELECT SUM(war) as war FROM batting_stats WHERE player_id=? AND split_id=1 AND year=? AND ab >= 100",
+            "SELECT SUM(war) as war FROM mlb_batting_stats WHERE player_id=? AND split_id=1 AND year=? AND ab >= 100",
             (pid, game_year - 1)).fetchone()
         pit = conn.execute(
-            "SELECT SUM((war + COALESCE(ra9war, war))/2.0) as war FROM pitching_stats WHERE player_id=? AND split_id=1 AND year=? AND ip >= 20",
+            "SELECT SUM((war + COALESCE(ra9war, war))/2.0) as war FROM mlb_pitching_stats WHERE player_id=? AND split_id=1 AND year=? AND ip >= 20",
             (pid, game_year - 1)).fetchone()
 
         war = (pit["war"] if pit and pit["war"] is not None else
@@ -983,19 +983,19 @@ def _calibrate_arb_salary_model(conn, game_year, dpw):
 
         # Career WAR (sum of all seasons)
         career_bat = conn.execute(
-            "SELECT COALESCE(SUM(war), 0) FROM batting_stats WHERE player_id=? AND split_id=1",
+            "SELECT COALESCE(SUM(war), 0) FROM mlb_batting_stats WHERE player_id=? AND split_id=1",
             (pid,)).fetchone()[0]
         career_pit = conn.execute(
-            "SELECT COALESCE(SUM((war + COALESCE(ra9war, war))/2.0), 0) FROM pitching_stats WHERE player_id=? AND split_id=1",
+            "SELECT COALESCE(SUM((war + COALESCE(ra9war, war))/2.0), 0) FROM mlb_pitching_stats WHERE player_id=? AND split_id=1",
             (pid,)).fetchone()[0]
         career_war = (career_bat or 0) + (career_pit or 0)
 
         # Prior year WAR (for ceiling fitting)
         prior_bat = conn.execute(
-            "SELECT COALESCE(SUM(war), 0) FROM batting_stats WHERE player_id=? AND split_id=1 AND year=?",
+            "SELECT COALESCE(SUM(war), 0) FROM mlb_batting_stats WHERE player_id=? AND split_id=1 AND year=?",
             (pid, game_year - 1)).fetchone()[0]
         prior_pit = conn.execute(
-            "SELECT COALESCE(SUM((war + COALESCE(ra9war, war))/2.0), 0) FROM pitching_stats WHERE player_id=? AND split_id=1 AND year=?",
+            "SELECT COALESCE(SUM((war + COALESCE(ra9war, war))/2.0), 0) FROM mlb_pitching_stats WHERE player_id=? AND split_id=1 AND year=?",
             (pid, game_year - 1)).fetchone()[0]
         prior_war = max((prior_bat or 0), (prior_pit or 0))
 
@@ -1229,7 +1229,7 @@ def _calibrate_carrying_tools(conn, game_year, role_map):
                bs.war
         FROM latest_ratings r
         JOIN players p ON r.player_id = p.player_id
-        JOIN batting_stats bs ON bs.player_id = p.player_id
+        JOIN mlb_batting_stats bs ON bs.player_id = p.player_id
         WHERE p.level = 1 AND bs.split_id = 1
           AND bs.year > ? AND bs.year <= ? AND bs.ab >= 300
     """, (year_lo, year_hi)).fetchall()

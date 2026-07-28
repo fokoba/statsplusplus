@@ -140,6 +140,7 @@ CREATE TABLE IF NOT EXISTS batting_stats (
     pa INTEGER, stint INTEGER, hbp INTEGER, sf INTEGER,
     g INTEGER, gs INTEGER, cs INTEGER, gdp INTEGER, ibb INTEGER,
     sh INTEGER, ci INTEGER, pitches_seen INTEGER, ubr REAL, wpa REAL,
+    league_id INTEGER,
     PRIMARY KEY (player_id, year, split_id, team_id)
 );
 
@@ -154,6 +155,7 @@ CREATE TABLE IF NOT EXISTS pitching_stats (
     iw INTEGER, ir REAL, irs REAL, rs INTEGER, dp INTEGER,
     sb INTEGER, cs INTEGER, sf INTEGER, sh INTEGER, ci INTEGER,
     tb INTEGER, li REAL, wpa REAL, relief_app INTEGER, md INTEGER, sd INTEGER,
+    league_id INTEGER,
     PRIMARY KEY (player_id, year, split_id, team_id)
 );
 
@@ -219,6 +221,7 @@ CREATE TABLE IF NOT EXISTS fielding_stats (
     g INTEGER, gs INTEGER, ip REAL, tc INTEGER, a INTEGER, po INTEGER,
     e INTEGER, dp INTEGER, pb INTEGER, sba INTEGER, rto INTEGER,
     zr REAL, framing REAL, arm REAL,
+    league_id INTEGER,
     PRIMARY KEY (player_id, year, team_id, position)
 );
 
@@ -321,6 +324,15 @@ CREATE TABLE IF NOT EXISTS ratings_history (
 CREATE VIEW IF NOT EXISTS latest_ratings AS
 SELECT * FROM ratings
 WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM ratings);
+
+CREATE VIEW IF NOT EXISTS mlb_batting_stats AS
+SELECT * FROM batting_stats WHERE league_id IS NULL;
+
+CREATE VIEW IF NOT EXISTS mlb_pitching_stats AS
+SELECT * FROM pitching_stats WHERE league_id IS NULL;
+
+CREATE VIEW IF NOT EXISTS mlb_fielding_stats AS
+SELECT * FROM fielding_stats WHERE league_id IS NULL;
 """
 
 

@@ -37,7 +37,7 @@ def _mlb_context(conn, bucket, composite, ceiling):
     from league_config import config as _lc
     _rm = {str(k): v for k, v in _lc.role_map.items()}
 
-    _year = conn.execute("SELECT MAX(year) FROM batting_stats").fetchone()[0]
+    _year = conn.execute("SELECT MAX(year) FROM mlb_batting_stats").fetchone()[0]
     if not _year:
         return None
 
@@ -62,7 +62,7 @@ def _mlb_context(conn, bucket, composite, ceiling):
         rows = conn.execute("""
             SELECT r.composite_score FROM latest_ratings r
             JOIN players p ON r.player_id = p.player_id
-            JOIN pitching_stats ps ON ps.player_id = p.player_id AND ps.split_id = 1
+            JOIN mlb_pitching_stats ps ON ps.player_id = p.player_id AND ps.split_id = 1
             WHERE p.level = 1 AND r.composite_score IS NOT NULL AND p.role = '11'
               AND ps.year = ? AND CAST(ps.ip AS REAL) >= ?
         """, (_year, sp_ip_min)).fetchall()
@@ -71,7 +71,7 @@ def _mlb_context(conn, bucket, composite, ceiling):
         rows = conn.execute("""
             SELECT r.composite_score FROM latest_ratings r
             JOIN players p ON r.player_id = p.player_id
-            JOIN pitching_stats ps ON ps.player_id = p.player_id AND ps.split_id = 1
+            JOIN mlb_pitching_stats ps ON ps.player_id = p.player_id AND ps.split_id = 1
             WHERE p.level = 1 AND r.composite_score IS NOT NULL AND p.role IN ('12','13')
               AND ps.year = ? AND CAST(ps.ip AS REAL) >= ?
         """, (_year, rp_ip_min)).fetchall()
@@ -81,7 +81,7 @@ def _mlb_context(conn, bucket, composite, ceiling):
             SELECT r.composite_score, p.pos, p.role
             FROM latest_ratings r
             JOIN players p ON r.player_id = p.player_id
-            JOIN batting_stats bs ON bs.player_id = p.player_id AND bs.split_id = 1
+            JOIN mlb_batting_stats bs ON bs.player_id = p.player_id AND bs.split_id = 1
             WHERE p.level = 1 AND r.composite_score IS NOT NULL
               AND p.role NOT IN ('11','12','13')
               AND bs.year = ? AND bs.pa >= ?
@@ -599,7 +599,7 @@ def get_player(pid):
     fielding_stats = []
     for row in conn.execute(
         "SELECT year, position, g, gs, ip, tc, a, po, e, dp, pb, sba, rto, zr, framing, arm "
-        "FROM fielding_stats WHERE player_id=? ORDER BY year, position", (pid,)).fetchall():
+        "FROM mlb_fielding_stats WHERE player_id=? ORDER BY year, position", (pid,)).fetchall():
         yr, fpos, g, gs, ip, tc, a, po, e, dp, pb, sba, rto, zr, framing, arm = row
         if g == 0:
             continue
@@ -1429,7 +1429,7 @@ def get_player(pid):
         _POS_LABELS = {3: "1B", 4: "2B", 5: "3B", 6: "SS", 7: "LF", 8: "CF", 9: "RF", 10: "DH", 2: "C"}
         _conn2 = get_db()
         _field = _conn2.execute(
-            "SELECT position, SUM(g) as games FROM fielding_stats WHERE player_id=? AND position != 1 GROUP BY position ORDER BY games DESC LIMIT 1",
+            "SELECT position, SUM(g) as games FROM mlb_fielding_stats WHERE player_id=? AND position != 1 GROUP BY position ORDER BY games DESC LIMIT 1",
             (pid,)).fetchone()
         if _field:
             pos_str = f"SP/{_POS_LABELS.get(_field[0], 'DH')}"
@@ -1482,7 +1482,7 @@ def get_player(pid):
     if fielding_stats:
         conn = get_db()
         fld_pctile_years = [r[0] for r in conn.execute(
-            "SELECT DISTINCT year FROM fielding_stats WHERE player_id=? ORDER BY year DESC",
+            "SELECT DISTINCT year FROM mlb_fielding_stats WHERE player_id=? ORDER BY year DESC",
             (pid,)).fetchall()]
         conn.close()
 
@@ -1687,7 +1687,7 @@ def get_player_popup(pid):
     if is_pitcher:
         s = conn.execute(
             "SELECT SUM(ip), SUM(era*ip)/NULLIF(SUM(ip),0), SUM(k), SUM(bb), SUM(war), SUM(sv), SUM(hld), SUM(g), SUM(gs) "
-            "FROM pitching_stats WHERE player_id=? AND year=? AND split_id=1",
+            "FROM mlb_pitching_stats WHERE player_id=? AND year=? AND split_id=1",
             (pid, year)
         ).fetchone()
         if s and s[0]:
@@ -1700,7 +1700,7 @@ def get_player_popup(pid):
             "(SUM(h)+SUM(bb)+SUM(hbp))*1.0/NULLIF(SUM(ab)+SUM(bb)+SUM(hbp)+SUM(sf),0), "
             "(SUM(h)+SUM(d)+2*SUM(t)+3*SUM(hr))*1.0/NULLIF(SUM(ab),0), "
             "SUM(hr), SUM(war), SUM(sb) "
-            "FROM batting_stats WHERE player_id=? AND year=? AND split_id=1",
+            "FROM mlb_batting_stats WHERE player_id=? AND year=? AND split_id=1",
             (pid, year)
         ).fetchone()
         if bs and (bs[0] or 0) >= 30:
@@ -1714,7 +1714,7 @@ def get_player_popup(pid):
             "(SUM(h)+SUM(bb)+SUM(hbp))*1.0/NULLIF(SUM(ab)+SUM(bb)+SUM(hbp)+SUM(sf),0), "
             "(SUM(h)+SUM(d)+2*SUM(t)+3*SUM(hr))*1.0/NULLIF(SUM(ab),0), "
             "SUM(hr), SUM(war), SUM(sb) "
-            "FROM batting_stats WHERE player_id=? AND year=? AND split_id=1",
+            "FROM mlb_batting_stats WHERE player_id=? AND year=? AND split_id=1",
             (pid, year)
         ).fetchone()
         if s and s[0]:

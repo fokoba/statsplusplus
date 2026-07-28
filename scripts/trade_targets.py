@@ -220,9 +220,9 @@ def find_targets(bucket, min_ovr=50, sellers_only=False, include_controlled=Fals
         LEFT JOIN contracts c ON p.player_id = c.player_id
         LEFT JOIN contract_extensions ce ON p.player_id = ce.player_id
         LEFT JOIN player_surplus s ON s.player_id = p.player_id AND s.eval_date = ?
-        LEFT JOIN batting_stats b ON p.player_id = b.player_id
+        LEFT JOIN mlb_batting_stats b ON p.player_id = b.player_id
             AND b.year = ? AND b.split_id = 1
-        LEFT JOIN pitching_stats pi ON p.player_id = pi.player_id
+        LEFT JOIN mlb_pitching_stats pi ON p.player_id = pi.player_id
             AND pi.year = ? AND pi.split_id = 1
         WHERE p.level = '1'
           AND r.ovr >= ?
@@ -239,7 +239,7 @@ def find_targets(bucket, min_ovr=50, sellers_only=False, include_controlled=Fals
         split_id = 3 if vs_hand == 'R' else 2
         split_rows = conn.execute("""
             SELECT player_id, avg, obp, slg, hr, pa
-            FROM batting_stats WHERE year=? AND split_id=?
+            FROM mlb_batting_stats WHERE year=? AND split_id=?
         """, (year, split_id)).fetchall()
         split_stats = {r["player_id"]: r for r in split_rows}
 

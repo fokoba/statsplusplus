@@ -45,9 +45,9 @@ def get_org_players(team_id):
             FROM player_surplus ps
             JOIN players p ON ps.player_id = p.player_id
             LEFT JOIN latest_ratings r ON ps.player_id = r.player_id
-            LEFT JOIN batting_stats b ON ps.player_id = b.player_id
+            LEFT JOIN mlb_batting_stats b ON ps.player_id = b.player_id
                 AND b.year = ? AND b.split_id = 1 AND b.team_id = ?
-            LEFT JOIN pitching_stats pit ON ps.player_id = pit.player_id
+            LEFT JOIN mlb_pitching_stats pit ON ps.player_id = pit.player_id
                 AND pit.year = ? AND pit.split_id = 1 AND pit.team_id = ?
             WHERE ps.eval_date = ? AND ps.team_id = ?
         """, (yr, team_id, yr, team_id, ed_s, team_id)).fetchall()

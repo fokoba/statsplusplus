@@ -152,11 +152,11 @@ def _estimate_service_time_from_games(conn, player_id):
     Caps each year at 1.0, sums across all years.
     """
     bat_by_year = {row[0]: row[1] for row in conn.execute(
-        "SELECT year, SUM(g) FROM batting_stats WHERE player_id=? AND split_id=1 GROUP BY year",
+        "SELECT year, SUM(g) FROM mlb_batting_stats WHERE player_id=? AND split_id=1 GROUP BY year",
         (player_id,)).fetchall()}
 
     pit_by_year = {row[0]: (row[1], row[2]) for row in conn.execute(
-        "SELECT year, SUM(g), SUM(gs) FROM pitching_stats WHERE player_id=? AND split_id=1 GROUP BY year",
+        "SELECT year, SUM(g), SUM(gs) FROM mlb_pitching_stats WHERE player_id=? AND split_id=1 GROUP BY year",
         (player_id,)).fetchall()}
 
     total = 0.0

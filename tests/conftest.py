@@ -82,6 +82,12 @@ CREATE TABLE IF NOT EXISTS ratings (
 CREATE VIEW IF NOT EXISTS latest_ratings AS
     SELECT * FROM ratings
     WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM ratings);
+CREATE VIEW IF NOT EXISTS mlb_batting_stats AS
+    SELECT * FROM batting_stats WHERE league_id IS NULL;
+CREATE VIEW IF NOT EXISTS mlb_pitching_stats AS
+    SELECT * FROM pitching_stats WHERE league_id IS NULL;
+CREATE VIEW IF NOT EXISTS mlb_fielding_stats AS
+    SELECT * FROM fielding_stats WHERE league_id IS NULL;
 CREATE TABLE IF NOT EXISTS ratings_history (
     player_id INTEGER, snapshot_date TEXT,
     composite_score INTEGER, ceiling_score INTEGER,

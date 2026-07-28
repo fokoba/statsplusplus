@@ -2604,7 +2604,7 @@ def _load_qualifying_stat_seasons(
     if is_pitcher:
         rows = conn.execute("""
             SELECT year, era, ip, k, bb, hra, hp, gs
-            FROM pitching_stats
+            FROM mlb_pitching_stats
             WHERE player_id = ? AND split_id = 1
               AND ((gs > 3 AND ip >= 40) OR (gs <= 3 AND ip >= 20))
             ORDER BY year DESC
@@ -2612,7 +2612,7 @@ def _load_qualifying_stat_seasons(
     else:
         rows = conn.execute("""
             SELECT year, obp, slg, ab
-            FROM batting_stats
+            FROM mlb_batting_stats
             WHERE player_id = ? AND split_id = 1 AND ab >= 130
             ORDER BY year DESC
         """, (player_id,)).fetchall()

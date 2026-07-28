@@ -780,7 +780,7 @@ def refresh_league(year, game_date=None):
     # Only pull years not already in the DB (excludes current and prior year
     # which are always fetched above).
     existing_years = {r[0] for r in conn.execute(
-        "SELECT DISTINCT year FROM batting_stats").fetchall()}
+        "SELECT DISTINCT year FROM mlb_batting_stats").fetchall()}
     hist_start = year - 15
     hist_years = [y for y in range(hist_start, prior_year) if y not in existing_years]
     if hist_years:
@@ -803,7 +803,7 @@ def refresh_league(year, game_date=None):
 
     # Backfill splits for years that have overall stats but are missing L/R splits
     existing_split_years = {r[0] for r in conn.execute(
-        "SELECT DISTINCT year FROM batting_stats WHERE split_id=2").fetchall()}
+        "SELECT DISTINCT year FROM mlb_batting_stats WHERE split_id=2").fetchall()}
     split_gap_years = [y for y in range(hist_start, prior_year)
                        if y in existing_years and y not in existing_split_years]
     if split_gap_years:
@@ -817,7 +817,7 @@ def refresh_league(year, game_date=None):
 
     # Backfill fielding for years that have batting/pitching but no fielding
     existing_fld_years = {r[0] for r in conn.execute(
-        "SELECT DISTINCT year FROM fielding_stats").fetchall()}
+        "SELECT DISTINCT year FROM mlb_fielding_stats").fetchall()}
     fld_gap_years = [y for y in range(hist_start, prior_year)
                      if y in existing_years and y not in existing_fld_years]
     if fld_gap_years:
@@ -1027,12 +1027,12 @@ def _refresh_dollar_per_war(year):
 
     placeholders = ",".join("?" * len(pids))
     bat_war = conn.execute(
-        f"SELECT SUM(war) FROM (SELECT player_id, SUM(war) as war FROM batting_stats "
+        f"SELECT SUM(war) FROM (SELECT player_id, SUM(war) as war FROM mlb_batting_stats "
         f"WHERE year=? AND split_id=1 AND player_id IN ({placeholders}) GROUP BY player_id)",
         [year - 1] + pids  # use prior season WAR — current season is incomplete
     ).fetchone()[0] or 0
     pit_war = conn.execute(
-        f"SELECT SUM(war) FROM (SELECT player_id, SUM(war) as war FROM pitching_stats "
+        f"SELECT SUM(war) FROM (SELECT player_id, SUM(war) as war FROM mlb_pitching_stats "
         f"WHERE year=? AND split_id=1 AND player_id IN ({placeholders}) GROUP BY player_id)",
         [year - 1] + pids
     ).fetchone()[0] or 0
@@ -1149,7 +1149,7 @@ def _refresh_stat_percentiles(year):
     # Use prior year if available for full-season samples; fall back to current year
     for yr in (year - 1, year):
         bat_rows = conn.execute("""
-            SELECT obp, slg FROM batting_stats
+            SELECT obp, slg FROM mlb_batting_stats
             WHERE year = ? AND split_id = 1 AND pa >= 300
         """, (yr,)).fetchall()
         if len(bat_rows) >= 20:
@@ -1166,7 +1166,7 @@ def _refresh_stat_percentiles(year):
     # P5 ERA- from qualifying pitchers (outs >= 300)
     for yr in (year - 1, year):
         pit_rows = conn.execute("""
-            SELECT era FROM pitching_stats
+            SELECT era FROM mlb_pitching_stats
             WHERE year = ? AND split_id = 1 AND outs >= 300 AND era IS NOT NULL
         """, (yr,)).fetchall()
         if len(pit_rows) >= 10:
@@ -1181,7 +1181,7 @@ def _refresh_stat_percentiles(year):
     for yr in (year - 1, year):
         gb_rows = conn.execute("""
             SELECT 100.0 * gb / (gb + fb) as gb_pct
-            FROM pitching_stats
+            FROM mlb_pitching_stats
             WHERE year = ? AND split_id = 1 AND (gb + fb) > 100
         """, (yr,)).fetchall()
         if len(gb_rows) >= 20:
@@ -1197,7 +1197,7 @@ def _refresh_stat_percentiles(year):
     for yr in (year - 1, year):
         gb_reg_rows = conn.execute("""
             SELECT r.gb as rating, 100.0 * ps.gb / (ps.gb + ps.fb) as actual
-            FROM pitching_stats ps
+            FROM mlb_pitching_stats ps
             JOIN latest_ratings r ON ps.player_id = r.player_id
             WHERE ps.year = ? AND ps.split_id = 1 AND (ps.gb + ps.fb) > 100
               AND r.gb IS NOT NULL AND r.gb > 0

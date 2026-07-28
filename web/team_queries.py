@@ -48,7 +48,7 @@ def _get_state():
     # so all queries that reference state["year"] for stats get valid results.
     conn = get_db()
     row = conn.execute(
-        "SELECT MAX(year) FROM batting_stats WHERE year <= ?", (state["year"],)
+        "SELECT MAX(year) FROM mlb_batting_stats WHERE year <= ?", (state["year"],)
     ).fetchone()
     state["stats_year"] = row[0] if row and row[0] else state["year"]
     return state
@@ -315,7 +315,7 @@ def get_roster(team_id=None):
 
     bat = {}
     for r in conn.execute(
-        "SELECT player_id, ab, h, d, t, hr, bb, pa, war FROM batting_stats WHERE year=? AND split_id=1 AND team_id=?", (year, tid)
+        "SELECT player_id, ab, h, d, t, hr, bb, pa, war FROM mlb_batting_stats WHERE year=? AND split_id=1 AND team_id=?", (year, tid)
     ).fetchall():
         pid, ab, h, d, t, hr, bb, pa, war = r
         avg = h / ab if ab else None
@@ -325,7 +325,7 @@ def get_roster(team_id=None):
 
     pit = {}
     for r in conn.execute(
-        "SELECT player_id, era, ip, k, war FROM pitching_stats WHERE year=? AND split_id=1 AND team_id=?", (year, tid)
+        "SELECT player_id, era, ip, k, war FROM mlb_pitching_stats WHERE year=? AND split_id=1 AND team_id=?", (year, tid)
     ).fetchall():
         pit[r[0]] = (r[1], r[2], r[3], r[4])
 
@@ -388,7 +388,7 @@ def get_roster_hitters(team_id=None):
         FROM players p
         LEFT JOIN player_surplus ps ON p.player_id=ps.player_id AND ps.eval_date=?
         LEFT JOIN latest_ratings r ON p.player_id=r.player_id
-        JOIN batting_stats b ON b.player_id=p.player_id AND b.year=? AND b.split_id=1 AND b.pa>=30
+        JOIN mlb_batting_stats b ON b.player_id=p.player_id AND b.year=? AND b.split_id=1 AND b.pa>=30
         WHERE p.team_id=? AND p.level='1' AND p.role IN (11,12,13)
     """, (ed, year, tid)).fetchall()
     twp_pids = {p["player_id"] for p in twp}
@@ -398,7 +398,7 @@ def get_roster_hitters(team_id=None):
     bat = {}  # pid -> {split_id -> dict}
     for r in conn.execute("""
         SELECT player_id, split_id, ab, h, d, t, hr, r, rbi, sb, bb, k, pa, war, g, cs, hbp, sf
-        FROM batting_stats WHERE year=? AND split_id IN (1,2,3) AND team_id=?
+        FROM mlb_batting_stats WHERE year=? AND split_id IN (1,2,3) AND team_id=?
     """, (year, tid)):
         bat.setdefault(r["player_id"], {})[r["split_id"]] = dict(r)
 
@@ -406,7 +406,7 @@ def get_roster_hitters(team_id=None):
     conn_fld = {}
     if twp_pids:
         for r in conn.execute(
-            "SELECT player_id, position, g FROM fielding_stats "
+            "SELECT player_id, position, g FROM mlb_fielding_stats "
             "WHERE year=? AND position != 1 AND player_id IN ({})".format(
                 ",".join("?" * len(twp_pids))),
             [year] + list(twp_pids)
@@ -495,7 +495,7 @@ def get_roster_pitchers(team_id=None):
     for r in conn.execute("""
         SELECT player_id, split_id, ip, g, gs, w, l, sv, era, k, bb, ha, war,
                hra, bf, hld, bs, qs, er, r AS runs, cg, sho, ir, irs
-        FROM pitching_stats WHERE year=? AND split_id IN (1,2,3) AND team_id=?
+        FROM mlb_pitching_stats WHERE year=? AND split_id IN (1,2,3) AND team_id=?
     """, (year, tid)):
         pit.setdefault(r["player_id"], {})[r["split_id"]] = dict(r)
 
@@ -504,7 +504,7 @@ def get_roster_pitchers(team_id=None):
     twp_pids = set()
     if pitcher_pids:
         for r in conn.execute(
-            "SELECT player_id FROM batting_stats WHERE year=? AND split_id=1 AND pa>=30 AND player_id IN ({})".format(
+            "SELECT player_id FROM mlb_batting_stats WHERE year=? AND split_id=1 AND pa>=30 AND player_id IN ({})".format(
                 ",".join("?" * len(pitcher_pids))),
             [year] + list(pitcher_pids)
         ).fetchall():
@@ -784,8 +784,8 @@ def get_roster_summary(team_id):
     rows = conn.execute("""
         SELECT p.role, p.age FROM players p
         WHERE p.team_id=? AND p.level='1'
-          AND (p.player_id IN (SELECT player_id FROM batting_stats WHERE year=? AND split_id=1)
-            OR p.player_id IN (SELECT player_id FROM pitching_stats WHERE year=? AND split_id=1))
+          AND (p.player_id IN (SELECT player_id FROM mlb_batting_stats WHERE year=? AND split_id=1)
+            OR p.player_id IN (SELECT player_id FROM mlb_pitching_stats WHERE year=? AND split_id=1))
     """, (team_id, year, year)).fetchall()
 
     groups = {"SP": [], "RP": [], "Pos": []}
@@ -889,8 +889,8 @@ def get_age_distribution(team_id):
     mlb_ages = conn.execute("""
         SELECT p.age FROM players p
         WHERE p.team_id=? AND p.level='1'
-          AND (p.player_id IN (SELECT player_id FROM batting_stats WHERE year=? AND split_id=1)
-            OR p.player_id IN (SELECT player_id FROM pitching_stats WHERE year=? AND split_id=1))
+          AND (p.player_id IN (SELECT player_id FROM mlb_batting_stats WHERE year=? AND split_id=1)
+            OR p.player_id IN (SELECT player_id FROM mlb_pitching_stats WHERE year=? AND split_id=1))
     """, (team_id, year, year)).fetchall()
 
     ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
@@ -907,8 +907,8 @@ def get_age_distribution(team_id):
     all_mlb = conn.execute("""
         SELECT p.team_id, p.age FROM players p
         WHERE p.level='1'
-          AND (p.player_id IN (SELECT player_id FROM batting_stats WHERE year=? AND split_id=1)
-            OR p.player_id IN (SELECT player_id FROM pitching_stats WHERE year=? AND split_id=1))
+          AND (p.player_id IN (SELECT player_id FROM mlb_batting_stats WHERE year=? AND split_id=1)
+            OR p.player_id IN (SELECT player_id FROM mlb_pitching_stats WHERE year=? AND split_id=1))
     """, (year, year)).fetchall()
 
     all_farm = conn.execute("""
@@ -1115,13 +1115,13 @@ def get_stat_leaders(team_id):
     bat_rows = conn.execute("""
         SELECT b.player_id, p.name, b.ab, b.h, b.hr, b.rbi, b.sb, b.war,
                b.pa, b.bb, b.d, b.t
-        FROM batting_stats b JOIN players p ON b.player_id = p.player_id
+        FROM mlb_batting_stats b JOIN players p ON b.player_id = p.player_id
         WHERE b.year=? AND b.split_id=1 AND b.team_id=?
     """, (year, team_id)).fetchall()
 
     pit_rows = conn.execute("""
         SELECT b.player_id, p.name, b.era, b.ip, b.k, b.war, b.w, b.l, b.sv, b.bb, b.ha
-        FROM pitching_stats b JOIN players p ON b.player_id = p.player_id
+        FROM mlb_pitching_stats b JOIN players p ON b.player_id = p.player_id
         WHERE b.year=? AND b.split_id=1 AND b.team_id=?
     """, (year, team_id)).fetchall()
 
@@ -1261,7 +1261,7 @@ def _league_pos_rankings(conn, year):
                r.ovr, r.pot, r.composite_score,
                r.cntct, r.gap, r.pow, r.eye,
                p.age
-        FROM fielding_stats f
+        FROM mlb_fielding_stats f
         JOIN players p ON f.player_id = p.player_id
         JOIN latest_ratings r ON f.player_id = r.player_id
         WHERE p.level = 1 AND f.year = ? AND f.position != 1 AND r.league_id > 0
@@ -1283,7 +1283,7 @@ def _league_pos_rankings(conn, year):
                r.ovr, r.pot, r.composite_score,
                r.stf, r.mov, r.ctrl,
                p.age
-        FROM pitching_stats ps
+        FROM mlb_pitching_stats ps
         JOIN players p ON ps.player_id = p.player_id
         JOIN latest_ratings r ON ps.player_id = r.player_id
         WHERE p.level = 1 AND ps.year = ? AND ps.split_id = 1 AND r.league_id > 0
@@ -1453,13 +1453,13 @@ def get_depth_chart(team_id):
     # Fielding and batting games for year-1 position assignment
     fielding = {}
     for r in conn.execute(
-        'SELECT player_id, position, g FROM fielding_stats '
+        'SELECT player_id, position, g FROM mlb_fielding_stats '
         'WHERE team_id=? AND year=? AND position!=1', (team_id, year)
     ).fetchall():
         fielding.setdefault(r["player_id"], {})[r["position"]] = r["g"]
 
     bat_games = {r["player_id"]: r["g"] for r in conn.execute(
-        'SELECT player_id, g FROM batting_stats '
+        'SELECT player_id, g FROM mlb_batting_stats '
         'WHERE team_id=? AND year=? AND split_id=1', (team_id, year)
     ).fetchall()}
 
@@ -1868,11 +1868,11 @@ def get_org_overview(team_id):
     fld_rows = conn.execute("""
         SELECT f.player_id, p.name, f.position, f.g, ps.ovr, ps.surplus,
                COALESCE(b.war, pt.war, 0) as war, p.age
-        FROM fielding_stats f
+        FROM mlb_fielding_stats f
         JOIN players p ON f.player_id = p.player_id
         LEFT JOIN player_surplus ps ON f.player_id = ps.player_id AND ps.eval_date = ?
-        LEFT JOIN batting_stats b ON f.player_id = b.player_id AND b.year = ? AND b.split_id = 1
-        LEFT JOIN pitching_stats pt ON f.player_id = pt.player_id AND pt.year = ? AND pt.split_id = 1
+        LEFT JOIN mlb_batting_stats b ON f.player_id = b.player_id AND b.year = ? AND b.split_id = 1
+        LEFT JOIN mlb_pitching_stats pt ON f.player_id = pt.player_id AND pt.year = ? AND pt.split_id = 1
         WHERE f.team_id = ? AND f.year = ? AND f.position != 1
           AND (p.team_id = ? OR p.parent_team_id = ?)
         ORDER BY f.player_id, f.g DESC
@@ -1891,7 +1891,7 @@ def get_org_overview(team_id):
         bat_rows = conn.execute("""
             SELECT b.player_id, p.name, p.pos as position, ps.ovr, ps.surplus,
                    b.war, p.age
-            FROM batting_stats b
+            FROM mlb_batting_stats b
             JOIN players p ON b.player_id = p.player_id
             LEFT JOIN player_surplus ps ON b.player_id = ps.player_id AND ps.eval_date = ?
             WHERE b.team_id = ? AND b.year = ? AND b.split_id = 1
@@ -1907,7 +1907,7 @@ def get_org_overview(team_id):
     # Pitchers — collect all, sorted by WAR (current roster only)
     pit_rows = conn.execute("""
         SELECT p.player_id, p.name, p.role, ps.ovr, ps.surplus, pt.war, p.age
-        FROM pitching_stats pt
+        FROM mlb_pitching_stats pt
         JOIN players p ON pt.player_id = p.player_id
         LEFT JOIN player_surplus ps ON pt.player_id = ps.player_id AND ps.eval_date = ?
         WHERE pt.team_id = ? AND pt.year = ? AND pt.split_id = 1

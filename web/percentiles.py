@@ -146,7 +146,7 @@ def _babip_expected(pid, cntct, speed, conn, year, babip_rating=None):
     # Historical residual: average (actual - model) over prior qualifying seasons
     rows = conn.execute("""
         SELECT b.h, b.hr, b.ab, b.k, b.sf, r.cntct, r.speed
-        FROM batting_stats b JOIN latest_ratings r ON b.player_id = r.player_id
+        FROM mlb_batting_stats b JOIN latest_ratings r ON b.player_id = r.player_id
         WHERE b.player_id=? AND b.split_id=1 AND b.ab>=200 AND b.year<? AND b.year>=?
     """, (pid, year, year - 5)).fetchall()
     if len(rows) >= 2:
@@ -191,7 +191,7 @@ def get_hitter_percentiles(pid, split_id=1, year=None):
     q = ("SELECT b.player_id, SUM(b.ab), SUM(b.h), SUM(b.d), SUM(b.t), SUM(b.hr), "
          "SUM(b.bb), SUM(b.k), SUM(b.pa), SUM(b.war), SUM(b.hbp), SUM(b.sf), "
          f"{rcols}, r.speed "
-         "FROM batting_stats b JOIN latest_ratings r ON b.player_id=r.player_id "
+         "FROM mlb_batting_stats b JOIN latest_ratings r ON b.player_id=r.player_id "
          "WHERE b.year=? AND b.split_id=? "
          "GROUP BY b.player_id "
          "HAVING SUM(b.pa)>=?")
@@ -340,7 +340,7 @@ def get_pitcher_percentiles(pid, split_id=1, year=None):
     q = ("SELECT ps.player_id, SUM(ps.ip), SUM(ps.era*ps.ip)/NULLIF(SUM(ps.ip),0), "
          "SUM(ps.k), SUM(ps.bb), SUM(ps.ha), SUM(ps.war), SUM(ps.hra), SUM(ps.bf), SUM(ps.hp), "
          f"{rcols}, SUM(ps.gs), SUM(ps.g), SUM(ps.gb), SUM(ps.fb) "
-         "FROM pitching_stats ps JOIN latest_ratings r ON ps.player_id=r.player_id "
+         "FROM mlb_pitching_stats ps JOIN latest_ratings r ON ps.player_id=r.player_id "
          "WHERE ps.year=? AND ps.split_id=? "
          "GROUP BY ps.player_id "
          "HAVING SUM(ps.ip)>=?")
@@ -348,7 +348,7 @@ def get_pitcher_percentiles(pid, split_id=1, year=None):
 
     # Detect if this player is an RP (few or no starts)
     player_gs_row = conn.execute(
-        "SELECT SUM(gs), SUM(g) FROM pitching_stats WHERE player_id=? AND year=? AND split_id=?",
+        "SELECT SUM(gs), SUM(g) FROM mlb_pitching_stats WHERE player_id=? AND year=? AND split_id=?",
         (pid, year, split_id)).fetchone()
     is_rp = player_gs_row and player_gs_row[1] and player_gs_row[0] / player_gs_row[1] < 0.25
 
@@ -526,7 +526,7 @@ def get_fielding_percentiles(pid, year=None):
     player_rows = conn.execute(
         "SELECT f.position, f.g, f.ip, f.tc, f.a, f.po, f.e, f.zr, f.framing, f.arm, "
         "       r.ifr, r.ofr, r.ife, r.ofe, r.c_arm, r.c_blk, r.c_frm, r.ifa "
-        "FROM fielding_stats f "
+        "FROM mlb_fielding_stats f "
         "JOIN latest_ratings r ON f.player_id = r.player_id "
         "WHERE f.player_id=? AND f.year=? AND f.position > 1",
         (pid, year)).fetchall()
@@ -547,7 +547,7 @@ def get_fielding_percentiles(pid, year=None):
         pool_rows = conn.execute(
             "SELECT f.player_id, f.ip, f.tc, f.a, f.po, f.e, f.zr, f.framing, f.arm, "
             "       r.ifr, r.ofr, r.ife, r.ofe, r.c_arm, r.c_blk, r.c_frm, r.ifa "
-            "FROM fielding_stats f "
+            "FROM mlb_fielding_stats f "
             "JOIN latest_ratings r ON f.player_id = r.player_id "
             "WHERE f.year=? AND f.position=? AND f.ip>=? "
             "GROUP BY f.player_id",
@@ -634,12 +634,12 @@ def get_percentile_history(pid, is_pitcher=False, split_id=1):
     sample_sizes = {}
     if is_pitcher:
         for row in conn.execute(
-            "SELECT year, SUM(ip) FROM pitching_stats WHERE player_id=? AND split_id=? GROUP BY year",
+            "SELECT year, SUM(ip) FROM mlb_pitching_stats WHERE player_id=? AND split_id=? GROUP BY year",
             (pid, split_id)).fetchall():
             sample_sizes[row[0]] = round(row[1], 1) if row[1] else 0
     else:
         for row in conn.execute(
-            "SELECT year, SUM(pa) FROM batting_stats WHERE player_id=? AND split_id=? GROUP BY year",
+            "SELECT year, SUM(pa) FROM mlb_batting_stats WHERE player_id=? AND split_id=? GROUP BY year",
             (pid, split_id)).fetchall():
             sample_sizes[row[0]] = row[1] or 0
     conn.close()
@@ -727,7 +727,7 @@ def get_fielding_percentile_history(pid):
     conn = get_db()
     # Get years this player has fielding data
     years = [r[0] for r in conn.execute(
-        "SELECT DISTINCT year FROM fielding_stats WHERE player_id=? ORDER BY year DESC",
+        "SELECT DISTINCT year FROM mlb_fielding_stats WHERE player_id=? ORDER BY year DESC",
         (pid,)).fetchall()]
     conn.close()
     if not years:

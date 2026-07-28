@@ -130,6 +130,7 @@ Items identified from beta tester usage and conversations.
 ## Web UI — Visual Overhaul
 
 - [ ] **In-app help system** — Add contextual help for key concepts (FV, risk, composite, surplus, etc.). Options: (1) "?" icon next to metrics that opens a tooltip/popover with explanation, (2) a slide-out help panel accessible from the nav, (3) a glossary page. Current tooltips via `title` attributes cover basics; a richer system would improve onboarding for new users. **LOE: Medium.**
+- [ ] **Player page injury/status banner** — Injury data (`injury_is_injured`, `injury_left`, `is_on_dl60`) is stored in DB and used by team roster pages and trade targets, but not displayed on individual player pages. Add a status banner (e.g., "60-Day DL — 65 days remaining") at the top of the player page when a player is injured/DFA'd/on waivers. Data already available in `players` table; just needs query + template work. **LOE: Low.**
 - [ ] **Team logos** — add team logos to team pages and player pages. Source or generate logo assets for all 34 MLB teams. Display in page headers, standings, and anywhere team identity appears. **LOE: Low-Medium.**
 - [ ] **UI overhaul exploration** — current layout is functional but generic. Investigate alternative visual styles, layouts, and design patterns to give the app more personality. **LOE: Medium-High.**
 

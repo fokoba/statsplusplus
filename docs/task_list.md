@@ -143,6 +143,65 @@ Items identified from beta tester usage and conversations.
 
 ---
 
+## API Integration Roadmap
+
+New StatsPlus API data discovered July 2026. Implementation plan in dependency order.
+See `docs/client_reference.md` for full field documentation.
+
+### Phase 1 — Expanded Player Fields (High Impact, Low Risk)
+
+The `/players` endpoint now returns 45 additional fields. These require schema changes
+to the `players` table and updates to `_upsert_players()` in refresh.py.
+
+- [ ] **1a. Injury status** — Store `injury_is_injured`, `injury_dl_left`, `injury_left`, `is_on_dl`, `is_on_dl60`, `dl_days_this_year`. Eliminates our biggest noted data limitation. Enables: injury flags in trade targets, roster status on team pages, filter injured players from depth charts. **LOE: Low.**
+- [ ] **1b. Service time** — Store `mlb_service_years`, `mlb_service_days`, `mlb_service_days_this_year`, `pro_service_years`, `pro_service_days`. Replaces our estimated service time in `arb_model.py` with exact values. Enables: precise arb eligibility, Super Two detection, Rule 5 eligibility. **LOE: Low.**
+- [ ] **1c. Roster status flags** — Store `is_on_waivers`, `designated_for_assignment`, `is_on_secondary`, `free_agent`, `was_traded`, `days_on_waivers`, `days_on_waivers_left`. Addresses "no transaction log" limitation — we can now see current state even if we can't see history. **LOE: Low.**
+- [ ] **1d. Draft history** — Store `draft_year`, `draft_round`, `draft_pick`, `draft_overall_pick`, `draft_team_id`. Useful for prospect pages, draft analysis, historical context. **LOE: Low.**
+- [ ] **1e. Demographics** — Store `date_of_birth`, `height`, `weight`, `bats`, `throws`, `nation_id`, `uniform_number`. Some overlap with ratings table (height/bats/throws). Consolidate into players table as canonical source. **LOE: Low.**
+
+### Phase 2 — Minor League Stats (High Impact, Medium Complexity)
+
+Stats are available for all minor league levels via the `lid` parameter on existing
+stat endpoints. Requires: discovering league IDs per league (via `/lgdata`), schema
+decisions (same table with `league_id` column, or separate), and refresh pipeline changes.
+
+- [ ] **2a. Implement `/lgdata` client method** — Add `get_lgdata() -> dict` to client.py. Use it during refresh to discover all league IDs and their hierarchy. Store league structure mapping. **LOE: Low.**
+- [ ] **2b. Schema decision for MiLB stats** — Options: (1) add `league_id` column to existing `batting_stats`/`pitching_stats`/`fielding_stats` tables (simpler, one query path), (2) separate `milb_batting_stats` table (cleaner separation, no risk to existing queries). Recommend option 1 with default `league_id=NULL` for existing MLB rows. **LOE: Low (design), Medium (migration).**
+- [ ] **2c. Refresh pipeline — MiLB stat pulls** — Add MiLB stat fetches to `refresh_league()`. Pull stats for all non-MLB leagues discovered via `/lgdata`. Consider: rate limiting (many more API calls), selective fetching (current year only? org players only?), refresh time impact. **LOE: Medium.**
+- [ ] **2d. MiLB stats in prospect evaluation** — Integrate minor league performance data into FV/composite calculations. Research: how to weight MiLB stats by level, how to adjust for league difficulty, blend with ratings. This is a significant model change. **LOE: High.**
+- [ ] **2e. MiLB stats on player pages** — Display minor league stat lines on prospect/player pages. Career stats by level. **LOE: Medium.**
+
+### Phase 3 — New Endpoints (Medium Impact, Low Complexity)
+
+Quick wins from newly documented endpoints.
+
+- [ ] **3a. Trade block** — Add `get_tradeblock() -> dict` to client.py. Store player IDs. Flag in `trade_targets.py` output ("ON BLOCK"). Display on trade workbench. **LOE: Low.**
+- [ ] **3b. Ballparks** — Add `get_ballparks() -> dict` to client.py. Store park factors. Use in stat normalization, display on team pages. **LOE: Low-Medium.**
+- [ ] **3c. League data (`/lgdata`) for standings** — Use real W-L-GB from `/lgdata` standings instead of pythagorean-only. Can supplement or replace game-frequency division detection. **LOE: Low-Medium.**
+
+### Phase 4 — Expanded Contract Data (Medium Impact, Medium Complexity)
+
+The `/contract` endpoint has 15 additional fields covering vesting options, incentives,
+and buyouts. Requires schema expansion and updates to contract analysis tools.
+
+- [ ] **4a. Option/vesting fields** — Store `last_year_vesting_option`, `next_last_year_team_option`, `next_last_year_player_option`, `next_last_year_vesting_option`, `next_last_year_option_buyout`, `last_year_option_buyout`. Improves option year handling in `contract_value.py` and `free_agents.py`. **LOE: Medium.**
+- [ ] **4b. Incentive fields** — Store `minimum_pa`, `minimum_pa_bonus`, `minimum_ip`, `minimum_ip_bonus`, `mvp_bonus`, `cyyoung_bonus`, `allstar_bonus`. Display on player contract pages. Factor into true contract cost projections. **LOE: Medium.**
+
+### Phase 5 — OSA Ratings (Lower Priority)
+
+- [ ] **5a. OSA ratings fetch** — Add `&osa=1` support to ratings export. Enables dual-rating comparison (scouted vs OSA) for accuracy assessment. Store in separate table or as additional columns. **LOE: Medium.**
+
+### Implementation Notes
+
+- Each phase is independent — can be implemented in any order
+- Phase 1 items are all low-risk schema additions with immediate value
+- Phase 2 is the most transformative but requires the most design thought
+- Phase 3 items are quick wins that improve existing workflows
+- All changes must maintain backward compatibility (NULL defaults for new columns)
+- Refresh time budget: current refresh is ~3 min. MiLB stats (Phase 2c) could add 30-60s depending on approach
+
+---
+
 ## Long-term
 
 - [ ] **Phase 2 — Interactive tools** — trade workbench, prospect explorer, free agent planner. Trade analysis CLI toolset complete (Session 44): `trade_targets.py`, `trade_assets.py`, `team_needs.py`, `trade_calculator.py` improvements, `trade-analyst.md` agent. Remaining: web-based trade workbench UI, prospect explorer UI, FA planner UI.

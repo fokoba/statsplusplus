@@ -156,6 +156,18 @@ def get_draft(lid: int = None) -> list[dict]:
 def get_game_history(year: int = None) -> list[dict]:
     return _csv("/gamehistory/", {"year": year})
 
+def get_lgdata() -> dict:
+    """League structure: leagues, subleagues, divisions, teams, standings."""
+    return _json("/lgdata/")
+
+def get_tradeblock() -> dict:
+    """Player IDs on the trade block. Returns {"player_ids": [...]}."""
+    return _json("/tradeblock/")
+
+def get_ballparks(lid: int = None) -> dict:
+    """Park factors for all ballparks. Optional lid for specific league."""
+    return _json("/ballparks/", {"lid": lid})
+
 # --- Ratings header repair and validation ---
 
 # Expected column names from the ratings CSV (in order). The API sends a

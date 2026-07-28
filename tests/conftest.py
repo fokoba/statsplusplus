@@ -27,7 +27,17 @@ CREATE TABLE IF NOT EXISTS teams (
 CREATE TABLE IF NOT EXISTS players (
     player_id INTEGER PRIMARY KEY, name TEXT, age INTEGER,
     team_id INTEGER, parent_team_id INTEGER, level TEXT,
-    pos INTEGER, role INTEGER
+    pos INTEGER, role INTEGER,
+    injury_is_injured INTEGER, injury_dl_left INTEGER, injury_left INTEGER,
+    is_on_dl INTEGER, is_on_dl60 INTEGER, dl_days_this_year INTEGER,
+    mlb_service_years INTEGER, mlb_service_days INTEGER, mlb_service_days_this_year INTEGER,
+    pro_service_years INTEGER, pro_service_days INTEGER,
+    is_active INTEGER, is_on_secondary INTEGER, is_on_waivers INTEGER,
+    designated_for_assignment INTEGER, free_agent INTEGER, was_traded INTEGER,
+    days_on_waivers INTEGER, days_on_waivers_left INTEGER, has_received_arbitration INTEGER,
+    draft_year INTEGER, draft_round INTEGER, draft_pick INTEGER,
+    draft_overall_pick INTEGER, draft_team_id INTEGER,
+    date_of_birth TEXT, weight INTEGER, nation_id INTEGER, uniform_number INTEGER
 );
 CREATE TABLE IF NOT EXISTS ratings (
     player_id INTEGER, snapshot_date TEXT,
@@ -105,6 +115,7 @@ CREATE TABLE IF NOT EXISTS batting_stats (
     pa INTEGER, stint INTEGER, hbp INTEGER, sf INTEGER,
     g INTEGER, gs INTEGER, cs INTEGER, gdp INTEGER, ibb INTEGER,
     sh INTEGER, ci INTEGER, pitches_seen INTEGER, ubr REAL, wpa REAL,
+    league_id INTEGER,
     PRIMARY KEY (player_id, year, split_id, team_id)
 );
 CREATE TABLE IF NOT EXISTS pitching_stats (
@@ -118,6 +129,7 @@ CREATE TABLE IF NOT EXISTS pitching_stats (
     iw INTEGER, ir REAL, irs REAL, rs INTEGER, dp INTEGER,
     sb INTEGER, cs INTEGER, sf INTEGER, sh INTEGER, ci INTEGER,
     tb INTEGER, li REAL, wpa REAL, relief_app INTEGER, md INTEGER, sd INTEGER,
+    league_id INTEGER,
     PRIMARY KEY (player_id, year, split_id, team_id)
 );
 CREATE TABLE IF NOT EXISTS fielding_stats (
@@ -125,6 +137,7 @@ CREATE TABLE IF NOT EXISTS fielding_stats (
     g INTEGER, gs INTEGER, ip REAL, tc INTEGER, a INTEGER, po INTEGER,
     e INTEGER, dp INTEGER, pb INTEGER, sba INTEGER, rto INTEGER,
     zr REAL, framing REAL, arm REAL,
+    league_id INTEGER,
     PRIMARY KEY (player_id, year, team_id, position)
 );
 CREATE TABLE IF NOT EXISTS team_batting_stats (

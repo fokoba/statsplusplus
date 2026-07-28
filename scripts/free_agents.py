@@ -34,6 +34,7 @@ def upcoming_fas(year, years_out=1, bucket=None, min_war=None, my_team_only=Fals
         SELECT c.player_id, p.name, p.age, c.years, c.current_year,
                c.salary_0, c.contract_team_id,
                c.last_year_team_option, c.last_year_player_option,
+               p.mlb_service_years, p.mlb_service_days,
                s.bucket, s.ovr, s.surplus,
                t.name as team_name
         FROM contracts c
@@ -75,13 +76,20 @@ def upcoming_fas(year, years_out=1, bucket=None, min_war=None, my_team_only=Fals
         yrs_left = r["years"] - r["current_year"]
         cur_sal = r["salary_0"] or 0
 
-        # Detect arb-eligible: salary above minimum, 1yr deal, service time < 6 years
+        # Detect arb-eligible using exact service time from DB
         is_arb = False
         if yrs_left <= 1 and cur_sal > _cfg.minimum_salary:
-            from arb_model import estimate_service_time as _est_svc
-            conn2 = _db.get_conn()
-            svc = _est_svc(conn2, r["player_id"])
-            conn2.close()
+            svc_yrs = r["mlb_service_years"]
+            svc_days = r["mlb_service_days"] or 0
+            if svc_yrs is not None:
+                # mlb_service_days is total cumulative days (172 days = 1 year)
+                svc = svc_days / 172.0
+            else:
+                # Fallback to estimation if service time not available
+                from arb_model import estimate_service_time as _est_svc
+                conn2 = _db.get_conn()
+                svc = _est_svc(conn2, r["player_id"])
+                conn2.close()
             if svc is not None and svc < 6.0:
                 is_arb = True
 

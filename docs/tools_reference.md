@@ -627,10 +627,19 @@ All accessed via the query functions above. Direct SQL is rarely needed.
 
 ## Known Data Limitations
 
-- **No minor league stats** — the StatsPlus API returns empty for minor league player IDs.
-  Farm analysis relies on ratings + age-vs-level context only.
+- **Minor league stats available but not yet integrated** — The StatsPlus API now supports
+  batting/pitching/fielding stats for all minor league levels via the `lid` parameter on
+  `/playerbatstatsv2` etc. Includes WAR. Until Phase 2 of the API Integration Roadmap is
+  complete, farm analysis still relies on ratings + age/level context only.
+  *(Tracked: API Roadmap Phase 2)*
 - **No play-by-play or box scores** — game results include final score and pitchers only.
-- **No injury data** — StatsPlus doesn't expose DL/IL status.
-- **No transaction log** — trades, callups, DFA are not tracked historically.
+- **Injury data available but not yet stored** — The `/players` endpoint now exposes
+  `injury_is_injured`, `injury_dl_left`, `injury_left` (added April 2026). Until Phase 1a
+  integration is complete, injury status is not in the DB.
+  *(Tracked: API Roadmap Phase 1a)*
+- **Roster status flags available but not yet stored** — The `/players` endpoint now exposes
+  `designated_for_assignment`, `is_on_waivers`, `was_traded`, `free_agent` flags. Until
+  Phase 1c integration, recent transactions are not reflected in the DB.
+  *(Tracked: API Roadmap Phase 1c)*
 - **Ratings are scouted** — accuracy varies by scout quality. `Acc` field indicates
   reliability (VH/H/A/L). Only mention low accuracy when `Acc = L`.

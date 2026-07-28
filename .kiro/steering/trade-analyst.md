@@ -329,14 +329,15 @@ for that view and shows the FA/ARB/TO distinction clearly.
 
 ## Known Data Limitations
 
-- **No injury data** — always confirm availability before recommending
-- **No transaction log** — DFAs, callups, trades, and waivers are not reflected until the next refresh. A DFA'd player will still appear on the roster. Always ask the user about recent moves before analyzing the roster — do not treat the DB roster as ground truth for current team construction.
+- **Injury data available but not yet stored** — The API now exposes `injury_is_injured`, `injury_dl_left`, `injury_left` on the `/players` endpoint (added April 2026). Until Phase 1a integration is complete, always confirm availability before recommending. *(Tracked: API Roadmap Phase 1a)*
+- **No transaction log** — DFAs, callups, trades, and waivers are not reflected until the next refresh. However, the API now exposes `designated_for_assignment`, `is_on_waivers`, `was_traded`, and `free_agent` flags on `/players`. Until Phase 1c integration, ask the user about recent moves. *(Tracked: API Roadmap Phase 1c)*
 - **Contract data may be stale** — if the user says a player has multi-year control but the DB shows a 1-year deal, the data needs a refresh. Flag this discrepancy rather than trusting the DB blindly.
 - **Ratings are scouted** — `Acc=L` players have unreliable grades
-- **No minor league stats** — farm analysis relies on ratings + age/level only
-- **Standings are pythagorean** — actual W-L may differ; confirm with user
+- **Minor league stats available but not yet stored** — The API supports batting/pitching/fielding stats for all minor league levels via the `lid` parameter. Includes WAR. Until Phase 2 integration, farm analysis relies on ratings + age/level only. *(Tracked: API Roadmap Phase 2)*
+- **Standings are pythagorean** — actual W-L now available via `/lgdata` endpoint but not yet integrated. *(Tracked: API Roadmap Phase 3c)*
 - **Seller classification is algorithmic** — user relationship context overrides it
 - **Split stats may not exist** — `trade_targets.py` falls back to split ratings
+- **Trade block data available but not yet stored** — `/tradeblock` endpoint returns confirmed-available player IDs. Until Phase 3a integration, confirm availability with user. *(Tracked: API Roadmap Phase 3a)*
 
 ---
 

@@ -35,12 +35,52 @@ def _upsert_teams(conn, teams):
     )
 
 def _upsert_players(conn, players):
+    _PLAYER_COLS = (
+        "player_id", "name", "age", "team_id", "parent_team_id", "level", "pos", "role",
+        # Injury
+        "injury_is_injured", "injury_dl_left", "injury_left",
+        "is_on_dl", "is_on_dl60", "dl_days_this_year",
+        # Service time
+        "mlb_service_years", "mlb_service_days", "mlb_service_days_this_year",
+        "pro_service_years", "pro_service_days",
+        # Roster status
+        "is_active", "is_on_secondary", "is_on_waivers",
+        "designated_for_assignment", "free_agent", "was_traded",
+        "days_on_waivers", "days_on_waivers_left", "has_received_arbitration",
+        # Draft info
+        "draft_year", "draft_round", "draft_pick", "draft_overall_pick", "draft_team_id",
+        # Demographics
+        "date_of_birth", "weight", "nation_id", "uniform_number",
+    )
+    col_list = ",".join(_PLAYER_COLS)
+    placeholders = ",".join(["?"] * len(_PLAYER_COLS))
+
+    def row(p):
+        return (
+            p["ID"],
+            f"{p.get('First Name', '')} {p.get('Last Name', '')}".strip(),
+            p.get("Age"), p.get("Team ID"), p.get("Parent Team ID"),
+            p.get("Level"), p.get("Pos"), p.get("Role"),
+            # Injury
+            p.get("injury_is_injured"), p.get("injury_dl_left"), p.get("injury_left"),
+            p.get("is_on_dl"), p.get("is_on_dl60"), p.get("dl_days_this_year"),
+            # Service time
+            p.get("mlb_service_years"), p.get("mlb_service_days"), p.get("mlb_service_days_this_year"),
+            p.get("pro_service_years"), p.get("pro_service_days"),
+            # Roster status
+            p.get("is_active"), p.get("is_on_secondary"), p.get("is_on_waivers"),
+            p.get("designated_for_assignment"), p.get("free_agent"), p.get("was_traded"),
+            p.get("days_on_waivers"), p.get("days_on_waivers_left"), p.get("has_received_arbitration"),
+            # Draft info
+            p.get("draft_year"), p.get("draft_round"), p.get("draft_pick"),
+            p.get("draft_overall_pick"), p.get("draft_team_id"),
+            # Demographics
+            p.get("date_of_birth"), p.get("weight"), p.get("nation_id"), p.get("uniform_number"),
+        )
+
     conn.executemany(
-        "INSERT OR REPLACE INTO players VALUES (?,?,?,?,?,?,?,?)",
-        [(p["ID"], f"{p.get('First Name','')} {p.get('Last Name','')}".strip(),
-          p.get("Age"), p.get("Team ID"), p.get("Parent Team ID"),
-          p.get("Level"), p.get("Pos"), p.get("Role"))
-         for p in players]
+        f"INSERT OR REPLACE INTO players ({col_list}) VALUES ({placeholders})",
+        [row(p) for p in players]
     )
 
 def _upsert_ratings(conn, ratings, snapshot_date, keep_history=True):
@@ -240,7 +280,7 @@ def _upsert_extensions(conn, extensions):
             rows
         )
 
-def _upsert_batting(conn, rows):
+def _upsert_batting(conn, rows, league_id=None):
     def _avg(r): return r.get("h", 0) / r["ab"] if r.get("ab") else None
     def _obp(r):
         h, bb, hp, ab, sf = r.get("h",0), r.get("bb",0), r.get("hp",0), r.get("ab",0), r.get("sf",0)
@@ -251,19 +291,21 @@ def _upsert_batting(conn, rows):
         if not ab: return None
         return (r.get("h",0) + r.get("d",0) + 2*r.get("t",0) + 3*r.get("hr",0)) / ab
 
+    n_cols = 33  # 32 original + league_id
     conn.executemany(
-        "INSERT OR REPLACE INTO batting_stats VALUES (" + ",".join(["?"]*32) + ")",
+        "INSERT OR REPLACE INTO batting_stats VALUES (" + ",".join(["?"]*n_cols) + ")",
         [(r["player_id"], r.get("year"), r.get("team_id"), r.get("split_id"),
           r.get("ab"), r.get("h"), r.get("d"), r.get("t"), r.get("hr"),
           r.get("r"), r.get("rbi"), r.get("sb"), r.get("bb"), r.get("k"),
           _avg(r), _obp(r), _slg(r), r.get("war"),
           r.get("pa"), r.get("stint"), r.get("hp"), r.get("sf"),
           r.get("g"), r.get("gs"), r.get("cs"), r.get("gdp"), r.get("ibb"),
-          r.get("sh"), r.get("ci"), r.get("pitches_seen"), r.get("ubr"), r.get("wpa"))
+          r.get("sh"), r.get("ci"), r.get("pitches_seen"), r.get("ubr"), r.get("wpa"),
+          league_id)
          for r in rows]
     )
 
-def _upsert_pitching(conn, rows):
+def _upsert_pitching(conn, rows, league_id=None):
     def _ip(outs):
         return outs / 3 if outs else 0.0
     def _era(r):
@@ -271,8 +313,9 @@ def _upsert_pitching(conn, rows):
         er = r.get("er") or 0
         return round(er * 27 / outs, 2) if outs > 0 else 0.0
 
+    n_cols = 53  # 52 original + league_id
     conn.executemany(
-        "INSERT OR REPLACE INTO pitching_stats VALUES (" + ",".join(["?"]*52) + ")",
+        "INSERT OR REPLACE INTO pitching_stats VALUES (" + ",".join(["?"]*n_cols) + ")",
         [(r["player_id"], r.get("year"), r.get("team_id"), r.get("split_id"),
           _ip(r.get("outs")), r.get("g"), r.get("gs"), r.get("w"), r.get("l"), r.get("s"),
           _era(r), r.get("k"), r.get("bb"), r.get("ha"), r.get("war"),
@@ -282,20 +325,23 @@ def _upsert_pitching(conn, rows):
           r.get("gb"), r.get("fb"), r.get("pi"), r.get("wp"), r.get("bk"),
           r.get("iw"), r.get("ir"), r.get("irs"), r.get("rs"), r.get("dp"),
           r.get("sb"), r.get("cs"), r.get("sf"), r.get("sh"), r.get("ci"),
-          r.get("tb"), r.get("li"), r.get("wpa"), r.get("ra"), r.get("md"), r.get("sd"))
+          r.get("tb"), r.get("li"), r.get("wpa"), r.get("ra"), r.get("md"), r.get("sd"),
+          league_id)
          for r in rows]
     )
 
 
 
-def _upsert_fielding(conn, rows):
+def _upsert_fielding(conn, rows, league_id=None):
+    n_cols = 19  # 18 original + league_id
     conn.executemany(
-        "INSERT OR REPLACE INTO fielding_stats VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT OR REPLACE INTO fielding_stats VALUES (" + ",".join(["?"]*n_cols) + ")",
         [(r["player_id"], r.get("year"), r.get("team_id"), r.get("position"),
           r.get("g"), r.get("gs"), (r.get("ip") or 0) / 3,
           r.get("tc"), r.get("a"), r.get("po"),
           r.get("e"), r.get("dp"), r.get("pb"), r.get("sba"), r.get("rto"),
-          r.get("zr"), r.get("framing"), r.get("arm"))
+          r.get("zr"), r.get("framing"), r.get("arm"),
+          league_id)
          for r in rows]
     )
 
@@ -774,6 +820,44 @@ def refresh_league(year, game_date=None):
     games = client.get_game_history(year=year)
     _upsert_games(conn, games)
     log.info(f"  {len(games)} games")
+
+    # Minor league stats — fetch from all discovered MiLB leagues (current year only)
+    log.info("── minor league stats")
+    try:
+        lgdata = client.get_lgdata()
+        # Find non-MLB leagues (level > 1) that are active in our league structure
+        primary_lid = None
+        milb_lids = []
+        for lg in lgdata.get("leagues", []):
+            if lg.get("primary_league"):
+                primary_lid = lg["league_id"]
+            elif lg.get("level", 0) in (2, 3, 4, 5, 6) and lg.get("parent_league_id") == primary_lid:
+                milb_lids.append(lg["league_id"])
+
+        # Store league hierarchy in settings for downstream use
+        settings_path = league_dir / "config" / "league_settings.json"
+        if settings_path.exists():
+            s = json.loads(settings_path.read_text())
+            s["minor_leagues"] = [{"lid": lg["league_id"], "name": lg["name"], "level": lg["level"]}
+                                  for lg in lgdata.get("leagues", [])
+                                  if lg["league_id"] in milb_lids]
+            s["primary_league_id"] = primary_lid
+            settings_path.write_text(json.dumps(s, indent=2) + "\n")
+
+        if milb_lids:
+            total_bat = total_pit = 0
+            for lid in milb_lids:
+                bat = client.get_player_batting_stats(year=year, split=1, lid=lid)
+                _upsert_batting(conn, bat, league_id=lid)
+                total_bat += len(bat)
+                pit = client.get_player_pitching_stats(year=year, split=1, lid=lid)
+                _upsert_pitching(conn, pit, league_id=lid)
+                total_pit += len(pit)
+            log.info(f"  {len(milb_lids)} leagues, {total_bat} batting rows, {total_pit} pitching rows")
+        else:
+            log.info("  no minor leagues found (primary_lid=%s)", primary_lid)
+    except Exception as e:
+        log.warning(f"  MiLB stats failed (non-fatal): {e}")
 
     conn.commit()
 

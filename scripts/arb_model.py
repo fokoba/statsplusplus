@@ -118,7 +118,32 @@ def arb_salary(ovr, bucket, arb_year, prior_salary, min_sal):
 
 
 def estimate_service_time(conn, player_id):
-    """Estimate fractional MLB service years from games played.
+    """Get MLB service time as fractional years.
+
+    Prefers exact values from the players table (mlb_service_days).
+    The API's mlb_service_days is cumulative total days of MLB service.
+    One full service year = 172 days. So 6 years = 1032 days.
+
+    Falls back to games-based estimation when exact data is not available.
+    """
+    # Try exact service time from expanded /players API fields
+    row = conn.execute(
+        "SELECT mlb_service_years, mlb_service_days FROM players WHERE player_id=?",
+        (player_id,)
+    ).fetchone()
+    if row and row[0] is not None:
+        # mlb_service_days is total cumulative days (not days beyond years)
+        # mlb_service_years = floor(mlb_service_days / 172)
+        # Use days directly for precision
+        days = row[1] or 0
+        return days / 172.0
+
+    # Fallback: estimate from games played
+    return _estimate_service_time_from_games(conn, player_id)
+
+
+def _estimate_service_time_from_games(conn, player_id):
+    """Estimate fractional MLB service years from games played (legacy fallback).
 
     Uses role-adjusted denominators per year:
       Hitters: g / SERVICE_GAMES_HITTER
@@ -159,6 +184,13 @@ def estimate_control(conn, player_id, age, salary, bucket=None):
     from league_config import config as _cfg
     min_sal = league_minimum()
     svc = estimate_service_time(conn, player_id)
+
+    # Check has_received_arbitration flag for more precise arb detection
+    arb_flag = conn.execute(
+        "SELECT has_received_arbitration FROM players WHERE player_id=?",
+        (player_id,)
+    ).fetchone()
+    has_arb = arb_flag[0] if arb_flag and arb_flag[0] is not None else None
 
     if _cfg.perpetual_arb:
         remaining = max(1, 38 - age)

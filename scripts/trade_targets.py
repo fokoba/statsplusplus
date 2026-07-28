@@ -111,7 +111,7 @@ def _contract_status(years, current_year, team_opt, player_opt):
 # ---------------------------------------------------------------------------
 
 def find_targets(bucket, min_ovr=50, sellers_only=False, include_controlled=False,
-                 max_salary_m=None, year=None, vs_hand=None):
+                 max_salary_m=None, year=None, vs_hand=None, exclude_injured=False):
     year = year or _cfg.year
     conn = _db.get_conn()
 
@@ -139,6 +139,8 @@ def find_targets(bucket, min_ovr=50, sellers_only=False, include_controlled=Fals
 
     rows = conn.execute(f"""
         SELECT p.player_id, p.name, p.age, p.team_id, p.pos, p.role,
+               p.injury_is_injured, p.injury_left, p.is_on_dl, p.is_on_dl60,
+               p.designated_for_assignment, p.is_on_waivers,
                r.ovr, r.pot,
                r.cntct, r.pow, r.eye, r.speed, r.cf,
                r.cntct_r, r.pow_r, r.eye_r,
@@ -196,6 +198,13 @@ def find_targets(bucket, min_ovr=50, sellers_only=False, include_controlled=Fals
         if pid in seen:
             continue
         seen.add(pid)
+
+        # Skip DFA'd players — not tradeable
+        if r["designated_for_assignment"]:
+            continue
+
+        if exclude_injured and r["injury_is_injured"]:
+            continue
 
         # Skip my team
         if r["team_id"] == _cfg.my_team_id:
@@ -276,6 +285,20 @@ def find_targets(bucket, min_ovr=50, sellers_only=False, include_controlled=Fals
                 "_sort_key": pow_split or r["pow"] or 0,
             })
 
+        # Injury flag
+        if r["injury_is_injured"]:
+            days = r["injury_left"] or 0
+            entry["injury"] = f"DL:{days}d" if days else "DL"
+            if r["is_on_dl60"]:
+                entry["injury"] = f"60-DL:{days}d"
+        else:
+            entry["injury"] = None
+
+        if r["is_on_waivers"]:
+            entry["on_waivers"] = True
+        else:
+            entry["on_waivers"] = False
+
         results.append(entry)
 
     sort_key = (lambda x: (0 if x["seller"] else 1, -x.get("_sort_key", x["ovr"]))) \
@@ -303,12 +326,13 @@ def _fmt_line(r):
         ip = int(r["ip"] or 0)
         war = f"{r['war']:.1f}" if r["war"] else "-.-"
         ext_note = f" +EXT${r['ext_salary_m']:.1f}M/yr" if r.get("ext_salary_m", 0) > 0 else ""
+        inj = f" 🏥{r['injury']}" if r.get('injury') else ""
         return (
             f"{status_marker} {seller_marker} {r['name']:<22} {r['age']:>2} "
             f"Ovr:{r['ovr']:>2}/{r['pot']:>2} {r['team']:<5} "
             f"${r['prorated_m']:.1f}M(pro) ${r['salary_m']:.1f}M(full){ext_note} "
             f"Surp:${r['surplus_m']:+.1f}M | "
-            f"ERA:{era} {ip}IP WAR:{war}"
+            f"ERA:{era} {ip}IP WAR:{war}{inj}"
         )
     else:
         avg = f".{int((r['avg'] or 0)*1000):03}" if r["avg"] else "---"
@@ -337,12 +361,13 @@ def _fmt_line(r):
             split_str = ""
 
         ext_note = f" +EXT${r['ext_salary_m']:.1f}M/yr" if r.get("ext_salary_m", 0) > 0 else ""
+        inj = f" 🏥{r['injury']}" if r.get('injury') else ""
         return (
             f"{status_marker} {seller_marker} {r['name']:<22} {r['age']:>2} "
             f"Ovr:{r['ovr']:>2}/{r['pot']:>2} {r['team']:<5} "
             f"${r['prorated_m']:.1f}M(pro) ${r['salary_m']:.1f}M(full){ext_note} "
             f"Surp:${r['surplus_m']:+.1f}M | "
-            f"{avg}/{obp}/{slg} {hr}HR WAR:{war}{cf}{split_str}"
+            f"{avg}/{obp}/{slg} {hr}HR WAR:{war}{cf}{split_str}{inj}"
         )
 
 
@@ -386,6 +411,8 @@ if __name__ == "__main__":
                              "E.g. --max-salary 4 means you can absorb up to $4M this year.")
     parser.add_argument("--vs-hand", choices=["R", "L"], default=None,
                         help="Show and sort by split ratings/stats vs RHP or LHP")
+    parser.add_argument("--exclude-injured", action="store_true",
+                        help="Exclude injured players from results")
     parser.add_argument("--year", type=int, default=None)
     args = parser.parse_args()
 
@@ -397,5 +424,6 @@ if __name__ == "__main__":
         max_salary_m=args.max_salary,
         year=args.year,
         vs_hand=args.vs_hand,
+        exclude_injured=args.exclude_injured,
     )
     print_targets(results, args.bucket)

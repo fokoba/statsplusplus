@@ -861,6 +861,44 @@ def refresh_league(year, game_date=None):
 
     conn.commit()
 
+    # Trade block — players explicitly made available
+    log.info("── trade block")
+    try:
+        tb = client.get_tradeblock()
+        player_ids = tb.get("player_ids", [])
+        conn.execute("DELETE FROM trade_block")
+        if player_ids:
+            conn.executemany(
+                "INSERT OR REPLACE INTO trade_block (player_id, fetched_date) VALUES (?, ?)",
+                [(pid, game_date) for pid in player_ids]
+            )
+        log.info(f"  {len(player_ids)} players on trade block")
+    except Exception as e:
+        log.warning(f"  trade block failed (non-fatal): {e}")
+
+    # Standings from /lgdata — real W-L-GB
+    log.info("── standings")
+    try:
+        lgdata = client.get_lgdata()
+        standings_rows = lgdata.get("standings", [])
+        if standings_rows:
+            conn.execute("DELETE FROM standings")
+            conn.executemany(
+                "INSERT OR REPLACE INTO standings (team_id, w, l, t, pct, gb, pos, streak, magic_number, fetched_date) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [(s["team_id"], s.get("w", 0), s.get("l", 0), s.get("t", 0),
+                  s.get("pct", 0), s.get("gb", 0), s.get("pos", 0),
+                  s.get("streak", 0), s.get("magic_number", 0), game_date)
+                 for s in standings_rows]
+            )
+            log.info(f"  {len(standings_rows)} team standings stored")
+        else:
+            log.info("  no standings data in /lgdata")
+    except Exception as e:
+        log.warning(f"  standings failed (non-fatal): {e}")
+
+    conn.commit()
+
     # Now collect ratings — wait for the minimum 30s if other pulls were fast
     elapsed = _time.monotonic() - ratings_start
     remaining = 30 - elapsed

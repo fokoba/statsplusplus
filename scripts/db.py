@@ -148,6 +148,24 @@ CREATE TABLE IF NOT EXISTS pitching_stats (
     PRIMARY KEY (player_id, year, split_id, team_id)
 );
 
+CREATE TABLE IF NOT EXISTS trade_block (
+    player_id   INTEGER PRIMARY KEY,
+    fetched_date TEXT
+);
+
+CREATE TABLE IF NOT EXISTS standings (
+    team_id      INTEGER PRIMARY KEY,
+    w            INTEGER,
+    l            INTEGER,
+    t            INTEGER,
+    pct          REAL,
+    gb           REAL,
+    pos          INTEGER,
+    streak       INTEGER,
+    magic_number INTEGER,
+    fetched_date TEXT
+);
+
 CREATE TABLE IF NOT EXISTS prospect_fv (
     player_id       INTEGER,
     eval_date       TEXT,

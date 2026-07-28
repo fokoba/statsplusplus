@@ -1266,6 +1266,59 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
 </div>
 {% endif %}
 
+{% if p.milb_bat_stats or p.milb_pit_stats %}
+<div class="panel" style="margin-top:16px">
+  <h2>Minor League Stats</h2>
+  {% if p.milb_bat_stats %}
+  <table>
+    <thead>
+      <tr>
+        <th>Year</th><th class="left">League</th><th>G</th><th>PA</th><th>AB</th>
+        <th>AVG</th><th>OBP</th><th>SLG</th>
+        <th>HR</th><th>RBI</th><th>BB</th><th>K</th><th>SB</th><th>WAR</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in p.milb_bat_stats %}
+      <tr>
+        <td>{{ s.year }}</td>
+        <td class="left">{{ s.league_name }}</td>
+        <td>{{ s.g }}</td><td>{{ s.pa }}</td><td>{{ s.ab }}</td>
+        <td>{{ "%.3f"|format(s.avg) }}</td><td>{{ "%.3f"|format(s.obp) }}</td><td>{{ "%.3f"|format(s.slg) }}</td>
+        <td>{{ s.hr }}</td><td>{{ s.rbi }}</td><td>{{ s.bb }}</td><td>{{ s.k }}</td><td>{{ s.sb }}</td>
+        <td>{{ s.war }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+  {% if p.milb_pit_stats %}
+  <table{% if p.milb_bat_stats %} style="margin-top:12px"{% endif %}>
+    <thead>
+      <tr>
+        <th>Year</th><th class="left">League</th><th>G</th><th>GS</th><th>IP</th>
+        <th>ERA</th><th>K</th><th>BB</th><th>K/9</th><th>BB/9</th>
+        <th>W</th><th>L</th><th>SV</th><th>WAR</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in p.milb_pit_stats %}
+      <tr>
+        <td>{{ s.year }}</td>
+        <td class="left">{{ s.league_name }}</td>
+        <td>{{ s.g }}</td><td>{{ s.gs }}</td><td>{{ s.ip|fmt_ip }}</td>
+        <td>{{ "%.2f"|format(s.era) }}</td><td>{{ s.k }}</td><td>{{ s.bb }}</td>
+        <td>{{ s.k9 }}</td><td>{{ s.bb9 }}</td>
+        <td>{{ s.w }}</td><td>{{ s.l }}</td><td>{{ s.sv }}</td>
+        <td>{{ s.war }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+{% endif %}
+
 {% if p.fielding_stats %}
 <div class="panel" style="margin-top:16px">
   <h2>Fielding Stats</h2>

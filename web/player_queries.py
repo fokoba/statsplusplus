@@ -1521,6 +1521,15 @@ def get_player(pid):
     milb_pit_stats = []
     try:
         _milb_conn = get_db()
+        # Build league_id → name/level mapping from league_settings.json
+        _lg_map = {}
+        _settings_path = get_cfg().league_dir / "config" / "league_settings.json"
+        if _settings_path.exists():
+            import json as _json_m
+            _ls = _json_m.loads(_settings_path.read_text())
+            for _ml in _ls.get("minor_leagues", []):
+                _lg_map[_ml["lid"]] = {"name": _ml["name"], "level": _ml["level"]}
+
         _milb_bat = _milb_conn.execute("""
             SELECT b.year, b.league_id, b.ab, b.h, b.hr, b.rbi, b.bb, b.k, b.sb,
                    b.pa, b.war, b.g, b.d, b.t, b.hbp, b.sf
@@ -1535,8 +1544,12 @@ def get_player(pid):
             bb = r["bb"] or 0
             k = r["k"] or 0
             pa = r["pa"] or 0
+            _lid = r["league_id"]
+            _lg_info = _lg_map.get(_lid, {})
             milb_bat_stats.append({
-                "year": r["year"], "league_id": r["league_id"],
+                "year": r["year"], "league_id": _lid,
+                "league_name": _lg_info.get("name", f"League {_lid}"),
+                "level": _lg_info.get("level", 0),
                 "g": r["g"] or 0, "pa": pa, "ab": ab, "h": h, "hr": hr,
                 "rbi": r["rbi"] or 0, "bb": bb, "k": k, "sb": r["sb"] or 0,
                 "avg": round(h / ab, 3) if ab else 0,
@@ -1555,8 +1568,12 @@ def get_player(pid):
         """, (pid,)).fetchall()
         for r in _milb_pit:
             ip = r["ip"] or 0
+            _lid = r["league_id"]
+            _lg_info = _lg_map.get(_lid, {})
             milb_pit_stats.append({
-                "year": r["year"], "league_id": r["league_id"],
+                "year": r["year"], "league_id": _lid,
+                "league_name": _lg_info.get("name", f"League {_lid}"),
+                "level": _lg_info.get("level", 0),
                 "g": r["g"] or 0, "gs": r["gs"] or 0,
                 "ip": round(ip, 1), "era": round(r["era"], 2) if r["era"] else 0,
                 "k": r["k"] or 0, "bb": r["bb"] or 0,

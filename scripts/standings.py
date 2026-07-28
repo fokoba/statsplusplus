@@ -100,7 +100,21 @@ def print_standings(rows, my_tid=None):
         my_tid = _cfg.my_team_id
     leader_pct = rows[0]["pct"] if rows else 0.5
 
-    hdr = f"{'#':>2}  {'Team':<28} {'W':>5} {'L':>5} {'Pct':>6} {'GB':>5} {'RS':>4} {'RA':>4} {'Diff':>5}"
+    # Load real standings from DB if available
+    real_standings = {}
+    try:
+        conn = _db.get_conn()
+        for r in conn.execute("SELECT team_id, w, l FROM standings").fetchall():
+            real_standings[r[0]] = (r[1], r[2])
+        conn.close()
+    except Exception:
+        pass
+
+    has_real = bool(real_standings)
+    if has_real:
+        hdr = f"{'#':>2}  {'Team':<24} {'pyW':>4} {'pyL':>4} {'Pct':>6} {'aW':>4} {'aL':>4} {'Δ':>3} {'GB':>5} {'RS':>4} {'RA':>4} {'Diff':>5}"
+    else:
+        hdr = f"{'#':>2}  {'Team':<28} {'W':>5} {'L':>5} {'Pct':>6} {'GB':>5} {'RS':>4} {'RA':>4} {'Diff':>5}"
     print(hdr)
     print("-" * len(hdr))
     leader_w = rows[0]["w"] if rows else 0
@@ -110,7 +124,15 @@ def print_standings(rows, my_tid=None):
         gb_str = "-" if gb < 0.25 else f"{gb:.1f}"
         diff_str = f"+{r['diff']}" if r["diff"] > 0 else str(r["diff"])
         marker = " ◄" if r["tid"] == my_tid else ""
-        print(f"{i:>2}  {r['name']:<28} {r['w']:>5} {r['l']:>5} {r['pct']:>6.3f} {gb_str:>5} {r['rs']:>4} {r['ra']:>4} {diff_str:>5}{marker}")
+        if has_real and r["tid"] in real_standings:
+            aw, al = real_standings[r["tid"]]
+            delta = aw - int(round(r["w"]))
+            delta_str = f"{delta:+d}" if delta != 0 else " 0"
+            print(f"{i:>2}  {r['name']:<24} {r['w']:>4} {r['l']:>4} {r['pct']:>6.3f} {aw:>4} {al:>4} {delta_str:>3} {gb_str:>5} {r['rs']:>4} {r['ra']:>4} {diff_str:>5}{marker}")
+        elif has_real:
+            print(f"{i:>2}  {r['name']:<24} {r['w']:>4} {r['l']:>4} {r['pct']:>6.3f} {'?':>4} {'?':>4} {'':>3} {gb_str:>5} {r['rs']:>4} {r['ra']:>4} {diff_str:>5}{marker}")
+        else:
+            print(f"{i:>2}  {r['name']:<28} {r['w']:>5} {r['l']:>5} {r['pct']:>6.3f} {gb_str:>5} {r['rs']:>4} {r['ra']:>4} {diff_str:>5}{marker}")
 
 
 def all_actual_records(year):

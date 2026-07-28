@@ -251,15 +251,38 @@ def _snapshot_ratings_history(conn, ratings, snapshot_date):
 
 
 def _upsert_contracts(conn, contracts):
+    _COLS = (
+        "player_id", "team_id", "contract_team_id", "is_major",
+        "season_year", "years", "current_year",
+        "salary_0", "salary_1", "salary_2", "salary_3",
+        "salary_4", "salary_5", "salary_6", "salary_7",
+        "salary_8", "salary_9", "salary_10", "salary_11",
+        "salary_12", "salary_13", "salary_14",
+        "no_trade", "last_year_team_option", "last_year_player_option",
+        "last_year_vesting_option", "last_year_option_buyout",
+        "next_last_year_team_option", "next_last_year_player_option",
+        "next_last_year_vesting_option", "next_last_year_option_buyout",
+        "minimum_pa", "minimum_pa_bonus", "minimum_ip", "minimum_ip_bonus",
+        "mvp_bonus", "cyyoung_bonus", "allstar_bonus",
+    )
+    col_list = ",".join(_COLS)
+    placeholders = ",".join(["?"] * len(_COLS))
+
     def row(c):
         return (
             c["player_id"], c.get("team_id"), c.get("contract_team_id"), c.get("is_major"),
             c.get("season_year"), c.get("years"), c.get("current_year"),
             *[c.get(f"salary{i}") for i in range(15)],
             c.get("no_trade"), c.get("last_year_team_option"), c.get("last_year_player_option"),
+            c.get("last_year_vesting_option"), c.get("last_year_option_buyout"),
+            c.get("next_last_year_team_option"), c.get("next_last_year_player_option"),
+            c.get("next_last_year_vesting_option"), c.get("next_last_year_option_buyout"),
+            c.get("minimum_pa"), c.get("minimum_pa_bonus"),
+            c.get("minimum_ip"), c.get("minimum_ip_bonus"),
+            c.get("mvp_bonus"), c.get("cyyoung_bonus"), c.get("allstar_bonus"),
         )
     conn.executemany(
-        f"INSERT OR REPLACE INTO contracts VALUES ({','.join(['?']*25)})",
+        f"INSERT OR REPLACE INTO contracts ({col_list}) VALUES ({placeholders})",
         [row(c) for c in contracts]
     )
 

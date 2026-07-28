@@ -147,9 +147,11 @@ def _classify_sellers(year):
 # Contract status
 # ---------------------------------------------------------------------------
 
-def _contract_status(years, current_year, team_opt, player_opt):
+def _contract_status(years, current_year, team_opt, player_opt, vesting_opt=False):
     yrs_left = years - current_year
     if yrs_left <= 1:
+        if vesting_opt:
+            return "VESTING"
         if team_opt or player_opt:
             return "OPTION"
         return "RENTAL"
@@ -210,6 +212,7 @@ def find_targets(bucket, min_ovr=50, sellers_only=False, include_controlled=Fals
                pi.era, pi.ip, pi.war as pwar, pi.k, pi.bb,
                c.salary_0, c.years, c.current_year,
                c.last_year_team_option, c.last_year_player_option,
+               c.last_year_vesting_option, c.last_year_option_buyout,
                s.surplus,
                ce.salary_0 as ext_salary, ce.years as ext_years
         FROM players p
@@ -272,7 +275,8 @@ def find_targets(bucket, min_ovr=50, sellers_only=False, include_controlled=Fals
 
         status = _contract_status(
             r["years"] or 1, r["current_year"] or 0,
-            r["last_year_team_option"], r["last_year_player_option"]
+            r["last_year_team_option"], r["last_year_player_option"],
+            vesting_opt=r.get("last_year_vesting_option"),
         )
         ext_salary_m = (r["ext_salary"] or 0) / 1e6
         # A "rental" with a signed extension is actually a commitment

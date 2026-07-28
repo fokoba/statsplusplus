@@ -97,7 +97,13 @@ CREATE TABLE IF NOT EXISTS contracts (
     salary_4 INTEGER, salary_5 INTEGER, salary_6 INTEGER, salary_7 INTEGER,
     salary_8 INTEGER, salary_9 INTEGER, salary_10 INTEGER, salary_11 INTEGER,
     salary_12 INTEGER, salary_13 INTEGER, salary_14 INTEGER,
-    no_trade INTEGER, last_year_team_option INTEGER, last_year_player_option INTEGER
+    no_trade INTEGER, last_year_team_option INTEGER, last_year_player_option INTEGER,
+    last_year_vesting_option INTEGER, last_year_option_buyout INTEGER,
+    next_last_year_team_option INTEGER, next_last_year_player_option INTEGER,
+    next_last_year_vesting_option INTEGER, next_last_year_option_buyout INTEGER,
+    minimum_pa INTEGER, minimum_pa_bonus INTEGER,
+    minimum_ip INTEGER, minimum_ip_bonus INTEGER,
+    mvp_bonus INTEGER, cyyoung_bonus INTEGER, allstar_bonus INTEGER
 );
 CREATE TABLE IF NOT EXISTS contract_extensions (
     player_id INTEGER PRIMARY KEY, team_id INTEGER, years INTEGER, current_year INTEGER,

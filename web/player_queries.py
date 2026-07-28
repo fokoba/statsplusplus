@@ -646,7 +646,14 @@ def get_player(pid):
 
     # Contract
     contract = None
-    c = conn.execute("SELECT years, current_year, salary_0, salary_1, salary_2, salary_3, salary_4, salary_5, salary_6, salary_7, no_trade, last_year_team_option, last_year_player_option FROM contracts WHERE player_id=?", (pid,)).fetchone()
+    c = conn.execute("""SELECT years, current_year, salary_0, salary_1, salary_2, salary_3, salary_4,
+        salary_5, salary_6, salary_7, no_trade, last_year_team_option, last_year_player_option,
+        last_year_vesting_option, last_year_option_buyout,
+        next_last_year_team_option, next_last_year_player_option,
+        next_last_year_vesting_option, next_last_year_option_buyout,
+        minimum_pa, minimum_pa_bonus, minimum_ip, minimum_ip_bonus,
+        mvp_bonus, cyyoung_bonus, allstar_bonus
+        FROM contracts WHERE player_id=?""", (pid,)).fetchone()
     if c:
         yrs, cur_yr = c[0], c[1]
         game_year = get_cfg().year
@@ -656,7 +663,22 @@ def get_player(pid):
             "years": yrs, "current_year": cur_yr + 1,
             "remaining": [(str(game_year + i - cur_yr), f"${s/1e6:.1f}M" if s >= 1e6 else f"${s/1e3:.0f}K") for i, s in remaining],
             "no_trade": c[10], "team_option": c[11], "player_option": c[12],
+            "vesting_option": c[13], "option_buyout": c[14],
+            "next_team_option": c[15], "next_player_option": c[16],
+            "next_vesting_option": c[17], "next_option_buyout": c[18],
+            "incentives": {},
         }
+        # Collect non-zero incentives
+        if c[19]:  # minimum_pa
+            contract["incentives"]["PA bonus"] = f"{c[19]} PA → ${c[20]/1e6:.1f}M" if c[20] else f"{c[19]} PA"
+        if c[21]:  # minimum_ip
+            contract["incentives"]["IP bonus"] = f"{c[21]} IP → ${c[22]/1e6:.1f}M" if c[22] else f"{c[21]} IP"
+        if c[23]:  # mvp_bonus
+            contract["incentives"]["MVP"] = f"${c[23]/1e6:.1f}M"
+        if c[24]:  # cyyoung_bonus
+            contract["incentives"]["Cy Young"] = f"${c[24]/1e6:.1f}M"
+        if c[25]:  # allstar_bonus
+            contract["incentives"]["All-Star"] = f"${c[25]/1e6:.1f}M"
         # Pending extension
         try:
             ext = conn.execute("SELECT years, salary_0, salary_1, salary_2, salary_3, salary_4, salary_5, salary_6, salary_7, salary_8, salary_9, salary_10, salary_11, salary_12, salary_13, salary_14, no_trade, last_year_team_option, last_year_player_option FROM contract_extensions WHERE player_id=?", (pid,)).fetchone()

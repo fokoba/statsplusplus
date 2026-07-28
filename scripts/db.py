@@ -120,7 +120,16 @@ CREATE TABLE IF NOT EXISTS contracts (
     salary_12 INTEGER, salary_13 INTEGER, salary_14 INTEGER,
     no_trade                INTEGER,
     last_year_team_option   INTEGER,
-    last_year_player_option INTEGER
+    last_year_player_option INTEGER,
+    last_year_vesting_option INTEGER,
+    last_year_option_buyout INTEGER,
+    next_last_year_team_option INTEGER,
+    next_last_year_player_option INTEGER,
+    next_last_year_vesting_option INTEGER,
+    next_last_year_option_buyout INTEGER,
+    minimum_pa INTEGER, minimum_pa_bonus INTEGER,
+    minimum_ip INTEGER, minimum_ip_bonus INTEGER,
+    mvp_bonus INTEGER, cyyoung_bonus INTEGER, allstar_bonus INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS batting_stats (
@@ -467,6 +476,7 @@ def init_schema(league_dir: Path | None = None):
             conn.execute("ALTER TABLE player_surplus ADD COLUMN surplus_yr1 INTEGER")
         _migrate_players(conn)
         _migrate_stats_league_id(conn)
+        _migrate_contracts(conn)
 
 
 def _migrate_stats_league_id(conn: sqlite3.Connection):
@@ -478,3 +488,26 @@ def _migrate_stats_league_id(conn: sqlite3.Connection):
         existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
         if "league_id" not in existing:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN league_id INTEGER")
+
+
+def _migrate_contracts(conn: sqlite3.Connection):
+    """Add expanded contract fields (Phase 4, July 2026)."""
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(contracts)").fetchall()}
+    new_cols = [
+        ("last_year_vesting_option", "INTEGER"),
+        ("last_year_option_buyout", "INTEGER"),
+        ("next_last_year_team_option", "INTEGER"),
+        ("next_last_year_player_option", "INTEGER"),
+        ("next_last_year_vesting_option", "INTEGER"),
+        ("next_last_year_option_buyout", "INTEGER"),
+        ("minimum_pa", "INTEGER"),
+        ("minimum_pa_bonus", "INTEGER"),
+        ("minimum_ip", "INTEGER"),
+        ("minimum_ip_bonus", "INTEGER"),
+        ("mvp_bonus", "INTEGER"),
+        ("cyyoung_bonus", "INTEGER"),
+        ("allstar_bonus", "INTEGER"),
+    ]
+    for col, typ in new_cols:
+        if col not in existing:
+            conn.execute(f"ALTER TABLE contracts ADD COLUMN {col} {typ}")

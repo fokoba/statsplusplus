@@ -1649,6 +1649,10 @@ def get_player(pid):
         "insights": insights,
         "milb_bat_stats": milb_bat_stats,
         "milb_pit_stats": milb_pit_stats,
+        "milb_leagues": sorted(
+            {(s["league_id"], s["league_name"]) for s in milb_bat_stats + milb_pit_stats},
+            key=lambda x: x[1]
+        ),
     }
 
 

@@ -597,12 +597,13 @@ def api_draft_detail(pid):
 
 @app.route("/api/player-percentiles/<int:pid>")
 def api_player_percentiles(pid):
-    """Return percentile rankings for a specific year."""
+    """Return percentile rankings for a specific year and optionally a specific league."""
     from percentiles import get_hitter_percentiles, get_pitcher_percentiles, get_fielding_percentiles
     from web_league_context import get_db
     year = request.args.get("year", type=int)
     split_id = request.args.get("split", 1, type=int)
     stat_type = request.args.get("type", "main")  # "main" or "fielding"
+    league_id = request.args.get("league_id", type=int)  # None = MLB, int = MiLB league
     if not year:
         return jsonify({"error": "year required"}), 400
     conn = get_db()
@@ -619,12 +620,12 @@ def api_player_percentiles(pid):
 
     is_pitcher = role[0] in (11, 12, 13)
     if is_pitcher:
-        data = get_pitcher_percentiles(pid, split_id=split_id, year=year)
+        data = get_pitcher_percentiles(pid, split_id=split_id, year=year, league_id=league_id)
     else:
-        data = get_hitter_percentiles(pid, split_id=split_id, year=year)
+        data = get_hitter_percentiles(pid, split_id=split_id, year=year, league_id=league_id)
     if not data:
         return jsonify({"error": "no data for year"}), 404
-    return jsonify({"year": year, "stats": data})
+    return jsonify({"year": year, "stats": data, "league_id": league_id})
 
 
 @app.route("/api/player-percentile-history/<int:pid>")

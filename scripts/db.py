@@ -88,6 +88,7 @@ CREATE TABLE IF NOT EXISTS ratings (
     height INTEGER, bats TEXT, throws TEXT,
     stl_rt INTEGER, run INTEGER, sac_bunt INTEGER, bunt_hit INTEGER, hold INTEGER,
     composite_score INTEGER, ceiling_score INTEGER, tool_only_score INTEGER, secondary_composite INTEGER,
+    true_ceiling INTEGER, positional_percentile REAL, positional_median INTEGER,
     PRIMARY KEY (player_id, snapshot_date)
 );
 

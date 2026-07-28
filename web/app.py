@@ -9,6 +9,7 @@ if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
 from flask import Flask, render_template, redirect, request, jsonify, g
+import werkzeug.exceptions
 import queries
 from league_config import LeagueConfig
 from league_context import get_league_dir, get_active_league_slug
@@ -63,12 +64,15 @@ def _set_league_context():
 
 @app.teardown_request
 def _close_db(exc):
-    if exc:
+    if exc and not isinstance(exc, werkzeug.exceptions.HTTPException):
         log.error("Request teardown error: %s", exc, exc_info=exc)
 
 
 @app.errorhandler(Exception)
 def _handle_exception(e):
+    # Don't log HTTP exceptions (404, 405, etc.) as unhandled errors — they're expected
+    if isinstance(e, werkzeug.exceptions.HTTPException):
+        return e
     log.error("Unhandled exception on %s %s: %s", request.method, request.path, e, exc_info=True)
     raise e
 
@@ -1193,8 +1197,8 @@ def _run_onboard_refresh(slug, ratings_poll_url=""):
         from league_context import get_statsplus_cookie
         cookie = get_statsplus_cookie()
         script = Path(__file__).parent.parent / "scripts" / "refresh.py"
-        cmd = [sys.executable, "-u", str(script), "--no-fv", "2033"]
-        env = {**os.environ, "STATSPLUS_LEAGUE_URL": slug, "STATSPLUS_COOKIE": cookie}
+        cmd = [sys.executable, "-u", str(script)]
+        env = {**os.environ, "STATSPLUS_LEAGUE_URL": slug, "STATSPLUS_COOKIE": cookie, "STATSPP_LEAGUE": slug}
         if ratings_poll_url:
             env["RATINGS_POLL_URL"] = ratings_poll_url
         proc = subprocess.Popen(

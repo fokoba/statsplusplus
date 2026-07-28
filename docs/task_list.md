@@ -148,36 +148,35 @@ Items identified from beta tester usage and conversations.
 New StatsPlus API data discovered July 2026. Implementation plan in dependency order.
 See `docs/client_reference.md` for full field documentation.
 
-### Phase 1 — Expanded Player Fields (High Impact, Low Risk)
+### Phase 1 — Expanded Player Fields ✅ (Completed Session 69)
 
-The `/players` endpoint now returns 45 additional fields. These require schema changes
-to the `players` table and updates to `_upsert_players()` in refresh.py.
+The `/players` endpoint now returns 45 additional fields. Schema migration adds
+30+ columns to `players` table; `_upsert_players()` stores all fields on refresh.
 
-- [ ] **1a. Injury status** — Store `injury_is_injured`, `injury_dl_left`, `injury_left`, `is_on_dl`, `is_on_dl60`, `dl_days_this_year`. Eliminates our biggest noted data limitation. Enables: injury flags in trade targets, roster status on team pages, filter injured players from depth charts. **LOE: Low.**
-- [ ] **1b. Service time** — Store `mlb_service_years`, `mlb_service_days`, `mlb_service_days_this_year`, `pro_service_years`, `pro_service_days`. Replaces our estimated service time in `arb_model.py` with exact values. Enables: precise arb eligibility, Super Two detection, Rule 5 eligibility. **LOE: Low.**
-- [ ] **1c. Roster status flags** — Store `is_on_waivers`, `designated_for_assignment`, `is_on_secondary`, `free_agent`, `was_traded`, `days_on_waivers`, `days_on_waivers_left`. Addresses "no transaction log" limitation — we can now see current state even if we can't see history. **LOE: Low.**
-- [ ] **1d. Draft history** — Store `draft_year`, `draft_round`, `draft_pick`, `draft_overall_pick`, `draft_team_id`. Useful for prospect pages, draft analysis, historical context. **LOE: Low.**
-- [ ] **1e. Demographics** — Store `date_of_birth`, `height`, `weight`, `bats`, `throws`, `nation_id`, `uniform_number`. Some overlap with ratings table (height/bats/throws). Consolidate into players table as canonical source. **LOE: Low.**
+- [x] **1a. Injury status** — `injury_is_injured`, `injury_dl_left`, `injury_left`, `is_on_dl`, `is_on_dl60`, `dl_days_this_year`. DL/DFA/WVR badges on team roster pages. Trade targets shows 🏥 annotations and skips DFA'd players. `--exclude-injured` CLI flag.
+- [x] **1b. Service time** — `mlb_service_years`, `mlb_service_days`, `mlb_service_days_this_year`, `pro_service_years`, `pro_service_days`. `arb_model.estimate_service_time()` reads exact values with games-based fallback. `free_agents.py` uses exact service for arb/FA classification.
+- [x] **1c. Roster status flags** — `is_on_waivers`, `designated_for_assignment`, `is_on_secondary`, `free_agent`, `was_traded`, `days_on_waivers`, `days_on_waivers_left`, `has_received_arbitration`. DFA'd players filtered from trade targets.
+- [x] **1d. Draft history** — `draft_year`, `draft_round`, `draft_pick`, `draft_overall_pick`, `draft_team_id`. Stored for 10,851 players.
+- [x] **1e. Demographics** — `date_of_birth`, `weight`, `nation_id`, `uniform_number`. Stored alongside existing player fields.
 
-### Phase 2 — Minor League Stats (High Impact, Medium Complexity)
+### Phase 2 — Minor League Stats (Partially Complete)
 
-Stats are available for all minor league levels via the `lid` parameter on existing
-stat endpoints. Requires: discovering league IDs per league (via `/lgdata`), schema
-decisions (same table with `league_id` column, or separate), and refresh pipeline changes.
+Stats available for all minor league levels via `lid` parameter. Storage and refresh
+pipeline complete; display and model integration remaining.
 
-- [ ] **2a. Implement `/lgdata` client method** — Add `get_lgdata() -> dict` to client.py. Use it during refresh to discover all league IDs and their hierarchy. Store league structure mapping. **LOE: Low.**
-- [ ] **2b. Schema decision for MiLB stats** — Options: (1) add `league_id` column to existing `batting_stats`/`pitching_stats`/`fielding_stats` tables (simpler, one query path), (2) separate `milb_batting_stats` table (cleaner separation, no risk to existing queries). Recommend option 1 with default `league_id=NULL` for existing MLB rows. **LOE: Low (design), Medium (migration).**
-- [ ] **2c. Refresh pipeline — MiLB stat pulls** — Add MiLB stat fetches to `refresh_league()`. Pull stats for all non-MLB leagues discovered via `/lgdata`. Consider: rate limiting (many more API calls), selective fetching (current year only? org players only?), refresh time impact. **LOE: Medium.**
+- [x] **2a. `/lgdata` client method** — `get_lgdata()` in client.py. Used during refresh to discover all league IDs and hierarchy. League structure stored in `league_settings.json`.
+- [x] **2b. Schema: `league_id` column** — Added to `batting_stats`, `pitching_stats`, `fielding_stats`. NULL = MLB (backward compatible). MiLB rows use the league ID from `/lgdata`.
+- [x] **2c. Refresh pipeline — MiLB stat pulls** — Fetches batting+pitching for all discovered MiLB leagues (13 leagues, ~10,600 rows total). Current year only. Adds ~15-20s to refresh time. Non-fatal on failure.
 - [ ] **2d. MiLB stats in prospect evaluation** — Integrate minor league performance data into FV/composite calculations. Research: how to weight MiLB stats by level, how to adjust for league difficulty, blend with ratings. This is a significant model change. **LOE: High.**
-- [ ] **2e. MiLB stats on player pages** — Display minor league stat lines on prospect/player pages. Career stats by level. **LOE: Medium.**
+- [ ] **2e. MiLB stats on player pages** — Display minor league stat lines on prospect/player pages. Career stats by level. Query code exists in `player_queries.py` (data returned in `milb_bat_stats`/`milb_pit_stats`), needs template rendering. **LOE: Low-Medium.**
 
 ### Phase 3 — New Endpoints (Medium Impact, Low Complexity)
 
-Quick wins from newly documented endpoints.
+Client methods implemented; storage and integration remaining.
 
-- [ ] **3a. Trade block** — Add `get_tradeblock() -> dict` to client.py. Store player IDs. Flag in `trade_targets.py` output ("ON BLOCK"). Display on trade workbench. **LOE: Low.**
-- [ ] **3b. Ballparks** — Add `get_ballparks() -> dict` to client.py. Store park factors. Use in stat normalization, display on team pages. **LOE: Low-Medium.**
-- [ ] **3c. League data (`/lgdata`) for standings** — Use real W-L-GB from `/lgdata` standings instead of pythagorean-only. Can supplement or replace game-frequency division detection. **LOE: Low-Medium.**
+- [ ] **3a. Trade block** — `get_tradeblock()` exists in client.py. Need: `trade_block` table, storage during refresh, flag in `trade_targets.py` output ("ON BLOCK"), `--on-block` filter. **LOE: Low.**
+- [ ] **3b. Ballparks** — `get_ballparks()` exists in client.py. Need: store park factors, use in stat normalization, display on team pages. **LOE: Low-Medium.**
+- [ ] **3c. League data (`/lgdata`) for standings** — `get_lgdata()` exists and is called during refresh for league hierarchy. Need: store real W-L-GB, use in seller classification and standings display alongside pythagorean. **LOE: Low-Medium.**
 
 ### Phase 4 — Expanded Contract Data (Medium Impact, Medium Complexity)
 
@@ -193,12 +192,12 @@ and buyouts. Requires schema expansion and updates to contract analysis tools.
 
 ### Implementation Notes
 
-- Each phase is independent — can be implemented in any order
-- Phase 1 items are all low-risk schema additions with immediate value
-- Phase 2 is the most transformative but requires the most design thought
-- Phase 3 items are quick wins that improve existing workflows
-- All changes must maintain backward compatibility (NULL defaults for new columns)
-- Refresh time budget: current refresh is ~3 min. MiLB stats (Phase 2c) could add 30-60s depending on approach
+- Phase 1 complete — all player fields stored and used by downstream tools
+- Phase 2a-c complete — MiLB stats ingested (13 leagues, ~10,600 rows). Display and model integration remain.
+- Phase 3 client methods implemented but storage/integration pending
+- Phase 4-5 not started
+- Refresh time: ~3:15 with MiLB stats (was ~3:00). Non-fatal if MiLB fetch fails.
+- All changes maintain backward compatibility (NULL defaults for new columns)
 
 ---
 

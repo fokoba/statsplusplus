@@ -4,6 +4,32 @@ Completed and deferred work items, organized by session. Moved from `task_list.m
 
 ---
 
+## Session 69 (2026-07-27)
+
+### Features
+
+- **StatsPlus API integration — Phase 1 complete** (`db.py`, `refresh.py`, `arb_model.py`, `free_agents.py`, `trade_targets.py`, `team_queries.py`, `team.html`) — Expanded player data from the StatsPlus API. Schema migration adds 30+ columns to the `players` table covering injury status, exact MLB service time, roster status flags, draft history, and demographics. All fields stored on refresh.
+
+- **Injury & DL status badges** (`team_queries.py`, `team.html`, `style.css`) — Team roster pages (Hitters/Pitchers tabs) display inline DL/DFA/WVR badges next to player names with tooltip showing days remaining. Trade targets tool shows 🏥 annotations for injured players and auto-skips DFA'd players. New `--exclude-injured` CLI flag on `trade_targets.py`.
+
+- **Exact service time replaces estimation** (`arb_model.py`, `free_agents.py`) — `estimate_service_time()` now reads exact `mlb_service_days` from the DB (172 days = 1 year), falling back to the games-based heuristic only when the data isn't available. `free_agents.py` arb/FA classification uses exact service time directly. Enables precise Super Two detection and deterministic control period calculation.
+
+- **Minor league stats pipeline** (`client.py`, `refresh.py`, `db.py`, `player_queries.py`) — Full MiLB batting and pitching stats now ingested during refresh. Discovers all minor league IDs via `/lgdata` (13 leagues for eMLB), fetches current-year stats for each, stores with `league_id` column in existing stat tables (NULL = MLB for backward compatibility). ~5,900 batting + 4,700 pitching rows. Player page query code returns `milb_bat_stats`/`milb_pit_stats` (template rendering pending).
+
+- **New client methods** (`client.py`) — `get_lgdata()` (league structure/standings), `get_tradeblock()` (players on trade block), `get_ballparks()` (park factors). Storage/integration for tradeblock and ballparks deferred to Phase 3.
+
+### Documentation
+
+- **API impact analysis** (`docs/api_impact_analysis.md`) — Comprehensive mapping of all newly available StatsPlus API data and how it integrates with existing subsystems. Covers service time, injury, roster flags, standings, trade block, MiLB stats, expanded contracts, park factors, draft history, and OSA ratings. Includes dependency graph and implementation priority matrix.
+
+- **API integration roadmap** (`docs/task_list.md`) — Phased implementation plan added to task list. Phase 1 (player fields) and Phase 2a-c (MiLB pipeline) marked complete.
+
+- **Client reference updated** (`docs/client_reference.md`) — Full documentation of expanded `/players` fields, new endpoints (`/lgdata`, `/tradeblock`, `/ballparks`), and MiLB stat fetching via `lid` parameter.
+
+- **Trade analyst steering updated** (`.kiro/steering/trade-analyst.md`) — Noted that injury data and roster status flags are now available in the DB, reducing the number of questions the agent needs to ask the user.
+
+---
+
 ## Session 68 (2026-07-27)
 
 ### Bug Fixes

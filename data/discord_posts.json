@@ -1,7 +1,7 @@
 {
-  "last_posted_commit": "660875e",
-  "last_posted_date": "2026-07-27",
-  "last_posted_title": "StatsPlus API Integration \u2014 Injury, Service Time, Roster Status & MiLB Stats",
+  "last_posted_commit": "689fab7",
+  "last_posted_date": "2026-07-28",
+  "last_posted_title": "API Integration Complete \u2014 MiLB Stats, Trade Block, Real Standings & Contract Options",
   "history": [
     {
       "date": "2026-07-22",
@@ -47,6 +47,11 @@
       "date": "2026-07-27",
       "commit": "660875e",
       "title": "StatsPlus API Integration \u2014 Injury, Service Time, Roster Status & MiLB Stats"
+    },
+    {
+      "date": "2026-07-28",
+      "commit": "689fab7",
+      "title": "API Integration Complete \u2014 MiLB Stats, Trade Block, Real Standings & Contract Options"
     }
   ]
 }

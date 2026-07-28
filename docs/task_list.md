@@ -169,23 +169,23 @@ pipeline complete; display and model integration remaining.
 - [x] **2b. Schema: `league_id` column** — Added to `batting_stats`, `pitching_stats`, `fielding_stats`. NULL = MLB (backward compatible). MiLB rows use the league ID from `/lgdata`.
 - [x] **2c. Refresh pipeline — MiLB stat pulls** — Fetches batting+pitching for all discovered MiLB leagues (13 leagues, ~10,600 rows total). Current year only. Adds ~15-20s to refresh time. Non-fatal on failure.
 - [ ] **2d. MiLB stats in prospect evaluation** — Integrate minor league performance data into FV/composite calculations. Research: how to weight MiLB stats by level, how to adjust for league difficulty, blend with ratings. This is a significant model change. **LOE: High.**
-- [ ] **2e. MiLB stats on player pages** — Display minor league stat lines on prospect/player pages. Career stats by level. Query code exists in `player_queries.py` (data returned in `milb_bat_stats`/`milb_pit_stats`), needs template rendering. **LOE: Low-Medium.**
+- [x] **2e. MiLB stats on player pages** — Minor League Stats section on player page Stats tab. Batting and pitching tables with league names from `league_settings.json`. Hitter and pitcher pages both supported.
 
-### Phase 3 — New Endpoints (Medium Impact, Low Complexity)
+### Phase 3 — New Endpoints ✅ (3a, 3c completed Session 70)
 
-Client methods implemented; storage and integration remaining.
+Client methods implemented; trade block and standings integrated.
 
-- [ ] **3a. Trade block** — `get_tradeblock()` exists in client.py. Need: `trade_block` table, storage during refresh, flag in `trade_targets.py` output ("ON BLOCK"), `--on-block` filter. **LOE: Low.**
+- [x] **3a. Trade block** — `trade_block` table populated during refresh. `trade_targets.py` shows 📋 annotation, `--on-block` flag filters to confirmed-available players.
 - [ ] **3b. Ballparks** — `get_ballparks()` exists in client.py. Need: store park factors, use in stat normalization, display on team pages. **LOE: Low-Medium.**
-- [ ] **3c. League data (`/lgdata`) for standings** — `get_lgdata()` exists and is called during refresh for league hierarchy. Need: store real W-L-GB, use in seller classification and standings display alongside pythagorean. **LOE: Low-Medium.**
+- [x] **3c. League data (`/lgdata`) for standings** — `standings` table stores real W-L-GB for all teams. `_classify_sellers()` uses real wins. `standings.py` shows pythagorean + actual with delta.
 
-### Phase 4 — Expanded Contract Data (Medium Impact, Medium Complexity)
+### Phase 4 — Expanded Contract Data ✅ (Completed Session 70)
 
-The `/contract` endpoint has 15 additional fields covering vesting options, incentives,
-and buyouts. Requires schema expansion and updates to contract analysis tools.
+All 13 additional contract fields stored. Vesting options, buyouts, and incentives
+integrated into trade targets, free agents, and player page contract display.
 
-- [ ] **4a. Option/vesting fields** — Store `last_year_vesting_option`, `next_last_year_team_option`, `next_last_year_player_option`, `next_last_year_vesting_option`, `next_last_year_option_buyout`, `last_year_option_buyout`. Improves option year handling in `contract_value.py` and `free_agents.py`. **LOE: Medium.**
-- [ ] **4b. Incentive fields** — Store `minimum_pa`, `minimum_pa_bonus`, `minimum_ip`, `minimum_ip_bonus`, `mvp_bonus`, `cyyoung_bonus`, `allstar_bonus`. Display on player contract pages. Factor into true contract cost projections. **LOE: Medium.**
+- [x] **4a. Option/vesting fields** — `last_year_vesting_option`, `next_last_year_team/player/vesting_option`, `last_year_option_buyout`, `next_last_year_option_buyout`. Trade targets shows VESTING status. Free agents shows buyout amounts.
+- [x] **4b. Incentive fields** — `minimum_pa/ip` + bonuses, `mvp_bonus`, `cyyoung_bonus`, `allstar_bonus`. Player page contract data includes non-zero incentives dict.
 
 ### Phase 5 — OSA Ratings (Lower Priority)
 
@@ -194,11 +194,12 @@ and buyouts. Requires schema expansion and updates to contract analysis tools.
 ### Implementation Notes
 
 - Phase 1 complete — all player fields stored and used by downstream tools
-- Phase 2a-c complete — MiLB stats ingested (13 leagues, ~10,600 rows). Display and model integration remain.
-- Phase 3 client methods implemented but storage/integration pending
-- Phase 4-5 not started
-- Refresh time: ~3:15 with MiLB stats (was ~3:00). Non-fatal if MiLB fetch fails.
-- All changes maintain backward compatibility (NULL defaults for new columns)
+- Phase 2 complete — MiLB stats ingested AND displayed on player pages. Model integration (2d) deferred.
+- Phase 3a + 3c complete — trade block and real standings integrated into trade tools
+- Phase 4 complete — all contract option/incentive fields stored and surfaced
+- Phase 3b (park factors) and Phase 5 (OSA ratings) deferred — lower priority
+- Refresh time: ~3:15 with MiLB stats + trade block + standings (was ~3:00). All new fetches non-fatal on failure.
+- All changes maintain backward compatibility (NULL defaults for new columns, migrations idempotent)
 
 ---
 

@@ -105,6 +105,68 @@ def _est_team_games(conn, year):
     return round((row[0] or 0) / 38) or 1
 
 
+# ── league-aware pool source ─────────────────────────────────────────────
+
+def _league_batting_source(league_id):
+    """Return (FROM clause, extra WHERE fragment, params) for a batting pool.
+
+    league_id=None → MLB (uses mlb_batting_stats view, no extra filter)
+    league_id=<int> → specific MiLB league (uses base table with league_id filter)
+    """
+    if league_id is None:
+        return "mlb_batting_stats", "", []
+    return "batting_stats", "AND b.league_id=?", [league_id]
+
+
+def _league_pitching_source(league_id):
+    """Return (FROM clause, extra WHERE fragment, params) for a pitching pool."""
+    if league_id is None:
+        return "mlb_pitching_stats", "", []
+    return "pitching_stats", "AND ps.league_id=?", [league_id]
+
+
+def _league_games(conn, year, league_id):
+    """Estimate games played for qualification threshold.
+
+    MLB: derive from team_batting_stats.
+    MiLB: derive from max PA in that league (same formula).
+    """
+    if league_id is None:
+        return _est_team_games(conn, year)
+    # For MiLB leagues, estimate from max player PA in the league
+    row = conn.execute(
+        "SELECT MAX(pa) FROM batting_stats WHERE league_id=? AND year=? AND split_id=1",
+        (league_id, year)
+    ).fetchone()
+    max_pa = (row[0] or 0) if row else 0
+    # MiLB seasons are shorter; max_pa for a full-season player ≈ 500-600
+    # Use the same 2.0 PA/game * season_games formula
+    # Estimate league season length from max PA / 4.0 PA per game
+    est_games = round(max_pa / 4.0) if max_pa > 50 else 130
+    return est_games
+
+
+def _resolve_league_year(conn, year, league_id, stat_type="batting"):
+    """Resolve available year for a league's stats.
+
+    For MiLB, check if data exists for that league+year combo.
+    """
+    table = "batting_stats" if stat_type == "batting" else "pitching_stats"
+    if league_id is None:
+        # MLB: use the view
+        view = f"mlb_{table}"
+        row = conn.execute(
+            f"SELECT 1 FROM {view} WHERE year=? AND split_id=1 LIMIT 1", (year,)
+        ).fetchone()
+        return year if row else None
+    # MiLB: check base table with league filter
+    row = conn.execute(
+        f"SELECT 1 FROM {table} WHERE year=? AND split_id=1 AND league_id=? LIMIT 1",
+        (year, league_id)
+    ).fetchone()
+    return year if row else None
+
+
 def _expected_range(expected, pa_or_ip, qualifier):
     """Half-width of expected range band, scaled by sample size.
 
@@ -167,18 +229,29 @@ def _babip_expected(pid, cntct, speed, conn, year, babip_rating=None):
 
 # ── hitter percentiles ───────────────────────────────────────────────────
 
-def get_hitter_percentiles(pid, split_id=1, year=None):
+def get_hitter_percentiles(pid, split_id=1, year=None, league_id=None):
     conn = get_db()
     conn.row_factory = None
     current_year = get_cfg().year
     explicit_year = year is not None
-    year = _resolve_pctile_year(conn, year or current_year, "batting_stats", fallback=not explicit_year)
-    if year is None:
+    year = year or current_year
+
+    # Resolve year — check data availability for the target league
+    resolved = _resolve_league_year(conn, year, league_id, stat_type="batting")
+    if resolved is None and not explicit_year:
+        # Fallback: try prior year
+        resolved = _resolve_league_year(conn, year - 1, league_id, stat_type="batting")
+    if resolved is None:
         conn.close()
         return None
+    year = resolved
     is_current = (year == current_year)
-    games = _est_team_games(conn, year)
+
+    games = _league_games(conn, year, league_id)
     min_pa = max(round(2.0 * games), 30) if split_id == 1 else 20
+
+    # Data source based on league
+    bat_table, league_filter, league_params = _league_batting_source(league_id)
 
     # Use split-specific ratings for L/R expected percentiles
     if split_id == 2:    # vs L
@@ -191,17 +264,17 @@ def get_hitter_percentiles(pid, split_id=1, year=None):
     q = ("SELECT b.player_id, SUM(b.ab), SUM(b.h), SUM(b.d), SUM(b.t), SUM(b.hr), "
          "SUM(b.bb), SUM(b.k), SUM(b.pa), SUM(b.war), SUM(b.hbp), SUM(b.sf), "
          f"{rcols}, r.speed "
-         "FROM mlb_batting_stats b JOIN latest_ratings r ON b.player_id=r.player_id "
-         "WHERE b.year=? AND b.split_id=? "
+         f"FROM {bat_table} b JOIN latest_ratings r ON b.player_id=r.player_id "
+         f"WHERE b.year=? AND b.split_id=? {league_filter} "
          "GROUP BY b.player_id "
          "HAVING SUM(b.pa)>=?")
-    rows = conn.execute(q, (year, split_id, min_pa)).fetchall()
+    rows = conn.execute(q, (year, split_id, *league_params, min_pa)).fetchall()
 
     qualified = True
     player_row = None
     if pid not in {r[0] for r in rows}:
         player_row = conn.execute(
-            q.replace("HAVING SUM(b.pa)>=?", "HAVING b.player_id=?"), (year, split_id, pid)
+            q.replace("HAVING SUM(b.pa)>=?", "HAVING b.player_id=?"), (year, split_id, *league_params, pid)
         ).fetchone()
         qualified = False
 
@@ -300,22 +373,32 @@ def get_hitter_percentiles(pid, split_id=1, year=None):
 
 # ── pitcher percentiles ──────────────────────────────────────────────────
 
-def get_pitcher_percentiles(pid, split_id=1, year=None):
+def get_pitcher_percentiles(pid, split_id=1, year=None, league_id=None):
     conn = get_db()
     conn.row_factory = None
     current_year = get_cfg().year
     explicit_year = year is not None
-    year = _resolve_pctile_year(conn, year or current_year, "pitching_stats", fallback=not explicit_year)
-    if year is None:
+    year = year or current_year
+
+    # Resolve year for the target league
+    resolved = _resolve_league_year(conn, year, league_id, stat_type="pitching")
+    if resolved is None and not explicit_year:
+        resolved = _resolve_league_year(conn, year - 1, league_id, stat_type="pitching")
+    if resolved is None:
         conn.close()
         return None
+    year = resolved
     is_current = (year == current_year)
-    games = _est_team_games(conn, year)
+
+    games = _league_games(conn, year, league_id)
     min_ip = max(round(0.7 * games), 5) if split_id == 1 else 5
 
     # RPs pitch far fewer innings — use a lower pool threshold so relievers
     # with a full workload aren't flagged as small sample.
     rp_min_ip = max(round(0.35 * games), 5) if split_id == 1 else 5
+
+    # Data source based on league
+    pit_table, league_filter, league_params = _league_pitching_source(league_id)
 
     from web_league_context import league_averages as _load_la
     _la = _load_la()
@@ -340,16 +423,17 @@ def get_pitcher_percentiles(pid, split_id=1, year=None):
     q = ("SELECT ps.player_id, SUM(ps.ip), SUM(ps.era*ps.ip)/NULLIF(SUM(ps.ip),0), "
          "SUM(ps.k), SUM(ps.bb), SUM(ps.ha), SUM(ps.war), SUM(ps.hra), SUM(ps.bf), SUM(ps.hp), "
          f"{rcols}, SUM(ps.gs), SUM(ps.g), SUM(ps.gb), SUM(ps.fb) "
-         "FROM mlb_pitching_stats ps JOIN latest_ratings r ON ps.player_id=r.player_id "
-         "WHERE ps.year=? AND ps.split_id=? "
+         f"FROM {pit_table} ps JOIN latest_ratings r ON ps.player_id=r.player_id "
+         f"WHERE ps.year=? AND ps.split_id=? {league_filter} "
          "GROUP BY ps.player_id "
          "HAVING SUM(ps.ip)>=?")
-    rows = conn.execute(q, (year, split_id, rp_min_ip)).fetchall()
+    rows = conn.execute(q, (year, split_id, *league_params, rp_min_ip)).fetchall()
 
     # Detect if this player is an RP (few or no starts)
     player_gs_row = conn.execute(
-        "SELECT SUM(gs), SUM(g) FROM mlb_pitching_stats WHERE player_id=? AND year=? AND split_id=?",
-        (pid, year, split_id)).fetchone()
+        f"SELECT SUM(gs), SUM(g) FROM {pit_table} WHERE player_id=? AND year=? AND split_id=?" +
+        (f" AND league_id=?" if league_id else ""),
+        (pid, year, split_id, *league_params) if league_id else (pid, year, split_id)).fetchone()
     is_rp = player_gs_row and player_gs_row[1] and player_gs_row[0] / player_gs_row[1] < 0.25
 
     qualified = True
@@ -357,7 +441,7 @@ def get_pitcher_percentiles(pid, split_id=1, year=None):
     is_in_pool = pid in {r[0] for r in rows}
     if not is_in_pool:
         player_row = conn.execute(
-            q.replace("HAVING SUM(ps.ip)>=?", "HAVING ps.player_id=?"), (year, split_id, pid)
+            q.replace("HAVING SUM(ps.ip)>=?", "HAVING ps.player_id=?"), (year, split_id, *league_params, pid)
         ).fetchone()
         qualified = False
     elif not is_rp:

@@ -171,6 +171,19 @@ pipeline complete; display and model integration remaining.
 - [ ] **2d. MiLB stats in prospect evaluation** — Integrate minor league performance data into FV/composite calculations. Research: how to weight MiLB stats by level, how to adjust for league difficulty, blend with ratings. This is a significant model change. **LOE: High.**
 - [x] **2e. MiLB stats on player pages** — Minor League Stats section on player page Stats tab. Batting and pitching tables with league names from `league_settings.json`. Hitter and pitcher pages both supported.
 
+**⚠️ URGENT: MiLB stats contaminating MLB-only systems.** Adding `league_id` column
+to stat tables without filtering existing queries means MiLB WAR/stats are treated as
+MLB production everywhere. Confirmed impact: WAR projections inflated (Schwarzenberg
+shows 4.4 WAR projection from AAA stats), percentile rankings polluted, evaluation
+engine stat signal contaminated, calibration affected. Fix: add `AND league_id IS NULL`
+to all queries that should only read MLB stats. ~60 query sites across 15 files.
+See full list in Session 70 smoke test notes.
+
+**Known remaining issues:**
+- MiLB stats only show current season (no historical years stored)
+- Percentile rankings should support per-league filtering (MLB/AAA/AA/etc)
+- Offseason WAR projection still shows for completed season (display logic issue)
+
 ### Phase 3 — New Endpoints ✅ (3a, 3c completed Session 70)
 
 Client methods implemented; trade block and standings integrated.

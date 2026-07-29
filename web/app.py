@@ -598,14 +598,27 @@ def api_draft_detail(pid):
 @app.route("/api/player-percentiles/<int:pid>")
 def api_player_percentiles(pid):
     """Return percentile rankings for a specific year and optionally a specific level."""
-    from percentiles import get_hitter_percentiles, get_pitcher_percentiles, get_fielding_percentiles
+    from percentiles import get_hitter_percentiles, get_pitcher_percentiles, get_fielding_percentiles, available_pctile_years
     from web_league_context import get_db
     year = request.args.get("year", type=int)
     split_id = request.args.get("split", 1, type=int)
     stat_type = request.args.get("type", "main")  # "main" or "fielding"
     level = request.args.get("level", type=int)  # None = MLB, 2=AAA, 3=AA, 4=A, 6=Rookie
-    if not year:
+    if year is None:
         return jsonify({"error": "year required"}), 400
+    # year=0 means "use most recent available year for this player at this level"
+    if year == 0:
+        from percentiles import available_pctile_years as _apy
+        _is_pit = False
+        conn = get_db()
+        _role_check = conn.execute("SELECT role FROM players WHERE player_id=?", (pid,)).fetchone()
+        conn.close()
+        if _role_check:
+            _is_pit = _role_check[0] in (11, 12, 13)
+        _yrs = _apy(pid, is_pitcher=_is_pit, level=level)
+        year = _yrs[0] if _yrs else None
+        if not year:
+            return jsonify({"error": "no data for level"}), 404
     conn = get_db()
     role = conn.execute("SELECT role FROM players WHERE player_id=?", (pid,)).fetchone()
     conn.close()
@@ -625,7 +638,8 @@ def api_player_percentiles(pid):
         data = get_hitter_percentiles(pid, split_id=split_id, year=year, level=level)
     if not data:
         return jsonify({"error": "no data for year"}), 404
-    return jsonify({"year": year, "stats": data, "level": level})
+    years = available_pctile_years(pid, is_pitcher=is_pitcher, level=level)
+    return jsonify({"year": year, "stats": data, "level": level, "available_years": years})
 
 
 @app.route("/api/player-percentile-history/<int:pid>")

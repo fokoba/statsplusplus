@@ -1445,52 +1445,61 @@ def get_player(pid):
     pctile_years_available = []
     pctile_levels = []  # [(level_int, label)] where player has stats
     pctile_level = None  # currently displayed level
+    pctile_year_levels = {}  # {year: [(level_int, label)]} — for JS to drive dropdown interaction
 
-    # Determine which levels this player has stats at
-    pctile_levels = available_pctile_levels(pid, is_pitcher=is_pitcher)
+    # Build the year→levels map: for each year, which levels have data
+    _all_levels = available_pctile_levels(pid, is_pitcher=is_pitcher)
+    _all_years_set = set()
+    for lv, lv_label in _all_levels:
+        yrs = available_pctile_years(pid, is_pitcher=is_pitcher, level=lv)
+        for yr in yrs:
+            _all_years_set.add(yr)
+            if yr not in pctile_year_levels:
+                pctile_year_levels[yr] = []
+            pctile_year_levels[yr].append((lv, lv_label))
+    pctile_years_available = sorted(_all_years_set, reverse=True)
 
-    # Choose default level: player's current level if they have stats there,
-    # otherwise the highest level with stats (closest to MLB).
-    _player_level = int(level) if level and str(level).isdigit() else None
-    if _player_level and any(lv == _player_level for lv, _ in pctile_levels):
-        pctile_level = _player_level
-    elif pctile_levels:
-        # Pick the first entry (highest level with data)
-        pctile_level = pctile_levels[0][0]
+    # Default: most recent year (prefer current year if data exists)
+    current_year = get_cfg().year
+    if current_year in pctile_year_levels:
+        pctile_year = current_year
+    elif pctile_years_available:
+        pctile_year = pctile_years_available[0]
 
-    if pctile_level is not None:
-        pctile_years_available = available_pctile_years(pid, is_pitcher=is_pitcher, level=pctile_level)
-        # Use the most recent year the player has stats at this level
-        _pctile_yr = pctile_years_available[0] if pctile_years_available else None
+    # Default level within the selected year: player's current level if available, else highest
+    if pctile_year:
+        _year_levels = pctile_year_levels.get(pctile_year, [])
+        pctile_levels = _year_levels
+        _player_level = int(level) if level and str(level).isdigit() else None
+        if _player_level and any(lv == _player_level for lv, _ in _year_levels):
+            pctile_level = _player_level
+        elif _year_levels:
+            pctile_level = _year_levels[0][0]
 
+    if pctile_level is not None and pctile_year is not None:
         if not is_pitcher:
-            percentiles = get_hitter_percentiles(pid, level=pctile_level, year=_pctile_yr)
+            percentiles = get_hitter_percentiles(pid, level=pctile_level, year=pctile_year)
             if percentiles:
                 for sid, key in ((2, "vl"), (3, "vr")):
-                    sp = get_hitter_percentiles(pid, split_id=sid, level=pctile_level, year=_pctile_yr)
+                    sp = get_hitter_percentiles(pid, split_id=sid, level=pctile_level, year=pctile_year)
                     if sp:
                         pctile_splits[key] = sp
         elif is_pitcher:
-            percentiles = get_pitcher_percentiles(pid, level=pctile_level, year=_pctile_yr)
+            percentiles = get_pitcher_percentiles(pid, level=pctile_level, year=pctile_year)
             if percentiles:
                 for sid, key in ((2, "vl"), (3, "vr")):
-                    sp = get_pitcher_percentiles(pid, split_id=sid, level=pctile_level, year=_pctile_yr)
+                    sp = get_pitcher_percentiles(pid, split_id=sid, level=pctile_level, year=pctile_year)
                     if sp:
                         pctile_splits[key] = sp
                 # Two-way: also get hitter percentiles
                 if is_two_way:
-                    bat_percentiles = get_hitter_percentiles(pid, level=pctile_level, year=_pctile_yr)
+                    bat_percentiles = get_hitter_percentiles(pid, level=pctile_level, year=pctile_year)
                     if bat_percentiles:
                         for sid, key in ((2, "vl"), (3, "vr")):
-                            sp = get_hitter_percentiles(pid, split_id=sid, level=pctile_level, year=_pctile_yr)
+                            sp = get_hitter_percentiles(pid, split_id=sid, level=pctile_level, year=pctile_year)
                             if sp:
                                 bat_pctile_splits[key] = sp
 
-    # Determine which year the percentiles are from
-    if pctile_years_available:
-        current_year = get_cfg().year
-        pctile_year = current_year if current_year in pctile_years_available else (
-            pctile_years_available[0] if pctile_years_available else None)
     if fielding_stats:
         fielding_pctiles = get_fielding_percentiles(pid)
 
@@ -1711,6 +1720,7 @@ def get_player(pid):
         "milb_pit_stats": milb_pit_stats,
         "pctile_levels": pctile_levels,
         "pctile_level": pctile_level,
+        "pctile_year_levels": pctile_year_levels,
     }
 
 

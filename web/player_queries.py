@@ -16,7 +16,7 @@ def _fmt_money_py(val):
     return f"${val:,.0f}"
 sys.path.insert(0, os.path.join(BASE, "scripts"))
 from player_utils import norm as _norm, norm_floor as _norm_floor, height_str as _height_str, display_pos as _display_pos, calc_pap, dollars_per_war as _dollars_per_war
-from percentiles import get_hitter_percentiles, get_pitcher_percentiles, get_fielding_percentiles, available_pctile_years, get_percentile_history, get_fielding_percentile_history
+from percentiles import get_hitter_percentiles, get_pitcher_percentiles, get_fielding_percentiles, available_pctile_years, available_pctile_levels, get_percentile_history, get_percentile_history_all_levels, get_fielding_percentile_history
 from web_league_context import get_db, get_cfg, team_abbr_map, team_names_map, level_map, pos_map
 from constants import ROLE_MAP
 
@@ -1443,35 +1443,52 @@ def get_player(pid):
     fielding_pctiles = None
     pctile_year = None
     pctile_years_available = []
-    if not is_pitcher:
-        pctile_years_available = available_pctile_years(pid, is_pitcher=False)
-        # Try current year first; falls back to most recent year with data
-        percentiles = get_hitter_percentiles(pid)
-        if percentiles:
-            for sid, key in ((2, "vl"), (3, "vr")):
-                sp = get_hitter_percentiles(pid, split_id=sid)
-                if sp:
-                    pctile_splits[key] = sp
-    elif is_pitcher:
-        pctile_years_available = available_pctile_years(pid, is_pitcher=True)
-        percentiles = get_pitcher_percentiles(pid)
-        if percentiles:
-            for sid, key in ((2, "vl"), (3, "vr")):
-                sp = get_pitcher_percentiles(pid, split_id=sid)
-                if sp:
-                    pctile_splits[key] = sp
-            # Two-way: also get hitter percentiles
-            if is_two_way:
-                bat_percentiles = get_hitter_percentiles(pid)
-                if bat_percentiles:
-                    for sid, key in ((2, "vl"), (3, "vr")):
-                        sp = get_hitter_percentiles(pid, split_id=sid)
-                        if sp:
-                            bat_pctile_splits[key] = sp
+    pctile_levels = []  # [(level_int, label)] where player has stats
+    pctile_level = None  # currently displayed level
+
+    # Determine which levels this player has stats at
+    pctile_levels = available_pctile_levels(pid, is_pitcher=is_pitcher)
+
+    # Choose default level: player's current level if they have stats there,
+    # otherwise the highest level with stats (closest to MLB).
+    _player_level = int(level) if level and str(level).isdigit() else None
+    if _player_level and any(lv == _player_level for lv, _ in pctile_levels):
+        pctile_level = _player_level
+    elif pctile_levels:
+        # Pick the first entry (highest level with data)
+        pctile_level = pctile_levels[0][0]
+
+    if pctile_level is not None:
+        pctile_years_available = available_pctile_years(pid, is_pitcher=is_pitcher, level=pctile_level)
+        # Use the most recent year the player has stats at this level
+        _pctile_yr = pctile_years_available[0] if pctile_years_available else None
+
+        if not is_pitcher:
+            percentiles = get_hitter_percentiles(pid, level=pctile_level, year=_pctile_yr)
+            if percentiles:
+                for sid, key in ((2, "vl"), (3, "vr")):
+                    sp = get_hitter_percentiles(pid, split_id=sid, level=pctile_level, year=_pctile_yr)
+                    if sp:
+                        pctile_splits[key] = sp
+        elif is_pitcher:
+            percentiles = get_pitcher_percentiles(pid, level=pctile_level, year=_pctile_yr)
+            if percentiles:
+                for sid, key in ((2, "vl"), (3, "vr")):
+                    sp = get_pitcher_percentiles(pid, split_id=sid, level=pctile_level, year=_pctile_yr)
+                    if sp:
+                        pctile_splits[key] = sp
+                # Two-way: also get hitter percentiles
+                if is_two_way:
+                    bat_percentiles = get_hitter_percentiles(pid, level=pctile_level, year=_pctile_yr)
+                    if bat_percentiles:
+                        for sid, key in ((2, "vl"), (3, "vr")):
+                            sp = get_hitter_percentiles(pid, split_id=sid, level=pctile_level, year=_pctile_yr)
+                            if sp:
+                                bat_pctile_splits[key] = sp
+
     # Determine which year the percentiles are from
     if pctile_years_available:
         current_year = get_cfg().year
-        # The function auto-falls back; the displayed year is current if it has data, else most recent
         pctile_year = current_year if current_year in pctile_years_available else (
             pctile_years_available[0] if pctile_years_available else None)
     if fielding_stats:
@@ -1488,6 +1505,7 @@ def get_player(pid):
 
     # Percentile history for Advanced tab
     pctile_history = get_percentile_history(pid, is_pitcher=is_pitcher)
+    pctile_history_all = get_percentile_history_all_levels(pid, is_pitcher=is_pitcher)
     fld_pctile_history = get_fielding_percentile_history(pid) if fielding_stats else None
 
     # Prospect comps
@@ -1554,8 +1572,10 @@ def get_player(pid):
 
         _milb_bat = _milb_conn.execute("""
             SELECT b.year, b.league_id, b.ab, b.h, b.hr, b.rbi, b.bb, b.k, b.sb,
-                   b.pa, b.war, b.g, b.d, b.t, b.hbp, b.sf
+                   b.pa, b.war, b.g, b.d, b.t, b.hbp, b.sf, b.team_id,
+                   t.name AS team_name
             FROM batting_stats b
+            LEFT JOIN teams t ON b.team_id = t.team_id
             WHERE b.player_id=? AND b.split_id=1 AND b.league_id IS NOT NULL
             ORDER BY b.year, b.league_id
         """, (pid,)).fetchall()
@@ -1566,43 +1586,83 @@ def get_player(pid):
             bb = r["bb"] or 0
             k = r["k"] or 0
             pa = r["pa"] or 0
+            hbp = r["hbp"] or 0
+            sf = r["sf"] or 0
             _lid = r["league_id"]
             _lg_info = _lg_map.get(_lid, {})
+            _level_num = _lg_info.get("level", 0)
+            _level_label = level_map().get(str(_level_num), f"L{_level_num}")
+            _team_name = r["team_name"] or ""
+            avg = h / ab if ab else 0
+            obp = (h + bb + hbp) / (ab + bb + hbp + sf) if (ab + bb + hbp + sf) else 0
+            slg = (h + (r["d"] or 0) + 2*(r["t"] or 0) + 3*hr) / ab if ab else 0
+            babip_denom = ab - k - hr + sf
             milb_bat_stats.append({
                 "year": r["year"], "league_id": _lid,
                 "league_name": _lg_info.get("name", f"League {_lid}"),
-                "level": _lg_info.get("level", 0),
-                "g": r["g"] or 0, "pa": pa, "ab": ab, "h": h, "hr": hr,
-                "rbi": r["rbi"] or 0, "bb": bb, "k": k, "sb": r["sb"] or 0,
-                "avg": round(h / ab, 3) if ab else 0,
-                "obp": round((h + bb + (r["hbp"] or 0)) / (ab + bb + (r["hbp"] or 0) + (r["sf"] or 0)), 3)
-                       if (ab + bb + (r["hbp"] or 0) + (r["sf"] or 0)) else 0,
-                "slg": round((h + (r["d"] or 0) + 2*(r["t"] or 0) + 3*hr) / ab, 3) if ab else 0,
+                "level": _level_num,
+                "level_label": _level_label,
+                "team_name": _team_name,
+                "g": r["g"] or 0, "pa": pa,
+                "avg": round(avg, 3),
+                "obp": round(obp, 3),
+                "slg": round(slg, 3),
+                "ops": round(obp + slg, 3),
+                "iso": round(slg - avg, 3),
+                "bb_pct": round(bb / pa * 100, 1) if pa else 0,
+                "so_pct": round(k / pa * 100, 1) if pa else 0,
+                "babip": round((h - hr) / babip_denom, 3) if babip_denom > 0 else 0,
+                "hr": hr, "rbi": r["rbi"] or 0, "sb": r["sb"] or 0,
                 "war": round(r["war"], 1) if r["war"] else 0,
             })
 
         _milb_pit = _milb_conn.execute("""
             SELECT p.year, p.league_id, p.ip, p.era, p.k, p.bb, p.w, p.l, p.sv,
-                   p.war, p.gs, p.g, p.hra, p.ha, p.er, p.r
+                   p.war, p.gs, p.g, p.hra, p.ha, p.er, p.r, p.bf, p.team_id,
+                   p.hp, p.gb, p.fb, p.hld,
+                   t.name AS team_name
             FROM pitching_stats p
+            LEFT JOIN teams t ON p.team_id = t.team_id
             WHERE p.player_id=? AND p.split_id=1 AND p.league_id IS NOT NULL
             ORDER BY p.year, p.league_id
         """, (pid,)).fetchall()
         for r in _milb_pit:
             ip = r["ip"] or 0
+            k = r["k"] or 0
+            bb = r["bb"] or 0
+            bf = r["bf"] or 0
+            hra = r["hra"] or 0
+            ha = r["ha"] or 0
+            hp = r["hp"] or 0
+            gb = r["gb"] or 0
+            fb = r["fb"] or 0
             _lid = r["league_id"]
             _lg_info = _lg_map.get(_lid, {})
+            _level_num = _lg_info.get("level", 0)
+            _level_label = level_map().get(str(_level_num), f"L{_level_num}")
+            _team_name = r["team_name"] or ""
+            k_pct = k / bf * 100 if bf else 0
+            bb_pct = bb / bf * 100 if bf else 0
+            gb_pct = 100.0 * gb / (gb + fb) if (gb + fb) > 0 else 0
+            babip_denom = bf - k - hra - bb - hp
+            babip = (ha - hra) / babip_denom if babip_denom > 0 else 0
             milb_pit_stats.append({
                 "year": r["year"], "league_id": _lid,
                 "league_name": _lg_info.get("name", f"League {_lid}"),
-                "level": _lg_info.get("level", 0),
+                "level": _level_num,
+                "level_label": _level_label,
+                "team_name": _team_name,
                 "g": r["g"] or 0, "gs": r["gs"] or 0,
                 "ip": round(ip, 1), "era": round(r["era"], 2) if r["era"] else 0,
-                "k": r["k"] or 0, "bb": r["bb"] or 0,
+                "k_pct": round(k_pct, 1), "bb_pct": round(bb_pct, 1),
+                "k_bb_pct": round(k_pct - bb_pct, 1),
+                "gb_pct": round(gb_pct, 1),
+                "babip": round(babip, 3),
                 "w": r["w"] or 0, "l": r["l"] or 0, "sv": r["sv"] or 0,
+                "hld": r["hld"] or 0,
                 "war": round(r["war"], 1) if r["war"] else 0,
-                "k9": round((r["k"] or 0) * 9 / ip, 1) if ip else 0,
-                "bb9": round((r["bb"] or 0) * 9 / ip, 1) if ip else 0,
+                "k9": round(k * 9 / ip, 1) if ip else 0,
+                "bb9": round(bb * 9 / ip, 1) if ip else 0,
             })
     except Exception:
         pass
@@ -1621,7 +1681,7 @@ def get_player(pid):
         "fielding_pctiles": fielding_pctiles, "fld_pctile_years": fld_pctile_years,
         "bat_percentiles": bat_percentiles, "bat_pctile_splits": bat_pctile_splits,
         "pctile_year": pctile_year, "pctile_years": pctile_years_available,
-        "pctile_history": pctile_history, "fld_pctile_history": fld_pctile_history,
+        "pctile_history": pctile_history, "pctile_history_all": pctile_history_all, "fld_pctile_history": fld_pctile_history,
         "prospect_comps": prospect_comps, "comp_stats": comp_stats, "pap": pap,
         "snapshot_deltas": snapshot_deltas,
         "dev_history": dev_history,
@@ -1649,10 +1709,8 @@ def get_player(pid):
         "insights": insights,
         "milb_bat_stats": milb_bat_stats,
         "milb_pit_stats": milb_pit_stats,
-        "milb_leagues": sorted(
-            {(s["league_id"], s["league_name"]) for s in milb_bat_stats + milb_pit_stats},
-            key=lambda x: x[1]
-        ),
+        "pctile_levels": pctile_levels,
+        "pctile_level": pctile_level,
     }
 
 

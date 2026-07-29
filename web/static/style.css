@@ -806,7 +806,7 @@ h2.league-header { color: #aaa; font-size: 0.95rem; text-transform: uppercase; l
   background: none; color: var(--text-dim);
 }
 .pctile-history-table .ph-cell.ph-unqualified {
-  background: rgba(255,255,255,0.04);
+  background: rgba(var(--ph-bg), 0.18); opacity: 0.7;
 }
 .pctile-history-table .ph-cell.ph-unqualified .ph-val {
   color: var(--text-dim); font-weight: 400;

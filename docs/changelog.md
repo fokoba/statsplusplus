@@ -4,6 +4,36 @@ Completed and deferred work items, organized by session. Moved from `task_list.m
 
 ---
 
+## Session 71 (2026-07-28)
+
+### Features
+
+- **Level-based percentile rankings for MiLB players** (`percentiles.py`, `player_queries.py`, `player.html`) — Percentile panel now works for minor leaguers. Pool combines all leagues at a given level (e.g., AAA = International + Pacific Coast combined). Player's percentiles are ranked against peers at their own level. Level selector dropdown (MLB / AAA / AA / A / Rookie) lets users switch comparison context. Defaults to the player's current level.
+
+- **Expected-value markers for all current-year data** (`percentiles.py`) — Rating-based expected percentile (the diamond marker) now shows for unqualified players too, not just qualified ones. This gives context for small-sample players ("here's where ratings say you should land"). Hot/cold/lucky/unlucky tags still only appear when qualified. For MiLB, BABIP expected falls back to contact percentile (MLB regression model not applicable at lower levels).
+
+- **Unified stats tables** (`player.html`, `player_queries.py`) — MLB and MiLB batting/pitching stats merged into a single table per player. Level column always shows (MLB / AAA / AA / A). Team column shows abbreviation for MLB, city name for MiLB (full league name on hover). Stats match across levels: AVG/OBP/SLG/OPS/ISO/BB%/SO%/BABIP/HR/RBI/SB/CS/OPS+/WAR for hitters; ERA/ERA+/FIP/SIERA/K%/BB%/K-BB%/GB%/BABIP/W/L/SV/HLD/WAR for pitchers. MiLB rows show "-" for stats that can't be computed (OPS+, FIP, SIERA). Traded players show "↳ Team" sub-rows in the Team column.
+
+- **Unified Advanced tab percentile history** (`percentiles.py`, `player.html`) — Single "Batting/Pitching Percentiles by Season" table for all players, powered by `get_percentile_history_all_levels()`. Each row shows year + level + PA/IP + color-coded percentile cells. Same table format for MLB veterans and minor leaguers — level column distinguishes context. Career (MLB) row shows PA-weighted averages. WAR mini-bars, value/percentile toggle, and split selector (MLB only) preserved.
+
+- **MiLB pitching derived stats** (`player_queries.py`) — MiLB pitching rows now compute K%, BB%, K-BB%, GB%, BABIP, and HLD from raw data (bf, k, bb, gb, fb, ha, hra, hld columns). Enables consistent stat columns across levels.
+
+- **Pure MiLB players get Stats + Advanced tabs** (`player.html`) — `has_stats` now includes MiLB data, so minor leaguers who have never played MLB get the full tabbed layout (Stats tab with their MiLB stats, Advanced tab with level-adjusted percentile history).
+
+### Bug Fixes
+
+- **Percentile panel missing for minor leaguers** — Panel only showed when MLB stats existed. Now shows for any player with stats at any level.
+
+- **Split toggle visible when no splits available** (`player.html`) — Switching to a MiLB level via the dropdown kept the "vs L / R" button visible even though MiLB has no split data. Now dynamically hidden when the API returns empty splits.
+
+- **`pctile-history-table` CSS class mismatch** — New all-levels table used wrong class name (`ph-table` instead of `pctile-history-table`), causing no color gradient to render.
+
+- **Unqualified cells completely colorless** (`style.css`) — `ph-unqualified` override removed all color (`rgba(255,255,255,0.04)`). Now uses the same percentile color gradient at reduced opacity (0.18 vs 0.45) with 0.7 overall opacity — you can still quickly scan where values fall while clearly seeing they're unqualified.
+
+- **Year resolution for offseason leagues** (`percentiles.py`) — `_resolve_level_year` now has built-in fallback to most recent year with data (was only trying exact year and year-1). Fixes PPL-type leagues where current year has no data yet.
+
+---
+
 ## Session 70 (2026-07-28)
 
 ### Features

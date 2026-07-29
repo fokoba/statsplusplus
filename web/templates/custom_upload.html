@@ -85,6 +85,7 @@
   <table id="custom-upload-table">
     <thead>
       <tr>
+        <th></th>
         <th data-sort="str" class="left">Name</th>
         <th data-sort="str">Pos</th>
         <th data-sort="str" class="left">Team</th>
@@ -103,8 +104,9 @@
     </thead>
     <tbody>
       {% for p in results %}
-      <tr data-pos="{{ p.bucket }}" data-org="{{ p.org }}" data-type="{{ 'pitcher' if p.is_pitcher else 'hitter' }}" data-r5="{{ 'yes' if p.rule5_eligible else 'no' }}" data-fa="{{ 'yes' if p.is_free_agent else 'no' }}" data-waivers="{{ 'yes' if p.on_waivers else 'no' }}" data-platoon="{{ p.platoon_strong_side or '' }}">
-        <td class="left">{{ p.name }}</td>
+      <tr class="cu-row" data-pid="{{ p.pid }}" data-pos="{{ p.bucket }}" data-org="{{ p.org }}" data-type="{{ 'pitcher' if p.is_pitcher else 'hitter' }}" data-r5="{{ 'yes' if p.rule5_eligible else 'no' }}" data-fa="{{ 'yes' if p.is_free_agent else 'no' }}" data-waivers="{{ 'yes' if p.on_waivers else 'no' }}" data-platoon="{{ p.platoon_strong_side or '' }}">
+        <td><input type="checkbox" class="cu-checkbox" data-pid="{{ p.pid }}"></td>
+        <td class="left cu-name">{{ p.name }}</td>
         <td>{{ p.bucket }}</td>
         <td class="left">{{ p.org_abbr or p.org }}</td>
         <td>{{ p.age }}</td>
@@ -163,6 +165,46 @@ function cuFilterResults() {
   var countEl = document.getElementById('cu-count');
   if (countEl) countEl.textContent = '(' + shown + ' shown' + (parts.length ? ' — ' + parts.join(', ') : '') + ')';
 }
+</script>
+
+<style>
+.cu-row.cu-marked .cu-name { color: var(--text-dim); text-decoration: line-through; }
+.cu-row.cu-marked td { opacity: 0.5; }
+</style>
+
+<script>
+/* ── Custom Upload: mark-as-tracked checkboxes, persisted per-player in localStorage ── */
+(function() {
+  var STORAGE_KEY = 'statspp_custom_upload_marks';
+
+  function loadMarks() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
+    catch (e) { return {}; }
+  }
+  function saveMarks(marks) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(marks));
+  }
+
+  var marks = loadMarks();
+  document.querySelectorAll('.cu-checkbox').forEach(function(cb) {
+    var pid = cb.dataset.pid;
+    var row = cb.closest('.cu-row');
+    if (marks[pid]) {
+      cb.checked = true;
+      row.classList.add('cu-marked');
+    }
+    cb.addEventListener('change', function() {
+      if (cb.checked) {
+        marks[pid] = true;
+        row.classList.add('cu-marked');
+      } else {
+        delete marks[pid];
+        row.classList.remove('cu-marked');
+      }
+      saveMarks(marks);
+    });
+  });
+})();
 </script>
 {% endif %}
 

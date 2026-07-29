@@ -82,6 +82,12 @@ CREATE TABLE IF NOT EXISTS ratings (
 CREATE VIEW IF NOT EXISTS latest_ratings AS
     SELECT * FROM ratings
     WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM ratings);
+CREATE VIEW IF NOT EXISTS mlb_batting_stats AS
+    SELECT * FROM batting_stats WHERE league_id IS NULL;
+CREATE VIEW IF NOT EXISTS mlb_pitching_stats AS
+    SELECT * FROM pitching_stats WHERE league_id IS NULL;
+CREATE VIEW IF NOT EXISTS mlb_fielding_stats AS
+    SELECT * FROM fielding_stats WHERE league_id IS NULL;
 CREATE TABLE IF NOT EXISTS ratings_history (
     player_id INTEGER, snapshot_date TEXT,
     composite_score INTEGER, ceiling_score INTEGER,
@@ -97,7 +103,13 @@ CREATE TABLE IF NOT EXISTS contracts (
     salary_4 INTEGER, salary_5 INTEGER, salary_6 INTEGER, salary_7 INTEGER,
     salary_8 INTEGER, salary_9 INTEGER, salary_10 INTEGER, salary_11 INTEGER,
     salary_12 INTEGER, salary_13 INTEGER, salary_14 INTEGER,
-    no_trade INTEGER, last_year_team_option INTEGER, last_year_player_option INTEGER
+    no_trade INTEGER, last_year_team_option INTEGER, last_year_player_option INTEGER,
+    last_year_vesting_option INTEGER, last_year_option_buyout INTEGER,
+    next_last_year_team_option INTEGER, next_last_year_player_option INTEGER,
+    next_last_year_vesting_option INTEGER, next_last_year_option_buyout INTEGER,
+    minimum_pa INTEGER, minimum_pa_bonus INTEGER,
+    minimum_ip INTEGER, minimum_ip_bonus INTEGER,
+    mvp_bonus INTEGER, cyyoung_bonus INTEGER, allstar_bonus INTEGER
 );
 CREATE TABLE IF NOT EXISTS contract_extensions (
     player_id INTEGER PRIMARY KEY, team_id INTEGER, years INTEGER, current_year INTEGER,

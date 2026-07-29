@@ -54,21 +54,71 @@ def _playoff_spots():
     return max(2, round(avg_per_league * 0.4))  # ~40% of each league makes playoffs
 
 def _classify_sellers(year):
-    """Return set of team_ids classified as sellers (> 8 GB from last playoff spot)."""
+    """Return set of team_ids classified as sellers (> 8 GB from last playoff spot).
+
+    Prefers real standings from the `standings` table (sourced from /lgdata).
+    Falls back to pythagorean standings when real standings aren't available.
+    """
+    conn = _db.get_conn()
+
+    # Try real standings first
+    real = conn.execute(
+        "SELECT team_id, w, l, gb FROM standings"
+    ).fetchall()
+
+    if real and len(real) >= 10:
+        # Use real GB directly — much simpler than pythagorean approach
+        spots = _playoff_spots()
+
+        # Group by sub-league for proper GB comparison
+        sub_leagues = {}
+        for div, teams in _cfg.settings.get("divisions", {}).items():
+            key = div.split()[0] if div else "ALL"
+            for tid in teams:
+                sub_leagues[tid] = key
+
+        # Build team records
+        records = {r["team_id"]: {"w": r["w"], "l": r["l"], "gb": r["gb"]} for r in real}
+
+        if not sub_leagues:
+            groups = {"ALL": list(records.keys())}
+        else:
+            groups = {}
+            for tid, key in sub_leagues.items():
+                groups.setdefault(key, []).append(tid)
+
+        sellers = set()
+        for league_key, league_tids in groups.items():
+            league_ids = set(league_tids)
+            league_rows = sorted(
+                [(tid, records[tid]) for tid in league_ids if tid in records],
+                key=lambda x: x[1]["w"], reverse=True
+            )
+            if len(league_rows) <= spots:
+                continue
+            cutoff_w = league_rows[spots - 1][1]["w"]
+            for tid, rec in league_rows[spots:]:
+                if (cutoff_w - rec["w"]) > 8:
+                    sellers.add(tid)
+
+        conn.close()
+        return sellers
+
+    conn.close()
+
+    # Fallback: pythagorean standings
     rows = _standings_from_db(year)
     if not rows:
         return set()
 
     spots = _playoff_spots()
 
-    # Group teams by sub-league (first word of division name, e.g. "AL" / "NL")
     sub_leagues = {}
     for div, teams in _cfg.settings.get("divisions", {}).items():
         key = div.split()[0] if div else "ALL"
         for tid in teams:
             sub_leagues[tid] = key
 
-    # If no division config, treat all teams as one league
     if not sub_leagues:
         groups = {"ALL": [r["tid"] for r in rows]}
     else:
@@ -97,9 +147,11 @@ def _classify_sellers(year):
 # Contract status
 # ---------------------------------------------------------------------------
 
-def _contract_status(years, current_year, team_opt, player_opt):
+def _contract_status(years, current_year, team_opt, player_opt, vesting_opt=False):
     yrs_left = years - current_year
     if yrs_left <= 1:
+        if vesting_opt:
+            return "VESTING"
         if team_opt or player_opt:
             return "OPTION"
         return "RENTAL"
@@ -111,9 +163,19 @@ def _contract_status(years, current_year, team_opt, player_opt):
 # ---------------------------------------------------------------------------
 
 def find_targets(bucket, min_ovr=50, sellers_only=False, include_controlled=False,
-                 max_salary_m=None, year=None, vs_hand=None, exclude_injured=False):
+                 max_salary_m=None, year=None, vs_hand=None, exclude_injured=False,
+                 on_block_only=False):
     year = year or _cfg.year
     conn = _db.get_conn()
+
+    sellers = _classify_sellers(year)
+
+    # Load trade block player IDs
+    trade_block_ids = set()
+    try:
+        trade_block_ids = {r[0] for r in conn.execute("SELECT player_id FROM trade_block").fetchall()}
+    except Exception:
+        pass  # Table may not exist in older DBs
 
     sellers = _classify_sellers(year)
 
@@ -150,6 +212,7 @@ def find_targets(bucket, min_ovr=50, sellers_only=False, include_controlled=Fals
                pi.era, pi.ip, pi.war as pwar, pi.k, pi.bb,
                c.salary_0, c.years, c.current_year,
                c.last_year_team_option, c.last_year_player_option,
+               c.last_year_vesting_option, c.last_year_option_buyout,
                s.surplus,
                ce.salary_0 as ext_salary, ce.years as ext_years
         FROM players p
@@ -157,9 +220,9 @@ def find_targets(bucket, min_ovr=50, sellers_only=False, include_controlled=Fals
         LEFT JOIN contracts c ON p.player_id = c.player_id
         LEFT JOIN contract_extensions ce ON p.player_id = ce.player_id
         LEFT JOIN player_surplus s ON s.player_id = p.player_id AND s.eval_date = ?
-        LEFT JOIN batting_stats b ON p.player_id = b.player_id
+        LEFT JOIN mlb_batting_stats b ON p.player_id = b.player_id
             AND b.year = ? AND b.split_id = 1
-        LEFT JOIN pitching_stats pi ON p.player_id = pi.player_id
+        LEFT JOIN mlb_pitching_stats pi ON p.player_id = pi.player_id
             AND pi.year = ? AND pi.split_id = 1
         WHERE p.level = '1'
           AND r.ovr >= ?
@@ -176,7 +239,7 @@ def find_targets(bucket, min_ovr=50, sellers_only=False, include_controlled=Fals
         split_id = 3 if vs_hand == 'R' else 2
         split_rows = conn.execute("""
             SELECT player_id, avg, obp, slg, hr, pa
-            FROM batting_stats WHERE year=? AND split_id=?
+            FROM mlb_batting_stats WHERE year=? AND split_id=?
         """, (year, split_id)).fetchall()
         split_stats = {r["player_id"]: r for r in split_rows}
 
@@ -212,7 +275,8 @@ def find_targets(bucket, min_ovr=50, sellers_only=False, include_controlled=Fals
 
         status = _contract_status(
             r["years"] or 1, r["current_year"] or 0,
-            r["last_year_team_option"], r["last_year_player_option"]
+            r["last_year_team_option"], r["last_year_player_option"],
+            vesting_opt=r["last_year_vesting_option"],
         )
         ext_salary_m = (r["ext_salary"] or 0) / 1e6
         # A "rental" with a signed extension is actually a commitment
@@ -299,6 +363,14 @@ def find_targets(bucket, min_ovr=50, sellers_only=False, include_controlled=Fals
         else:
             entry["on_waivers"] = False
 
+        # Trade block flag
+        pid = r["player_id"]
+        entry["on_block"] = pid in trade_block_ids
+
+        # Filter: --on-block shows only trade block players
+        if on_block_only and not entry["on_block"]:
+            continue
+
         results.append(entry)
 
     sort_key = (lambda x: (0 if x["seller"] else 1, -x.get("_sort_key", x["ovr"]))) \
@@ -327,12 +399,13 @@ def _fmt_line(r):
         war = f"{r['war']:.1f}" if r["war"] else "-.-"
         ext_note = f" +EXT${r['ext_salary_m']:.1f}M/yr" if r.get("ext_salary_m", 0) > 0 else ""
         inj = f" 🏥{r['injury']}" if r.get('injury') else ""
+        blk = " 📋" if r.get("on_block") else ""
         return (
             f"{status_marker} {seller_marker} {r['name']:<22} {r['age']:>2} "
             f"Ovr:{r['ovr']:>2}/{r['pot']:>2} {r['team']:<5} "
             f"${r['prorated_m']:.1f}M(pro) ${r['salary_m']:.1f}M(full){ext_note} "
             f"Surp:${r['surplus_m']:+.1f}M | "
-            f"ERA:{era} {ip}IP WAR:{war}{inj}"
+            f"ERA:{era} {ip}IP WAR:{war}{inj}{blk}"
         )
     else:
         avg = f".{int((r['avg'] or 0)*1000):03}" if r["avg"] else "---"
@@ -362,12 +435,13 @@ def _fmt_line(r):
 
         ext_note = f" +EXT${r['ext_salary_m']:.1f}M/yr" if r.get("ext_salary_m", 0) > 0 else ""
         inj = f" 🏥{r['injury']}" if r.get('injury') else ""
+        blk = " 📋" if r.get("on_block") else ""
         return (
             f"{status_marker} {seller_marker} {r['name']:<22} {r['age']:>2} "
             f"Ovr:{r['ovr']:>2}/{r['pot']:>2} {r['team']:<5} "
             f"${r['prorated_m']:.1f}M(pro) ${r['salary_m']:.1f}M(full){ext_note} "
             f"Surp:${r['surplus_m']:+.1f}M | "
-            f"{avg}/{obp}/{slg} {hr}HR WAR:{war}{cf}{split_str}{inj}"
+            f"{avg}/{obp}/{slg} {hr}HR WAR:{war}{cf}{split_str}{inj}{blk}"
         )
 
 
@@ -413,6 +487,8 @@ if __name__ == "__main__":
                         help="Show and sort by split ratings/stats vs RHP or LHP")
     parser.add_argument("--exclude-injured", action="store_true",
                         help="Exclude injured players from results")
+    parser.add_argument("--on-block", action="store_true",
+                        help="Show only players on the trade block")
     parser.add_argument("--year", type=int, default=None)
     args = parser.parse_args()
 
@@ -425,5 +501,6 @@ if __name__ == "__main__":
         year=args.year,
         vs_hand=args.vs_hand,
         exclude_injured=args.exclude_injured,
+        on_block_only=args.on_block,
     )
     print_targets(results, args.bucket)

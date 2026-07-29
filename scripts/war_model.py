@@ -121,7 +121,7 @@ def load_stat_history(conn, game_date):
     bat_rows = conn.execute(
         """SELECT player_id, year, SUM(war) as war, SUM(ab) as ab,
                   MAX(stint) as max_stint, COUNT(team_id) as team_count
-           FROM batting_stats WHERE split_id=1 AND year < ?
+           FROM mlb_batting_stats WHERE split_id=1 AND year < ?
            GROUP BY player_id, year""", (cutoff_year,)
     ).fetchall()
     pit_rows = conn.execute(
@@ -129,7 +129,7 @@ def load_stat_history(conn, game_date):
                   SUM((war + COALESCE(ra9war, war)) / 2.0) as war,
                   SUM(gs) as gs, SUM(ip) as ip,
                   MAX(stint) as max_stint, COUNT(team_id) as team_count
-           FROM pitching_stats WHERE split_id=1 AND year < ?
+           FROM mlb_pitching_stats WHERE split_id=1 AND year < ?
            GROUP BY player_id, year""", (cutoff_year,)
     ).fetchall()
 

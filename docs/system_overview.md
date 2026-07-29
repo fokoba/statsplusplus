@@ -88,7 +88,7 @@ All other analysis scripts are read-only against the DB.
 | `trade_targets.py` | 350 | Trade target finder — MLB players by position with contract status (RENTAL/ARB/RENTAL+EXT/OPTION/CONTROLLED), seller classification, split ratings, pro-rated salary. |
 | `trade_assets.py` | 150 | Tradeable assets for any team — MLB surplus players + farm prospects ranked by value. |
 | `team_needs.py` | 160 | Positional needs vs league average — OPS/ERA gaps flagged by severity, upgrade priority list, platoon flags, `--aaa-roster` for full AAA depth. Works for any team. |
-| `standings.py` | 160 | League-wide standings — W/L, run differential, pythagorean expected record. `--actual` flag shows actual W-L from `games` table with delta. `--team <ABBR>` shows team-specific actual record + playoff picture (division leaders, WC race with GB). Importable: `actual_record()`, `all_actual_records()`, `league_standings_actual()`, `playoff_picture()`. |
+| `standings.py` | 160 | League-wide standings — pythagorean W/L alongside actual W/L (from `standings` table) with delta (Δ) column. `--actual` flag shows team-specific actual record with delta. `--team <ABBR>` shows team-specific actual record + playoff picture (division leaders, WC race with GB). Importable: `actual_record()`, `all_actual_records()`, `league_standings_actual()`, `playoff_picture()`. |
 | `free_agents.py` | 105 | Upcoming free agent class — expiring contracts with FA/ARB/TO status. ARB-eligible players (service time < 6 years) distinguished from true walk-year FAs. |
 | `player_utils.py` | 324 | Shared evaluation logic — bucketing, FV calc, WAR/aging curves, normalization. |
 | `league_config.py` | 120 | Single abstraction for league-specific settings. Loads from `league_settings.json` + `state.json`. |
@@ -116,6 +116,8 @@ All other analysis scripts are read-only against the DB.
 | `fielding_stats` | `refresh.py` | Player fielding stats by position (G, IP, TC, E, ZR, framing, arm). `league_id` column for MiLB. |
 | `prospect_fv` | `fv_calc.py` | FV grades for prospects and rookie-eligible MLB players (<130 AB, <50 IP, age ≤ 24). Cleared and rewritten each run. |
 | `player_surplus` | `fv_calc.py` | Surplus value for all MLB players. Cleared and rewritten each run. |
+| `trade_block` | `refresh.py` | Player IDs on the trade block (from `/tradeblock` endpoint). Cleared and repopulated each refresh. |
+| `standings` | `refresh.py` | Real W-L-GB-PCT-streak-magic# for all teams (from `/lgdata`). Used by seller classification and `standings.py` display. |
 
 ---
 

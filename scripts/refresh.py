@@ -255,15 +255,38 @@ def _snapshot_ratings_history(conn, ratings, snapshot_date):
 
 
 def _upsert_contracts(conn, contracts):
+    _COLS = (
+        "player_id", "team_id", "contract_team_id", "is_major",
+        "season_year", "years", "current_year",
+        "salary_0", "salary_1", "salary_2", "salary_3",
+        "salary_4", "salary_5", "salary_6", "salary_7",
+        "salary_8", "salary_9", "salary_10", "salary_11",
+        "salary_12", "salary_13", "salary_14",
+        "no_trade", "last_year_team_option", "last_year_player_option",
+        "last_year_vesting_option", "last_year_option_buyout",
+        "next_last_year_team_option", "next_last_year_player_option",
+        "next_last_year_vesting_option", "next_last_year_option_buyout",
+        "minimum_pa", "minimum_pa_bonus", "minimum_ip", "minimum_ip_bonus",
+        "mvp_bonus", "cyyoung_bonus", "allstar_bonus",
+    )
+    col_list = ",".join(_COLS)
+    placeholders = ",".join(["?"] * len(_COLS))
+
     def row(c):
         return (
             c["player_id"], c.get("team_id"), c.get("contract_team_id"), c.get("is_major"),
             c.get("season_year"), c.get("years"), c.get("current_year"),
             *[c.get(f"salary{i}") for i in range(15)],
             c.get("no_trade"), c.get("last_year_team_option"), c.get("last_year_player_option"),
+            c.get("last_year_vesting_option"), c.get("last_year_option_buyout"),
+            c.get("next_last_year_team_option"), c.get("next_last_year_player_option"),
+            c.get("next_last_year_vesting_option"), c.get("next_last_year_option_buyout"),
+            c.get("minimum_pa"), c.get("minimum_pa_bonus"),
+            c.get("minimum_ip"), c.get("minimum_ip_bonus"),
+            c.get("mvp_bonus"), c.get("cyyoung_bonus"), c.get("allstar_bonus"),
         )
     conn.executemany(
-        f"INSERT OR REPLACE INTO contracts VALUES ({','.join(['?']*25)})",
+        f"INSERT OR REPLACE INTO contracts ({col_list}) VALUES ({placeholders})",
         [row(c) for c in contracts]
     )
 
@@ -761,7 +784,7 @@ def refresh_league(year, game_date=None):
     # Only pull years not already in the DB (excludes current and prior year
     # which are always fetched above).
     existing_years = {r[0] for r in conn.execute(
-        "SELECT DISTINCT year FROM batting_stats").fetchall()}
+        "SELECT DISTINCT year FROM mlb_batting_stats").fetchall()}
     hist_start = year - 15
     hist_years = [y for y in range(hist_start, prior_year) if y not in existing_years]
     if hist_years:
@@ -784,7 +807,7 @@ def refresh_league(year, game_date=None):
 
     # Backfill splits for years that have overall stats but are missing L/R splits
     existing_split_years = {r[0] for r in conn.execute(
-        "SELECT DISTINCT year FROM batting_stats WHERE split_id=2").fetchall()}
+        "SELECT DISTINCT year FROM mlb_batting_stats WHERE split_id=2").fetchall()}
     split_gap_years = [y for y in range(hist_start, prior_year)
                        if y in existing_years and y not in existing_split_years]
     if split_gap_years:
@@ -798,7 +821,7 @@ def refresh_league(year, game_date=None):
 
     # Backfill fielding for years that have batting/pitching but no fielding
     existing_fld_years = {r[0] for r in conn.execute(
-        "SELECT DISTINCT year FROM fielding_stats").fetchall()}
+        "SELECT DISTINCT year FROM mlb_fielding_stats").fetchall()}
     fld_gap_years = [y for y in range(hist_start, prior_year)
                      if y in existing_years and y not in existing_fld_years]
     if fld_gap_years:
@@ -862,6 +885,44 @@ def refresh_league(year, game_date=None):
             log.info("  no minor leagues found (primary_lid=%s)", primary_lid)
     except Exception as e:
         log.warning(f"  MiLB stats failed (non-fatal): {e}")
+
+    conn.commit()
+
+    # Trade block — players explicitly made available
+    log.info("── trade block")
+    try:
+        tb = client.get_tradeblock()
+        player_ids = tb.get("player_ids", [])
+        conn.execute("DELETE FROM trade_block")
+        if player_ids:
+            conn.executemany(
+                "INSERT OR REPLACE INTO trade_block (player_id, fetched_date) VALUES (?, ?)",
+                [(pid, game_date) for pid in player_ids]
+            )
+        log.info(f"  {len(player_ids)} players on trade block")
+    except Exception as e:
+        log.warning(f"  trade block failed (non-fatal): {e}")
+
+    # Standings from /lgdata — real W-L-GB
+    log.info("── standings")
+    try:
+        lgdata = client.get_lgdata()
+        standings_rows = lgdata.get("standings", [])
+        if standings_rows:
+            conn.execute("DELETE FROM standings")
+            conn.executemany(
+                "INSERT OR REPLACE INTO standings (team_id, w, l, t, pct, gb, pos, streak, magic_number, fetched_date) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [(s["team_id"], s.get("w", 0), s.get("l", 0), s.get("t", 0),
+                  s.get("pct", 0), s.get("gb", 0), s.get("pos", 0),
+                  s.get("streak", 0), s.get("magic_number", 0), game_date)
+                 for s in standings_rows]
+            )
+            log.info(f"  {len(standings_rows)} team standings stored")
+        else:
+            log.info("  no standings data in /lgdata")
+    except Exception as e:
+        log.warning(f"  standings failed (non-fatal): {e}")
 
     conn.commit()
 
@@ -970,12 +1031,12 @@ def _refresh_dollar_per_war(year):
 
     placeholders = ",".join("?" * len(pids))
     bat_war = conn.execute(
-        f"SELECT SUM(war) FROM (SELECT player_id, SUM(war) as war FROM batting_stats "
+        f"SELECT SUM(war) FROM (SELECT player_id, SUM(war) as war FROM mlb_batting_stats "
         f"WHERE year=? AND split_id=1 AND player_id IN ({placeholders}) GROUP BY player_id)",
         [year - 1] + pids  # use prior season WAR — current season is incomplete
     ).fetchone()[0] or 0
     pit_war = conn.execute(
-        f"SELECT SUM(war) FROM (SELECT player_id, SUM(war) as war FROM pitching_stats "
+        f"SELECT SUM(war) FROM (SELECT player_id, SUM(war) as war FROM mlb_pitching_stats "
         f"WHERE year=? AND split_id=1 AND player_id IN ({placeholders}) GROUP BY player_id)",
         [year - 1] + pids
     ).fetchone()[0] or 0
@@ -1092,7 +1153,7 @@ def _refresh_stat_percentiles(year):
     # Use prior year if available for full-season samples; fall back to current year
     for yr in (year - 1, year):
         bat_rows = conn.execute("""
-            SELECT obp, slg FROM batting_stats
+            SELECT obp, slg FROM mlb_batting_stats
             WHERE year = ? AND split_id = 1 AND pa >= 300
         """, (yr,)).fetchall()
         if len(bat_rows) >= 20:
@@ -1109,7 +1170,7 @@ def _refresh_stat_percentiles(year):
     # P5 ERA- from qualifying pitchers (outs >= 300)
     for yr in (year - 1, year):
         pit_rows = conn.execute("""
-            SELECT era FROM pitching_stats
+            SELECT era FROM mlb_pitching_stats
             WHERE year = ? AND split_id = 1 AND outs >= 300 AND era IS NOT NULL
         """, (yr,)).fetchall()
         if len(pit_rows) >= 10:
@@ -1124,7 +1185,7 @@ def _refresh_stat_percentiles(year):
     for yr in (year - 1, year):
         gb_rows = conn.execute("""
             SELECT 100.0 * gb / (gb + fb) as gb_pct
-            FROM pitching_stats
+            FROM mlb_pitching_stats
             WHERE year = ? AND split_id = 1 AND (gb + fb) > 100
         """, (yr,)).fetchall()
         if len(gb_rows) >= 20:
@@ -1140,7 +1201,7 @@ def _refresh_stat_percentiles(year):
     for yr in (year - 1, year):
         gb_reg_rows = conn.execute("""
             SELECT r.gb as rating, 100.0 * ps.gb / (ps.gb + ps.fb) as actual
-            FROM pitching_stats ps
+            FROM mlb_pitching_stats ps
             JOIN latest_ratings r ON ps.player_id = r.player_id
             WHERE ps.year = ? AND ps.split_id = 1 AND (ps.gb + ps.fb) > 100
               AND r.gb IS NOT NULL AND r.gb > 0

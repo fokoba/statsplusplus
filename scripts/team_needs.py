@@ -63,7 +63,7 @@ def analyze(team_id=None, year=None):
                r.cntct_l, r.cntct_r, r.pow_l, r.pow_r, r.eye_l, r.eye_r, r.bats
         FROM players p
         JOIN latest_ratings r ON p.player_id = r.player_id
-        JOIN batting_stats b ON p.player_id = b.player_id
+        JOIN mlb_batting_stats b ON p.player_id = b.player_id
             AND b.year = ? AND b.split_id = 1
         WHERE p.team_id = ? AND p.level = '1' AND p.role = 0
         ORDER BY b.pa DESC
@@ -132,7 +132,7 @@ def analyze(team_id=None, year=None):
                pi.gs, pi.g
         FROM players p
         JOIN latest_ratings r ON p.player_id = r.player_id
-        JOIN pitching_stats pi ON p.player_id = pi.player_id
+        JOIN mlb_pitching_stats pi ON p.player_id = pi.player_id
             AND pi.year = ? AND pi.split_id = 1
         WHERE p.team_id = ? AND p.level = '1' AND p.role IN (11, 12, 13)
         ORDER BY pi.ip DESC

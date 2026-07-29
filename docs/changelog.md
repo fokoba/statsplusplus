@@ -4,6 +4,76 @@ Completed and deferred work items, organized by session. Moved from `task_list.m
 
 ---
 
+## Session 71 (2026-07-28)
+
+### Features
+
+- **Level-based percentile rankings for MiLB players** (`percentiles.py`, `player_queries.py`, `player.html`) — Percentile panel now works for minor leaguers. Pool combines all leagues at a given level (e.g., AAA = International + Pacific Coast combined). Player's percentiles are ranked against peers at their own level. Level selector dropdown (MLB / AAA / AA / A / Rookie) lets users switch comparison context. Defaults to the player's current level.
+
+- **Expected-value markers for all current-year data** (`percentiles.py`) — Rating-based expected percentile (the diamond marker) now shows for unqualified players too, not just qualified ones. This gives context for small-sample players ("here's where ratings say you should land"). Hot/cold/lucky/unlucky tags still only appear when qualified. For MiLB, BABIP expected falls back to contact percentile (MLB regression model not applicable at lower levels).
+
+- **Unified stats tables** (`player.html`, `player_queries.py`) — MLB and MiLB batting/pitching stats merged into a single table per player. Level column always shows (MLB / AAA / AA / A). Team column shows abbreviation for MLB, city name for MiLB (full league name on hover). Stats match across levels: AVG/OBP/SLG/OPS/ISO/BB%/SO%/BABIP/HR/RBI/SB/CS/OPS+/WAR for hitters; ERA/ERA+/FIP/SIERA/K%/BB%/K-BB%/GB%/BABIP/W/L/SV/HLD/WAR for pitchers. MiLB rows show "-" for stats that can't be computed (OPS+, FIP, SIERA). Traded players show "↳ Team" sub-rows in the Team column.
+
+- **Unified Advanced tab percentile history** (`percentiles.py`, `player.html`) — Single "Batting/Pitching Percentiles by Season" table for all players, powered by `get_percentile_history_all_levels()`. Each row shows year + level + PA/IP + color-coded percentile cells. Same table format for MLB veterans and minor leaguers — level column distinguishes context. Career (MLB) row shows PA-weighted averages. WAR mini-bars, value/percentile toggle, and split selector (MLB only) preserved.
+
+- **MiLB pitching derived stats** (`player_queries.py`) — MiLB pitching rows now compute K%, BB%, K-BB%, GB%, BABIP, and HLD from raw data (bf, k, bb, gb, fb, ha, hra, hld columns). Enables consistent stat columns across levels.
+
+- **Pure MiLB players get Stats + Advanced tabs** (`player.html`) — `has_stats` now includes MiLB data, so minor leaguers who have never played MLB get the full tabbed layout (Stats tab with their MiLB stats, Advanced tab with level-adjusted percentile history).
+
+### Bug Fixes
+
+- **Percentile panel missing for minor leaguers** — Panel only showed when MLB stats existed. Now shows for any player with stats at any level.
+
+- **Split toggle visible when no splits available** (`player.html`) — Switching to a MiLB level via the dropdown kept the "vs L / R" button visible even though MiLB has no split data. Now dynamically hidden when the API returns empty splits.
+
+- **`pctile-history-table` CSS class mismatch** — New all-levels table used wrong class name (`ph-table` instead of `pctile-history-table`), causing no color gradient to render.
+
+- **Unqualified cells completely colorless** (`style.css`) — `ph-unqualified` override removed all color (`rgba(255,255,255,0.04)`). Now uses the same percentile color gradient at reduced opacity (0.18 vs 0.45) with 0.7 overall opacity — you can still quickly scan where values fall while clearly seeing they're unqualified.
+
+- **Year resolution for offseason leagues** (`percentiles.py`) — `_resolve_level_year` now has built-in fallback to most recent year with data (was only trying exact year and year-1). Fixes PPL-type leagues where current year has no data yet.
+
+---
+
+## Session 70 (2026-07-28)
+
+### Features
+
+- **MiLB stats on player pages** (Phase 2e) — Player page Stats tab now shows a "Minor League Stats" section between MLB and Fielding stats. Batting table (G/PA/AB/AVG/OBP/SLG/HR/RBI/BB/K/SB/WAR) and pitching table (G/GS/IP/ERA/K/BB/K9/BB9/W/L/SV/WAR) with league names resolved from `league_settings.json`. Both hitter and pitcher pages supported.
+
+- **Trade block integration** (Phase 3a) — New `trade_block` table populated during refresh via `/tradeblock` endpoint. `trade_targets.py` shows 📋 annotation for players on the trade block. New `--on-block` flag filters to only confirmed-available players (47 players in eMLB).
+
+- **Real standings from `/lgdata`** (Phase 3c) — New `standings` table stores real W-L-GB-PCT-streak-magic# for all teams. `_classify_sellers()` now uses real win totals instead of pythagorean for seller detection. `standings.py` shows both pythagorean and actual W-L side by side with a delta (Δ) column showing over/underperformance.
+
+- **Expanded contract fields** (Phase 4) — Contracts table gains 13 columns: vesting options, option buyouts (current + next-to-last year), PA/IP incentive thresholds with bonuses, MVP/CY/All-Star bonuses. `trade_targets.py` now returns "VESTING" status (distinct from generic OPTION). `free_agents.py` shows buyout amounts (`TO($0.8M)`) and VO status. Player page contract data includes incentives dict.
+
+### Bug Fixes
+
+- **Fresh install crash: `true_ceiling` column missing** — Onboarding used `--no-fv` which skipped the evaluation engine (the only thing creating the column). Fixed by adding `true_ceiling`, `positional_percentile`, `positional_median` to base schema AND removing `--no-fv` from onboard so full pipeline runs.
+
+- **Favicon excluded from release zip** — GitHub Actions workflow excluded all `*.png` globally, catching `web/static/assets/favicon-32.png`. Scoped image exclusions to `assets/screenshots/` only.
+
+- **Error handler noise on 404s** — `_handle_exception` caught HTTP exceptions and logged full tracebacks for missing static files. Now returns HTTP errors directly without logging. Missing files produce a single 404 log line.
+
+- **`sqlite3.Row.get()` crash in trade targets** — `sqlite3.Row` doesn't support `.get()`. Fixed bracket access for `vesting_opt` column.
+
+- **Onboard refresh hardcoded year** — Removed hardcoded `2033` from subprocess command; refresh auto-detects year from API game date. Added `STATSPP_LEAGUE` env var to subprocess for reliable league resolution.
+
+### Verification
+
+- **Comprehensive smoke test of API integrations** — Verified all Phase 1-4 features working end-to-end:
+  - Service time: 10/10 true FAs were misclassified as ARB by old heuristic; exact values fix this
+  - Contract value: correct control periods using exact service time
+  - Trade targets: injury annotations, DFA exclusion, trade block flags, vesting status all working
+  - Free agents: exact classification, buyout display
+  - Seller classification: 11 teams correctly identified via real standings
+  - Player pages: MiLB stats + contract incentives flowing through
+
+### Documentation
+
+- Task list: Phase 2e, 3a, 3c, 4 marked complete. Player page injury banner added to backlog. External data directory added to long-term backlog.
+
+---
+
 ## Session 69 (2026-07-27)
 
 ### Features

@@ -167,7 +167,7 @@ def get_batting_leaders(yr=None, min_pa=50):
     rows = conn.execute("""
         SELECT p.player_id, p.name, p.team_id,
                b.ab, b.h, b.d, b.t, b.hr, b.rbi, b.bb, b.k, b.sb, b.pa, b.war, b.r, b.hbp
-        FROM batting_stats b JOIN players p ON b.player_id=p.player_id
+        FROM mlb_batting_stats b JOIN players p ON b.player_id=p.player_id
         WHERE b.year=? AND b.split_id=1 AND b.pa >= ?
         ORDER BY b.war DESC
     """, (yr, min_pa)).fetchall()
@@ -210,7 +210,7 @@ def get_pitching_leaders(yr=None, min_ip=10):
     rows = conn.execute("""
         SELECT p.player_id, p.name, p.team_id,
                ps.ip, ps.era, ps.k, ps.bb, ps.w, ps.l, ps.sv, ps.war, ps.ha, ps.hld
-        FROM pitching_stats ps JOIN players p ON ps.player_id=p.player_id
+        FROM mlb_pitching_stats ps JOIN players p ON ps.player_id=p.player_id
         WHERE ps.year=? AND ps.split_id=1 AND ps.ip >= ?
         ORDER BY ps.war DESC
     """, (yr, min_ip)).fetchall()
@@ -522,7 +522,7 @@ def get_player_card(pid):
         st = conn.execute("""
             SELECT SUM(ip), SUM(er)*27.0/NULLIF(SUM(outs),0), SUM(k), SUM(bb),
                    SUM(war), SUM(sv), SUM(hld)
-            FROM pitching_stats WHERE player_id=? AND year=? AND split_id=1
+            FROM mlb_pitching_stats WHERE player_id=? AND year=? AND split_id=1
         """, (pid, year)).fetchone()
         if st and st[0]:
             out["stats"] = {"ip": round(st[0], 1), "era": round(st[1], 2) if st[1] else None,
@@ -533,7 +533,7 @@ def get_player_card(pid):
                    (SUM(h)+SUM(bb)+SUM(hbp))*1.0/NULLIF(SUM(ab)+SUM(bb)+SUM(hbp)+SUM(sf),0),
                    (SUM(h)-SUM(d)-SUM(t)-SUM(hr)+2*SUM(d)+3*SUM(t)+4*SUM(hr))*1.0/NULLIF(SUM(ab),0),
                    SUM(hr), SUM(sb), SUM(war)
-            FROM batting_stats WHERE player_id=? AND year=? AND split_id=1
+            FROM mlb_batting_stats WHERE player_id=? AND year=? AND split_id=1
         """, (pid, year)).fetchone()
         if st and st[0]:
             out["stats"] = {"avg": round(st[1], 3) if st[1] else None,
@@ -718,7 +718,7 @@ def get_prospect_comps(pid):
         if is_pit:
             st = conn.execute("""
                 SELECT SUM(ip), SUM(er)*27.0/NULLIF(SUM(outs),0), SUM(k), SUM(war)
-                FROM pitching_stats WHERE player_id=? AND year=? AND split_id=1
+                FROM mlb_pitching_stats WHERE player_id=? AND year=? AND split_id=1
             """, (cpid, yr)).fetchone()
             if st and st[0]:
                 comp["line"] = f"{round(st[1],2) if st[1] else 0:.2f} ERA · {round(st[0],1)} IP · {round(st[3],1)} WAR"
@@ -728,7 +728,7 @@ def get_prospect_comps(pid):
                        (SUM(h)+SUM(bb)+SUM(hbp))*1.0/NULLIF(SUM(ab)+SUM(bb)+SUM(hbp)+SUM(sf),0),
                        (SUM(h)-SUM(d)-SUM(t)-SUM(hr)+2*SUM(d)+3*SUM(t)+4*SUM(hr))*1.0/NULLIF(SUM(ab),0),
                        SUM(hr), SUM(war)
-                FROM batting_stats WHERE player_id=? AND year=? AND split_id=1
+                FROM mlb_batting_stats WHERE player_id=? AND year=? AND split_id=1
             """, (cpid, yr)).fetchone()
             if st and st[0]:
                 avg = f"{st[0]:.3f}"[1:]
@@ -1212,14 +1212,14 @@ def get_positional_rankings():
     pitcher_is_sp = {}
     pit_stats = conn.execute("""
         SELECT player_id, gs, g
-        FROM pitching_stats
+        FROM mlb_pitching_stats
         WHERE split_id = 1 AND year = ?
     """, (stats_year,)).fetchall()
     # Fall back to prior year if current year has no data (spring training)
     if not pit_stats:
         pit_stats = conn.execute("""
             SELECT player_id, gs, g
-            FROM pitching_stats
+            FROM mlb_pitching_stats
             WHERE split_id = 1 AND year = ?
         """, (stats_year - 1,)).fetchall()
     for r in pit_stats:

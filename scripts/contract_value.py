@@ -196,10 +196,10 @@ def contract_value(player_id, retention_pct=0.0, _conn=None, _hist=None):
         if _cfg_init.perpetual_arb:
             # Sum prior career WAR from stats
             _cw_bat = conn.execute(
-                "SELECT COALESCE(SUM(war), 0) FROM batting_stats WHERE player_id=? AND split_id=1",
+                "SELECT COALESCE(SUM(war), 0) FROM mlb_batting_stats WHERE player_id=? AND split_id=1",
                 (pid,)).fetchone()[0]
             _cw_pit = conn.execute(
-                "SELECT COALESCE(SUM((war + COALESCE(ra9war, war))/2.0), 0) FROM pitching_stats WHERE player_id=? AND split_id=1",
+                "SELECT COALESCE(SUM((war + COALESCE(ra9war, war))/2.0), 0) FROM mlb_pitching_stats WHERE player_id=? AND split_id=1",
                 (pid,)).fetchone()[0]
             _career_war_accum = (_cw_bat or 0) + (_cw_pit or 0)
     except Exception:

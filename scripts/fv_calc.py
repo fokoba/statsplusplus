@@ -119,10 +119,10 @@ def run():
 
     # Career service for rookie eligibility (130 AB / 50 IP)
     _career_ab = dict(conn.execute(
-        "SELECT player_id, SUM(ab) FROM batting_stats WHERE split_id=1 GROUP BY player_id"
+        "SELECT player_id, SUM(ab) FROM mlb_batting_stats WHERE split_id=1 GROUP BY player_id"
     ).fetchall())
     _career_ip = dict(conn.execute(
-        "SELECT player_id, SUM(ip) FROM pitching_stats WHERE split_id=1 GROUP BY player_id"
+        "SELECT player_id, SUM(ip) FROM mlb_pitching_stats WHERE split_id=1 GROUP BY player_id"
     ).fetchall())
 
     rows = conn.execute(RATINGS_SQL).fetchall()

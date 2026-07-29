@@ -80,7 +80,7 @@ def find_comps(conn, target_tools, bucket, tolerance=10, min_pa=200,
                    ps.war, ps.ip, ps.k, ps.bb, ps.year
             FROM latest_ratings r
             JOIN players p ON r.player_id = p.player_id
-            JOIN pitching_stats ps ON ps.player_id = p.player_id
+            JOIN mlb_pitching_stats ps ON ps.player_id = p.player_id
             WHERE p.level = 1 AND {role_clause}
               AND ps.split_id = 1{year_clause.format(t='ps')}
         """, (min_pa,)).fetchall()
@@ -94,7 +94,7 @@ def find_comps(conn, target_tools, bucket, tolerance=10, min_pa=200,
                    bs.war, bs.pa, bs.hr, bs.sb, bs.year
             FROM latest_ratings r
             JOIN players p ON r.player_id = p.player_id
-            JOIN batting_stats bs ON bs.player_id = p.player_id
+            JOIN mlb_batting_stats bs ON bs.player_id = p.player_id
             WHERE p.level = 1 AND {pos_clause}
               AND bs.split_id = 1 AND bs.pa >= ?{year_clause.format(t='bs')}
         """, (min_pa,)).fetchall()

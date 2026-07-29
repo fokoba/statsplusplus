@@ -126,7 +126,16 @@ CREATE TABLE IF NOT EXISTS contracts (
     salary_12 INTEGER, salary_13 INTEGER, salary_14 INTEGER,
     no_trade                INTEGER,
     last_year_team_option   INTEGER,
-    last_year_player_option INTEGER
+    last_year_player_option INTEGER,
+    last_year_vesting_option INTEGER,
+    last_year_option_buyout INTEGER,
+    next_last_year_team_option INTEGER,
+    next_last_year_player_option INTEGER,
+    next_last_year_vesting_option INTEGER,
+    next_last_year_option_buyout INTEGER,
+    minimum_pa INTEGER, minimum_pa_bonus INTEGER,
+    minimum_ip INTEGER, minimum_ip_bonus INTEGER,
+    mvp_bonus INTEGER, cyyoung_bonus INTEGER, allstar_bonus INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS batting_stats (
@@ -137,6 +146,7 @@ CREATE TABLE IF NOT EXISTS batting_stats (
     pa INTEGER, stint INTEGER, hbp INTEGER, sf INTEGER,
     g INTEGER, gs INTEGER, cs INTEGER, gdp INTEGER, ibb INTEGER,
     sh INTEGER, ci INTEGER, pitches_seen INTEGER, ubr REAL, wpa REAL,
+    league_id INTEGER,
     PRIMARY KEY (player_id, year, split_id, team_id)
 );
 
@@ -151,7 +161,26 @@ CREATE TABLE IF NOT EXISTS pitching_stats (
     iw INTEGER, ir REAL, irs REAL, rs INTEGER, dp INTEGER,
     sb INTEGER, cs INTEGER, sf INTEGER, sh INTEGER, ci INTEGER,
     tb INTEGER, li REAL, wpa REAL, relief_app INTEGER, md INTEGER, sd INTEGER,
+    league_id INTEGER,
     PRIMARY KEY (player_id, year, split_id, team_id)
+);
+
+CREATE TABLE IF NOT EXISTS trade_block (
+    player_id   INTEGER PRIMARY KEY,
+    fetched_date TEXT
+);
+
+CREATE TABLE IF NOT EXISTS standings (
+    team_id      INTEGER PRIMARY KEY,
+    w            INTEGER,
+    l            INTEGER,
+    t            INTEGER,
+    pct          REAL,
+    gb           REAL,
+    pos          INTEGER,
+    streak       INTEGER,
+    magic_number INTEGER,
+    fetched_date TEXT
 );
 
 CREATE TABLE IF NOT EXISTS prospect_fv (
@@ -198,6 +227,7 @@ CREATE TABLE IF NOT EXISTS fielding_stats (
     g INTEGER, gs INTEGER, ip REAL, tc INTEGER, a INTEGER, po INTEGER,
     e INTEGER, dp INTEGER, pb INTEGER, sba INTEGER, rto INTEGER,
     zr REAL, framing REAL, arm REAL,
+    league_id INTEGER,
     PRIMARY KEY (player_id, year, team_id, position)
 );
 
@@ -300,6 +330,15 @@ CREATE TABLE IF NOT EXISTS ratings_history (
 CREATE VIEW IF NOT EXISTS latest_ratings AS
 SELECT * FROM ratings
 WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM ratings);
+
+CREATE VIEW IF NOT EXISTS mlb_batting_stats AS
+SELECT * FROM batting_stats WHERE league_id IS NULL;
+
+CREATE VIEW IF NOT EXISTS mlb_pitching_stats AS
+SELECT * FROM pitching_stats WHERE league_id IS NULL;
+
+CREATE VIEW IF NOT EXISTS mlb_fielding_stats AS
+SELECT * FROM fielding_stats WHERE league_id IS NULL;
 """
 
 
@@ -460,6 +499,7 @@ def init_schema(league_dir: Path | None = None):
             conn.execute("ALTER TABLE player_surplus ADD COLUMN surplus_yr1 INTEGER")
         _migrate_players(conn)
         _migrate_stats_league_id(conn)
+        _migrate_contracts(conn)
         # players: "retired" isn't part of the base schema or _migrate_players'
         # StatsPlus-API column set, but is used by our own free-agent tracking.
         p_cols = {r[1] for r in conn.execute("PRAGMA table_info(players)").fetchall()}
@@ -476,3 +516,26 @@ def _migrate_stats_league_id(conn: sqlite3.Connection):
         existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
         if "league_id" not in existing:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN league_id INTEGER")
+
+
+def _migrate_contracts(conn: sqlite3.Connection):
+    """Add expanded contract fields (Phase 4, July 2026)."""
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(contracts)").fetchall()}
+    new_cols = [
+        ("last_year_vesting_option", "INTEGER"),
+        ("last_year_option_buyout", "INTEGER"),
+        ("next_last_year_team_option", "INTEGER"),
+        ("next_last_year_player_option", "INTEGER"),
+        ("next_last_year_vesting_option", "INTEGER"),
+        ("next_last_year_option_buyout", "INTEGER"),
+        ("minimum_pa", "INTEGER"),
+        ("minimum_pa_bonus", "INTEGER"),
+        ("minimum_ip", "INTEGER"),
+        ("minimum_ip_bonus", "INTEGER"),
+        ("mvp_bonus", "INTEGER"),
+        ("cyyoung_bonus", "INTEGER"),
+        ("allstar_bonus", "INTEGER"),
+    ]
+    for col, typ in new_cols:
+        if col not in existing:
+            conn.execute(f"ALTER TABLE contracts ADD COLUMN {col} {typ}")

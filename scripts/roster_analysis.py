@@ -387,7 +387,7 @@ def main():
 
     # Batting stats
     bat_rows = conn.execute("""
-        SELECT * FROM batting_stats
+        SELECT * FROM mlb_batting_stats
         WHERE player_id IN ({}) AND year=? AND split_id=1
     """.format(",".join("?" * len(mlb_ids))),
         list(mlb_ids) + [year]
@@ -395,7 +395,7 @@ def main():
 
     # Pitching stats
     pit_rows = conn.execute("""
-        SELECT * FROM pitching_stats
+        SELECT * FROM mlb_pitching_stats
         WHERE player_id IN ({}) AND year=? AND split_id=1
     """.format(",".join("?" * len(mlb_ids))),
         list(mlb_ids) + [year]

@@ -34,6 +34,7 @@ def upcoming_fas(year, years_out=1, bucket=None, min_war=None, my_team_only=Fals
         SELECT c.player_id, p.name, p.age, c.years, c.current_year,
                c.salary_0, c.contract_team_id,
                c.last_year_team_option, c.last_year_player_option,
+               c.last_year_vesting_option, c.last_year_option_buyout,
                p.mlb_service_years, p.mlb_service_days,
                s.bucket, s.ovr, s.surplus,
                t.name as team_name
@@ -105,6 +106,8 @@ def upcoming_fas(year, years_out=1, bucket=None, min_war=None, my_team_only=Fals
             "surplus": surplus,
             "to": r["last_year_team_option"],
             "po": r["last_year_player_option"],
+            "vo": r["last_year_vesting_option"],
+            "buyout": r["last_year_option_buyout"],
             "is_arb": is_arb,
         })
 
@@ -120,7 +123,17 @@ def print_fas(results, title="Upcoming Free Agents"):
     for r in results:
         sal_str = f"${r['salary']:,.0f}" if r["salary"] else "min"
         sur_str = f"${r['surplus']/1e6:+.1f}M" if r["surplus"] else "n/a"
-        status = "ARB" if r.get("is_arb") else ("TO" if r.get("to") else ("PO" if r.get("po") else "FA"))
+        if r.get("is_arb"):
+            status = "ARB"
+        elif r.get("vo"):
+            status = "VO"
+        elif r.get("to"):
+            buyout = r.get("buyout")
+            status = f"TO(${buyout/1e6:.1f}M)" if buyout else "TO"
+        elif r.get("po"):
+            status = "PO"
+        else:
+            status = "FA"
         print(f"{r['name']:<25} {r['age']:>3} {r['bucket']:<4} {r['ovr']:>3} {r['team']:<20} {sal_str:>10} {sur_str:>10} {status:>8}")
 
 

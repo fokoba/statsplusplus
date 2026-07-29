@@ -94,7 +94,7 @@ def get_contracts(parent_team_id: int) -> list[dict]:
 def get_batting_stats(parent_team_id: int, year: int, split_id: int = 1) -> list[dict]:
     with get_conn() as conn:
         rows = conn.execute("""
-            SELECT s.* FROM batting_stats s
+            SELECT s.* FROM mlb_batting_stats s
             JOIN players p ON s.player_id = p.player_id
             WHERE (p.team_id = ? OR p.parent_team_id = ?) AND s.year = ? AND s.split_id = ?
         """, (parent_team_id, parent_team_id, year, split_id)).fetchall()
@@ -104,7 +104,7 @@ def get_batting_stats(parent_team_id: int, year: int, split_id: int = 1) -> list
 def get_pitching_stats(parent_team_id: int, year: int, split_id: int = 1) -> list[dict]:
     with get_conn() as conn:
         rows = conn.execute("""
-            SELECT s.* FROM pitching_stats s
+            SELECT s.* FROM mlb_pitching_stats s
             JOIN players p ON s.player_id = p.player_id
             WHERE (p.team_id = ? OR p.parent_team_id = ?) AND s.year = ? AND s.split_id = ?
         """, (parent_team_id, parent_team_id, year, split_id)).fetchall()

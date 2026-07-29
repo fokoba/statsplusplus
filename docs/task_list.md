@@ -74,6 +74,7 @@ Items identified from beta tester usage and conversations.
 ### High Priority (Bugs)
 - [x] **Org page — lineup card blank** — Starting lineup card on org overview shows blank for hitters (pitchers section was previously fixed). Root cause: `fielding_stats` empty for leagues onboarded mid-season (refresh only fetched current year). Fix: (1) refresh now always fetches prior-year fielding, (2) org overview falls back to `batting_stats` + `players.pos` when fielding is unavailable. Reported by Koba. **Done Session 62.**
 - [ ] **IP display uses float formatting instead of baseball notation** — Advanced tab career row shows `581.3000000000001` (floating point drift from summing IP floats) and `3.3` instead of `3.1` (baseball notation: .1 = 1 out, .2 = 2 outs). Need to apply `fmt_ip` or equivalent fractional display to the percentile history IP column and career row. Reported by Koba. **LOE: Low.**
+- [ ] **Split percentile qualification threshold too low** — Currently 20 PA for L/R splits, which means a player with 29 PA vs RHP shows full-color percentile bars. Should scale with season progress (e.g., 20 PA in April → 50 PA by mid-season → 80 PA full season). The `pctile-unqualified` CSS class already handles the visual dimming; just needs a smarter threshold calculation. **LOE: Low.**
 
 ### Feature Requests
 - [ ] **CSV export for minor league rosters** — Extend CSV export to minor league team pages (individual affiliates) or create an "all minor leagues" org view with export. Enables external analysis of player development progression across the farm system. Reported by Koba. **LOE: Low-Medium. DONE.**
@@ -130,6 +131,7 @@ Items identified from beta tester usage and conversations.
 ## Web UI — Visual Overhaul
 
 - [ ] **In-app help system** — Add contextual help for key concepts (FV, risk, composite, surplus, etc.). Options: (1) "?" icon next to metrics that opens a tooltip/popover with explanation, (2) a slide-out help panel accessible from the nav, (3) a glossary page. Current tooltips via `title` attributes cover basics; a richer system would improve onboarding for new users. **LOE: Medium.**
+- [ ] **Player page injury/status banner** — Injury data (`injury_is_injured`, `injury_left`, `is_on_dl60`) is stored in DB and used by team roster pages and trade targets, but not displayed on individual player pages. Add a status banner (e.g., "60-Day DL — 65 days remaining") at the top of the player page when a player is injured/DFA'd/on waivers. Data already available in `players` table; just needs query + template work. **LOE: Low.**
 - [ ] **Team logos** — add team logos to team pages and player pages. Source or generate logo assets for all 34 MLB teams. Display in page headers, standings, and anywhere team identity appears. **LOE: Low-Medium.**
 - [ ] **UI overhaul exploration** — current layout is functional but generic. Investigate alternative visual styles, layouts, and design patterns to give the app more personality. **LOE: Medium-High.**
 
@@ -168,23 +170,36 @@ pipeline complete; display and model integration remaining.
 - [x] **2b. Schema: `league_id` column** — Added to `batting_stats`, `pitching_stats`, `fielding_stats`. NULL = MLB (backward compatible). MiLB rows use the league ID from `/lgdata`.
 - [x] **2c. Refresh pipeline — MiLB stat pulls** — Fetches batting+pitching for all discovered MiLB leagues (13 leagues, ~10,600 rows total). Current year only. Adds ~15-20s to refresh time. Non-fatal on failure.
 - [ ] **2d. MiLB stats in prospect evaluation** — Integrate minor league performance data into FV/composite calculations. Research: how to weight MiLB stats by level, how to adjust for league difficulty, blend with ratings. This is a significant model change. **LOE: High.**
-- [ ] **2e. MiLB stats on player pages** — Display minor league stat lines on prospect/player pages. Career stats by level. Query code exists in `player_queries.py` (data returned in `milb_bat_stats`/`milb_pit_stats`), needs template rendering. **LOE: Low-Medium.**
+- [x] **2e. MiLB stats on player pages** — Minor League Stats section on player page Stats tab. Batting and pitching tables with league names from `league_settings.json`. Hitter and pitcher pages both supported.
 
-### Phase 3 — New Endpoints (Medium Impact, Low Complexity)
+**⚠️ URGENT: MiLB stats contaminating MLB-only systems.** Adding `league_id` column
+to stat tables without filtering existing queries means MiLB WAR/stats are treated as
+MLB production everywhere. Confirmed impact: WAR projections inflated (Schwarzenberg
+shows 4.4 WAR projection from AAA stats), percentile rankings polluted, evaluation
+engine stat signal contaminated, calibration affected. Fix: add `AND league_id IS NULL`
+to all queries that should only read MLB stats. ~60 query sites across 15 files.
+See full list in Session 70 smoke test notes.
 
-Client methods implemented; storage and integration remaining.
+**Known remaining issues:**
+- MiLB stats only show current season (no historical years stored)
+- Percentile rankings should support per-league filtering (MLB/AAA/AA/etc)
+- Offseason WAR projection still shows for completed season (display logic issue)
 
-- [ ] **3a. Trade block** — `get_tradeblock()` exists in client.py. Need: `trade_block` table, storage during refresh, flag in `trade_targets.py` output ("ON BLOCK"), `--on-block` filter. **LOE: Low.**
+### Phase 3 — New Endpoints ✅ (3a, 3c completed Session 70)
+
+Client methods implemented; trade block and standings integrated.
+
+- [x] **3a. Trade block** — `trade_block` table populated during refresh. `trade_targets.py` shows 📋 annotation, `--on-block` flag filters to confirmed-available players.
 - [ ] **3b. Ballparks** — `get_ballparks()` exists in client.py. Need: store park factors, use in stat normalization, display on team pages. **LOE: Low-Medium.**
-- [ ] **3c. League data (`/lgdata`) for standings** — `get_lgdata()` exists and is called during refresh for league hierarchy. Need: store real W-L-GB, use in seller classification and standings display alongside pythagorean. **LOE: Low-Medium.**
+- [x] **3c. League data (`/lgdata`) for standings** — `standings` table stores real W-L-GB for all teams. `_classify_sellers()` uses real wins. `standings.py` shows pythagorean + actual with delta.
 
-### Phase 4 — Expanded Contract Data (Medium Impact, Medium Complexity)
+### Phase 4 — Expanded Contract Data ✅ (Completed Session 70)
 
-The `/contract` endpoint has 15 additional fields covering vesting options, incentives,
-and buyouts. Requires schema expansion and updates to contract analysis tools.
+All 13 additional contract fields stored. Vesting options, buyouts, and incentives
+integrated into trade targets, free agents, and player page contract display.
 
-- [ ] **4a. Option/vesting fields** — Store `last_year_vesting_option`, `next_last_year_team_option`, `next_last_year_player_option`, `next_last_year_vesting_option`, `next_last_year_option_buyout`, `last_year_option_buyout`. Improves option year handling in `contract_value.py` and `free_agents.py`. **LOE: Medium.**
-- [ ] **4b. Incentive fields** — Store `minimum_pa`, `minimum_pa_bonus`, `minimum_ip`, `minimum_ip_bonus`, `mvp_bonus`, `cyyoung_bonus`, `allstar_bonus`. Display on player contract pages. Factor into true contract cost projections. **LOE: Medium.**
+- [x] **4a. Option/vesting fields** — `last_year_vesting_option`, `next_last_year_team/player/vesting_option`, `last_year_option_buyout`, `next_last_year_option_buyout`. Trade targets shows VESTING status. Free agents shows buyout amounts.
+- [x] **4b. Incentive fields** — `minimum_pa/ip` + bonuses, `mvp_bonus`, `cyyoung_bonus`, `allstar_bonus`. Player page contract data includes non-zero incentives dict.
 
 ### Phase 5 — OSA Ratings (Lower Priority)
 
@@ -193,16 +208,18 @@ and buyouts. Requires schema expansion and updates to contract analysis tools.
 ### Implementation Notes
 
 - Phase 1 complete — all player fields stored and used by downstream tools
-- Phase 2a-c complete — MiLB stats ingested (13 leagues, ~10,600 rows). Display and model integration remain.
-- Phase 3 client methods implemented but storage/integration pending
-- Phase 4-5 not started
-- Refresh time: ~3:15 with MiLB stats (was ~3:00). Non-fatal if MiLB fetch fails.
-- All changes maintain backward compatibility (NULL defaults for new columns)
+- Phase 2 complete — MiLB stats ingested AND displayed on player pages. Model integration (2d) deferred.
+- Phase 3a + 3c complete — trade block and real standings integrated into trade tools
+- Phase 4 complete — all contract option/incentive fields stored and surfaced
+- Phase 3b (park factors) and Phase 5 (OSA ratings) deferred — lower priority
+- Refresh time: ~3:15 with MiLB stats + trade block + standings (was ~3:00). All new fetches non-fatal on failure.
+- All changes maintain backward compatibility (NULL defaults for new columns, migrations idempotent)
 
 ---
 
 ## Long-term
 
+- [ ] **External data directory** — Move user data (`app_config.json`, league dirs, history) out of the install folder to the OS-standard location (`%LOCALAPPDATA%\StatsPlusPlus` on Windows, `~/.local/share/statsplusplus` on Linux, `~/Library/Application Support/StatsPlusPlus` on macOS). Enables zero-risk updates (delete old folder, extract new zip). Add "Data Location" display in Settings. Refactor `league_context.py` and launchers to resolve the external path. Currently all data lives in `data/` within the install — works but means updates require manually copying the data folder.
 - [ ] **Phase 2 — Interactive tools** — trade workbench, prospect explorer, free agent planner. Trade analysis CLI toolset complete (Session 44): `trade_targets.py`, `trade_assets.py`, `team_needs.py`, `trade_calculator.py` improvements, `trade-analyst.md` agent. Remaining: web-based trade workbench UI, prospect explorer UI, FA planner UI.
 - [ ] **Phase 3 — AI assistant** — chat interface with league/team context.
 - [ ] **Discord integration** — ~~Set up a Discord channel for Stats++ users (development updates, feedback, feature requests).~~ Server created, webhook posting implemented (patch notes via `discord_post.py`), widget on settings page. Remaining: (1) inbound integration — create Discord bot application for read token, build `discord_sync.py` script to pull messages from #feature-requests and #bug-reports channels into structured session context, (2) explore slash commands for lightweight queries (/prospect, /standings). **LOE: Medium.**

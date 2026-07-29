@@ -7,6 +7,31 @@ sys.path.insert(0, os.path.join(BASE, "scripts"))
 from web_league_context import get_db, get_cfg, has_extended_ratings
 
 
+# ── Level labels and league→level mapping ────────────────────────────────
+
+_LEVEL_LABELS = {1: "MLB", 2: "AAA", 3: "AA", 4: "A", 5: "A-Short", 6: "Rookie"}
+
+
+def _get_level_league_ids(level):
+    """Return list of league_ids that belong to a given minor league level.
+
+    Reads from league_settings.json minor_leagues list.
+    """
+    cfg = get_cfg()
+    path = cfg.league_dir / "config" / "league_settings.json"
+    if not path.exists():
+        return []
+    ls = json.loads(path.read_text())
+    return [ml["lid"] for ml in ls.get("minor_leagues", []) if ml.get("level") == level]
+
+
+def _level_label(level):
+    """Human-readable label for a level number."""
+    cfg = get_cfg()
+    lmap = cfg.level_map if hasattr(cfg, "level_map") else {}
+    return lmap.get(str(level), _LEVEL_LABELS.get(level, f"Level {level}"))
+
+
 # ── year resolution helpers ──────────────────────────────────────────────
 
 def _resolve_pctile_year(conn, year, table="batting_stats", fallback=True):
@@ -33,16 +58,76 @@ def _resolve_pctile_year(conn, year, table="batting_stats", fallback=True):
     return row[0] if row and row[0] else None
 
 
-def available_pctile_years(pid, is_pitcher=False):
-    """Return list of years (descending) where this player has stats."""
+def available_pctile_years(pid, is_pitcher=False, level=None):
+    """Return list of years (descending) where this player has stats.
+
+    If level is specified, only return years at that level.
+    level=1 or None with no level → MLB stats only.
+    level=2,3,4,etc → MiLB stats at that level.
+    """
     conn = get_db()
     table = "pitching_stats" if is_pitcher else "batting_stats"
-    rows = conn.execute(
-        f"SELECT DISTINCT year FROM {table} WHERE player_id=? AND split_id=1 ORDER BY year DESC",
-        (pid,)
-    ).fetchall()
+    if level is not None and level != 1:
+        lids = _get_level_league_ids(level)
+        if not lids:
+            conn.close()
+            return []
+        placeholders = ",".join("?" * len(lids))
+        rows = conn.execute(
+            f"SELECT DISTINCT year FROM {table} WHERE player_id=? AND split_id=1 "
+            f"AND league_id IN ({placeholders}) ORDER BY year DESC",
+            (pid, *lids)
+        ).fetchall()
+    else:
+        # MLB: league_id IS NULL
+        view = f"mlb_{table}"
+        rows = conn.execute(
+            f"SELECT DISTINCT year FROM {view} WHERE player_id=? AND split_id=1 ORDER BY year DESC",
+            (pid,)
+        ).fetchall()
     conn.close()
     return [r[0] for r in rows]
+
+
+def available_pctile_levels(pid, is_pitcher=False):
+    """Return list of (level_int, level_label) tuples where this player has stats.
+
+    Ordered: MLB first, then descending level (AAA, AA, A, Rookie).
+    Only returns levels with actual stat rows for this player.
+    """
+    conn = get_db()
+    table = "pitching_stats" if is_pitcher else "batting_stats"
+    levels = []
+
+    # Check MLB
+    view = f"mlb_{table}"
+    has_mlb = conn.execute(
+        f"SELECT 1 FROM {view} WHERE player_id=? AND split_id=1 LIMIT 1", (pid,)
+    ).fetchone()
+    if has_mlb:
+        levels.append((1, "MLB"))
+
+    # Check each MiLB level
+    cfg = get_cfg()
+    path = cfg.league_dir / "config" / "league_settings.json"
+    if path.exists():
+        ls = json.loads(path.read_text())
+        level_lids = {}
+        for ml in ls.get("minor_leagues", []):
+            level_lids.setdefault(ml["level"], []).append(ml["lid"])
+        for lv in sorted(level_lids.keys()):
+            lids = level_lids[lv]
+            placeholders = ",".join("?" * len(lids))
+            has_data = conn.execute(
+                f"SELECT 1 FROM {table} WHERE player_id=? AND split_id=1 "
+                f"AND league_id IN ({placeholders}) LIMIT 1",
+                (pid, *lids)
+            ).fetchone()
+            if has_data:
+                levels.append((lv, _level_label(lv)))
+
+    conn.close()
+    return levels
 
 # ── constants ────────────────────────────────────────────────────────────
 
@@ -105,6 +190,102 @@ def _est_team_games(conn, year):
     return round((row[0] or 0) / 38) or 1
 
 
+# ── level-aware pool source ───────────────────────────────────────────────
+
+def _level_batting_source(level):
+    """Return (FROM clause, extra WHERE fragment, params) for a batting pool.
+
+    level=None or 1 → MLB (uses mlb_batting_stats view, no extra filter)
+    level=2,3,4,6 → MiLB at that level (uses base table with league_id IN filter)
+    """
+    if level is None or level == 1:
+        return "mlb_batting_stats", "", []
+    lids = _get_level_league_ids(level)
+    if not lids:
+        return "batting_stats", "AND 1=0", []  # no data — empty result
+    placeholders = ",".join("?" * len(lids))
+    return "batting_stats", f"AND b.league_id IN ({placeholders})", list(lids)
+
+
+def _level_pitching_source(level):
+    """Return (FROM clause, extra WHERE fragment, params) for a pitching pool."""
+    if level is None or level == 1:
+        return "mlb_pitching_stats", "", []
+    lids = _get_level_league_ids(level)
+    if not lids:
+        return "pitching_stats", "AND 1=0", []
+    placeholders = ",".join("?" * len(lids))
+    return "pitching_stats", f"AND ps.league_id IN ({placeholders})", list(lids)
+
+
+def _level_games(conn, year, level):
+    """Estimate games played for qualification threshold.
+
+    MLB: derive from team_batting_stats.
+    MiLB: derive from max PA across all leagues at that level.
+    """
+    if level is None or level == 1:
+        return _est_team_games(conn, year)
+    lids = _get_level_league_ids(level)
+    if not lids:
+        return 130
+    placeholders = ",".join("?" * len(lids))
+    row = conn.execute(
+        f"SELECT MAX(pa) FROM batting_stats WHERE league_id IN ({placeholders}) "
+        "AND year=? AND split_id=1",
+        (*lids, year)
+    ).fetchone()
+    max_pa = (row[0] or 0) if row else 0
+    # Estimate league season length from max PA / 4.0 PA per game
+    est_games = round(max_pa / 4.0) if max_pa > 50 else 130
+    return est_games
+
+
+def _resolve_level_year(conn, year, level, stat_type="batting", fallback=True):
+    """Resolve available year for a level's stats.
+
+    If year has data, use it. If fallback=True and no data at the exact year,
+    fall back to the most recent year with data at that level.
+    """
+    table = "batting_stats" if stat_type == "batting" else "pitching_stats"
+    if level is None or level == 1:
+        # MLB: use the view
+        view = f"mlb_{table}"
+        row = conn.execute(
+            f"SELECT 1 FROM {view} WHERE year=? AND split_id=1 LIMIT 1", (year,)
+        ).fetchone()
+        if row:
+            return year
+        if not fallback:
+            return None
+        # Fall back to most recent year with data
+        row = conn.execute(
+            f"SELECT MAX(year) FROM {view} WHERE split_id=1"
+        ).fetchone()
+        return row[0] if row and row[0] else None
+    # MiLB: check base table with level filter
+    lids = _get_level_league_ids(level)
+    if not lids:
+        return None
+    placeholders = ",".join("?" * len(lids))
+    row = conn.execute(
+        f"SELECT 1 FROM {table} WHERE year=? AND split_id=1 "
+        f"AND league_id IN ({placeholders}) LIMIT 1",
+        (year, *lids)
+    ).fetchone()
+    if row:
+        return year
+    if not fallback:
+        return None
+    # Fall back to most recent year at this level
+    row = conn.execute(
+        f"SELECT MAX(year) FROM {table} WHERE split_id=1 "
+        f"AND league_id IN ({placeholders})",
+        tuple(lids)
+    ).fetchone()
+    return row[0] if row and row[0] else None
+
+
 def _expected_range(expected, pa_or_ip, qualifier):
     """Half-width of expected range band, scaled by sample size.
 
@@ -146,7 +327,7 @@ def _babip_expected(pid, cntct, speed, conn, year, babip_rating=None):
     # Historical residual: average (actual - model) over prior qualifying seasons
     rows = conn.execute("""
         SELECT b.h, b.hr, b.ab, b.k, b.sf, r.cntct, r.speed
-        FROM batting_stats b JOIN latest_ratings r ON b.player_id = r.player_id
+        FROM mlb_batting_stats b JOIN latest_ratings r ON b.player_id = r.player_id
         WHERE b.player_id=? AND b.split_id=1 AND b.ab>=200 AND b.year<? AND b.year>=?
     """, (pid, year, year - 5)).fetchall()
     if len(rows) >= 2:
@@ -167,18 +348,27 @@ def _babip_expected(pid, cntct, speed, conn, year, babip_rating=None):
 
 # ── hitter percentiles ───────────────────────────────────────────────────
 
-def get_hitter_percentiles(pid, split_id=1, year=None):
+def get_hitter_percentiles(pid, split_id=1, year=None, level=None):
     conn = get_db()
     conn.row_factory = None
     current_year = get_cfg().year
     explicit_year = year is not None
-    year = _resolve_pctile_year(conn, year or current_year, "batting_stats", fallback=not explicit_year)
-    if year is None:
+    year = year or current_year
+
+    # Resolve year — check data availability for the target level
+    resolved = _resolve_level_year(conn, year, level, stat_type="batting",
+                                   fallback=not explicit_year)
+    if resolved is None:
         conn.close()
         return None
+    year = resolved
     is_current = (year == current_year)
-    games = _est_team_games(conn, year)
+
+    games = _level_games(conn, year, level)
     min_pa = max(round(2.0 * games), 30) if split_id == 1 else 20
+
+    # Data source based on level
+    bat_table, level_filter, level_params = _level_batting_source(level)
 
     # Use split-specific ratings for L/R expected percentiles
     if split_id == 2:    # vs L
@@ -191,17 +381,17 @@ def get_hitter_percentiles(pid, split_id=1, year=None):
     q = ("SELECT b.player_id, SUM(b.ab), SUM(b.h), SUM(b.d), SUM(b.t), SUM(b.hr), "
          "SUM(b.bb), SUM(b.k), SUM(b.pa), SUM(b.war), SUM(b.hbp), SUM(b.sf), "
          f"{rcols}, r.speed "
-         "FROM batting_stats b JOIN latest_ratings r ON b.player_id=r.player_id "
-         "WHERE b.year=? AND b.split_id=? "
+         f"FROM {bat_table} b JOIN latest_ratings r ON b.player_id=r.player_id "
+         f"WHERE b.year=? AND b.split_id=? {level_filter} "
          "GROUP BY b.player_id "
          "HAVING SUM(b.pa)>=?")
-    rows = conn.execute(q, (year, split_id, min_pa)).fetchall()
+    rows = conn.execute(q, (year, split_id, *level_params, min_pa)).fetchall()
 
     qualified = True
     player_row = None
     if pid not in {r[0] for r in rows}:
         player_row = conn.execute(
-            q.replace("HAVING SUM(b.pa)>=?", "HAVING b.player_id=?"), (year, split_id, pid)
+            q.replace("HAVING SUM(b.pa)>=?", "HAVING b.player_id=?"), (year, split_id, *level_params, pid)
         ).fetchone()
         qualified = False
 
@@ -274,23 +464,27 @@ def get_hitter_percentiles(pid, split_id=1, year=None):
 
         tag = None
         expected = None
-        if qualified and is_current:
+        if is_current:
             if label in HITTER_TAG_MAP:
                 sk, rk, s_inv, r_inv = HITTER_TAG_MAP[label]
                 r_pctile = _pctile(player_rat[rk], rat_vals[rk])
                 expected = r_pctile
-                gap = pctile - r_pctile
-                thresh = _tag_threshold(r_pctile)
-                tag = "hot" if gap >= thresh else ("cold" if gap <= -thresh else None)
+                if qualified:
+                    gap = pctile - r_pctile
+                    thresh = _tag_threshold(r_pctile)
+                    tag = "hot" if gap >= thresh else ("cold" if gap <= -thresh else None)
             elif label == "BABIP":
-                if exp_babip is not None:
+                if exp_babip is not None and (level is None or level == 1):
+                    # MLB: use calibrated BABIP model
                     babip_vals = [pool[p]["babip"] for p in pool]
                     expected = _pctile(exp_babip, babip_vals)
                 else:
+                    # MiLB or no model: use contact percentile as proxy
                     expected = cntct_pctile
-                gap = pctile - expected
-                thresh = _tag_threshold(expected)
-                tag = "lucky" if gap >= thresh else ("unlucky" if gap <= -thresh else None)
+                if qualified:
+                    gap = pctile - expected
+                    thresh = _tag_threshold(expected)
+                    tag = "lucky" if gap >= thresh else ("unlucky" if gap <= -thresh else None)
 
         result.append({"label": label, "value": val, "pctile": pctile, "tag": tag,
                        "qualified": qualified, "expected": expected,
@@ -300,22 +494,31 @@ def get_hitter_percentiles(pid, split_id=1, year=None):
 
 # ── pitcher percentiles ──────────────────────────────────────────────────
 
-def get_pitcher_percentiles(pid, split_id=1, year=None):
+def get_pitcher_percentiles(pid, split_id=1, year=None, level=None):
     conn = get_db()
     conn.row_factory = None
     current_year = get_cfg().year
     explicit_year = year is not None
-    year = _resolve_pctile_year(conn, year or current_year, "pitching_stats", fallback=not explicit_year)
-    if year is None:
+    year = year or current_year
+
+    # Resolve year for the target level
+    resolved = _resolve_level_year(conn, year, level, stat_type="pitching",
+                                   fallback=not explicit_year)
+    if resolved is None:
         conn.close()
         return None
+    year = resolved
     is_current = (year == current_year)
-    games = _est_team_games(conn, year)
+
+    games = _level_games(conn, year, level)
     min_ip = max(round(0.7 * games), 5) if split_id == 1 else 5
 
     # RPs pitch far fewer innings — use a lower pool threshold so relievers
     # with a full workload aren't flagged as small sample.
     rp_min_ip = max(round(0.35 * games), 5) if split_id == 1 else 5
+
+    # Data source based on level
+    pit_table, level_filter, level_params = _level_pitching_source(level)
 
     from web_league_context import league_averages as _load_la
     _la = _load_la()
@@ -340,16 +543,17 @@ def get_pitcher_percentiles(pid, split_id=1, year=None):
     q = ("SELECT ps.player_id, SUM(ps.ip), SUM(ps.era*ps.ip)/NULLIF(SUM(ps.ip),0), "
          "SUM(ps.k), SUM(ps.bb), SUM(ps.ha), SUM(ps.war), SUM(ps.hra), SUM(ps.bf), SUM(ps.hp), "
          f"{rcols}, SUM(ps.gs), SUM(ps.g), SUM(ps.gb), SUM(ps.fb) "
-         "FROM pitching_stats ps JOIN latest_ratings r ON ps.player_id=r.player_id "
-         "WHERE ps.year=? AND ps.split_id=? "
+         f"FROM {pit_table} ps JOIN latest_ratings r ON ps.player_id=r.player_id "
+         f"WHERE ps.year=? AND ps.split_id=? {level_filter} "
          "GROUP BY ps.player_id "
          "HAVING SUM(ps.ip)>=?")
-    rows = conn.execute(q, (year, split_id, rp_min_ip)).fetchall()
+    rows = conn.execute(q, (year, split_id, *level_params, rp_min_ip)).fetchall()
 
     # Detect if this player is an RP (few or no starts)
+    _rp_where = level_filter.replace("ps.", "") if level_filter else ""
     player_gs_row = conn.execute(
-        "SELECT SUM(gs), SUM(g) FROM pitching_stats WHERE player_id=? AND year=? AND split_id=?",
-        (pid, year, split_id)).fetchone()
+        f"SELECT SUM(gs), SUM(g) FROM {pit_table} WHERE player_id=? AND year=? AND split_id=? {_rp_where}",
+        (pid, year, split_id, *level_params)).fetchone()
     is_rp = player_gs_row and player_gs_row[1] and player_gs_row[0] / player_gs_row[1] < 0.25
 
     qualified = True
@@ -357,7 +561,7 @@ def get_pitcher_percentiles(pid, split_id=1, year=None):
     is_in_pool = pid in {r[0] for r in rows}
     if not is_in_pool:
         player_row = conn.execute(
-            q.replace("HAVING SUM(ps.ip)>=?", "HAVING ps.player_id=?"), (year, split_id, pid)
+            q.replace("HAVING SUM(ps.ip)>=?", "HAVING ps.player_id=?"), (year, split_id, *level_params, pid)
         ).fetchone()
         qualified = False
     elif not is_rp:
@@ -456,43 +660,44 @@ def get_pitcher_percentiles(pid, split_id=1, year=None):
 
         tag = None
         expected = None
-        if qualified and is_current:
+        if is_current:
             if label == "HR/9":
                 rk = "hra" if _has_hra else "mov"
                 r_pctile = _pctile(player_rat.get(rk) or 0, rat_vals[rk])
                 expected = r_pctile
-                gap = pctile - r_pctile
-                thresh = _tag_threshold(r_pctile)
-                tag = "hot" if gap >= thresh else ("cold" if gap <= -thresh else None)
+                if qualified:
+                    gap = pctile - r_pctile
+                    thresh = _tag_threshold(r_pctile)
+                    tag = "hot" if gap >= thresh else ("cold" if gap <= -thresh else None)
             elif label == "BABIP":
                 # Pitcher BABIP expected: regression model from pbabip rating.
-                # BABIP ≈ 0.439 - 0.0028 * pbabip (r=-0.18, from 362 qualifying seasons).
-                # Rating percentiles don't work here — MLB pbabip distribution is too
-                # compressed (stdev 3.3) for percentile ranking to be meaningful.
-                if _has_pbabip:
+                if _has_pbabip and (level is None or level == 1):
                     exp_babip = 0.4387 - 0.002797 * (player_rat.get("pbabip") or 50)
                 else:
-                    exp_babip = 0.293  # league average fallback
+                    exp_babip = 0.293  # league average fallback for MiLB
                 expected = _pctile(exp_babip, [pool[p]["babip"] for p in pool])
                 expected = 100 - expected  # invert (lower BABIP = higher percentile)
-                gap = pctile - expected
-                thresh = _tag_threshold(expected)
-                tag = "lucky" if gap >= thresh else ("unlucky" if gap <= -thresh else None)
+                if qualified:
+                    gap = pctile - expected
+                    thresh = _tag_threshold(expected)
+                    tag = "lucky" if gap >= thresh else ("unlucky" if gap <= -thresh else None)
             elif label == "GB%":
                 # GB% expected from regression: actual_gb = intercept + slope * gb_rating
                 if _gb_reg and player_rat.get("gb"):
                     exp_gb = _gb_reg["intercept"] + _gb_reg["slope"] * player_rat["gb"]
                     expected = _pctile(exp_gb, [pool[p]["gb_pct"] for p in pool])
-                    gap = pctile - expected
-                    thresh = _tag_threshold(expected)
-                    tag = "hot" if gap >= thresh else ("cold" if gap <= -thresh else None)
+                    if qualified:
+                        gap = pctile - expected
+                        thresh = _tag_threshold(expected)
+                        tag = "hot" if gap >= thresh else ("cold" if gap <= -thresh else None)
             elif label in PITCHER_TAG_MAP:
                 sk, rk, s_inv, r_inv = PITCHER_TAG_MAP[label]
                 r_pctile = _pctile(player_rat[rk], rat_vals[rk])
                 expected = r_pctile
-                gap = pctile - r_pctile
-                thresh = _tag_threshold(r_pctile)
-                tag = "hot" if gap >= thresh else ("cold" if gap <= -thresh else None)
+                if qualified:
+                    gap = pctile - r_pctile
+                    thresh = _tag_threshold(r_pctile)
+                    tag = "hot" if gap >= thresh else ("cold" if gap <= -thresh else None)
 
         fmt = "d" if key == "era_plus" else (".1f" if key in ("k9", "bb9", "hr9", "war", "war_rate", "gb_pct") else ".2f" if key in ("era", "fip", "siera") else ".3f")
         result.append({"label": label, "value": val, "pctile": pctile, "tag": tag,
@@ -526,7 +731,7 @@ def get_fielding_percentiles(pid, year=None):
     player_rows = conn.execute(
         "SELECT f.position, f.g, f.ip, f.tc, f.a, f.po, f.e, f.zr, f.framing, f.arm, "
         "       r.ifr, r.ofr, r.ife, r.ofe, r.c_arm, r.c_blk, r.c_frm, r.ifa "
-        "FROM fielding_stats f "
+        "FROM mlb_fielding_stats f "
         "JOIN latest_ratings r ON f.player_id = r.player_id "
         "WHERE f.player_id=? AND f.year=? AND f.position > 1",
         (pid, year)).fetchall()
@@ -547,7 +752,7 @@ def get_fielding_percentiles(pid, year=None):
         pool_rows = conn.execute(
             "SELECT f.player_id, f.ip, f.tc, f.a, f.po, f.e, f.zr, f.framing, f.arm, "
             "       r.ifr, r.ofr, r.ife, r.ofe, r.c_arm, r.c_blk, r.c_frm, r.ifa "
-            "FROM fielding_stats f "
+            "FROM mlb_fielding_stats f "
             "JOIN latest_ratings r ON f.player_id = r.player_id "
             "WHERE f.year=? AND f.position=? AND f.ip>=? "
             "GROUP BY f.player_id",
@@ -617,7 +822,7 @@ def get_fielding_percentiles(pid, year=None):
 # ── multi-year percentile history ────────────────────────────────────────
 
 def get_percentile_history(pid, is_pitcher=False, split_id=1):
-    """Compute percentile rankings for all available years.
+    """Compute percentile rankings for all available years (MLB only).
 
     Returns dict with:
       - years: [list of years descending]
@@ -625,7 +830,7 @@ def get_percentile_history(pid, is_pitcher=False, split_id=1):
       - sample_sizes: {year: pa_or_ip}
       - sample_label: "PA" or "IP"
     """
-    years = available_pctile_years(pid, is_pitcher=is_pitcher)
+    years = available_pctile_years(pid, is_pitcher=is_pitcher, level=1)
     if not years:
         return None
 
@@ -634,12 +839,12 @@ def get_percentile_history(pid, is_pitcher=False, split_id=1):
     sample_sizes = {}
     if is_pitcher:
         for row in conn.execute(
-            "SELECT year, SUM(ip) FROM pitching_stats WHERE player_id=? AND split_id=? GROUP BY year",
+            "SELECT year, SUM(ip) FROM mlb_pitching_stats WHERE player_id=? AND split_id=? GROUP BY year",
             (pid, split_id)).fetchall():
             sample_sizes[row[0]] = round(row[1], 1) if row[1] else 0
     else:
         for row in conn.execute(
-            "SELECT year, SUM(pa) FROM batting_stats WHERE player_id=? AND split_id=? GROUP BY year",
+            "SELECT year, SUM(pa) FROM mlb_batting_stats WHERE player_id=? AND split_id=? GROUP BY year",
             (pid, split_id)).fetchall():
             sample_sizes[row[0]] = row[1] or 0
     conn.close()
@@ -652,9 +857,9 @@ def get_percentile_history(pid, is_pitcher=False, split_id=1):
 
     for yr in years:
         if is_pitcher:
-            result = get_pitcher_percentiles(pid, split_id=split_id, year=yr)
+            result = get_pitcher_percentiles(pid, split_id=split_id, year=yr, level=1)
         else:
-            result = get_hitter_percentiles(pid, split_id=split_id, year=yr)
+            result = get_hitter_percentiles(pid, split_id=split_id, year=yr, level=1)
         if not result:
             continue
         for entry in result:
@@ -717,6 +922,105 @@ def get_percentile_history(pid, is_pitcher=False, split_id=1):
     }
 
 
+def get_percentile_history_all_levels(pid, is_pitcher=False):
+    """Compute percentile rankings across all levels for all available years.
+
+    Each year+level combo is a separate entry. Percentiles are computed against
+    the pool at that level for that year, enabling cross-level development tracking.
+
+    Returns dict with:
+      - rows: [{year, level, level_label, pa_or_ip, stats: {label: {value, pctile, qualified, fmt}}}]
+        sorted by year ascending then level descending (highest level first within year)
+      - stat_labels: [{label, fmt}] ordered list of stat columns
+      - sample_label: "PA" or "IP"
+    """
+    levels = available_pctile_levels(pid, is_pitcher=is_pitcher)
+    if not levels:
+        return None
+
+    stat_defs = PITCHER_PCTILE_STATS if is_pitcher else HITTER_PCTILE_STATS
+
+    conn = get_db()
+    rows = []
+
+    for lv, lv_label in levels:
+        years = available_pctile_years(pid, is_pitcher=is_pitcher, level=lv)
+        for yr in years:
+            if is_pitcher:
+                result = get_pitcher_percentiles(pid, split_id=1, year=yr, level=lv)
+            else:
+                result = get_hitter_percentiles(pid, split_id=1, year=yr, level=lv)
+            if not result:
+                continue
+
+            # Get sample size for this year+level
+            if lv == 1:
+                table = "mlb_pitching_stats" if is_pitcher else "mlb_batting_stats"
+                col = "ip" if is_pitcher else "pa"
+                sample_row = conn.execute(
+                    f"SELECT SUM({col}) FROM {table} WHERE player_id=? AND split_id=1 AND year=?",
+                    (pid, yr)).fetchone()
+            else:
+                lids = _get_level_league_ids(lv)
+                if lids:
+                    table = "pitching_stats" if is_pitcher else "batting_stats"
+                    col = "ip" if is_pitcher else "pa"
+                    placeholders = ",".join("?" * len(lids))
+                    sample_row = conn.execute(
+                        f"SELECT SUM({col}) FROM {table} WHERE player_id=? AND split_id=1 "
+                        f"AND year=? AND league_id IN ({placeholders})",
+                        (pid, yr, *lids)).fetchone()
+                else:
+                    sample_row = None
+
+            sample = 0
+            if sample_row and sample_row[0]:
+                sample = round(sample_row[0], 1) if is_pitcher else int(sample_row[0])
+
+            stat_data = {}
+            for entry in result:
+                stat_data[entry["label"]] = {
+                    "value": entry["value"],
+                    "pctile": entry["pctile"],
+                    "qualified": entry["qualified"],
+                    "fmt": entry["fmt"],
+                }
+
+            rows.append({
+                "year": yr,
+                "level": lv,
+                "level_label": lv_label,
+                "sample": sample,
+                "stats": stat_data,
+            })
+
+    conn.close()
+
+    if not rows:
+        return None
+
+    # Sort: year ascending, then level descending (MiLB before MLB within same year)
+    rows.sort(key=lambda r: (r["year"], -r["level"]))
+
+    # Determine stat labels from the first row that has data
+    stat_labels = []
+    seen = set()
+    for _, label, _ in stat_defs:
+        if any(label in r["stats"] for r in rows) and label not in seen:
+            # Get fmt from first occurrence
+            for r in rows:
+                if label in r["stats"]:
+                    stat_labels.append({"label": label, "fmt": r["stats"][label]["fmt"]})
+                    seen.add(label)
+                    break
+
+    return {
+        "rows": rows,
+        "stat_labels": stat_labels,
+        "sample_label": "IP" if is_pitcher else "PA",
+    }
+
+
 def get_fielding_percentile_history(pid):
     """Compute fielding percentile rankings for all available years.
 
@@ -727,7 +1031,7 @@ def get_fielding_percentile_history(pid):
     conn = get_db()
     # Get years this player has fielding data
     years = [r[0] for r in conn.execute(
-        "SELECT DISTINCT year FROM fielding_stats WHERE player_id=? ORDER BY year DESC",
+        "SELECT DISTINCT year FROM mlb_fielding_stats WHERE player_id=? ORDER BY year DESC",
         (pid,)).fetchall()]
     conn.close()
     if not years:

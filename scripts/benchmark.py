@@ -96,9 +96,9 @@ def _load_mlb_data(conn, cfg, year):
                    p.age, p.pos, p.role, p.name, p.player_id
             FROM latest_ratings r
             JOIN players p ON r.player_id = p.player_id
-            LEFT JOIN batting_stats bs ON p.player_id = bs.player_id
+            LEFT JOIN mlb_batting_stats bs ON p.player_id = bs.player_id
                 AND bs.year = ? AND bs.split_id = 1
-            LEFT JOIN pitching_stats ps ON p.player_id = ps.player_id
+            LEFT JOIN mlb_pitching_stats ps ON p.player_id = ps.player_id
                 AND ps.year = ? AND ps.split_id = 1
             WHERE p.level = 1 AND r.composite_score IS NOT NULL
         """, (yr, yr)).fetchall()

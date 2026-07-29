@@ -278,6 +278,11 @@
 <div class="panel">
   <h2>Percentile Rankings{% if p.percentiles[0] and not p.percentiles[0].qualified %} <span style="font-size:10px; font-weight:400; color:var(--text-dim)">(small sample)</span>{% endif %}
     {% if p.pctile_splits %}<span class="split-toggle" onclick="toggleSplits(this)">vs L / R</span>{% endif %}
+    {% if p.pctile_levels and p.pctile_levels|length > 1 %}
+    <select class="pctile-year-select" onchange="loadPctileLevel({{ p.player_id }}, this.value)" title="Level">
+      {% for lv, lname in p.pctile_levels %}<option value="{{ lv }}"{% if lv == p.pctile_level %} selected{% endif %}>{{ lname }}</option>{% endfor %}
+    </select>
+    {% endif %}
     {% if p.pctile_years and p.pctile_years|length > 1 %}
     <select class="pctile-year-select" onchange="loadPctileYear({{ p.player_id }}, this.value)" title="Season">
       {% for yr in p.pctile_years %}<option value="{{ yr }}"{% if yr == p.pctile_year %} selected{% endif %}>{{ yr }}</option>{% endfor %}
@@ -320,6 +325,13 @@
 <div class="panel">
   <h2>Percentile Rankings{% if p.percentiles[0] and not p.percentiles[0].qualified %} <span style="font-size:10px; font-weight:400; color:var(--text-dim)">(small sample)</span>{% endif %}
     {% if p.pctile_splits %}<span class="split-toggle" onclick="toggleSplits(this)">vs L / R</span>{% endif %}
+    {% if p.pctile_levels and p.pctile_levels|length > 1 %}
+    <select class="pctile-year-select" onchange="loadPctileLevel({{ p.player_id }}, this.value)" title="Level">
+      {% for lv, lname in p.pctile_levels %}<option value="{{ lv }}"{% if lv == p.pctile_level %} selected{% endif %}>{{ lname }}</option>{% endfor %}
+    </select>
+    {% elif p.pctile_level and p.pctile_level != 1 %}
+    <span style="font-size:11px; font-weight:400; color:var(--text-dim); margin-left:8px">{{ p.pctile_levels[0][1] if p.pctile_levels else '' }}</span>
+    {% endif %}
     {% if p.pctile_years and p.pctile_years|length > 1 %}
     <select class="pctile-year-select" onchange="loadPctileYear({{ p.player_id }}, this.value)" title="Season">
       {% for yr in p.pctile_years %}<option value="{{ yr }}"{% if yr == p.pctile_year %} selected{% endif %}>{{ yr }}</option>{% endfor %}
@@ -580,7 +592,7 @@
   {% endif %}
 </div>
 
-{% set has_stats = p.bat_stats or p.pit_stats %}
+{% set has_stats = p.bat_stats or p.pit_stats or p.milb_bat_stats or p.milb_pit_stats %}
 
 {# Tool profile panel — replaced by unified evaluation panel #}
 {% macro tool_profile_panel() %}{% endmacro %}
@@ -926,7 +938,7 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
 <div class="tab-bar">
   <button class="tab active" data-tab="overview">Overview</button>
   <button class="tab" data-tab="stats">Stats</button>
-  {% if p.pctile_history %}<button class="tab" data-tab="advanced">Advanced</button>{% endif %}
+  {% if p.pctile_history_all %}<button class="tab" data-tab="advanced">Advanced</button>{% endif %}
   {% if p.dev_history and p.dev_history.snapshots|length >= 2 %}<button class="tab" data-tab="development">Development</button>{% endif %}
   {% if p.prospect_comps %}<button class="tab" data-tab="outlook">Outlook</button>{% endif %}
   <button class="tab" data-tab="contract">Contract</button>
@@ -950,19 +962,22 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
   </div>
 </div>
 
-{% if p.pctile_history %}
+{% if p.pctile_history_all %}
 {# ══ Advanced tab ══ #}
 <div class="tab-content" id="tab-advanced">
   <div class="panel" style="max-width:100%">
     <div class="ph-header">
       <h2>{{ "Pitching" if p.is_pitcher else "Batting" }} Percentiles by Season
         <span class="ph-toggle" onclick="togglePctileDisplay(this)">Show Percentiles</span>
+        {% if p.pctile_history %}
         <span class="ph-split-btns">
           <button class="split-btn active" onclick="loadPctileHistory({{ p.player_id }}, 1, this)">Overall</button>
           <button class="split-btn" onclick="loadPctileHistory({{ p.player_id }}, 2, this)">vs L</button>
           <button class="split-btn" onclick="loadPctileHistory({{ p.player_id }}, 3, this)">vs R</button>
         </span>
+        {% endif %}
       </h2>
+      {% if p.pctile_history %}
       {% set war_data = p.pctile_history.stats|selectattr("label", "equalto", "WAR")|first %}
       {% if war_data %}
       <div class="ph-war-mini">
@@ -988,25 +1003,27 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
         {% endif %}
       </div>
       {% endif %}
+      {% endif %}
     </div>
     <div class="pctile-history-table-wrap">
     <table class="pctile-history-table">
       <thead>
         <tr>
           <th class="ph-stat-col">Season</th>
-          <th class="ph-sample-col">{{ p.pctile_history.sample_label }}</th>
-          {% for s in p.pctile_history.stats %}<th>{{ s.label }}</th>{% endfor %}
+          <th class="left">Level</th>
+          <th class="ph-sample-col">{{ p.pctile_history_all.sample_label }}</th>
+          {% for sl in p.pctile_history_all.stat_labels %}<th>{{ sl.label }}</th>{% endfor %}
         </tr>
       </thead>
       <tbody>
-        {% for yr in p.pctile_history.years %}
+        {% for row in p.pctile_history_all.rows %}
         <tr>
-          <td class="ph-year">{{ yr }}</td>
-          <td class="ph-sample">{% if p.pctile_history.sample_label == "IP" %}{{ p.pctile_history.sample_sizes.get(yr, "—")|fmt_ip }}{% else %}{{ p.pctile_history.sample_sizes.get(yr, "—") }}{% endif %}</td>
-          {% for s in p.pctile_history.stats %}
-            {% set yr_data = s["values"].get(yr) %}
-            {% if yr_data %}
-              {% set v = yr_data %}
+          <td class="ph-year">{{ row.year }}</td>
+          <td class="left" style="font-size:11px">{{ row.level_label }}</td>
+          <td class="ph-sample">{{ row.sample }}</td>
+          {% for sl in p.pctile_history_all.stat_labels %}
+            {% if sl.label in row.stats %}
+              {% set v = row.stats[sl.label] %}
               {% if v.pctile <= 50 %}
                 {% set r = (60 + (240 - 60) * v.pctile / 50)|round|int %}
                 {% set g = (80 + (240 - 80) * v.pctile / 50)|round|int %}
@@ -1026,17 +1043,18 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
         </tr>
         {% endfor %}
       </tbody>
+      {% if p.pctile_history %}
       <tfoot>
         <tr class="ph-career-row">
           <td class="ph-year">Career</td>
+          <td class="left" style="font-size:11px">MLB</td>
           <td class="ph-sample">{% if p.pctile_history.sample_label == "IP" %}{{ p.pctile_history.sample_sizes.values()|sum|fmt_ip }}{% else %}{{ p.pctile_history.sample_sizes.values()|sum }}{% endif %}</td>
-          {% for s in p.pctile_history.stats %}
-            {% set career = s.get("career") %}
-            {% if career %}
-              {% set avg_pctile = career.avg_pctile %}
-              {% set avg_val = career.avg_value %}
-              {% set stat_fmt = career.fmt %}
-              {% set n_seasons = career.n_seasons %}
+          {% for sl in p.pctile_history_all.stat_labels %}
+            {% set career_stat = p.pctile_history.stats|selectattr("label", "equalto", sl.label)|first %}
+            {% if career_stat and career_stat.career %}
+              {% set avg_pctile = career_stat.career.avg_pctile %}
+              {% set avg_val = career_stat.career.avg_value %}
+              {% set stat_fmt = career_stat.career.fmt %}
               {% if avg_pctile <= 50 %}
                 {% set r = (60 + (240 - 60) * avg_pctile / 50)|round|int %}
                 {% set g = (80 + (240 - 80) * avg_pctile / 50)|round|int %}
@@ -1055,10 +1073,12 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
           {% endfor %}
         </tr>
       </tfoot>
+      {% endif %}
     </table>
     </div>
   </div>
-  {% if p.fld_pctile_history %}
+
+{% if p.fld_pctile_history %}
   <div class="panel" style="max-width:100%; margin-top:16px">
     <h2>Fielding Percentiles by Season</h2>
     {% for pos_data in p.fld_pctile_history.positions %}
@@ -1102,7 +1122,8 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
     </div>
     {% endfor %}
   </div>
-  {% endif %}
+{% endif %}
+
 </div>
 {% endif %}
 
@@ -1136,7 +1157,7 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
   {% if show_year %}<td>{{ s.year }}{% if s.stints is defined %} <span class="stint-count">({{ s.stints|length }} teams)</span>{% endif %}</td>{% endif %}<td>{{ s.g }}</td><td>{{ s.pa }}</td>
   <td>{{ "%.3f"|format(s.avg) }}</td><td>{{ "%.3f"|format(s.obp) }}</td><td>{{ "%.3f"|format(s.slg) }}</td><td>{{ "%.3f"|format(s.ops) }}</td><td>{{ "%.3f"|format(s.iso) }}</td>
   <td>{{ "%.1f"|format(s.bb_pct) }}</td><td>{{ "%.1f"|format(s.so_pct) }}</td><td>{{ "%.3f"|format(s.babip) }}</td>
-  <td>{{ s.hr }}</td><td>{{ s.rbi }}</td><td>{{ s.sb }}/{{ s.cs }}</td>
+  <td>{{ s.hr }}</td><td>{{ s.rbi }}</td><td>{{ s.sb }}</td><td>{{ s.cs }}</td>
   <td>{{ s.ops_plus }}</td><td>{{ "%.1f"|format(s.war) }}</td>
 </tr>
 {% if s.stints is defined %}
@@ -1145,14 +1166,14 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
   <td class="stint-team">↳ {{ st.team }}</td><td>{{ st.g }}</td><td>{{ st.pa }}</td>
   <td>{{ "%.3f"|format(st.avg) }}</td><td>{{ "%.3f"|format(st.obp) }}</td><td>{{ "%.3f"|format(st.slg) }}</td><td>{{ "%.3f"|format(st.ops) }}</td><td>{{ "%.3f"|format(st.iso) }}</td>
   <td>{{ "%.1f"|format(st.bb_pct) }}</td><td>{{ "%.1f"|format(st.so_pct) }}</td><td>{{ "%.3f"|format(st.babip) }}</td>
-  <td>{{ st.hr }}</td><td>{{ st.rbi }}</td><td>{{ st.sb }}/{{ st.cs }}</td>
+  <td>{{ st.hr }}</td><td>{{ st.rbi }}</td><td>{{ st.sb }}</td><td>{{ st.cs }}</td>
   <td>-</td><td>{{ "%.1f"|format(st.war) }}</td>
 </tr>
 {% endfor %}
 {% endif %}
 {% endmacro %}
 
-{% if p.bat_stats %}
+{% if p.bat_stats or p.milb_bat_stats %}
 <div class="panel">
   <h2>Batting Stats</h2>
   {% if p.bat_splits.vl or p.bat_splits.vr %}
@@ -1165,34 +1186,69 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
   <table class="split-view" data-split="overall">
     <thead>
       <tr>
-        <th data-sort="num">Year</th><th data-sort="num">G</th><th data-sort="num">PA</th>
+        <th data-sort="num">Year</th><th class="left" data-sort="text">Level</th><th class="left" data-sort="text">Team</th><th data-sort="num">G</th><th data-sort="num">PA</th>
         <th data-sort="num">AVG</th><th data-sort="num">OBP</th><th data-sort="num">SLG</th><th data-sort="num">OPS</th><th data-sort="num">ISO</th>
         <th data-sort="num">BB%</th><th data-sort="num">SO%</th><th data-sort="num">BABIP</th>
-        <th data-sort="num">HR</th><th data-sort="num">RBI</th><th data-sort="num">SB/CS</th>
+        <th data-sort="num">HR</th><th data-sort="num">RBI</th><th data-sort="num">SB</th><th data-sort="num">CS</th>
         <th data-sort="num">OPS+</th><th data-sort="num">WAR</th>
       </tr>
     </thead>
-    <tbody>{% for s in p.bat_stats %}{{ bat_row(s) }}{% endfor %}</tbody>
+    <tbody>
+    {# Combine MLB and MiLB stats, sorted by year #}
+    {% set all_bat = [] %}
+    {% for s in p.bat_stats %}{% set _ = all_bat.append({"src":"mlb","year":s.year,"g":s.g,"pa":s.pa,"avg":s.avg,"obp":s.obp,"slg":s.slg,"ops":s.ops,"iso":s.iso,"bb_pct":s.bb_pct,"so_pct":s.so_pct,"babip":s.babip,"hr":s.hr,"rbi":s.rbi,"sb":s.sb,"cs":s.cs,"ops_plus":s.ops_plus,"war":s.war,"team":s.team,"stints":s.stints if s.stints is defined else none}) %}{% endfor %}
+    {% for s in p.milb_bat_stats %}{% set _ = all_bat.append({"src":"milb","year":s.year,"g":s.g,"pa":s.pa,"avg":s.avg,"obp":s.obp,"slg":s.slg,"ops":s.ops,"iso":s.iso,"bb_pct":s.bb_pct,"so_pct":s.so_pct,"babip":s.babip,"hr":s.hr,"rbi":s.rbi,"sb":s.sb,"cs":none,"ops_plus":none,"war":s.war,"team":s.team_name,"level_label":s.level_label,"league_name":s.league_name,"stints":none}) %}{% endfor %}
+    {% for s in all_bat|sort(attribute='year') %}
+    <tr{% if s.stints %} class="totals-row"{% endif %}>
+      <td>{{ s.year }}{% if s.stints %} <span class="stint-count">({{ s.stints|length }} teams)</span>{% endif %}</td>
+      <td class="left">{% if s.src == 'mlb' %}MLB{% else %}{{ s.level_label }}{% endif %}</td>
+      <td class="left"{% if s.src == 'milb' %} title="{{ s.league_name }}"{% endif %}>{% if s.stints %}{% elif s.team %}{{ s.team }}{% endif %}</td>
+      <td>{{ s.g }}</td><td>{{ s.pa }}</td>
+      <td>{{ "%.3f"|format(s.avg) }}</td><td>{{ "%.3f"|format(s.obp) }}</td><td>{{ "%.3f"|format(s.slg) }}</td><td>{{ "%.3f"|format(s.ops) }}</td><td>{{ "%.3f"|format(s.iso) }}</td>
+      <td>{{ "%.1f"|format(s.bb_pct) }}</td><td>{{ "%.1f"|format(s.so_pct) }}</td><td>{{ "%.3f"|format(s.babip) }}</td>
+      <td>{{ s.hr }}</td><td>{{ s.rbi }}</td><td>{{ s.sb }}</td><td>{% if s.cs is not none %}{{ s.cs }}{% else %}-{% endif %}</td>
+      <td>{% if s.ops_plus is not none %}{{ s.ops_plus }}{% else %}-{% endif %}</td><td>{{ "%.1f"|format(s.war) }}</td>
+    </tr>
+    {% if s.stints %}
+    {% for st in s.stints %}
+    <tr class="stint-row">
+      <td></td><td></td><td class="left stint-team">↳ {{ st.team }}</td><td>{{ st.g }}</td><td>{{ st.pa }}</td>
+      <td>{{ "%.3f"|format(st.avg) }}</td><td>{{ "%.3f"|format(st.obp) }}</td><td>{{ "%.3f"|format(st.slg) }}</td><td>{{ "%.3f"|format(st.ops) }}</td><td>{{ "%.3f"|format(st.iso) }}</td>
+      <td>{{ "%.1f"|format(st.bb_pct) }}</td><td>{{ "%.1f"|format(st.so_pct) }}</td><td>{{ "%.3f"|format(st.babip) }}</td>
+      <td>{{ st.hr }}</td><td>{{ st.rbi }}</td><td>{{ st.sb }}</td><td>{{ st.cs }}</td>
+      <td>-</td><td>{{ "%.1f"|format(st.war) }}</td>
+    </tr>
+    {% endfor %}
+    {% endif %}
+    {% endfor %}
+    </tbody>
   </table>
   {% for key in ["vl","vr"] %}
   {% if p.bat_splits[key] %}
   <table class="split-view" data-split="{{ key }}" style="display:none">
     <thead>
       <tr>
-        <th>Year</th><th>G</th><th>PA</th>
+        <th>Year</th><th class="left">Level</th><th class="left">Team</th><th>G</th><th>PA</th>
         <th>AVG</th><th>OBP</th><th>SLG</th><th>OPS</th><th>ISO</th>
         <th>BB%</th><th>SO%</th><th>BABIP</th>
-        <th>HR</th><th>RBI</th><th>SB/CS</th>
+        <th>HR</th><th>RBI</th><th>SB</th><th>CS</th>
       </tr>
     </thead>
-    <tbody>{% for s in p.bat_splits[key] %}{{ bat_row(s) }}{% endfor %}</tbody>
+    <tbody>{% for s in p.bat_splits[key] %}
+    <tr>
+      <td>{{ s.year }}</td><td class="left">MLB</td><td class="left">{{ s.team }}</td><td>{{ s.g }}</td><td>{{ s.pa }}</td>
+      <td>{{ "%.3f"|format(s.avg) }}</td><td>{{ "%.3f"|format(s.obp) }}</td><td>{{ "%.3f"|format(s.slg) }}</td><td>{{ "%.3f"|format(s.ops) }}</td><td>{{ "%.3f"|format(s.iso) }}</td>
+      <td>{{ "%.1f"|format(s.bb_pct) }}</td><td>{{ "%.1f"|format(s.so_pct) }}</td><td>{{ "%.3f"|format(s.babip) }}</td>
+      <td>{{ s.hr }}</td><td>{{ s.rbi }}</td><td>{{ s.sb }}</td><td>{{ s.cs }}</td>
+    </tr>
+    {% endfor %}</tbody>
   </table>
   {% endif %}
   {% endfor %}
 </div>
 {% endif %}
 
-{% if p.pit_stats %}
+{% if p.pit_stats or p.milb_pit_stats %}
 <div class="panel" style="margin-top:16px">
   <h2>Pitching Stats</h2>
   {% if p.pit_splits.vl or p.pit_splits.vr %}
@@ -1205,7 +1261,7 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
   <table class="split-view" data-split="overall">
     <thead>
       <tr>
-        <th data-sort="num">Year</th><th data-sort="num">G</th><th data-sort="num">GS</th><th data-sort="num">IP</th>
+        <th data-sort="num">Year</th><th class="left" data-sort="text">Level</th><th class="left" data-sort="text">Team</th><th data-sort="num">G</th><th data-sort="num">GS</th><th data-sort="num">IP</th>
         <th data-sort="num" data-sort-best="low">ERA</th><th data-sort="num">ERA+</th><th data-sort="num" data-sort-best="low">FIP</th><th data-sort="num" data-sort-best="low">SIERA</th>
         <th data-sort="num">K%</th><th data-sort="num" data-sort-best="low">BB%</th><th data-sort="num">K-BB%</th><th data-sort="num">GB%</th><th data-sort="num">BABIP</th>
         <th data-sort="num">W</th><th data-sort="num" data-sort-best="low">L</th><th data-sort="num">SV</th><th data-sort="num">HLD</th>
@@ -1213,30 +1269,39 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
       </tr>
     </thead>
     <tbody>
-      {% for s in p.pit_stats %}
-      <tr{% if s.stints is defined %} class="totals-row"{% endif %}>
-        <td>{{ s.year }}{% if s.stints is defined %} <span class="stint-count">({{ s.stints|length }} teams)</span>{% endif %}</td><td>{{ s.g }}</td><td>{{ s.gs }}</td><td>{{ s.ip|fmt_ip }}</td>
-        <td>{{ "%.2f"|format(s.era) if s.era is not none else "-" }}</td><td>{{ s.era_plus }}</td>
-        <td>{{ "%.2f"|format(s.fip) }}</td><td>{{ "%.2f"|format(s.siera) }}</td>
-        <td>{{ "%.1f"|format(s.k_pct) }}</td><td>{{ "%.1f"|format(s.bb_pct) }}</td><td>{{ "%.1f"|format(s.k_bb_pct) }}</td><td>{{ "%.1f"|format(s.gb_pct) }}</td>
-        <td>{{ "%.3f"|format(s.babip) }}</td>
-        <td>{{ s.w }}</td><td>{{ s.l }}</td><td>{{ s.sv }}</td><td>{{ s.hld }}</td>
-        <td>{{ "%.1f"|format(s.war) }}</td>
-      </tr>
-      {% if s.stints is defined %}
-      {% for st in s.stints %}
-      <tr class="stint-row">
-        <td class="stint-team">↳ {{ st.team }}</td><td>{{ st.g }}</td><td>{{ st.gs }}</td><td>{{ st.ip|fmt_ip }}</td>
-        <td>{{ "%.2f"|format(st.era) if st.era is not none else "-" }}</td><td>-</td>
-        <td>{{ "%.2f"|format(st.fip) }}</td><td>-</td>
-        <td>{{ "%.1f"|format(st.k_pct) }}</td><td>{{ "%.1f"|format(st.bb_pct) }}</td><td>{{ "%.1f"|format(st.k_bb_pct) }}</td><td>{{ "%.1f"|format(st.gb_pct) }}</td>
-        <td>{{ "%.3f"|format(st.babip) }}</td>
-        <td>{{ st.w }}</td><td>{{ st.l }}</td><td>{{ st.sv }}</td><td>{{ st.hld }}</td>
-        <td>{{ "%.1f"|format(st.war) }}</td>
-      </tr>
-      {% endfor %}
-      {% endif %}
-      {% endfor %}
+    {# Combine MLB and MiLB pitching stats, sorted by year #}
+    {% set all_pit = [] %}
+    {% for s in p.pit_stats %}{% set _ = all_pit.append({"src":"mlb","year":s.year,"g":s.g,"gs":s.gs,"ip":s.ip,"era":s.era,"era_plus":s.era_plus,"fip":s.fip,"siera":s.siera,"k_pct":s.k_pct,"bb_pct":s.bb_pct,"k_bb_pct":s.k_bb_pct,"gb_pct":s.gb_pct,"babip":s.babip,"w":s.w,"l":s.l,"sv":s.sv,"hld":s.hld,"war":s.war,"team":s.team,"stints":s.stints if s.stints is defined else none}) %}{% endfor %}
+    {% for s in p.milb_pit_stats %}{% set _ = all_pit.append({"src":"milb","year":s.year,"g":s.g,"gs":s.gs,"ip":s.ip,"era":s.era,"era_plus":none,"fip":none,"siera":none,"k_pct":s.k_pct,"bb_pct":s.bb_pct,"k_bb_pct":s.k_bb_pct,"gb_pct":s.gb_pct,"babip":s.babip,"w":s.w,"l":s.l,"sv":s.sv,"hld":s.hld,"war":s.war,"team":s.team_name,"level_label":s.level_label,"league_name":s.league_name,"stints":none}) %}{% endfor %}
+    {% for s in all_pit|sort(attribute='year') %}
+    <tr{% if s.stints %} class="totals-row"{% endif %}>
+      <td>{{ s.year }}{% if s.stints %} <span class="stint-count">({{ s.stints|length }} teams)</span>{% endif %}</td>
+      <td class="left">{% if s.src == 'mlb' %}MLB{% else %}{{ s.level_label }}{% endif %}</td>
+      <td class="left"{% if s.src == 'milb' %} title="{{ s.league_name }}"{% endif %}>{% if s.stints %}{% elif s.team %}{{ s.team }}{% endif %}</td>
+      <td>{{ s.g }}</td><td>{{ s.gs }}</td><td>{{ s.ip|fmt_ip }}</td>
+      <td>{{ "%.2f"|format(s.era) if s.era is not none else "-" }}</td>
+      <td>{% if s.era_plus is not none %}{{ s.era_plus }}{% else %}-{% endif %}</td>
+      <td>{% if s.fip is not none %}{{ "%.2f"|format(s.fip) }}{% else %}-{% endif %}</td>
+      <td>{% if s.siera is not none %}{{ "%.2f"|format(s.siera) }}{% else %}-{% endif %}</td>
+      <td>{{ "%.1f"|format(s.k_pct) }}</td><td>{{ "%.1f"|format(s.bb_pct) }}</td><td>{{ "%.1f"|format(s.k_bb_pct) }}</td>
+      <td>{{ "%.1f"|format(s.gb_pct) }}</td><td>{{ "%.3f"|format(s.babip) }}</td>
+      <td>{{ s.w }}</td><td>{{ s.l }}</td><td>{{ s.sv }}</td><td>{{ s.hld }}</td>
+      <td>{{ "%.1f"|format(s.war) }}</td>
+    </tr>
+    {% if s.stints %}
+    {% for st in s.stints %}
+    <tr class="stint-row">
+      <td></td><td></td><td class="left stint-team">↳ {{ st.team }}</td><td>{{ st.g }}</td><td>{{ st.gs }}</td><td>{{ st.ip|fmt_ip }}</td>
+      <td>{{ "%.2f"|format(st.era) if st.era is not none else "-" }}</td><td>-</td>
+      <td>{{ "%.2f"|format(st.fip) }}</td><td>-</td>
+      <td>{{ "%.1f"|format(st.k_pct) }}</td><td>{{ "%.1f"|format(st.bb_pct) }}</td><td>{{ "%.1f"|format(st.k_bb_pct) }}</td><td>{{ "%.1f"|format(st.gb_pct) }}</td>
+      <td>{{ "%.3f"|format(st.babip) }}</td>
+      <td>{{ st.w }}</td><td>{{ st.l }}</td><td>{{ st.sv }}</td><td>{{ st.hld }}</td>
+      <td>{{ "%.1f"|format(st.war) }}</td>
+    </tr>
+    {% endfor %}
+    {% endif %}
+    {% endfor %}
     </tbody>
   </table>
   {% for key in ["vl","vr"] %}
@@ -1244,7 +1309,7 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
   <table class="split-view" data-split="{{ key }}" style="display:none">
     <thead>
       <tr>
-        <th>Year</th><th>G</th><th>IP</th>
+        <th>Year</th><th class="left">Level</th><th class="left">Team</th><th>G</th><th>IP</th>
         <th>ERA</th><th>FIP</th>
         <th>K%</th><th>BB%</th><th>K-BB%</th><th>GB%</th><th>BABIP</th>
       </tr>
@@ -1252,7 +1317,7 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
     <tbody>
       {% for s in p.pit_splits[key] %}
       <tr>
-        <td>{{ s.year }}</td><td>{{ s.g }}</td><td>{{ s.ip|fmt_ip }}</td>
+        <td>{{ s.year }}</td><td class="left">MLB</td><td class="left">{{ s.team }}</td><td>{{ s.g }}</td><td>{{ s.ip|fmt_ip }}</td>
         <td>{{ "%.2f"|format(s.era) if s.era is not none else "-" }}</td>
         <td>{{ "%.2f"|format(s.fip) }}</td>
         <td>{{ "%.1f"|format(s.k_pct) }}</td><td>{{ "%.1f"|format(s.bb_pct) }}</td><td>{{ "%.1f"|format(s.k_bb_pct) }}</td><td>{{ "%.1f"|format(s.gb_pct) }}</td>
@@ -1329,6 +1394,7 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
     <div class="panel-stack">
       {{ evaluation_panel() }}
       {{ scouting_panel() }}
+      {{ percentile_panel() }}
       {{ comps_panel() }}
     </div>
   </div>
@@ -1388,8 +1454,14 @@ function loadPctileYear(pid, year) {
   if (!container) return;
   container.style.opacity = '0.5';
 
+  // Get current level from level selector
+  var panel = container.closest('.panel');
+  var levelSelect = panel.querySelector('select[title="Level"]');
+  var level = levelSelect ? levelSelect.value : '';
+
   function buildGrid(stats) {
-    var html = '<div class="pctile-grid">';
+    var unqualified = stats.length > 0 && !stats[0].qualified;
+    var html = '<div class="pctile-grid' + (unqualified ? ' pctile-unqualified' : '') + '">';
     stats.forEach(function(s) {
       var fmt = s.value;
       if (s.fmt === '.3f') fmt = s.value.toFixed(3);
@@ -1397,23 +1469,37 @@ function loadPctileYear(pid, year) {
       else if (s.fmt === '.1f') fmt = s.value.toFixed(1);
       else if (s.fmt === 'd') fmt = Math.round(s.value);
       var suffix = (s.label === 'BB%' || s.label === 'K%' || s.label === 'SO%') ? '%' : '';
+      var trackInner = '';
+      if (s.expected_range) {
+        trackInner += '<span class="pctile-expected-range" style="left:' + s.expected_range[0] + '%; width:' + (s.expected_range[1] - s.expected_range[0]) + '%"></span>';
+      }
+      if (s.expected !== null && s.expected !== undefined) {
+        trackInner += '<span class="pctile-expected" style="left:' + s.expected + '%"></span>';
+      }
+      trackInner += '<span class="pctile-fill" style="width:' + s.pctile + '%; --pctile:' + s.pctile + '"></span>';
+      trackInner += '<span class="pctile-dot" style="left:' + s.pctile + '%; --pctile:' + s.pctile + '"></span>';
+      var tagHtml = '';
+      if (s.tag) {
+        var tagMap = {"hot":"▲ Hot","cold":"▼ Cold","lucky":"🍀 Lucky","unlucky":"▽ Unlucky"};
+        tagHtml = tagMap[s.tag] || '';
+      }
       html += '<div class="pctile-row">'
         + '<span class="pctile-label">' + s.label + '</span>'
         + '<span class="pctile-val">' + fmt + suffix + '</span>'
-        + '<span class="pctile-track">'
-        + '<span class="pctile-fill" style="width:' + s.pctile + '%; --pctile:' + s.pctile + '"></span>'
-        + '<span class="pctile-dot" style="left:' + s.pctile + '%; --pctile:' + s.pctile + '"></span>'
-        + '</span>'
+        + '<span class="pctile-track">' + trackInner + '</span>'
         + '<span class="pctile-num" style="--pctile:' + s.pctile + '">' + s.pctile + '</span>'
-        + '<span class="pctile-tag"></span>'
+        + '<span class="pctile-tag' + (s.tag ? ' tag-' + s.tag : '') + '">' + tagHtml + '</span>'
         + '</div>';
     });
     html += '</div>';
     return html;
   }
 
+  var url = '/api/player-percentiles/' + pid + '?year=' + year;
+  if (level && level !== '1') url += '&level=' + level;
+
   // Fetch overall
-  fetch('/api/player-percentiles/' + pid + '?year=' + year)
+  fetch(url)
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data.error) { container.style.opacity = '1'; return; }
@@ -1421,8 +1507,8 @@ function loadPctileYear(pid, year) {
 
       // Fetch splits
       Promise.all([
-        fetch('/api/player-percentiles/' + pid + '?year=' + year + '&split=2').then(function(r) { return r.ok ? r.json() : null; }),
-        fetch('/api/player-percentiles/' + pid + '?year=' + year + '&split=3').then(function(r) { return r.ok ? r.json() : null; })
+        fetch(url + '&split=2').then(function(r) { return r.ok ? r.json() : null; }),
+        fetch(url + '&split=3').then(function(r) { return r.ok ? r.json() : null; })
       ]).then(function(splits) {
         var vl = splits[0] && splits[0].stats ? splits[0] : null;
         var vr = splits[1] && splits[1].stats ? splits[1] : null;
@@ -1434,12 +1520,101 @@ function loadPctileYear(pid, year) {
         }
         container.innerHTML = html;
         container.style.opacity = '1';
-        // Reset split toggle to overall view
+        // Show/hide split toggle based on whether splits exist
         var panel = container.closest('.panel');
         var btn = panel.querySelector('.split-toggle');
-        if (btn) btn.classList.remove('active');
+        if (btn) {
+          btn.classList.remove('active');
+          btn.style.display = (vl || vr) ? '' : 'none';
+        }
+        var hasTags = data.stats.some(function(s) { return s.tag; });
         var legend = panel.querySelector('.pctile-legend');
-        if (legend) legend.style.display = 'none';
+        if (legend) legend.style.display = hasTags ? '' : 'none';
+      });
+    })
+    .catch(function() { container.style.opacity = '1'; });
+}
+
+function loadPctileLevel(pid, level) {
+  var container = document.getElementById('pctile-main');
+  if (!container) return;
+  container.style.opacity = '0.5';
+
+  // Get current year from year selector or use default
+  var yearSelect = container.closest('.panel').querySelector('select[title="Season"]');
+  var year = yearSelect ? yearSelect.value : {{ p.pctile_year or p.year }};
+
+  var url = '/api/player-percentiles/' + pid + '?year=' + year;
+  if (level) url += '&level=' + level;
+
+  function buildGrid(stats) {
+    var unqualified = stats.length > 0 && !stats[0].qualified;
+    var html = '<div class="pctile-grid' + (unqualified ? ' pctile-unqualified' : '') + '">';
+    stats.forEach(function(s) {
+      var fmt = s.value;
+      if (s.fmt === '.3f') fmt = s.value.toFixed(3);
+      else if (s.fmt === '.2f') fmt = s.value.toFixed(2);
+      else if (s.fmt === '.1f') fmt = s.value.toFixed(1);
+      else if (s.fmt === 'd') fmt = Math.round(s.value);
+      var suffix = (s.label === 'BB%' || s.label === 'K%' || s.label === 'SO%') ? '%' : '';
+      var trackInner = '';
+      if (s.expected_range) {
+        trackInner += '<span class="pctile-expected-range" style="left:' + s.expected_range[0] + '%; width:' + (s.expected_range[1] - s.expected_range[0]) + '%"></span>';
+      }
+      if (s.expected !== null && s.expected !== undefined) {
+        trackInner += '<span class="pctile-expected" style="left:' + s.expected + '%"></span>';
+      }
+      trackInner += '<span class="pctile-fill" style="width:' + s.pctile + '%; --pctile:' + s.pctile + '"></span>';
+      trackInner += '<span class="pctile-dot" style="left:' + s.pctile + '%; --pctile:' + s.pctile + '"></span>';
+      var tagHtml = '';
+      if (s.tag) {
+        var tagMap = {"hot":"▲ Hot","cold":"▼ Cold","lucky":"🍀 Lucky","unlucky":"▽ Unlucky"};
+        tagHtml = tagMap[s.tag] || '';
+      }
+      html += '<div class="pctile-row">'
+        + '<span class="pctile-label">' + s.label + '</span>'
+        + '<span class="pctile-val">' + fmt + suffix + '</span>'
+        + '<span class="pctile-track">' + trackInner + '</span>'
+        + '<span class="pctile-num" style="--pctile:' + s.pctile + '">' + s.pctile + '</span>'
+        + '<span class="pctile-tag' + (s.tag ? ' tag-' + s.tag : '') + '">' + tagHtml + '</span>'
+        + '</div>';
+    });
+    html += '</div>';
+    return html;
+  }
+
+  fetch(url)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.error) { container.style.opacity = '1'; return; }
+      var html = '<div class="split-overall">' + buildGrid(data.stats) + '</div>';
+
+      // Fetch splits for this level
+      Promise.all([
+        fetch(url + '&split=2').then(function(r) { return r.ok ? r.json() : null; }),
+        fetch(url + '&split=3').then(function(r) { return r.ok ? r.json() : null; })
+      ]).then(function(splits) {
+        var vl = splits[0] && splits[0].stats ? splits[0] : null;
+        var vr = splits[1] && splits[1].stats ? splits[1] : null;
+        if (vl || vr) {
+          html += '<div class="split-lr" style="display:none">';
+          if (vl) html += '<h3 class="split-label">vs LHP</h3>' + buildGrid(vl.stats);
+          if (vr) html += '<h3 class="split-label">vs RHP</h3>' + buildGrid(vr.stats);
+          html += '</div>';
+        }
+        container.innerHTML = html;
+        container.style.opacity = '1';
+        // Show/hide split toggle based on whether splits exist
+        var panel = container.closest('.panel');
+        var btn = panel.querySelector('.split-toggle');
+        if (btn) {
+          btn.classList.remove('active');
+          btn.style.display = (vl || vr) ? '' : 'none';
+        }
+        // Show legend only if we have tags (qualified current year)
+        var hasTags = data.stats.some(function(s) { return s.tag; });
+        var legend = panel.querySelector('.pctile-legend');
+        if (legend) legend.style.display = hasTags ? '' : 'none';
       });
     })
     .catch(function() { container.style.opacity = '1'; });

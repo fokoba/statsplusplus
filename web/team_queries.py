@@ -1350,12 +1350,13 @@ def get_draft_org_depth(team_id):
         if key in result:
             result[key]["farm"] += (r[1] or 0) / 1e6
 
-    # Compute league average per position for relative thresholds
-    try:
-        from league_config import config as _cfg
-        num_teams = len(_cfg.mlb_team_ids)
-    except Exception:
-        num_teams = 16
+    # Compute league average per position for relative thresholds.
+    # Use the request-scoped mlb_team_ids() (web_league_context), not the raw
+    # league_config singleton — that singleton lazily caches whichever
+    # league's data it first computes for the life of the process and never
+    # invalidates on /switch-league, so it can silently return another
+    # league's (or a stale empty) team count here.
+    num_teams = len(mlb_team_ids()) or 16
 
     league_avg = {p: 0.0 for p in POS_ORDER}
     for r in conn.execute("""

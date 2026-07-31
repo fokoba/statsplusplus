@@ -109,7 +109,7 @@ def get_trade_value(player_id, retention_pct=0.0):
     # Check prospect_fv first (covers rookie-eligible)
     pf = conn.execute("""
         SELECT pf.fv, pf.fv_str, pf.level, pf.bucket, p.age, p.name, p.team_id,
-               p.parent_team_id, p.pos
+               p.parent_team_id, p.pos, pf.fv_continuous
         FROM prospect_fv pf JOIN players p ON p.player_id = pf.player_id
         WHERE pf.player_id = ? ORDER BY pf.eval_date DESC LIMIT 1
     """, (player_id,)).fetchone()
@@ -117,16 +117,22 @@ def get_trade_value(player_id, retention_pct=0.0):
     if pf:
         fv, fv_str, level, bucket = pf[0], pf[1], pf[2], pf[3]
         age, name, tid, ptid, pos_code = pf[4], pf[5], pf[6], pf[7], pf[8]
+        fv_continuous = pf[9]
         fv_plus = str(fv_str).endswith("+")
-        rr = conn.execute("SELECT ovr, pot, pot_cf, pot_ss, pot_c, pot_second_b, pot_third_b "
+        # Use fv_continuous (pre-rounding) for surplus — matches fv_calc.py
+        fv_for_surplus = fv_continuous if fv_continuous is not None else fv
+        fv_plus_for_surplus = False if fv_continuous is not None else fv_plus
+        rr = conn.execute("SELECT ovr, pot, pot_cf, pot_ss, pot_c, pot_second_b, pot_third_b, "
+                          "composite_score, true_ceiling, ceiling_score "
                           "FROM latest_ratings WHERE player_id=?", (player_id,)).fetchone()
-        ovr = rr[0] if rr else None
-        pot = rr[1] if rr else None
+        # Use model scores for certainty/option value and scarcity
+        ovr = (rr[7] if rr and rr[7] else None) or (rr[0] if rr else None)
+        pot = (rr[8] or rr[9] if rr else None) or (rr[1] if rr else None)
         _dk = {'CF': 2, 'SS': 3, 'C': 4, '2B': 5, '3B': 6}
         def_rating = rr[_dk[bucket]] if rr and bucket in _dk else None
 
-        base = prospect_surplus_with_option(fv, age, level, bucket,
-                                            ovr=ovr, pot=pot, fv_plus=fv_plus,
+        base = prospect_surplus_with_option(fv_for_surplus, age, level, bucket,
+                                            ovr=ovr, pot=pot, fv_plus=fv_plus_for_surplus,
                                             def_rating=def_rating)
         surplus = {s: max(0, round(base * m)) for s, m in SENSITIVITY.items()}
 

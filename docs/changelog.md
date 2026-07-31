@@ -4,33 +4,59 @@ Completed and deferred work items, organized by session. Moved from `task_list.m
 
 ---
 
-## Session 71 (2026-07-28)
+## Session 72 (2026-07-29)
+
+### Bug Fixes
+
+- **Prospect surplus value inconsistency** — Player pages showed three different surplus values (header, raw total, adjusted total) because the batch pipeline (`fv_calc.py`) used `fv_continuous` (pre-rounding, e.g. 47.3) with component scores, while the web UI recalculated using the rounded integer FV (45) without component scores. Fix: added `fv_continuous REAL` column to `prospect_fv` table; all calculation paths (player page, trade tab, trade calculator CLI, prospect_value CLI) now use the stored continuous FV and component scores. Stored surplus is used as the authoritative total on the player page.
+
+- **Trade calculator and trade tab using raw OOTP OVR/Pot instead of model scores** — `trade_calculator.py` and `web/trade_queries.py` read `ratings.ovr`/`ratings.pot` (the game's values) for surplus calculations rather than `composite_score`/`true_ceiling` (the model's values). Now reads model scores with fallback to OOTP values, matching what the batch pipeline uses.
+
+### Improvements
+
+- **Scarcity table default recalibrated for composite ceiling scale** — `_SCARCITY_MULT_DEFAULT` breakpoints shifted up to match the composite ceiling distribution (S-curve from 42→0.0 to 53→1.0). MLB P10 ceiling is 48, P50 is 52; table now reflects this. Only affects uncalibrated leagues — leagues with a calibrated `SCARCITY_MULT` in `model_weights.json` (e.g., EMLB) are unaffected.
+
+### Investigation (no code change)
+
+- **Prospect surplus scarcity mismatch** — Investigated whether OOTP Pot should replace true_ceiling for scarcity input. Conclusion: Pot is not a fixed ceiling (changes for 78% of players) and doesn't dictate sim outcomes (individual tool ratings do). Our model's ceiling is the better production predictor. The correct fix is recalibrating the scarcity table for the composite scale (done above), not switching inputs. The Santoro case (Pot 40, ceil 53, surplus $75M) is a correct valuation for an FV 50 CF at age 20 in AA — consistent with other FV 50 AA prospects ($52-88M range).
+
+---
+
+## Session 71 (2026-07-28/29)
 
 ### Features
 
-- **Level-based percentile rankings for MiLB players** (`percentiles.py`, `player_queries.py`, `player.html`) — Percentile panel now works for minor leaguers. Pool combines all leagues at a given level (e.g., AAA = International + Pacific Coast combined). Player's percentiles are ranked against peers at their own level. Level selector dropdown (MLB / AAA / AA / A / Rookie) lets users switch comparison context. Defaults to the player's current level.
+- **Level-based percentile rankings for MiLB players** (`percentiles.py`, `player_queries.py`, `player.html`) — Percentile panel now works for minor leaguers. Pool combines all leagues at a given level (e.g., AAA = International + Pacific Coast combined). Player's percentiles are ranked against peers at their own level. Season and Level selector dropdowns always shown for consistent UX. Season dropdown drives the Level dropdown (shows only levels available for the selected year).
+
+- **Unified player page layout** (`player.html`) — Removed the dual-path template (`{% if has_stats %}` MLB vs `{% else %}` prospect). One layout for all players. Tabs appear/disappear based on data availability: Overview (always), Stats (if any stats), Advanced (if percentile history), Development (if rating snapshots), Outlook (if prospect comps/outcomes), Valuation (if surplus or contract exists).
+
+- **Valuation tab** — Replaces the old "Contract" tab. Shows surplus projection on the left, contract panel on the right (if contract exists). Works for both prospects (surplus only) and MLB players (surplus + contract). Consistent placement for "what is this player worth?" regardless of player type.
 
 - **Expected-value markers for all current-year data** (`percentiles.py`) — Rating-based expected percentile (the diamond marker) now shows for unqualified players too, not just qualified ones. This gives context for small-sample players ("here's where ratings say you should land"). Hot/cold/lucky/unlucky tags still only appear when qualified. For MiLB, BABIP expected falls back to contact percentile (MLB regression model not applicable at lower levels).
 
-- **Unified stats tables** (`player.html`, `player_queries.py`) — MLB and MiLB batting/pitching stats merged into a single table per player. Level column always shows (MLB / AAA / AA / A). Team column shows abbreviation for MLB, city name for MiLB (full league name on hover). Stats match across levels: AVG/OBP/SLG/OPS/ISO/BB%/SO%/BABIP/HR/RBI/SB/CS/OPS+/WAR for hitters; ERA/ERA+/FIP/SIERA/K%/BB%/K-BB%/GB%/BABIP/W/L/SV/HLD/WAR for pitchers. MiLB rows show "-" for stats that can't be computed (OPS+, FIP, SIERA). Traded players show "↳ Team" sub-rows in the Team column.
+- **Unified stats tables** (`player.html`, `player_queries.py`) — MLB and MiLB batting/pitching stats merged into a single table per player. Level and Team as separate columns. Stats match across levels: AVG/OBP/SLG/OPS/ISO/BB%/SO%/BABIP/HR/RBI/SB/CS/OPS+/WAR for hitters; ERA/ERA+/FIP/SIERA/K%/BB%/K-BB%/GB%/BABIP/W/L/SV/HLD/WAR for pitchers. MiLB rows show "-" for stats that can't be computed (OPS+, FIP, SIERA). Traded players show "↳ Team" sub-rows in the Team column.
 
-- **Unified Advanced tab percentile history** (`percentiles.py`, `player.html`) — Single "Batting/Pitching Percentiles by Season" table for all players, powered by `get_percentile_history_all_levels()`. Each row shows year + level + PA/IP + color-coded percentile cells. Same table format for MLB veterans and minor leaguers — level column distinguishes context. Career (MLB) row shows PA-weighted averages. WAR mini-bars, value/percentile toggle, and split selector (MLB only) preserved.
+- **Unified Advanced tab percentile history** (`percentiles.py`, `player.html`) — Single "Batting/Pitching Percentiles by Season" table for all players, powered by `get_percentile_history_all_levels()`. Each row shows year + level + PA/IP + color-coded percentile cells ranked against that level's pool. Career (MLB) row with PA-weighted averages. WAR mini-bars, value/percentile toggle, and split selector (MLB only) preserved.
 
-- **MiLB pitching derived stats** (`player_queries.py`) — MiLB pitching rows now compute K%, BB%, K-BB%, GB%, BABIP, and HLD from raw data (bf, k, bb, gb, fb, ha, hra, hld columns). Enables consistent stat columns across levels.
+- **Stats snapshot shows current level** (`player.html`) — Overview panel now shows the most recent stats from any level (prefers current year MiLB over stale MLB). Header shows "2034 Stats (AAA)" to indicate level context.
 
-- **Pure MiLB players get Stats + Advanced tabs** (`player.html`) — `has_stats` now includes MiLB data, so minor leaguers who have never played MLB get the full tabbed layout (Stats tab with their MiLB stats, Advanced tab with level-adjusted percentile history).
+- **MiLB pitching derived stats** (`player_queries.py`) — MiLB pitching rows compute K%, BB%, K-BB%, GB%, BABIP, and HLD from raw data. Enables consistent stat columns across levels.
 
 ### Bug Fixes
 
 - **Percentile panel missing for minor leaguers** — Panel only showed when MLB stats existed. Now shows for any player with stats at any level.
 
-- **Split toggle visible when no splits available** (`player.html`) — Switching to a MiLB level via the dropdown kept the "vs L / R" button visible even though MiLB has no split data. Now dynamically hidden when the API returns empty splits.
+- **Split toggle visible when no splits available** (`player.html`) — Switching to a MiLB level via the dropdown kept the "vs L / R" button visible. Now dynamically hidden when the API returns empty splits.
 
-- **`pctile-history-table` CSS class mismatch** — New all-levels table used wrong class name (`ph-table` instead of `pctile-history-table`), causing no color gradient to render.
+- **`pctile-history-table` CSS class mismatch** — New all-levels table used wrong class name, causing no color gradient to render.
 
-- **Unqualified cells completely colorless** (`style.css`) — `ph-unqualified` override removed all color (`rgba(255,255,255,0.04)`). Now uses the same percentile color gradient at reduced opacity (0.18 vs 0.45) with 0.7 overall opacity — you can still quickly scan where values fall while clearly seeing they're unqualified.
+- **Unqualified percentile cells completely colorless** (`style.css`) — Now uses the same percentile color gradient at reduced opacity (0.18 background, 0.7 overall) so you can still scan where values fall while clearly seeing they're unqualified. Same treatment for percentile bar view (reduced saturation + opacity instead of flat gray).
 
-- **Year resolution for offseason leagues** (`percentiles.py`) — `_resolve_level_year` now has built-in fallback to most recent year with data (was only trying exact year and year-1). Fixes PPL-type leagues where current year has no data yet.
+- **Year resolution for offseason leagues** (`percentiles.py`) — `_resolve_level_year` now has built-in fallback to most recent year with data.
+
+- **Kevin Mead stats snapshot showing stale MLB data** — Players in minors with no current-year MLB stats were showing prior year MLB data instead of current MiLB stats.
+
+- **Level selector not updating when switching seasons** — JS `onPctileSeasonChange` now updates the Level dropdown options based on which levels have data in the selected year.
 
 ---
 

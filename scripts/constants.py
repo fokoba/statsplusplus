@@ -160,11 +160,14 @@ NO_TRACK_RECORD_DISCOUNT = 0.50
 RP_POT_DISCOUNT = 0.85
 
 # Scarcity multiplier by talent tier. Low-ceiling players are freely available (waivers,
-# minor league FA) so their theoretical surplus has no trade value. Applied using Pot
-# (ceiling) rather than FV so developing players are valued for what they'll become.
-# Smooth S-curve shape — no single-point cliffs. Reaches 1.0 at Pot 49 to reflect
-# scouting fog of war (1-2 point Pot differences are within noise).
-_SCARCITY_MULT_DEFAULT = {40: 0.0, 42: 0.05, 44: 0.20, 45: 0.35, 46: 0.55, 47: 0.75, 48: 0.92, 49: 1.0, 80: 1.0}
+# minor league FA) so their theoretical surplus has no trade value. Applied using
+# true_ceiling (composite scale) so developing players are valued for what they'll become.
+# Smooth S-curve shape — no single-point cliffs.
+# Calibrated for composite ceiling scale where:
+#   MLB P10 = ceiling 48, MLB P50 = ceiling 52, Prospect P90 = ceiling 51
+#   Below 45 = below MLB floor (freely available)
+#   52+ = above-average MLB ceiling (full scarcity)
+_SCARCITY_MULT_DEFAULT = {42: 0.0, 44: 0.03, 45: 0.10, 46: 0.20, 47: 0.35, 48: 0.50, 49: 0.65, 50: 0.80, 51: 0.90, 52: 0.97, 53: 1.0, 80: 1.0}
 SCARCITY_MULT = _w("SCARCITY_MULT", _SCARCITY_MULT_DEFAULT)
 
 # Minimum data points required for position-specific regression in calibrate.py.

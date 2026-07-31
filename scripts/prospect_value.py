@@ -519,7 +519,7 @@ def find_player(player_id):
     import db
     conn = db.get_conn()
     row = conn.execute("""
-        SELECT pf.fv, pf.fv_str, pf.level, pf.bucket, p.age
+        SELECT pf.fv, pf.fv_str, pf.level, pf.bucket, p.age, pf.fv_continuous
         FROM prospect_fv pf
         JOIN players p ON p.player_id = pf.player_id
         WHERE pf.player_id = ?
@@ -528,8 +528,9 @@ def find_player(player_id):
     conn.close()
     if row:
         fv_plus = str(row["fv_str"]).endswith("+")
-        return row["fv"], row["level"], row["bucket"], row["age"], fv_plus
-    return None, None, None, None, False
+        fv_cont = row["fv_continuous"] if row["fv_continuous"] is not None else row["fv"]
+        return row["fv"], row["level"], row["bucket"], row["age"], fv_plus, fv_cont
+    return None, None, None, None, False, None
 
 # ---------------------------------------------------------------------------
 # Output formatting
@@ -572,7 +573,7 @@ def main():
     args = parser.parse_args()
 
     if args.player:
-        fv, level, bucket, db_age, fv_plus = find_player(args.player)
+        fv, level, bucket, db_age, fv_plus, fv_continuous = find_player(args.player)
         if not fv:
             print(f"Player {args.player} not found in prospect_fv. Use --fv/--age/--level/--bucket.")
             sys.exit(1)
@@ -580,6 +581,10 @@ def main():
         level  = args.level  or level
         bucket = args.bucket or bucket
         age    = args.age    or db_age
+        # Use fv_continuous for more accurate surplus (pre-rounding FV)
+        if not args.fv and fv_continuous is not None:
+            fv = fv_continuous
+            fv_plus = False  # continuous already incorporates the half-grade
         if not age:
             print("--age required when player not found in DB")
             sys.exit(1)

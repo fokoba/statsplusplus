@@ -685,9 +685,9 @@ h2.league-header { color: #aaa; font-size: 0.95rem; text-transform: uppercase; l
 
 /* Percentile rankings (Savant style) */
 .pctile-grid { display: flex; flex-direction: column; gap: 10px; padding: 4px 0; }
-.pctile-grid.pctile-unqualified .pctile-fill { background: #666; }
-.pctile-grid.pctile-unqualified .pctile-dot { background: #888; }
-.pctile-grid.pctile-unqualified .pctile-num { color: #888; }
+.pctile-grid.pctile-unqualified .pctile-fill { background: hsl(calc(240 - var(--pctile) * 2.4), 30%, 50%); opacity: 0.2; }
+.pctile-grid.pctile-unqualified .pctile-dot { background: hsl(calc(240 - var(--pctile) * 2.4), 30%, 50%); opacity: 0.6; }
+.pctile-grid.pctile-unqualified .pctile-num { color: var(--text-dim); }
 .pctile-row { display: flex; align-items: center; gap: 10px; }
 .pctile-label { width: 40px; font-size: 11px; color: var(--text-dim); text-align: right; flex-shrink: 0; }
 .pctile-val { width: 52px; font-size: 11px; text-align: right; flex-shrink: 0; font-variant-numeric: tabular-nums; }

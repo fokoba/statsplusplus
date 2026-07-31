@@ -114,7 +114,7 @@ All other analysis scripts are read-only against the DB.
 | `team_pitching_stats` | `refresh.py` | Team-level pitching aggregates (34 teams × 3 splits) |
 | `games` | `refresh.py` | Game results (23K+ games, 2024-2033). runs0=away, runs1=home |
 | `fielding_stats` | `refresh.py` | Player fielding stats by position (G, IP, TC, E, ZR, framing, arm). `league_id` column for MiLB. |
-| `prospect_fv` | `fv_calc.py` | FV grades for prospects and rookie-eligible MLB players (<130 AB, <50 IP, age ≤ 24). Cleared and rewritten each run. |
+| `prospect_fv` | `fv_calc.py` | FV grades for prospects and rookie-eligible MLB players (<130 AB, <50 IP, age ≤ 24). Includes `fv_continuous` (pre-rounding FV for interpolated surplus). Cleared and rewritten each run. |
 | `player_surplus` | `fv_calc.py` | Surplus value for all MLB players. Cleared and rewritten each run. |
 | `trade_block` | `refresh.py` | Player IDs on the trade block (from `/tradeblock` endpoint). Cleared and repopulated each refresh. |
 | `standings` | `refresh.py` | Real W-L-GB-PCT-streak-magic# for all teams (from `/lgdata`). Used by seller classification and `standings.py` display. |

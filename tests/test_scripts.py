@@ -834,6 +834,7 @@ class TestComputeOrgNeeds:
             CREATE TABLE prospect_fv (
                 player_id INTEGER, eval_date TEXT, fv INTEGER, fv_str TEXT,
                 level TEXT, bucket TEXT, prospect_surplus INTEGER, risk TEXT,
+                fv_continuous REAL,
                 PRIMARY KEY (player_id, eval_date)
             );
             CREATE TABLE contracts (
@@ -851,8 +852,8 @@ class TestComputeOrgNeeds:
     def _add_prospect(self, conn, pid, parent_team_id, bucket, fv, date="2033-06-01"):
         conn.execute("INSERT INTO players VALUES (?,?,?,?,?,?,?,?)",
                      (pid, f"Prospect{pid}", 20, parent_team_id + 100, parent_team_id, "4", 6, 0))
-        conn.execute("INSERT INTO prospect_fv VALUES (?,?,?,?,?,?,?,?)",
-                     (pid, date, fv, f"{fv}", "aa", bucket, 5000000, "Medium"))
+        conn.execute("INSERT INTO prospect_fv VALUES (?,?,?,?,?,?,?,?,?)",
+                     (pid, date, fv, f"{fv}", "aa", bucket, 5000000, "Medium", float(fv)))
 
     def test_weakness_detects_below_median_no_farm(self):
         """Position below league median with no FV 50+ farm help → need."""

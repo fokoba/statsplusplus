@@ -621,7 +621,7 @@ def get_player(pid):
         "SELECT bucket, ovr, surplus, fv_str, surplus_yr1 FROM player_surplus WHERE player_id=? AND eval_date=?",
         (pid, ed)).fetchone()
     prospect_row = conn.execute(
-        "SELECT bucket, fv, fv_str, prospect_surplus, level, risk FROM prospect_fv WHERE player_id=? AND eval_date=?",
+        "SELECT bucket, fv, fv_str, prospect_surplus, level, risk, fv_continuous FROM prospect_fv WHERE player_id=? AND eval_date=?",
         (pid, ed)).fetchone()
 
     valuation = {}
@@ -639,6 +639,7 @@ def get_player(pid):
         valuation["type"] = "prospect"
         valuation["level"] = prospect_row[4]
         valuation["risk"] = prospect_row[5]
+        valuation["fv_continuous"] = prospect_row[6]
         valuation["ovr"] = (rd.get("composite_score") if rd else None) or (ratings["ovr"] if ratings else None)
         valuation["pot"] = (rd.get("true_ceiling") or rd.get("ceiling_score") if rd else None) or (ratings["pot"] if ratings else None)
         _def_keys = {'CF':'pot_cf','SS':'pot_ss','C':'pot_c','2B':'pot_second_b','3B':'pot_third_b'}
@@ -1276,16 +1277,30 @@ def get_player(pid):
         elif valuation.get("type") == "prospect":
             import prospect_value as _pv
             fv = valuation.get("fv", 0)
+            # Use fv_continuous (pre-rounding) for accurate surplus — matches fv_calc.py
+            fv_for_surplus = valuation.get("fv_continuous") or fv
             bucket_val = valuation.get("bucket", "")
             level_val = valuation.get("level", level_str)
             _dr = valuation.get("def_rating")
-            pv = _pv.prospect_surplus(fv, age, level_val, bucket_val,
+            _comp_kw = dict(offensive_grade=eval_data.get("offensive_grade"),
+                            offensive_ceiling=eval_data.get("offensive_ceiling"),
+                            defensive_value=eval_data.get("defensive_value"),
+                            durability_score=eval_data.get("durability_score"))
+            pv = _pv.prospect_surplus(fv_for_surplus, age, level_val, bucket_val,
                                       ovr=valuation.get("ovr"), pot=valuation.get("pot"),
                                       def_rating=_dr)
             opt_total = _pv.prospect_surplus_with_option(
-                fv, age, level_val, bucket_val,
+                fv_for_surplus, age, level_val, bucket_val,
                 ovr=valuation.get("ovr"), pot=valuation.get("pot"),
-                def_rating=_dr)
+                def_rating=_dr, **_comp_kw)
+            # Use stored surplus as authoritative when available (computed by
+            # fv_calc.py with full context: fv_continuous + component scores).
+            # Fall back to live calculation for on-the-fly evaluations.
+            stored_surplus = valuation.get("surplus")
+            if stored_surplus and stored_surplus != 0:
+                authoritative_total = round(stored_surplus * 1e6)
+            else:
+                authoritative_total = opt_total
             if pv and pv.get("breakdown"):
                 cert = pv.get("certainty_mult", 1.0)
                 scar = pv.get("scarcity_mult", 1.0)
@@ -1299,19 +1314,15 @@ def get_player(pid):
                               "salary": b["salary"],
                               "surplus": b["surplus"]}
                              for b in pv["breakdown"]],
-                    "total": {"base": opt_total},
+                    "total": {"base": authoritative_total},
                     "flags": [f"ETA: {pv['years_to_mlb']:.1f} yrs"],
                     "discount_note": f"× {pv['dev_discount']:.0%} dev"
                                      + (f" × {scar:.2f} scarcity" if scar < 1.0 else "")
                                      + (f" × {cert:.2f} certainty" if cert != 1.0 else "")
-                                     + f" = {_fmt_money_py(opt_total)}",
+                                     + f" = {_fmt_money_py(authoritative_total)}",
                     "raw_total": raw_total,
                 }
             # Career outcome probabilities
-            _comp_kw = dict(offensive_grade=eval_data.get("offensive_grade"),
-                            offensive_ceiling=eval_data.get("offensive_ceiling"),
-                            defensive_value=eval_data.get("defensive_value"),
-                            durability_score=eval_data.get("durability_score"))
             outcome_probs = _pv.career_outcome_probs(
                 fv, age, level_val, bucket_val,
                 ovr=valuation.get("ovr") or eval_data.get("composite_score"),
@@ -1364,19 +1375,21 @@ def get_player(pid):
                     _p["_level"] = _lvl_key
                     _fv, _fv_plus = calc_fv(_p)
                     _fv_str = f"{_fv}+" if _fv_plus else str(_fv)
+                    _fv_continuous = _p.get("_fv_continuous", _fv)
                     _dr = _p.get({'CF':'PotCF','SS':'PotSS','C':'PotC','2B':'Pot2B','3B':'Pot3B'}.get(_bucket, ""), 0)
                     valuation = {
                         "type": "prospect", "bucket": _display_pos(_bucket),
                         "fv": _fv, "fv_str": _fv_str,
+                        "fv_continuous": _fv_continuous,
                         "ovr": _p["Ovr"], "pot": _p["Pot"],
                         "surplus": 0, "level": _lvl_key,
                     }
                     outcome_probs = _pv.career_outcome_probs(
                         _fv, age, _lvl_key, _bucket, ovr=_p["Ovr"], pot=_p["Pot"], def_rating=_dr)
-                    pv = _pv.prospect_surplus(_fv, age, _lvl_key, _bucket,
+                    pv = _pv.prospect_surplus(_fv_continuous, age, _lvl_key, _bucket,
                                               ovr=_p["Ovr"], pot=_p["Pot"], def_rating=_dr)
                     opt_total = _pv.prospect_surplus_with_option(
-                        _fv, age, _lvl_key, _bucket,
+                        _fv_continuous, age, _lvl_key, _bucket,
                         ovr=_p["Ovr"], pot=_p["Pot"], def_rating=_dr)
                     if pv and pv.get("breakdown"):
                         cert = pv.get("certainty_mult", 1.0)

@@ -186,6 +186,7 @@ CREATE TABLE IF NOT EXISTS prospect_fv (
     bucket          TEXT,
     prospect_surplus INTEGER,
     risk            TEXT,
+    fv_continuous   REAL,
     PRIMARY KEY (player_id, eval_date)
 );
 

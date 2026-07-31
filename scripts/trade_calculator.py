@@ -82,7 +82,7 @@ def value_player(spec):
             return {"type": "contract", "data": result}
 
     # Prospect path — pull from DB
-    fv, level, bucket, db_age, fv_plus = find_player(pid)
+    fv, level, bucket, db_age, fv_plus, fv_continuous = find_player(pid)
 
     fv_raw  = spec.get("fv") or fv
     fv_plus = str(fv_raw).endswith("+") if isinstance(fv_raw, str) else fv_plus
@@ -95,21 +95,30 @@ def value_player(spec):
         return {"type": "unknown", "player_id": pid,
                 "error": f"Insufficient data for player {pid}. Provide fv/age/level/bucket in trade spec."}
 
+    # Use fv_continuous for surplus when available (pre-rounding, more accurate)
+    # If user overrides fv via spec, use the integer override instead.
+    fv_for_surplus = fv_continuous if (fv_continuous is not None and not spec.get("fv")) else fv_int
+    fv_plus_for_surplus = False if fv_for_surplus != fv_int else fv_plus
+
     # Look up ovr/pot for certainty multiplier
     import db as _db
     conn = _db.get_conn()
     row = conn.execute("SELECT name, age FROM players WHERE player_id=?", (pid,)).fetchone()
     name = row["name"] if row else str(pid)
-    rr = conn.execute("SELECT ovr, pot, pot_cf, pot_ss, pot_c, pot_second_b, pot_third_b FROM ratings WHERE player_id=? ORDER BY snapshot_date DESC LIMIT 1", (pid,)).fetchone()
+    rr = conn.execute("SELECT ovr, pot, pot_cf, pot_ss, pot_c, pot_second_b, pot_third_b, "
+                      "composite_score, true_ceiling, ceiling_score "
+                      "FROM ratings WHERE player_id=? ORDER BY snapshot_date DESC LIMIT 1", (pid,)).fetchone()
     conn.close()
-    ovr = rr["ovr"] if rr else None
-    pot = rr["pot"] if rr else None
+    # Use model scores for certainty/option value and scarcity
+    ovr = (rr["composite_score"] if rr and rr["composite_score"] else None) or (rr["ovr"] if rr else None)
+    pot = (rr["true_ceiling"] or rr["ceiling_score"] if rr else None) or (rr["pot"] if rr else None)
     _def_keys = {'CF':'pot_cf','SS':'pot_ss','C':'pot_c','2B':'pot_second_b','3B':'pot_third_b'}
     def_rating = rr[_def_keys[bucket]] if rr and bucket in _def_keys else None
 
     SENSITIVITY = {"pessimistic": 0.85, "base": 1.00, "optimistic": 1.15}
-    base_surplus = prospect_surplus_with_option(fv_int, age, level, bucket,
-                                                 ovr=ovr, pot=pot, fv_plus=fv_plus,
+    base_surplus = prospect_surplus_with_option(fv_for_surplus, age, level, bucket,
+                                                 ovr=ovr, pot=pot,
+                                                 fv_plus=fv_plus_for_surplus,
                                                  def_rating=def_rating)
     total_surplus = {s: max(0, round(base_surplus * mult)) for s, mult in SENSITIVITY.items()}
 

@@ -4,6 +4,24 @@ Completed and deferred work items, organized by session. Moved from `task_list.m
 
 ---
 
+## Session 72 (2026-07-29)
+
+### Bug Fixes
+
+- **Prospect surplus value inconsistency** — Player pages showed three different surplus values (header, raw total, adjusted total) because the batch pipeline (`fv_calc.py`) used `fv_continuous` (pre-rounding, e.g. 47.3) with component scores, while the web UI recalculated using the rounded integer FV (45) without component scores. Fix: added `fv_continuous REAL` column to `prospect_fv` table; all calculation paths (player page, trade tab, trade calculator CLI, prospect_value CLI) now use the stored continuous FV and component scores. Stored surplus is used as the authoritative total on the player page.
+
+- **Trade calculator and trade tab using raw OOTP OVR/Pot instead of model scores** — `trade_calculator.py` and `web/trade_queries.py` read `ratings.ovr`/`ratings.pot` (the game's values) for surplus calculations rather than `composite_score`/`true_ceiling` (the model's values). Now reads model scores with fallback to OOTP values, matching what the batch pipeline uses.
+
+### Improvements
+
+- **Scarcity table default recalibrated for composite ceiling scale** — `_SCARCITY_MULT_DEFAULT` breakpoints shifted up to match the composite ceiling distribution (S-curve from 42→0.0 to 53→1.0). MLB P10 ceiling is 48, P50 is 52; table now reflects this. Only affects uncalibrated leagues — leagues with a calibrated `SCARCITY_MULT` in `model_weights.json` (e.g., EMLB) are unaffected.
+
+### Investigation (no code change)
+
+- **Prospect surplus scarcity mismatch** — Investigated whether OOTP Pot should replace true_ceiling for scarcity input. Conclusion: Pot is not a fixed ceiling (changes for 78% of players) and doesn't dictate sim outcomes (individual tool ratings do). Our model's ceiling is the better production predictor. The correct fix is recalibrating the scarcity table for the composite scale (done above), not switching inputs. The Santoro case (Pot 40, ceil 53, surplus $75M) is a correct valuation for an FV 50 CF at age 20 in AA — consistent with other FV 50 AA prospects ($52-88M range).
+
+---
+
 ## Session 71 (2026-07-28/29)
 
 ### Features

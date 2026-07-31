@@ -506,6 +506,13 @@ def init_schema(league_dir: Path | None = None):
         p_cols = {r[1] for r in conn.execute("PRAGMA table_info(players)").fetchall()}
         if "retired" not in p_cols:
             conn.execute("ALTER TABLE players ADD COLUMN retired INTEGER")
+        # prospect_fv: fv_continuous was added to the base CREATE TABLE but has
+        # no migration, so pre-existing DBs (any league onboarded before this
+        # column existed) never get it — get_player() crashes with
+        # "no such column: fv_continuous" reading the player page.
+        pf_cols = {r[1] for r in conn.execute("PRAGMA table_info(prospect_fv)").fetchall()}
+        if "fv_continuous" not in pf_cols:
+            conn.execute("ALTER TABLE prospect_fv ADD COLUMN fv_continuous REAL")
 
 
 def _migrate_stats_league_id(conn: sqlite3.Connection):

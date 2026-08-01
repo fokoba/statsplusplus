@@ -3278,13 +3278,18 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
                 disc_key = "pitcher" if is_pitcher else "hitter"
                 milb_weighted_sum = 0.0
                 milb_total_weight = 0.0
+                # Determine current year for recency decay
+                _cur_year = milb_seasons[0].get("year", 2034) if milb_seasons else 2034
                 for ms in milb_seasons[:3]:
                     lv = str(ms.get("level", 0))
                     discount = float(milb_discounts.get(disc_key, {}).get(lv, 0.0))
                     if discount <= 0:
                         continue
                     pa = ms.get("pa", 0) if not is_pitcher else ms.get("ip", 0) * 4.3
-                    weight = pa * discount
+                    # Recency decay: current year = 1.0, -1yr = 0.7, -2yr = 0.4
+                    years_ago = _cur_year - ms.get("year", _cur_year)
+                    recency = max(0.2, 1.0 - years_ago * 0.3)
+                    weight = pa * discount * recency
                     milb_weighted_sum += ms["stat_2080"] * weight
                     milb_total_weight += weight
 

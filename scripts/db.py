@@ -497,6 +497,27 @@ def init_schema(league_dir: Path | None = None):
         pf_cols = {r[1] for r in conn.execute("PRAGMA table_info(prospect_fv)").fetchall()}
         if "fv_continuous" not in pf_cols:
             conn.execute("ALTER TABLE prospect_fv ADD COLUMN fv_continuous REAL")
+        if "risk" not in pf_cols:
+            conn.execute("ALTER TABLE prospect_fv ADD COLUMN risk TEXT")
+
+        # ratings.true_ceiling — added for evaluation engine ceiling tracking
+        r_cols = {r[1] for r in conn.execute("PRAGMA table_info(ratings)").fetchall()}
+        if "true_ceiling" not in r_cols:
+            conn.execute("ALTER TABLE ratings ADD COLUMN true_ceiling INTEGER")
+
+        # contracts.last_year_player_option — base contract field added after
+        # initial schema. _migrate_contracts covers the Phase 4 expansion cols
+        # but not this one which was added to the base CREATE TABLE separately.
+        c_cols = {r[1] for r in conn.execute("PRAGMA table_info(contracts)").fetchall()}
+        if "last_year_player_option" not in c_cols:
+            conn.execute("ALTER TABLE contracts ADD COLUMN last_year_player_option INTEGER")
+
+        # games.runs0/runs1 — game scores added for team page display
+        g_cols = {r[1] for r in conn.execute("PRAGMA table_info(games)").fetchall()}
+        if "runs0" not in g_cols:
+            conn.execute("ALTER TABLE games ADD COLUMN runs0 INTEGER")
+        if "runs1" not in g_cols:
+            conn.execute("ALTER TABLE games ADD COLUMN runs1 INTEGER")
 
 
 def _migrate_stats_league_id(conn: sqlite3.Connection):

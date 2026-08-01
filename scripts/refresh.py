@@ -878,6 +878,34 @@ def refresh_league(year, game_date=None):
                 total_pit += len(pit)
             log.info(f"  {len(milb_lids)} leagues, {total_bat} batting rows, {total_pit} pitching rows")
 
+            # Backfill prior-year MiLB stats (up to 5 years back)
+            # Only fetches years not already stored. On first run after this
+            # feature ships, fetches all available history; subsequently only
+            # adds the previous year when a new season starts.
+            existing_milb_years = {r[0] for r in conn.execute(
+                "SELECT DISTINCT year FROM batting_stats WHERE league_id IS NOT NULL"
+            ).fetchall()}
+            milb_hist_start = year - 5
+            milb_hist_years = [y for y in range(milb_hist_start, year)
+                               if y not in existing_milb_years]
+            if milb_hist_years:
+                log.info(f"  MiLB history backfill: {milb_hist_years}")
+                for y in milb_hist_years:
+                    yr_bat = yr_pit = 0
+                    for lid in milb_lids:
+                        try:
+                            bat = client.get_player_batting_stats(year=y, split=1, lid=lid)
+                            _upsert_batting(conn, bat, league_id=lid)
+                            yr_bat += len(bat)
+                            pit = client.get_player_pitching_stats(year=y, split=1, lid=lid)
+                            _upsert_pitching(conn, pit, league_id=lid)
+                            yr_pit += len(pit)
+                        except Exception:
+                            pass  # individual league/year failures non-fatal
+                    if yr_bat or yr_pit:
+                        log.info(f"    {y}: {yr_bat} bat, {yr_pit} pit")
+                conn.commit()
+
             # Compute per-league MiLB averages for stat normalization
             conn.commit()  # ensure upserted data is visible
             _compute_milb_averages(conn, milb_lids, year, league_dir)

@@ -720,7 +720,7 @@ def get_fielding_percentiles(pid, year=None):
     conn.row_factory = None
     current_year = get_cfg().year
     explicit_year = year is not None
-    year = _resolve_pctile_year(conn, year or current_year, "fielding_stats", fallback=not explicit_year)
+    year = _resolve_pctile_year(conn, year or current_year, "mlb_fielding_stats", fallback=not explicit_year)
     if year is None:
         conn.close()
         return None

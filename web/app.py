@@ -693,6 +693,13 @@ def api_draft_picks():
         return jsonify({"picks": [], "error": str(e)})
 
 
+@app.route("/api/waiver-wire")
+def api_waiver_wire():
+    """Return players currently on waivers."""
+    from queries import get_waiver_wire
+    return jsonify({"players": get_waiver_wire()})
+
+
 @app.route("/api/draft-pool-upload", methods=["POST"])
 def api_draft_pool_upload():
     """Upload a CSV of draft-eligible player IDs exported from OOTP."""
@@ -1417,6 +1424,42 @@ def api_game_date():
     except Exception:
         remote_date = None
     return jsonify({"local": local_date, "remote": remote_date})
+
+
+@app.route("/api/session-cookie")
+def api_session_cookie():
+    """Return current session cookie components."""
+    from league_context import get_statsplus_cookie
+    cookie = get_statsplus_cookie() or ""
+    sid = ""
+    csrf = ""
+    for part in cookie.split(";"):
+        part = part.strip()
+        if part.startswith("sessionid="):
+            sid = part[len("sessionid="):]
+        elif part.startswith("csrftoken="):
+            csrf = part[len("csrftoken="):]
+    return jsonify({"session_id": sid, "csrf_token": csrf})
+
+
+@app.route("/api/save-session-cookie", methods=["POST"])
+def api_save_session_cookie():
+    """Save a new session cookie."""
+    import json as _json
+    from league_context import APP_CONFIG_PATH
+    data = request.get_json(silent=True) or {}
+    sid = data.get("session_id", "").strip()
+    csrf = data.get("csrf_token", "").strip()
+    cookie = f"sessionid={sid}" if sid else ""
+    if cookie and csrf:
+        cookie += f";csrftoken={csrf}"
+    try:
+        app_cfg = _json.loads(APP_CONFIG_PATH.read_text()) if APP_CONFIG_PATH.exists() else {}
+        app_cfg["statsplus_cookie"] = cookie
+        APP_CONFIG_PATH.write_text(_json.dumps(app_cfg, indent=2) + "\n")
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
 
 
 @app.route("/api/test-connection", methods=["POST"])

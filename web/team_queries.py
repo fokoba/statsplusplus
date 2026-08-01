@@ -371,7 +371,7 @@ def get_roster_hitters(team_id=None):
                ps.ovr, ps.surplus, ps.surplus_yr1,
                r.composite_score,
                p.injury_is_injured, p.injury_left, p.is_on_dl60,
-               p.designated_for_assignment, p.is_on_waivers
+               p.designated_for_assignment, p.is_on_waivers, p.is_on_dl
         FROM players p
         LEFT JOIN player_surplus ps ON p.player_id=ps.player_id AND ps.eval_date=?
         LEFT JOIN latest_ratings r ON p.player_id=r.player_id
@@ -384,7 +384,7 @@ def get_roster_hitters(team_id=None):
                ps.ovr, ps.surplus, ps.surplus_yr1,
                r.composite_score,
                p.injury_is_injured, p.injury_left, p.is_on_dl60,
-               p.designated_for_assignment, p.is_on_waivers
+               p.designated_for_assignment, p.is_on_waivers, p.is_on_dl
         FROM players p
         LEFT JOIN player_surplus ps ON p.player_id=ps.player_id AND ps.eval_date=?
         LEFT JOIN latest_ratings r ON p.player_id=r.player_id
@@ -457,10 +457,11 @@ def get_roster_hitters(team_id=None):
             "surplus": round(p["surplus_yr1"] / 1e6, 1) if p["surplus_yr1"] else 0,
             "pap": calc_pap(war, salaries.get(pid, 0), team_g, dpw),
             "is_two_way": pid in twp_pids,
-            "status": "DL" if p["injury_is_injured"] else
-                      ("DFA" if p["designated_for_assignment"] else
-                       ("WVR" if p["is_on_waivers"] else None)),
-            "injury_days": p["injury_left"] if p["injury_is_injured"] else None,
+            "status": "DL" if (p["is_on_dl"] or p["is_on_dl60"]) else
+                      ("INJ" if p["injury_is_injured"] else
+                       ("DFA" if p["designated_for_assignment"] else
+                        ("WVR" if p["is_on_waivers"] else None))),
+            "injury_days": p["injury_left"] if p["injury_is_injured"] and p["injury_left"] and p["injury_left"] < 1000 else None,
             "splits": {
                 "1": _fmt_split(splits.get(1) if splits else None),
                 "2": _fmt_split(splits.get(2) if splits else None),
@@ -484,7 +485,7 @@ def get_roster_pitchers(team_id=None):
                ps.ovr, ps.surplus, ps.surplus_yr1,
                r.composite_score,
                p.injury_is_injured, p.injury_left, p.is_on_dl60,
-               p.designated_for_assignment, p.is_on_waivers
+               p.designated_for_assignment, p.is_on_waivers, p.is_on_dl
         FROM players p
         LEFT JOIN player_surplus ps ON p.player_id=ps.player_id AND ps.eval_date=?
         LEFT JOIN latest_ratings r ON p.player_id=r.player_id
@@ -549,10 +550,11 @@ def get_roster_pitchers(team_id=None):
             "surplus": round(p["surplus_yr1"] / 1e6, 1) if p["surplus_yr1"] else 0,
             "pap": calc_pap(war, salaries.get(pid, 0), team_g, dpw),
             "is_two_way": pid in twp_pids,
-            "status": "DL" if p["injury_is_injured"] else
-                      ("DFA" if p["designated_for_assignment"] else
-                       ("WVR" if p["is_on_waivers"] else None)),
-            "injury_days": p["injury_left"] if p["injury_is_injured"] else None,
+            "status": "DL" if (p["is_on_dl"] or p["is_on_dl60"]) else
+                      ("INJ" if p["injury_is_injured"] else
+                       ("DFA" if p["designated_for_assignment"] else
+                        ("WVR" if p["is_on_waivers"] else None))),
+            "injury_days": p["injury_left"] if p["injury_is_injured"] and p["injury_left"] and p["injury_left"] < 1000 else None,
             "splits": {
                 "1": _fmt_split(splits.get(1) if splits else None),
                 "2": _fmt_split(splits.get(2) if splits else None),

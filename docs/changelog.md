@@ -4,6 +4,29 @@ Completed and deferred work items, organized by session. Moved from `task_list.m
 
 ---
 
+## Session 73 (2026-08-01)
+
+### Features
+
+- **Player page injury/status banner** (`player_queries.py`, `player.html`, `style.css`) — Prominent banner at the top of player pages showing injury/DFA/waiver status. Classifications: DL (on disabled list with timeline), 60-Day DL, Day-to-Day (short injury), Injured (not on DL, longer term), Out Indefinitely (1000+ days), DFA, On Waivers. Color-coded by severity (red/orange/yellow). Data sourced from `players` table injury fields.
+
+- **Waiver wire page** (`queries.py`, `app.py`, `league.html`) — New "Waivers" tab on the league page showing all players currently on waivers. Table includes: name (linked), position, age, team, composite, ceiling, FV grade, recent stats, salary, service time, days remaining, and status notes (DFA/injury flags). Sorted by composite descending. Lazy-loaded on tab click via `/api/waiver-wire` endpoint.
+
+- **Session cookie quick-access panel** (`base.html`, `app.py`, `style.css`) — 🔑 button next to the Refresh button opens a dropdown panel showing the current StatsPlus session ID and CSRF token. Auto-verifies cookie validity on open (green ✓ active / red ✗ expired). Allows editing and saving without navigating to Settings. New API endpoints: `/api/session-cookie` (read) and `/api/save-session-cookie` (write).
+
+### Bug Fixes
+
+- **DL badge shown for injured-but-not-on-DL players** (`team_queries.py`, `team.html`) — Team roster page used `injury_is_injured` to set the DL badge, meaning any injured player (including day-to-day) showed "DL". Now correctly distinguishes: DL badge only for `is_on_dl=1` or `is_on_dl60=1`; new INJ badge (yellow) for injured players not placed on the DL. Tooltip shows "no timetable" for indefinite injuries (1000+ days) instead of "1000d left". Added `is_on_dl` to roster queries (was missing).
+
+- **Unqualified percentile bars completely gray** (`style.css`) — Changed from flat gray (`#666`) to muted version of the percentile color (reduced saturation 30% + lower opacity). Users can still visually scan where values fall while clearly seeing the data is small-sample.
+
+### Backlog Updates
+
+- Marked "IP display fix" as done (was completed Session 68).
+- Added "Split percentile qualification threshold" to backlog (season-scaled PA threshold).
+
+---
+
 ## Session 72 (2026-07-29)
 
 ### Bug Fixes

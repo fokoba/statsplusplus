@@ -73,7 +73,7 @@ Items identified from beta tester usage and conversations.
 
 ### High Priority (Bugs)
 - [x] **Org page — lineup card blank** — Starting lineup card on org overview shows blank for hitters (pitchers section was previously fixed). Root cause: `fielding_stats` empty for leagues onboarded mid-season (refresh only fetched current year). Fix: (1) refresh now always fetches prior-year fielding, (2) org overview falls back to `batting_stats` + `players.pos` when fielding is unavailable. Reported by Koba. **Done Session 62.**
-- [ ] **IP display uses float formatting instead of baseball notation** — Advanced tab career row shows `581.3000000000001` (floating point drift from summing IP floats) and `3.3` instead of `3.1` (baseball notation: .1 = 1 out, .2 = 2 outs). Need to apply `fmt_ip` or equivalent fractional display to the percentile history IP column and career row. Reported by Koba. **LOE: Low.**
+- [x] **IP display uses float formatting instead of baseball notation** — Fixed Session 68. Applied `fmt_ip` filter to Jinja server-rendered view and added `fmtIp()` JS helper for client-rendered split view. Reported by Koba. **Done Session 68.**
 - [ ] **Split percentile qualification threshold too low** — Currently 20 PA for L/R splits, which means a player with 29 PA vs RHP shows full-color percentile bars. Should scale with season progress (e.g., 20 PA in April → 50 PA by mid-season → 80 PA full season). The `pctile-unqualified` CSS class already handles the visual dimming; just needs a smarter threshold calculation. **LOE: Low.**
 
 ### Feature Requests
@@ -132,7 +132,7 @@ Items identified from beta tester usage and conversations.
 ## Web UI — Visual Overhaul
 
 - [ ] **In-app help system** — Add contextual help for key concepts (FV, risk, composite, surplus, etc.). Options: (1) "?" icon next to metrics that opens a tooltip/popover with explanation, (2) a slide-out help panel accessible from the nav, (3) a glossary page. Current tooltips via `title` attributes cover basics; a richer system would improve onboarding for new users. **LOE: Medium.**
-- [ ] **Player page injury/status banner** — Injury data (`injury_is_injured`, `injury_left`, `is_on_dl60`) is stored in DB and used by team roster pages and trade targets, but not displayed on individual player pages. Add a status banner (e.g., "60-Day DL — 65 days remaining") at the top of the player page when a player is injured/DFA'd/on waivers. Data already available in `players` table; just needs query + template work. **LOE: Low.**
+- [x] **Player page injury/status banner** — DL/60-Day DL/Day-to-Day/Injured/Out Indefinitely/DFA/Waivers classifications with color-coded banner. Data from `players` table. Team roster badges also fixed to distinguish DL vs INJ. **Done Session 73.**
 - [ ] **Team logos** — add team logos to team pages and player pages. Source or generate logo assets for all 34 MLB teams. Display in page headers, standings, and anywhere team identity appears. **LOE: Low-Medium.**
 - [ ] **UI overhaul exploration** — current layout is functional but generic. Investigate alternative visual styles, layouts, and design patterns to give the app more personality. **LOE: Medium-High.**
 

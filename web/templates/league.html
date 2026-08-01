@@ -38,6 +38,7 @@
   <button class="tab" data-tab="standings">Standings</button>
   <button class="tab" data-tab="prospects">Prospects</button>
   <button class="tab" data-tab="rankings">Rankings</button>
+  <button class="tab" data-tab="waivers">Waivers</button>
   <button class="tab" data-tab="trade">Trade</button>
   <button class="tab" data-tab="draft">Draft</button>
 </div>
@@ -327,6 +328,16 @@
 </div>
 {% endfor %}
 {% endif %}
+</div>
+
+{# ══════ Waivers Tab ══════ #}
+<div class="tab-content" id="tab-waivers">
+  <div class="panel" style="max-width:100%">
+    <h2>Waiver Wire <span id="waiver-count" style="font-size:12px; font-weight:400; color:var(--text-dim)"></span></h2>
+    <div id="waiver-wire-content" style="min-height:100px">
+      <p style="color:var(--text-dim)">Loading...</p>
+    </div>
+  </div>
 </div>
 
 {# ══════ Trade Tab ══════ #}
@@ -2291,6 +2302,62 @@ function updateDraftPicks(btn) {
 
 renderMyPicks(DRAFT_PICKS_INIT);
 renderDraftBoard('all');
+
+// Auto-load waiver wire when tab is opened
+let waiversLoaded = false;
+document.querySelector('[data-tab="waivers"]').addEventListener('click', () => {
+  if (waiversLoaded) return;
+  waiversLoaded = true;
+  fetch('/api/waiver-wire')
+    .then(r => r.json())
+    .then(data => {
+      const players = data.players || [];
+      const container = document.getElementById('waiver-wire-content');
+      const countEl = document.getElementById('waiver-count');
+      countEl.textContent = `(${players.length} players)`;
+      if (!players.length) {
+        container.innerHTML = '<p style="color:var(--text-dim)">No players currently on waivers.</p>';
+        return;
+      }
+      let html = '<table class="sortable"><thead><tr>';
+      html += '<th class="left">Name</th><th>Pos</th><th>Age</th><th>Team</th>';
+      html += '<th>Comp</th><th>Ceil</th><th>FV</th>';
+      html += '<th>Stats</th><th>Salary</th><th>Svc</th><th>Days Left</th><th>Note</th>';
+      html += '</tr></thead><tbody>';
+      players.forEach(p => {
+        let statsStr = '-';
+        if (p.bat_stats) statsStr = `${p.bat_stats.year}: ${p.bat_stats.pa} PA, ${p.bat_stats.war} WAR`;
+        else if (p.pit_stats) statsStr = `${p.pit_stats.year}: ${p.pit_stats.ip} IP, ${p.pit_stats.era} ERA`;
+        let salStr = p.salary ? '$' + (p.salary >= 1e6 ? (p.salary/1e6).toFixed(1)+'M' : Math.round(p.salary/1e3)+'K') : '-';
+        let notes = [];
+        if (p.was_dfa) notes.push('DFA');
+        if (p.injured) notes.push('🏥');
+        if (p.risk) notes.push(p.risk.charAt(0));
+        html += '<tr>';
+        html += `<td class="left"><a href="/player/${p.player_id}">${p.name}</a></td>`;
+        html += `<td>${p.pos}</td>`;
+        html += `<td>${p.age}</td>`;
+        html += `<td>${p.team_abbr}</td>`;
+        html += `<td>${p.composite || '-'}</td>`;
+        html += `<td>${p.ceiling || '-'}</td>`;
+        html += `<td>${p.fv || '-'}</td>`;
+        html += `<td style="font-size:11px">${statsStr}</td>`;
+        html += `<td>${salStr}</td>`;
+        html += `<td>${p.service || '-'}</td>`;
+        html += `<td>${p.days_left || '?'}</td>`;
+        html += `<td style="font-size:11px">${notes.join(' ')}</td>`;
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
+      container.innerHTML = html;
+      if (typeof initSort === 'function') {
+        initSort(container.querySelector('table'));
+      }
+    })
+    .catch(() => {
+      document.getElementById('waiver-wire-content').innerHTML = '<p style="color:#ff6b6b">Failed to load waiver wire.</p>';
+    });
+});
 
 // Auto-select user's team on Side A when trade tab is first opened
 let tradeInitialized = false;

@@ -939,6 +939,13 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
 {# MLB PLAYERS — tabbed layout                                           #}
 {# ═══════════════════════════════════════════════════════════════════════ #}
 
+{% if p.player_status %}
+<div class="player-status-banner status-{{ p.player_status.severity }}">
+  <span class="status-icon">{% if p.player_status.type in ('dl', 'dl60', 'out', 'injured') %}🏥{% elif p.player_status.type == 'dtd' %}⚠️{% elif p.player_status.type == 'DFA' %}⛔{% elif p.player_status.type == 'waivers' %}📋{% endif %}</span>
+  <span class="status-text">{{ p.player_status.label }}</span>
+</div>
+{% endif %}
+
 <div class="tab-bar">
   <button class="tab active" data-tab="overview">Overview</button>
   {% if p.bat_stats or p.pit_stats or p.milb_bat_stats or p.milb_pit_stats %}<button class="tab" data-tab="stats">Stats</button>{% endif %}

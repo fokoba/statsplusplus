@@ -407,6 +407,43 @@ def get_player(pid):
     org_id = team_id if parent_team_id == 0 else parent_team_id
     level_str = level_map().get(str(level), str(level))
 
+    # Injury/status info
+    _status_row = conn.execute(
+        "SELECT injury_is_injured, injury_left, injury_dl_left, is_on_dl, is_on_dl60, "
+        "designated_for_assignment, is_on_waivers, days_on_waivers_left "
+        "FROM players WHERE player_id=?", (pid,)).fetchone()
+    player_status = None
+    if _status_row:
+        _inj = _status_row[0] or 0
+        _inj_left = _status_row[1] or 0
+        _dl_left = _status_row[2] or 0
+        _on_dl = _status_row[3] or 0
+        _on_dl60 = _status_row[4] or 0
+        _dfa = _status_row[5] or 0
+        _waivers = _status_row[6] or 0
+        _waivers_left = _status_row[7] or 0
+
+        if _dfa:
+            player_status = {"type": "DFA", "label": "Designated for Assignment", "severity": "high"}
+        elif _waivers:
+            player_status = {"type": "waivers", "label": f"On Waivers ({_waivers_left}d left)" if _waivers_left else "On Waivers", "severity": "high"}
+        elif _on_dl60:
+            if _inj_left >= 1000:
+                player_status = {"type": "dl60", "label": "60-Day DL — Out Indefinitely", "severity": "high"}
+            else:
+                player_status = {"type": "dl60", "label": f"60-Day DL — {_inj_left} days remaining", "severity": "high"}
+        elif _on_dl:
+            if _inj_left >= 1000:
+                player_status = {"type": "dl", "label": "DL — Out Indefinitely", "severity": "high"}
+            else:
+                player_status = {"type": "dl", "label": f"DL — {_inj_left} days remaining", "severity": "medium"}
+        elif _inj and _inj_left >= 1000:
+            player_status = {"type": "out", "label": "Out Indefinitely", "severity": "high"}
+        elif _inj and _inj_left > 7:
+            player_status = {"type": "injured", "label": f"Injured — {_inj_left} days", "severity": "medium"}
+        elif _inj and _inj_left > 0:
+            player_status = {"type": "dtd", "label": f"Day-to-Day ({_inj_left}d)", "severity": "low"}
+
     # Ratings (latest snapshot) — SELECT * + dict to handle leagues with/without extended columns
     r = conn.execute("SELECT * FROM ratings WHERE player_id=? ORDER BY snapshot_date DESC LIMIT 1", (pid,)).fetchone()
     # Build dict from row
@@ -1695,6 +1732,7 @@ def get_player(pid):
         "team": team_names_map().get(org_id, "?"), "team_abbr": team_abbr_map().get(org_id, "?"), "tid": org_id,
         "actual_team_id": team_id if team_id != org_id else None,
         "level": level_str, "is_pitcher": is_pitcher, "is_two_way": is_two_way,
+        "player_status": player_status,
         "ratings": ratings, "hit_ratings": hit_ratings, "valuation": valuation, "contract": contract,
         "bat_stats": bat_stats, "pit_stats": pit_stats, "summary": summary,
         "bat_splits": bat_splits, "pit_splits": pit_splits,

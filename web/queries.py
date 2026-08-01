@@ -1296,3 +1296,107 @@ def get_positional_rankings():
         result.append((key, group))
 
     return result
+
+
+# ── Waiver Wire ──────────────────────────────────────────────────────────
+
+def get_waiver_wire():
+    """Return players currently on waivers with evaluation context.
+
+    Returns list of dicts sorted by composite score descending, with:
+    - Player identity (name, age, pos, bats/throws)
+    - Current ability (composite, ceiling, OVR)
+    - Recent stats (current or prior year)
+    - Contract/control context (salary, service time, years remaining)
+    - Waiver context (days remaining, was DFA'd)
+    - FV grade if prospect-eligible
+    """
+    conn = get_db()
+    conn.row_factory = None
+
+    rows = conn.execute("""
+        SELECT p.player_id, p.name, p.age, p.pos, p.role, p.level,
+               p.days_on_waivers, p.days_on_waivers_left,
+               p.designated_for_assignment, p.parent_team_id, p.team_id,
+               p.mlb_service_years, p.mlb_service_days,
+               p.injury_is_injured, p.injury_left,
+               r.composite_score, r.true_ceiling, r.ceiling_score, r.ovr, r.pot,
+               r.bats, r.throws,
+               pf.fv, pf.bucket, pf.risk, pf.prospect_surplus,
+               c.years AS contract_years, c.current_year AS contract_current_year,
+               c.salary_0
+        FROM players p
+        LEFT JOIN latest_ratings r ON p.player_id = r.player_id
+        LEFT JOIN prospect_fv pf ON p.player_id = pf.player_id
+        LEFT JOIN contracts c ON p.player_id = c.player_id
+        WHERE p.is_on_waivers = 1
+        ORDER BY COALESCE(r.composite_score, r.ovr, 0) DESC
+    """).fetchall()
+
+    from web_league_context import team_abbr_map, get_cfg
+    _abbr = team_abbr_map()
+    _year = get_cfg().year
+    _pos_labels = {1: 'P', 2: 'C', 3: '1B', 4: '2B', 5: '3B', 6: 'SS', 7: 'LF', 8: 'CF', 9: 'RF', 10: 'DH'}
+
+    results = []
+    for row in rows:
+        pid = row[0]
+        pos_num = row[3]
+        role = row[4]
+        if role in (11, 12):
+            pos_str = "SP"
+        elif role == 13:
+            pos_str = "RP"
+        else:
+            pos_str = _pos_labels.get(pos_num, "?")
+
+        composite = row[15] or row[18] or 0
+        ceiling = row[16] or row[17] or row[19] or 0
+        org_id = row[9] if row[9] else row[10]
+
+        # Get most recent stats
+        stat_row = conn.execute("""
+            SELECT year, pa, war FROM mlb_batting_stats
+            WHERE player_id=? AND split_id=1 ORDER BY year DESC LIMIT 1
+        """, (pid,)).fetchone() if role not in (11, 12, 13) else None
+
+        pit_row = conn.execute("""
+            SELECT year, ip, era, war FROM mlb_pitching_stats
+            WHERE player_id=? AND split_id=1 ORDER BY year DESC LIMIT 1
+        """, (pid,)).fetchone() if role in (11, 12, 13) else None
+
+        # Service time and control
+        svc_years = row[11] or 0
+        svc_days = row[12] or 0
+        contract_years = row[26]
+        contract_cur = row[27]
+        salary = row[28] or 0
+        years_remaining = (contract_years - contract_cur) if contract_years and contract_cur is not None else None
+
+        results.append({
+            "player_id": pid,
+            "name": row[1],
+            "age": row[2],
+            "pos": pos_str,
+            "level": row[5],
+            "team_abbr": _abbr.get(org_id, "?"),
+            "bats": {1: "R", 2: "L", 3: "S"}.get(row[20], "?"),
+            "throws": {1: "R", 2: "L"}.get(row[21], "?"),
+            "composite": round(composite),
+            "ceiling": round(ceiling),
+            "days_left": row[7],
+            "was_dfa": bool(row[8]),
+            "injured": bool(row[13]) and (row[14] or 0) > 0,
+            "fv": row[22],
+            "bucket": row[23],
+            "risk": row[24],
+            "surplus": row[25],  # prospect_surplus from pf table
+            "service": f"{svc_years}.{svc_days:03d}" if svc_years else None,
+            "salary": salary,
+            "years_control": years_remaining,
+            "bat_stats": {"year": stat_row[0], "pa": stat_row[1], "war": round(stat_row[2], 1)} if stat_row else None,
+            "pit_stats": {"year": pit_row[0], "ip": round(pit_row[1], 1), "era": round(pit_row[2], 2), "war": round(pit_row[3], 1)} if pit_row else None,
+        })
+
+    conn.close()
+    return results

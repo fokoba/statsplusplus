@@ -955,8 +955,28 @@ td.stat-bad  { color: var(--red); }
 .tw-badge { font-size: 10px; padding: 1px 4px; border-radius: 3px; background: var(--border); color: var(--green); vertical-align: middle; margin-left: 4px; }
 .status-badge { font-size: 10px; padding: 1px 4px; border-radius: 3px; vertical-align: middle; margin-left: 4px; font-weight: 600; }
 .status-badge.dl { background: #4a2020; color: #ff6b6b; }
+.status-badge.inj { background: #3a3020; color: #ffcc44; }
 .status-badge.dfa { background: #3a3020; color: #ffa500; }
 .status-badge.wvr { background: #20303a; color: #6bb5ff; }
+
+.player-status-banner { padding: 8px 16px; border-radius: 6px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; }
+.player-status-banner .status-icon { font-size: 16px; }
+.player-status-banner.status-high { background: rgba(255, 80, 80, 0.12); border: 1px solid rgba(255, 80, 80, 0.3); color: #ff6b6b; }
+.player-status-banner.status-medium { background: rgba(255, 165, 0, 0.10); border: 1px solid rgba(255, 165, 0, 0.25); color: #ffa500; }
+.player-status-banner.status-low { background: rgba(255, 220, 100, 0.08); border: 1px solid rgba(255, 220, 100, 0.2); color: #ffe066; }
+
+.session-panel { position: absolute; right: 8px; top: 48px; background: var(--surface); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 14px; width: 320px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); z-index: 1000; }
+.session-panel.hidden { display: none; }
+.session-panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; font-weight: 600; font-size: 13px; }
+.session-status { font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 500; }
+.session-status.ok { background: rgba(80,200,80,0.15); color: #6ece6e; }
+.session-status.expired { background: rgba(255,80,80,0.15); color: #ff6b6b; }
+.session-status.checking { background: rgba(200,200,200,0.1); color: var(--text-dim); }
+.session-label { display: block; font-size: 11px; color: var(--text-dim); margin-bottom: 8px; font-weight: 500; }
+.session-input { display: block; width: 100%; margin-top: 3px; padding: 6px 8px; background: var(--bg); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; color: var(--text); font-size: 12px; font-family: monospace; }
+.session-input:focus { outline: none; border-color: rgba(100,150,255,0.4); }
+.session-save { width: 100%; padding: 7px; background: rgba(100,150,255,0.2); border: 1px solid rgba(100,150,255,0.3); border-radius: 4px; color: #8bb8ff; font-size: 12px; font-weight: 600; cursor: pointer; margin-top: 4px; }
+.session-save:hover { background: rgba(100,150,255,0.3); }
 .tw-toggle { margin-left: 8px; }
 .tw-btn { font-size: 11px; padding: 2px 8px; border: 1px solid var(--border); background: transparent; color: var(--text-dim); cursor: pointer; border-radius: 3px; }
 .tw-btn.active { background: var(--border); color: var(--green); }

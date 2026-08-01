@@ -1210,7 +1210,8 @@
       var s = p.splits[split];
       var twBadge = p.is_two_way ? ' <span class="tw-badge" title="Two-way player">TW</span>' : '';
       var statusBadge = '';
-      if (p.status === 'DL') statusBadge = ' <span class="status-badge dl" title="Injured' + (p.injury_days ? ' — ' + p.injury_days + 'd left' : '') + '">DL</span>';
+      if (p.status === 'DL') statusBadge = ' <span class="status-badge dl" title="On DL' + (p.injury_days ? ' — ' + p.injury_days + 'd left' : '') + '">DL</span>';
+      else if (p.status === 'INJ') statusBadge = ' <span class="status-badge inj" title="Injured' + (p.injury_days ? ' — ' + p.injury_days + 'd' : ' — no timetable') + '">INJ</span>';
       else if (p.status === 'DFA') statusBadge = ' <span class="status-badge dfa" title="Designated for assignment">DFA</span>';
       else if (p.status === 'WVR') statusBadge = ' <span class="status-badge wvr" title="On waivers">WVR</span>';
       var tr = document.createElement('tr');
@@ -1258,7 +1259,8 @@
       var s = p.splits[split];
       var twBadge = p.is_two_way ? ' <span class="tw-badge" title="Two-way player">TW</span>' : '';
       var statusBadge = '';
-      if (p.status === 'DL') statusBadge = ' <span class="status-badge dl" title="Injured' + (p.injury_days ? ' — ' + p.injury_days + 'd left' : '') + '">DL</span>';
+      if (p.status === 'DL') statusBadge = ' <span class="status-badge dl" title="On DL' + (p.injury_days ? ' — ' + p.injury_days + 'd left' : '') + '">DL</span>';
+      else if (p.status === 'INJ') statusBadge = ' <span class="status-badge inj" title="Injured' + (p.injury_days ? ' — ' + p.injury_days + 'd' : ' — no timetable') + '">INJ</span>';
       else if (p.status === 'DFA') statusBadge = ' <span class="status-badge dfa" title="Designated for assignment">DFA</span>';
       else if (p.status === 'WVR') statusBadge = ' <span class="status-badge wvr" title="On waivers">WVR</span>';
       var tr = document.createElement('tr');

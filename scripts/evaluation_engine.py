@@ -2862,6 +2862,19 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
     # -- Load league averages for MLB stat blending --
     lg_obp, lg_slg, lg_era = _load_league_averages(league_dir)
 
+    # -- Load MiLB averages and level discounts for unified stat blending --
+    milb_averages = _load_milb_averages(league_dir)
+    milb_discounts = {"hitter": {}, "pitcher": {}}
+    milb_norm_ages = {}
+    try:
+        mw_path = league_dir / "config" / "model_weights.json"
+        if mw_path.exists():
+            _mw_data = json.load(open(mw_path))
+            milb_discounts = _mw_data.get("MILB_LEVEL_DISCOUNTS", milb_discounts)
+            milb_norm_ages = _mw_data.get("MILB_NORM_AGES", milb_norm_ages)
+    except (json.JSONDecodeError, OSError):
+        pass
+
     # -- Load stat-based two-way set from war_model --
     # This is the ground truth for players with qualifying seasons in both
     # batting and pitching. Falls back to empty set if unavailable.
@@ -3235,23 +3248,76 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
             ceiling_ct_bonus = 0.0
             ceiling_ct_breakdown = []
 
-        # -- MLB stat blending --
+        # -- Unified stat blending (MLB + MiLB) --
         level = row_dict.get("level")
         is_mlb = (level == "1" or level == 1)
+
+        # Step 1: MLB stat blending (preserves existing behavior exactly)
+        mlb_stat_2080_values = []
         if is_mlb:
             stat_seasons = _load_qualifying_stat_seasons(conn, player_id, is_pitcher)
             if stat_seasons:
-                stat_2080_values = _compute_stat_signal(
+                mlb_stat_2080_values = _compute_stat_signal(
                     stat_seasons, is_pitcher, lg_obp, lg_slg, lg_era,
                 )
-                if stat_2080_values:
+                if mlb_stat_2080_values:
                     peak_age = 27 if is_pitcher else 28
                     player_age = row_dict.get("age") or 28
                     composite_score = compute_composite_mlb(
-                        tool_only_score, stat_2080_values,
+                        tool_only_score, mlb_stat_2080_values,
                         peak_age=peak_age, player_age=player_age,
                         is_pitcher=is_pitcher,
                     )
+
+        # Step 2: MiLB stat blending (additive for all players with MiLB data)
+        # Only applies when MLB stat blending hasn't already provided a strong signal.
+        # The MiLB contribution is scaled DOWN as MLB sample grows.
+        if milb_averages:
+            milb_seasons = _load_milb_stat_seasons(conn, player_id, is_pitcher, milb_averages)
+            if milb_seasons:
+                disc_key = "pitcher" if is_pitcher else "hitter"
+                milb_weighted_sum = 0.0
+                milb_total_weight = 0.0
+                for ms in milb_seasons[:3]:
+                    lv = str(ms.get("level", 0))
+                    discount = float(milb_discounts.get(disc_key, {}).get(lv, 0.0))
+                    if discount <= 0:
+                        continue
+                    pa = ms.get("pa", 0) if not is_pitcher else ms.get("ip", 0) * 4.3
+                    weight = pa * discount
+                    milb_weighted_sum += ms["stat_2080"] * weight
+                    milb_total_weight += weight
+
+                if milb_total_weight > 0:
+                    milb_signal = milb_weighted_sum / milb_total_weight
+                    milb_effective_pa = milb_total_weight
+
+                    # MiLB blend weight: scales with sample, capped at 25% for MiLB alone
+                    # (MLB can already do up to 60% via compute_composite_mlb)
+                    milb_blend = min(0.25, milb_effective_pa / 800.0)
+
+                    # Fade MiLB as MLB sample grows: if MLB already blended heavily,
+                    # reduce MiLB contribution to avoid double-counting
+                    mlb_seasons_count = len(mlb_stat_2080_values)
+                    if mlb_seasons_count >= 3:
+                        milb_blend *= 0.10  # MLB dominates — MiLB nearly irrelevant
+                    elif mlb_seasons_count == 2:
+                        milb_blend *= 0.35  # MLB moderate — MiLB still contributes
+                    elif mlb_seasons_count == 1:
+                        milb_blend *= 0.65  # MLB limited — MiLB is important context
+
+                    # Young player discount for negative MiLB signal
+                    player_age = row_dict.get("age") or 28
+                    peak_age = 27 if is_pitcher else 28
+                    if player_age < peak_age and tool_only_score > milb_signal:
+                        age_factor = max(0.3, 1.0 - (peak_age - player_age) * 0.12)
+                        milb_blend *= age_factor
+
+                    # Apply MiLB blend on top of whatever composite we have
+                    if milb_blend >= 0.01:
+                        composite_score = max(20, min(80, round(
+                            composite_score * (1.0 - milb_blend) + milb_signal * milb_blend
+                        )))
 
         # Ensure ceiling >= composite after stat blending
         ceiling_score = max(ceiling_score, composite_score)

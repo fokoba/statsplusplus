@@ -662,7 +662,24 @@ def get_player(pid):
         (pid, ed)).fetchone()
 
     valuation = {}
-    if surplus_row:
+    # For rookie-eligible MLB players (in both tables), prefer prospect surplus —
+    # the contract model only sees the current 1-year pre-arb deal and drastically
+    # undervalues years of remaining team control.
+    if prospect_row and surplus_row:
+        # Player is in both: use prospect valuation (more complete for pre-arb players)
+        valuation["bucket"] = _display_pos(prospect_row[0])
+        valuation["fv"] = prospect_row[1]
+        valuation["fv_str"] = prospect_row[2]
+        valuation["surplus"] = round(prospect_row[3] / 1e6, 1) if prospect_row[3] else 0
+        valuation["type"] = "prospect"
+        valuation["level"] = prospect_row[4]
+        valuation["risk"] = prospect_row[5]
+        valuation["fv_continuous"] = prospect_row[6]
+        valuation["ovr"] = (rd.get("composite_score") if rd else None) or (ratings["ovr"] if ratings else None)
+        valuation["pot"] = (rd.get("true_ceiling") or rd.get("ceiling_score") if rd else None) or (ratings["pot"] if ratings else None)
+        _def_keys = {'CF':'pot_cf','SS':'pot_ss','C':'pot_c','2B':'pot_second_b','3B':'pot_third_b'}
+        valuation["def_rating"] = rd.get(_def_keys.get(prospect_row[0], "")) or 0 if rd else 0
+    elif surplus_row:
         valuation["bucket"] = _display_pos(surplus_row[0])
         valuation["ovr"] = surplus_row[1]
         valuation["surplus"] = round(surplus_row[2] / 1e6, 1) if surplus_row[2] else 0

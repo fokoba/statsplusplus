@@ -686,6 +686,43 @@
   </div>
   {% endif %}
 
+  {# ── MiLB Performance Context (Scout vs Performance) ── #}
+  {% if p.milb_perf %}
+  {% set mp = p.milb_perf %}
+  <div style="background:var(--surface); border-radius:6px; padding:10px; margin-bottom:12px; font-size:12px">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px">
+      <span style="color:var(--text-dim); font-size:10px; text-transform:uppercase; letter-spacing:1px">Performance vs Scouting — {{ mp.level_name }}</span>
+      {% if mp.promo_ready %}<span style="background:#2e7d32; color:#fff; padding:2px 6px; border-radius:3px; font-size:10px; font-weight:600">↑ PROMOTION READY</span>{% endif %}
+    </div>
+    <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:center">
+      {# Composite divergence #}
+      <div>
+        <span style="color:var(--text-dim)">Production:</span>
+        <span class="ovr-color" data-g="{{ mp.stat_2080|round|int }}">{{ mp.stat_2080|round|int }}</span>
+        <span style="color:var(--text-dim)">vs Tools:</span>
+        <span class="ovr-color" data-g="{{ mp.tool_only }}">{{ mp.tool_only }}</span>
+        {% if mp.delta > 3 %}<span style="color:#4caf50; font-weight:600">(+{{ mp.delta|round|int }} overperforming)</span>
+        {% elif mp.delta < -3 %}<span style="color:#f44336; font-weight:600">({{ mp.delta|round|int }} underperforming)</span>
+        {% else %}<span style="color:var(--text-dim)">({{ "%+d"|format(mp.delta|round|int) }})</span>{% endif %}
+      </div>
+      {# Ceiling adjustment #}
+      {% if mp.pac_delta != 0 %}
+      <div>
+        <span style="color:var(--text-dim)">Ceiling adj:</span>
+        <span style="{% if mp.pac_delta > 0 %}color:#4caf50{% elif mp.pac_delta < 0 %}color:#f44336{% endif %}; font-weight:600">{{ "%+d"|format(mp.pac_delta) }}</span>
+        <span style="color:var(--text-dim)">({{ mp.raw_ceiling }}→{{ mp.pac }})</span>
+      </div>
+      {% endif %}
+    </div>
+    {% if mp.age_vs_level != 0 or mp.ops_plus %}
+    <div style="margin-top:4px; font-size:11px; color:var(--text-dim)">
+      {% if mp.age_vs_level > 0 %}Young for level ({{ mp.age_vs_level }}yr under norm){% elif mp.age_vs_level < 0 %}Old for level ({{ (-mp.age_vs_level) }}yr over norm){% endif %}
+      {% if mp.ops_plus %}{% if mp.age_vs_level != 0 %} · {% endif %}OPS+ {{ mp.ops_plus }} at {{ mp.level_name }}{% endif %}
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
   {# ── vs. Game Rating ── #}
   {% if p.ratings and p.ratings.ovr and p.composite_score %}
   {% set comp_diff = p.composite_score - p.ratings.ovr %}

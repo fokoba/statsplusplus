@@ -120,6 +120,10 @@ Items identified from beta tester usage and conversations.
 
 - [ ] **Player development history chart** — chart showing rating trajectories over time using `ratings_history` snapshots (monthly in-game). Display current + potential for primary tools (hitter: cntct/gap/pow/eye/ks; pitcher: stf/mov/ctrl + individual pitches), ovr/pot headline, and extended ratings (babip/hra/pbabip) when available. Waiting for multiple snapshots to accumulate before building the UI. **LOE: Medium.**
 - [x] **Percentile rankings: offseason display + multi-year history** — Percentile panel now auto-falls back to prior year during offseason. Year selector dropdown on all panels. New "Advanced" tab on player pages shows color-coded percentile history table (blue→white→red), fielding history by position, PA/IP context, career averages, value/percentile toggle. **Done Session 63.**
+- [ ] **Level-relative ranking** — Show where a prospect ranks among all players at their level by OPS+/ERA-. Display as percentile bar ("Top 5% at level") on player page and as a column in prospect lists. Provides context for individual stat lines. **LOE: Low.**
+- [ ] **Development pace indicator** — Compare a player's level progression to expected pace for their profile. Badges: "⚡ Fast Track" (1+ levels ahead), "📈 On Pace", "⚠️ Stalled" (1+ levels behind with high PA). Show on player page and farm overview. **LOE: Medium.**
+- [ ] **Farm system health dashboard** — Aggregate MiLB stat signals at the org level: promotion-ready count, performance trajectory breakdown (rising/steady/falling), stats-vs-tools alignment chart. Enhances team farm page with system-level insight. **LOE: Medium.**
+- [ ] **Historical prospect comparisons** — Show comparable players at the same age+level who went on to succeed/fail. "73% of similar performers reached MLB within 2 years." Requires accumulated multi-season data. **LOE: High.**
 
 ---
 

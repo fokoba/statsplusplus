@@ -317,6 +317,11 @@ def run():
                     "MLB", bucket, p_surplus, fv_risk, fv_continuous
                 ))
         elif age <= 24:
+            # Prospect graduation: skip players who have exceeded MLB rookie thresholds
+            # regardless of current level (e.g., rehab assignments, option stints).
+            # MLB rule: 130 AB or 50 IP exhausts prospect eligibility.
+            if _career_ab.get(pid, 0) >= 130 or _career_ip.get(pid, 0) >= 50:
+                continue
             level_key = LEVEL_INT_KEY.get(int(level))
             if not level_key:
                 continue

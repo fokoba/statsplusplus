@@ -8,7 +8,7 @@ _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from flask import Flask, render_template, redirect, request, jsonify, g
+from flask import Flask, render_template, redirect, request, jsonify, g, session
 import werkzeug.exceptions
 import queries
 from league_config import LeagueConfig
@@ -21,6 +21,23 @@ log = get_logger("web")
 app = Flask(__name__)
 app.json.sort_keys = False
 app.jinja_env.policies["json.dumps_kwargs"] = {"sort_keys": False}
+
+# Secret key for signed session cookies — persisted in app_config.json so it
+# survives restarts (a fresh key on every restart would invalidate every
+# open browser's session, including their per-tab active-league choice).
+def _load_or_create_secret_key() -> str:
+    import json as _json, secrets
+    from league_context import APP_CONFIG_PATH
+    cfg = _json.loads(APP_CONFIG_PATH.read_text()) if APP_CONFIG_PATH.exists() else {}
+    key = cfg.get("flask_secret_key")
+    if not key:
+        key = secrets.token_hex(32)
+        cfg["flask_secret_key"] = key
+        APP_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        APP_CONFIG_PATH.write_text(_json.dumps(cfg, indent=2) + "\n")
+    return key
+
+app.secret_key = _load_or_create_secret_key()
 
 # Run DB schema migration on startup for all leagues (adds new columns if missing).
 # This is idempotent and fast (only ALTERs if columns are absent).
@@ -40,8 +57,14 @@ _EXEMPT_PREFIXES = ("/settings", "/onboard", "/switch-league", "/refresh",
 
 @app.before_request
 def _set_league_context():
-    """Populate Flask g with league-scoped config."""
-    slug = get_active_league_slug()
+    """Populate Flask g with league-scoped config.
+
+    Active league is resolved per-session (Flask's signed session cookie)
+    first, so switching leagues in one browser tab doesn't yank the active
+    league out from under any other open tab/session — falls back to the
+    global app_config.json default for brand-new sessions.
+    """
+    slug = session.get("active_league") or get_active_league_slug()
     league_dir = get_league_dir(slug)
     settings_exist = (league_dir / "config" / "league_settings.json").exists()
     # No leagues at all — send to onboarding (unless already there)
@@ -982,6 +1005,12 @@ def api_wipe_league():
         redirect_to = "/onboard"
     APP_CONFIG_PATH.write_text(_json.dumps(app_cfg, indent=2) + "\n")
 
+    # If this session had one of the wiped leagues active, clear it so we
+    # fall back to the (now-updated) global default instead of pointing at
+    # a directory that no longer exists.
+    if session.get("active_league") in targets:
+        session.pop("active_league", None)
+
     return jsonify({"ok": True, "redirect": redirect_to})
 
 
@@ -1134,14 +1163,13 @@ def settings():
 
 @app.route("/switch-league/<slug>")
 def switch_league(slug):
-    import json as _json
-    from league_context import APP_CONFIG_PATH, get_league_dir
+    from league_context import get_league_dir
     league_dir = get_league_dir(slug)
     if not (league_dir / "config" / "league_settings.json").exists():
         return "League not found", 404
-    app_cfg = _json.loads(APP_CONFIG_PATH.read_text()) if APP_CONFIG_PATH.exists() else {}
-    app_cfg["active_league"] = slug
-    APP_CONFIG_PATH.write_text(_json.dumps(app_cfg, indent=2) + "\n")
+    # Scoped to this browser's session only (signed cookie) — switching
+    # leagues in one tab must not affect any other open tab/session.
+    session["active_league"] = slug
     return redirect("/")
 
 

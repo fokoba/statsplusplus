@@ -726,12 +726,12 @@
   {# ── vs. Game Rating ── #}
   {% if p.ratings and p.ratings.ovr and p.composite_score %}
   {% set comp_diff = p.composite_score - p.ratings.ovr %}
-  {% set ceil_diff = (p.ceiling_score - p.ratings.pot) if p.ratings.pot else none %}
+  {% set ceil_diff = ((p.true_ceiling or p.ceiling_score) - p.ratings.pot) if p.ratings.pot else none %}
   <div style="background:var(--surface); border-radius:6px; padding:10px; margin-bottom:12px; font-size:12px">
     <div style="color:var(--text-dim); font-size:10px; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px">vs. Game Rating</div>
     <div style="display:flex; gap:16px; flex-wrap:wrap">
       <span>Comp {{ p.composite_score }} vs OVR {{ p.ratings.ovr }} <span class="{% if comp_diff > 3 %}pos{% elif comp_diff < -3 %}neg{% endif %}" style="font-weight:600">{{ "%+d"|format(comp_diff) }}</span></span>
-      {% if ceil_diff is not none %}<span>Ceil {{ p.ceiling_score }} vs POT {{ p.ratings.pot }} <span class="{% if ceil_diff > 3 %}pos{% elif ceil_diff < -3 %}neg{% endif %}" style="font-weight:600">{{ "%+d"|format(ceil_diff) }}</span></span>{% endif %}
+      {% if ceil_diff is not none %}<span>Ceil {{ p.true_ceiling or p.ceiling_score }} vs POT {{ p.ratings.pot }} <span class="{% if ceil_diff > 3 %}pos{% elif ceil_diff < -3 %}neg{% endif %}" style="font-weight:600">{{ "%+d"|format(ceil_diff) }}</span></span>{% endif %}
     </div>
   </div>
   {% endif %}

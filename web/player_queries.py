@@ -662,7 +662,24 @@ def get_player(pid):
         (pid, ed)).fetchone()
 
     valuation = {}
-    if surplus_row:
+    # For rookie-eligible MLB players (in both tables), prefer prospect surplus —
+    # the contract model only sees the current 1-year pre-arb deal and drastically
+    # undervalues years of remaining team control.
+    if prospect_row and surplus_row:
+        # Player is in both: use prospect valuation (more complete for pre-arb players)
+        valuation["bucket"] = _display_pos(prospect_row[0])
+        valuation["fv"] = prospect_row[1]
+        valuation["fv_str"] = prospect_row[2]
+        valuation["surplus"] = round(prospect_row[3] / 1e6, 1) if prospect_row[3] else 0
+        valuation["type"] = "prospect"
+        valuation["level"] = prospect_row[4]
+        valuation["risk"] = prospect_row[5]
+        valuation["fv_continuous"] = prospect_row[6]
+        valuation["ovr"] = (rd.get("composite_score") if rd else None) or (ratings["ovr"] if ratings else None)
+        valuation["pot"] = (rd.get("true_ceiling") or rd.get("ceiling_score") if rd else None) or (ratings["pot"] if ratings else None)
+        _def_keys = {'CF':'pot_cf','SS':'pot_ss','C':'pot_c','2B':'pot_second_b','3B':'pot_third_b'}
+        valuation["def_rating"] = rd.get(_def_keys.get(prospect_row[0], "")) or 0 if rd else 0
+    elif surplus_row:
         valuation["bucket"] = _display_pos(surplus_row[0])
         valuation["ovr"] = surplus_row[1]
         valuation["surplus"] = round(surplus_row[2] / 1e6, 1) if surplus_row[2] else 0
@@ -1726,6 +1743,85 @@ def get_player(pid):
     except Exception:
         pass
 
+    # ── MiLB performance context (for Scout vs Performance panel) ──
+    milb_perf = None
+    try:
+        if level != 1 or (age and age <= 25):
+            import sys as _sys
+            _sys.path.insert(0, "scripts") if "scripts" not in _sys.path else None
+            from evaluation_engine import _load_milb_stat_seasons, _load_milb_averages
+            from fv_model import compute_performance_adjusted_ceiling, compute_stat_risk_modifier
+            _league_dir = get_cfg().league_dir
+            _ma = _load_milb_averages(_league_dir)
+            if _ma:
+                _mp_conn = get_db()
+                _milb_s = _load_milb_stat_seasons(_mp_conn, pid, is_pitcher, _ma)
+                if _milb_s:
+                    import json as _json_perf
+                    _mw_path = _league_dir / "config" / "model_weights.json"
+                    _disc_map = {}
+                    _norm_ages = {}
+                    if _mw_path.exists():
+                        _mw = _json_perf.loads(_mw_path.read_text())
+                        _disc_map = _mw.get("MILB_LEVEL_DISCOUNTS", {})
+                        _norm_ages = _mw.get("MILB_NORM_AGES", {})
+                    _disc_key = "pitcher" if is_pitcher else "hitter"
+                    _ws = 0.0
+                    _tw = 0.0
+                    _best_level = None
+                    _best_ops = None
+                    for _ms in _milb_s[:3]:
+                        _lv = str(_ms.get("level", 0))
+                        _d = float(_disc_map.get(_disc_key, {}).get(_lv, 0.0))
+                        if _d <= 0:
+                            continue
+                        _pa = _ms.get("pa", 0) if not is_pitcher else _ms.get("ip", 0) * 4.3
+                        _w = _pa * _d
+                        _ws += _ms["stat_2080"] * _w
+                        _tw += _w
+                        if _best_level is None:
+                            _best_level = int(_lv)
+                            _best_ops = _ms.get("ops_plus", _ms.get("era_minus_inv"))
+                    if _tw > 0:
+                        _stat_2080 = _ws / _tw
+                        _eff_pa = _tw
+                        _p_age = age or 22
+                        _norm_age = int(_norm_ages.get(str(_best_level), 23))
+                        _tonly = tool_only_score or composite_score or 0
+                        _raw_ceil = eval_data.get("true_ceiling") or ceiling_score or 0
+                        _pac = compute_performance_adjusted_ceiling(
+                            _raw_ceil, _stat_2080, _p_age, _norm_age, _eff_pa, _tonly
+                        )
+                        _risk_mod = compute_stat_risk_modifier(
+                            _stat_2080, _p_age, _norm_age, _eff_pa, _tonly
+                        )
+                        # Promotion readiness
+                        _promo_ready = (
+                            _p_age <= _norm_age
+                            and _stat_2080 >= 55  # above-average production at level
+                            and _eff_pa >= 50
+                            and (_tonly or 0) >= 45  # tools support next level
+                        )
+                        _level_names = {2: "AAA", 3: "AA", 4: "A", 6: "Rookie"}
+                        milb_perf = {
+                            "stat_2080": round(_stat_2080, 1),
+                            "tool_only": _tonly,
+                            "delta": round(_stat_2080 - _tonly, 1),
+                            "pac": _pac,
+                            "raw_ceiling": _raw_ceil,
+                            "pac_delta": _pac - _raw_ceil,
+                            "risk_modifier": round(_risk_mod, 3),
+                            "effective_pa": round(_eff_pa),
+                            "level": _best_level,
+                            "level_name": _level_names.get(_best_level, f"Lv{_best_level}"),
+                            "age_vs_level": _norm_age - _p_age,  # positive = young for level
+                            "promo_ready": _promo_ready,
+                            "ops_plus": round(_best_ops) if _best_ops else None,
+                        }
+    except Exception as _mp_err:
+        import logging as _mp_log
+        _mp_log.getLogger("statspp").warning("milb_perf computation failed for pid=%s: %s", pid, _mp_err)
+
     return {
         "pid": pid, "player_id": pid, "name": name, "age": age, "pos": pos_str,
         "year": get_cfg().year,
@@ -1772,6 +1868,7 @@ def get_player(pid):
         "pctile_levels": pctile_levels,
         "pctile_level": pctile_level,
         "pctile_year_levels": pctile_year_levels,
+        "milb_perf": milb_perf,
     }
 
 

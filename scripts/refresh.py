@@ -881,6 +881,38 @@ def refresh_league(year, game_date=None):
                 _upsert_pitching(conn, pit, league_id=lid)
                 total_pit += len(pit)
             log.info(f"  {len(milb_lids)} leagues, {total_bat} batting rows, {total_pit} pitching rows")
+
+            # Backfill prior-year MiLB stats (up to 5 years back)
+            # Only fetches years not already stored. On first run after this
+            # feature ships, fetches all available history; subsequently only
+            # adds the previous year when a new season starts.
+            existing_milb_years = {r[0] for r in conn.execute(
+                "SELECT DISTINCT year FROM batting_stats WHERE league_id IS NOT NULL"
+            ).fetchall()}
+            milb_hist_start = year - 5
+            milb_hist_years = [y for y in range(milb_hist_start, year)
+                               if y not in existing_milb_years]
+            if milb_hist_years:
+                log.info(f"  MiLB history backfill: {milb_hist_years}")
+                for y in milb_hist_years:
+                    yr_bat = yr_pit = 0
+                    for lid in milb_lids:
+                        try:
+                            bat = client.get_player_batting_stats(year=y, split=1, lid=lid)
+                            _upsert_batting(conn, bat, league_id=lid)
+                            yr_bat += len(bat)
+                            pit = client.get_player_pitching_stats(year=y, split=1, lid=lid)
+                            _upsert_pitching(conn, pit, league_id=lid)
+                            yr_pit += len(pit)
+                        except Exception:
+                            pass  # individual league/year failures non-fatal
+                    if yr_bat or yr_pit:
+                        log.info(f"    {y}: {yr_bat} bat, {yr_pit} pit")
+                conn.commit()
+
+            # Compute per-league MiLB averages for stat normalization
+            conn.commit()  # ensure upserted data is visible
+            _compute_milb_averages(conn, milb_lids, year, league_dir)
         else:
             log.info("  no minor leagues found (primary_lid=%s)", primary_lid)
     except Exception as e:
@@ -1092,6 +1124,72 @@ def _detect_minimum_salary():
     s["minimum_salary"] = salary
     settings_path.write_text(json.dumps(s, indent=2) + "\n")
     log.info(f"  minimum salary: ${salary:,} (mode of bottom 200 MLB contracts)")
+
+
+def _compute_milb_averages(conn, milb_lids, year, league_dir):
+    """Compute per-league MiLB batting and pitching averages for stat normalization.
+
+    Stores averages in league_settings.json under each minor_league entry:
+        minor_leagues[i].batting_avg = {obp, slg, pa_pool}
+        minor_leagues[i].pitching_avg = {era, ip_pool}
+
+    These are used by the evaluation engine to compute level-relative OPS+/ERA-
+    for the MiLB stat integration feature.
+    """
+    settings_path = league_dir / "config" / "league_settings.json"
+    if not settings_path.exists():
+        return
+
+    s = json.loads(settings_path.read_text())
+    minor_leagues = s.get("minor_leagues", [])
+
+    for ml in minor_leagues:
+        lid = ml["lid"]
+
+        # Batting: compute average OBP and SLG from players with >= 50 PA
+        bat_row = conn.execute("""
+            SELECT AVG(sub.obp) as avg_obp, AVG(sub.slg) as avg_slg, COUNT(*) as n
+            FROM (
+                SELECT (SUM(h)+SUM(bb)+SUM(hbp))*1.0/NULLIF(SUM(pa),0) as obp,
+                       (SUM(h)+SUM(d)+2*SUM(t)+3*SUM(hr))*1.0/NULLIF(SUM(ab),0) as slg
+                FROM batting_stats
+                WHERE league_id=? AND split_id=1 AND year=?
+                GROUP BY player_id
+                HAVING SUM(pa) >= 50
+            ) sub
+        """, (lid, year)).fetchone()
+
+        if bat_row and bat_row["avg_obp"]:
+            ml["batting_avg"] = {
+                "obp": round(bat_row["avg_obp"], 4),
+                "slg": round(bat_row["avg_slg"], 4),
+                "n": bat_row["n"],
+                "year": year,
+            }
+
+        # Pitching: compute average ERA from pitchers with >= 30 IP
+        pit_row = conn.execute("""
+            SELECT AVG(sub.era) as avg_era, COUNT(*) as n
+            FROM (
+                SELECT SUM(er)*27.0/NULLIF(SUM(outs),0) as era
+                FROM pitching_stats
+                WHERE league_id=? AND split_id=1 AND year=?
+                GROUP BY player_id
+                HAVING SUM(ip) >= 30
+            ) sub
+            WHERE sub.era IS NOT NULL
+        """, (lid, year)).fetchone()
+
+        if pit_row and pit_row["avg_era"]:
+            ml["pitching_avg"] = {
+                "era": round(pit_row["avg_era"], 2),
+                "n": pit_row["n"],
+                "year": year,
+            }
+
+    s["minor_leagues"] = minor_leagues
+    settings_path.write_text(json.dumps(s, indent=2) + "\n")
+    log.info("  MiLB averages computed for %d leagues", len(minor_leagues))
 
 
 def _refresh_league_averages(year):

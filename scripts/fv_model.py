@@ -413,6 +413,11 @@ def calc_fv_v2(p):
     dev_confidence = closure * base_discount * gap_scale + char_adj
     dev_confidence = max(0.0, min(1.0, dev_confidence))
 
+    # MiLB stat-based risk modifier (when stat context is provided)
+    _stat_risk_adj = p.get("_stat_risk_modifier", 0.0)
+    if _stat_risk_adj:
+        dev_confidence = max(0.0, min(1.0, dev_confidence + _stat_risk_adj))
+
     if gap < 3:
         risk = "Low"
     elif dev_confidence >= 0.40:
@@ -425,3 +430,130 @@ def calc_fv_v2(p):
         risk = "Extreme"
 
     return fv_grade, risk
+
+
+# ---------------------------------------------------------------------------
+# Performance-Adjusted Ceiling (PAC)
+# ---------------------------------------------------------------------------
+
+def compute_performance_adjusted_ceiling(
+    true_ceiling: int,
+    stat_2080: float,
+    player_age: int,
+    norm_age: int,
+    effective_pa: float,
+    tool_only_score: int,
+) -> int:
+    """Compute performance-adjusted ceiling from MiLB stat signal.
+
+    Adjusts the scouting-based ceiling up or down based on how the player
+    is performing relative to expectations at their level, weighted by
+    age-for-level context and sample size.
+
+    Args:
+        true_ceiling: Raw scouting ceiling (20-80 scale).
+        stat_2080: Player's level-relative production on 20-80 scale
+            (from MiLB OPS+ or inverted ERA-).
+        player_age: Player's current age.
+        norm_age: Normal age for the player's level (e.g., 24 for AAA).
+        effective_pa: PA × level_discount — confidence in the stat signal.
+        tool_only_score: Pure tool composite (no stat blend).
+
+    Returns:
+        Adjusted ceiling (clamped to 20-80).
+    """
+    if effective_pa < 30 or true_ceiling <= 0:
+        return true_ceiling
+
+    # Signal: how far above/below average the player is producing
+    # stat_2080 of 50 = level average, 60 = plus, 40 = below average
+    # Normalize relative to tool_only_score: are stats confirming or contradicting tools?
+    signal = (stat_2080 - tool_only_score) / 30.0  # normalized to ~[-1, +1] range
+    signal = max(-1.0, min(1.0, signal))
+
+    # Age-for-level context
+    age_context = norm_age - player_age  # positive = young for level
+
+    # Asymmetric age multipliers
+    if signal > 0:
+        # Positive signal: amplify for young players, dampen for old
+        if age_context > 0:
+            age_mult = 1.0 + age_context * 0.15  # +15% per year young
+        else:
+            age_mult = max(0.4, 1.0 + age_context * 0.20)  # -20% per year old (AAAA dampening)
+    else:
+        # Negative signal: dampen for young players, amplify for old
+        if age_context > 0:
+            age_mult = max(0.25, 1.0 - age_context * 0.25)  # -25% per year young (they're developing)
+        else:
+            age_mult = 1.0 + abs(age_context) * 0.15  # +15% per year old
+
+    # Sample confidence: ramps from 0 at 30 eff PA to 1.0 at 300 eff PA
+    sample_confidence = min(1.0, (effective_pa - 30) / 270.0)
+
+    # Maximum ceiling adjustment: ±6 points
+    max_adjustment = 6.0
+    adjustment = signal * age_mult * sample_confidence * max_adjustment
+    adjustment = max(-max_adjustment, min(max_adjustment, adjustment))
+
+    result = true_ceiling + round(adjustment)
+    return max(20, min(80, result))
+
+
+def compute_stat_risk_modifier(
+    stat_2080: float,
+    player_age: int,
+    norm_age: int,
+    effective_pa: float,
+    tool_only_score: int,
+) -> float:
+    """Compute a risk modifier based on MiLB stat performance.
+
+    Returns an additive adjustment to dev_confidence (the risk calculation's
+    core variable). Positive = more confident (reduces risk), negative = less
+    confident (increases risk).
+
+    Magnitude is small (±0.05 to ±0.12) — enough to shift one risk band in
+    strong cases, but not enough to override the fundamentals.
+
+    Args:
+        stat_2080: Player's level-relative production on 20-80 scale.
+        player_age: Player's current age.
+        norm_age: Normal age for the player's level.
+        effective_pa: PA × level_discount.
+        tool_only_score: Pure tool composite.
+
+    Returns:
+        Float adjustment to dev_confidence (typically -0.12 to +0.12).
+    """
+    if effective_pa < 50:
+        return 0.0
+
+    # Performance relative to tools
+    perf_delta = stat_2080 - tool_only_score  # positive = outperforming tools
+
+    # Normalize: +15 above tools = strong confirming signal
+    normalized = perf_delta / 15.0
+    normalized = max(-1.0, min(1.0, normalized))
+
+    # Age context
+    age_context = norm_age - player_age  # positive = young
+
+    # Only strong signals with sufficient sample should modify risk
+    sample_factor = min(1.0, (effective_pa - 50) / 200.0)
+
+    # Base modifier: ±0.08 at full signal + full sample
+    base_mod = normalized * 0.08 * sample_factor
+
+    # Age amplification for confirming signals
+    if normalized > 0 and age_context > 0:
+        # Young + outperforming = strong confidence boost
+        base_mod *= (1.0 + age_context * 0.25)
+    elif normalized < 0 and age_context < 0:
+        # Old + underperforming = strong confidence reduction
+        base_mod *= (1.0 + abs(age_context) * 0.20)
+    elif normalized < 0 and age_context > 0:
+        # Young + underperforming = dampened (still developing)
+        base_mod *= max(0.2, 1.0 - age_context * 0.30)
+
+    return max(-0.12, min(0.12, base_mod))

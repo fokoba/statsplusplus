@@ -4,6 +4,46 @@ Completed and deferred work items, organized by session. Moved from `task_list.m
 
 ---
 
+## Session 74 (2026-08-01 — 2026-08-02)
+
+### Major: MiLB Stats in Prospect Evaluation
+
+Full integration of minor league statistics into the player evaluation pipeline. Four-phase implementation:
+
+- **Phase A: Infrastructure** — MiLB league averages computed per-league during refresh (OBP/SLG for hitters, ERA for pitchers). `_load_milb_stat_seasons()` function normalizes stats to level-relative OPS+/ERA- and converts to 20-80 scale. Level discount factors stored in `model_weights.json`.
+
+- **Phase B: Composite blending** — MiLB stats blend into prospect composite scores. MLB stat blending preserved exactly (via `compute_composite_mlb`), MiLB layered on top as additive secondary signal. Max 25% MiLB blend weight, fades as MLB sample grows (×0.65 with 1 MLB year, ×0.35 with 2, ×0.10 with 3+). Young-player discount dampens negative signals. Typical impact: +1 to +4 composite points for full-season performers.
+
+- **Phase B: Performance-Adjusted Ceiling (PAC)** — Adjusts scouting ceiling ±6 points based on production vs age-for-level context. Young dominators get amplified boost; young strugglers get dampened penalty; old-for-level overperformers dampened (AAAA signal); old underperformers amplified. Feeds into FV via `calc_fv_v2()`.
+
+- **Phase B: Risk modifier** — Stat performance modifies `dev_confidence` by ±0.12 before risk classification. Young + outperforming = confidence boost (risk ↓); old + underperforming = confidence penalty (risk ↑). 230 players moved to "Low" risk, 141 moved out of "High".
+
+- **Phase C: Calibration** — Historical MiLB stats backfill (5 prior years, ~28K batting + ~16K pitching rows). Empirical calibration from VMLB 2029-2034 MiLB→MLB WAR regressions (n=777 across levels). Level discounts calibrated: AAA 0.55, AA 0.40, A 0.20, Rookie 0.05. Recency decay applied (current year 1.0×, -1yr 0.7×, -2yr 0.4×).
+
+- **Phase D: UI** — "Performance vs Scouting" panel on player evaluation section showing: production grade vs tool grade, ceiling adjustment (PAC delta), age-for-level context, OPS+ at level, and green "↑ PROMOTION READY" badge when player meets promotion criteria. Shown for all prospects and young MLB players with MiLB history; hidden for established veterans.
+
+### Features
+
+- **Waiver wire page** — (carried from Session 73 start)
+- **Session cookie panel** — (carried from Session 73 start)
+- **Injury/status banners** — (carried from Session 73 start)
+
+### Bug Fixes
+
+- **Missing DB migrations for 5 late-added columns** (`db.py`) — `ratings.true_ceiling`, `contracts.last_year_player_option`, `prospect_fv.risk`, `games.runs0`, `games.runs1` all had CREATE TABLE definitions but no ALTER TABLE migration for existing DBs. Any upgrading user would get 500 errors on player/team pages. Added idempotent migrations for all. Also merged PR #6 from Koba (same class fix for `fv_continuous`).
+
+- **MiLB stats contamination audit** — Verified all 100+ query sites use `mlb_*` views correctly. One minor fix: `_resolve_pctile_year` was checking raw `fielding_stats` table instead of `mlb_fielding_stats` view for year resolution.
+
+- **Graduated players in prospect lists** (`fv_calc.py`) — Players who exceeded MLB rookie thresholds (130 AB or 50 IP) were still appearing in prospect_fv when on rehab/option assignments. Eddie Cardenas (405 career IP) appeared as FV 55 prospect. Fix: check career AB/IP for all players regardless of current level. 23 graduated players correctly excluded.
+
+- **Rookie-eligible surplus mismatch** (`player_queries.py`) — Players in both `prospect_fv` and `player_surplus` tables showed the contract-model surplus ($4.4M for a 1-yr pre-arb deal) instead of prospect-model surplus ($72.3M reflecting full team control). Fix: prefer prospect valuation for dual-table players.
+
+- **vs. Game Rating ceiling mismatch** (`player.html`) — "Ceil X vs POT Y" used `ceiling_score` (54, intermediate value) instead of `true_ceiling` (56, displayed value). Now consistent with header.
+
+- **DL badge / INJ badge** — (carried from Session 73 start)
+
+---
+
 ## Session 73 (2026-08-01)
 
 ### Features

@@ -125,6 +125,21 @@ def run():
         "SELECT player_id, SUM(ip) FROM mlb_pitching_stats WHERE split_id=1 GROUP BY player_id"
     ).fetchall())
 
+    # Load MiLB stat context for PAC and risk modifier
+    from evaluation_engine import _load_milb_stat_seasons, _load_milb_averages
+    from fv_model import compute_performance_adjusted_ceiling, compute_stat_risk_modifier
+    _milb_averages = _load_milb_averages(league_dir)
+    _milb_discounts = {}
+    _milb_norm_ages = {}
+    _mw_path = league_dir / "config" / "model_weights.json"
+    if _mw_path.exists():
+        try:
+            _mw_data = json.load(open(_mw_path))
+            _milb_discounts = _mw_data.get("MILB_LEVEL_DISCOUNTS", {})
+            _milb_norm_ages = _mw_data.get("MILB_NORM_AGES", {})
+        except (json.JSONDecodeError, OSError):
+            pass
+
     rows = conn.execute(RATINGS_SQL).fetchall()
 
     # Filter to players belonging to our league's organizations.
@@ -250,6 +265,35 @@ def run():
             if age <= 24 and _career_ab.get(pid, 0) < 130 and _career_ip.get(pid, 0) < 50:
                 p["_norm_age"] = LEVEL_NORM_AGE["aaa"]
                 p["_level"] = "aaa"
+
+                # MiLB stat context for rookie-eligible MLB players
+                if _milb_averages:
+                    _milb_s = _load_milb_stat_seasons(conn, pid, p["_is_pitcher"], _milb_averages)
+                    if _milb_s:
+                        _disc_key = "pitcher" if p["_is_pitcher"] else "hitter"
+                        _weighted_sum = 0.0
+                        _total_w = 0.0
+                        for _ms in _milb_s[:3]:
+                            _lv = str(_ms.get("level", 0))
+                            _disc = float(_milb_discounts.get(_disc_key, {}).get(_lv, 0.0))
+                            if _disc <= 0:
+                                continue
+                            _pa = _ms.get("pa", 0) if not p["_is_pitcher"] else _ms.get("ip", 0) * 4.3
+                            _w = _pa * _disc
+                            _weighted_sum += _ms["stat_2080"] * _w
+                            _total_w += _w
+                        if _total_w > 0:
+                            _stat_2080 = _weighted_sum / _total_w
+                            _eff_pa = _total_w
+                            _norm_age_lv = int(_milb_norm_ages.get("2", 24))  # AAA norm
+                            _tool_only = p.get("composite_score") or p.get("Ovr") or 0
+                            p["Pot"] = compute_performance_adjusted_ceiling(
+                                p["Pot"], _stat_2080, age, _norm_age_lv, _eff_pa, _tool_only
+                            )
+                            p["_stat_risk_modifier"] = compute_stat_risk_modifier(
+                                _stat_2080, age, _norm_age_lv, _eff_pa, _tool_only
+                            )
+
                 fv_base, fv_risk = calc_fv(p)
                 fv_str = str(fv_base)
                 if bucket == "RP":
@@ -273,11 +317,48 @@ def run():
                     "MLB", bucket, p_surplus, fv_risk, fv_continuous
                 ))
         elif age <= 24:
+            # Prospect graduation: skip players who have exceeded MLB rookie thresholds
+            # regardless of current level (e.g., rehab assignments, option stints).
+            # MLB rule: 130 AB or 50 IP exhausts prospect eligibility.
+            if _career_ab.get(pid, 0) >= 130 or _career_ip.get(pid, 0) >= 50:
+                continue
             level_key = LEVEL_INT_KEY.get(int(level))
             if not level_key:
                 continue
             p["_norm_age"] = LEVEL_NORM_AGE[level_key]
             p["_level"] = level_key
+
+            # MiLB stat context: PAC and risk modifier
+            if _milb_averages:
+                _milb_s = _load_milb_stat_seasons(conn, pid, p["_is_pitcher"], _milb_averages)
+                if _milb_s:
+                    _disc_key = "pitcher" if p["_is_pitcher"] else "hitter"
+                    _weighted_sum = 0.0
+                    _total_w = 0.0
+                    for _ms in _milb_s[:3]:
+                        _lv = str(_ms.get("level", 0))
+                        _disc = float(_milb_discounts.get(_disc_key, {}).get(_lv, 0.0))
+                        if _disc <= 0:
+                            continue
+                        _pa = _ms.get("pa", 0) if not p["_is_pitcher"] else _ms.get("ip", 0) * 4.3
+                        _w = _pa * _disc
+                        _weighted_sum += _ms["stat_2080"] * _w
+                        _total_w += _w
+                    if _total_w > 0:
+                        _stat_2080 = _weighted_sum / _total_w
+                        _eff_pa = _total_w
+                        _norm_age_lv = int(_milb_norm_ages.get(str(int(level)), p["_norm_age"]))
+                        _tool_only = p.get("composite_score") or p.get("Ovr") or 0
+
+                        # Apply PAC
+                        p["Pot"] = compute_performance_adjusted_ceiling(
+                            p["Pot"], _stat_2080, age, _norm_age_lv, _eff_pa, _tool_only
+                        )
+                        # Compute risk modifier
+                        p["_stat_risk_modifier"] = compute_stat_risk_modifier(
+                            _stat_2080, age, _norm_age_lv, _eff_pa, _tool_only
+                        )
+
             fv_base, fv_risk = calc_fv(p)
             fv_str = str(fv_base)
             level_label = LEVEL_INT_LABEL.get(int(level), str(level))

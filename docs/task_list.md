@@ -174,20 +174,16 @@ pipeline complete; display and model integration remaining.
 - [x] **2a. `/lgdata` client method** — `get_lgdata()` in client.py. Used during refresh to discover all league IDs and hierarchy. League structure stored in `league_settings.json`.
 - [x] **2b. Schema: `league_id` column** — Added to `batting_stats`, `pitching_stats`, `fielding_stats`. NULL = MLB (backward compatible). MiLB rows use the league ID from `/lgdata`.
 - [x] **2c. Refresh pipeline — MiLB stat pulls** — Fetches batting+pitching for all discovered MiLB leagues (13 leagues, ~10,600 rows total). Current year only. Adds ~15-20s to refresh time. Non-fatal on failure.
-- [ ] **2d. MiLB stats in prospect evaluation** — Integrate minor league performance data into FV/composite calculations. Research: how to weight MiLB stats by level, how to adjust for league difficulty, blend with ratings. This is a significant model change. **LOE: High.**
+- [x] **2d. MiLB stats in prospect evaluation** — MiLB performance integrated into composite scoring (level-discounted blend), Performance-Adjusted Ceiling (PAC), and risk modifier. Calibrated from VMLB 2029-2034 regressions. Historical MiLB stats (5yr backfill) stored for multi-year analysis. **Done Session 74.**
 - [x] **2e. MiLB stats on player pages** — Minor League Stats section on player page Stats tab. Batting and pitching tables with league names from `league_settings.json`. Hitter and pitcher pages both supported.
 
-**⚠️ URGENT: MiLB stats contaminating MLB-only systems.** Adding `league_id` column
-to stat tables without filtering existing queries means MiLB WAR/stats are treated as
-MLB production everywhere. Confirmed impact: WAR projections inflated (Schwarzenberg
-shows 4.4 WAR projection from AAA stats), percentile rankings polluted, evaluation
-engine stat signal contaminated, calibration affected. Fix: add `AND league_id IS NULL`
-to all queries that should only read MLB stats. ~60 query sites across 15 files.
-See full list in Session 70 smoke test notes.
+**✅ MiLB stats contamination — RESOLVED.** All MLB-only query sites use `mlb_*` views
+(created Session 70). Full audit confirmed in Session 74: 100+ query sites verified,
+evaluation engine, WAR model, calibration pipeline, and percentiles all correctly isolated.
+One minor fix applied (fielding percentile year resolution).
 
 **Known remaining issues:**
-- MiLB stats only show current season (no historical years stored)
-- Percentile rankings should support per-league filtering (MLB/AAA/AA/etc)
+- Percentile rankings support per-level filtering (done Session 73)
 - Offseason WAR projection still shows for completed season (display logic issue)
 
 ### Phase 3 — New Endpoints ✅ (3a, 3c completed Session 70)

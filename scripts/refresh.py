@@ -1329,13 +1329,16 @@ def update_state(game_date, year):
     league_dir = get_league_dir()
     state_path = league_dir / "config" / "state.json"
     existing = json.loads(state_path.read_text()) if state_path.exists() else {}
-    state = {
+    # Merge onto existing state rather than rebuilding from scratch — this
+    # file also holds per-league values this function doesn't own (e.g.
+    # statsplus_cookie), which a full overwrite would silently discard.
+    existing.update({
         "game_date": game_date,
         "last_updated": datetime.now(timezone.utc).isoformat(),
         "year": int(year),
         "my_team_id": existing.get("my_team_id", _cfg.my_team_id),
-    }
-    _write_json(state_path, state)
+    })
+    _write_json(state_path, existing)
 
 
 def _run_calibrate():

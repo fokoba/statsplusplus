@@ -39,8 +39,28 @@ def get_league_dir(slug: str | None = None) -> Path:
     return league_dir  # will fail downstream with clear path
 
 
-def get_statsplus_cookie() -> str:
-    """Global StatsPlus cookie from app_config.json."""
+def get_statsplus_cookie(league_dir: Path | None = None) -> str:
+    """StatsPlus session cookie for a league.
+
+    Different leagues (e.g. two OOTP leagues hosted under separate
+    statsplus.net accounts) can require entirely different login sessions,
+    so the cookie lives per-league in <league_dir>/config/state.json —
+    not in the shared app_config.json — the same place other per-league
+    runtime state (game_date, my_team_id) already lives.
+
+    Falls back to the legacy global app_config.json key (pre-migration
+    single-league installs), then statsplus/.env, if the per-league value
+    isn't set.
+    """
+    if league_dir is None:
+        league_dir = get_league_dir()
+    state_path = league_dir / "config" / "state.json"
+    if state_path.exists():
+        state = json.loads(state_path.read_text())
+        cookie = state.get("statsplus_cookie", "")
+        if cookie:
+            return cookie
+    # Legacy fallback: shared global cookie (pre-per-league-cookie installs)
     cfg = _read_app_config()
     cookie = cfg.get("statsplus_cookie", "")
     if cookie:
@@ -52,3 +72,15 @@ def get_statsplus_cookie() -> str:
             if line.startswith("STATSPLUS_COOKIE="):
                 return line.split("=", 1)[1].strip()
     return ""
+
+
+def set_statsplus_cookie(cookie: str, league_dir: Path | None = None) -> None:
+    """Persist the StatsPlus cookie for a specific league's own state.json."""
+    if league_dir is None:
+        league_dir = get_league_dir()
+    config_dir = league_dir / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    state_path = config_dir / "state.json"
+    state = json.loads(state_path.read_text()) if state_path.exists() else {}
+    state["statsplus_cookie"] = cookie
+    state_path.write_text(json.dumps(state, indent=2) + "\n")

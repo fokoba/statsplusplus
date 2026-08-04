@@ -1025,6 +1025,7 @@
   <table id="{{ table_id }}">
     <thead>
       <tr>
+        <th></th>
         <th data-sort="str" class="left">Name</th>
         <th data-sort="str">Pos</th>
         <th data-sort="num">Age</th>
@@ -1040,8 +1041,9 @@
     </thead>
     <tbody>
       {% for p in rows %}
-      <tr>
-        <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
+      <tr class="add-row" data-pid="{{ p.pid }}">
+        <td><input type="checkbox" class="add-checkbox" data-pid="{{ p.pid }}"></td>
+        <td class="left"><a class="player-link add-name" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
         <td>{{ p.bucket }}</td>
         <td>{{ p.age }}</td>
         <td>{{ p.level }}</td>
@@ -1166,6 +1168,46 @@
       } else {
         delete marks[pid];
         row.classList.remove('cut-marked');
+      }
+      saveMarks(marks);
+    });
+  });
+})();
+</script>
+
+<style>
+.add-row.add-marked .add-name { color: var(--text-dim); text-decoration: line-through; }
+.add-row.add-marked td { opacity: 0.5; }
+</style>
+
+<script>
+/* ── Add Candidates: mark-as-actioned checkboxes, persisted per-player in localStorage ── */
+(function() {
+  var STORAGE_KEY = 'statspp_add_marks';
+
+  function loadMarks() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
+    catch (e) { return {}; }
+  }
+  function saveMarks(marks) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(marks));
+  }
+
+  var marks = loadMarks();
+  document.querySelectorAll('#tab-adds .add-checkbox').forEach(function(cb) {
+    var pid = cb.dataset.pid;
+    var row = cb.closest('.add-row');
+    if (marks[pid]) {
+      cb.checked = true;
+      row.classList.add('add-marked');
+    }
+    cb.addEventListener('change', function() {
+      if (cb.checked) {
+        marks[pid] = true;
+        row.classList.add('add-marked');
+      } else {
+        delete marks[pid];
+        row.classList.remove('add-marked');
       }
       saveMarks(marks);
     });

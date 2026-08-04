@@ -182,28 +182,42 @@ def _get_web_logger():
     return _gl("web")
 
 
-def _run_refresh():
-    """Run refresh.py in background thread."""
+def _run_refresh(slug, league_dir, statsplus_slug, cookie):
+    """Run refresh.py in background thread.
+
+    Takes the target league explicitly (slug/dir/statsplus_slug/cookie),
+    all captured from the triggering request *before* the thread starts —
+    this function runs with no Flask request context, so anything that
+    resolved the "active league" ambiently (module-level league_config
+    singleton, get_cfg()'s g-based fallback, etc.) would silently operate
+    on whichever league happens to be the global app_config.json default,
+    not necessarily the league the user actually clicked refresh from.
+    """
     _log = _get_web_logger()
-    _log.info("=== dashboard refresh started ===")
+    _log.info("=== dashboard refresh started (league=%s) ===", slug)
     try:
-        from league_config import config as _bg_cfg
+        import db as _db_mod
+        from league_config import LeagueConfig
+        bg_cfg = LeagueConfig(base_dir=league_dir)
         script = Path(__file__).parent.parent / "scripts" / "refresh.py"
+        env = {**os.environ, "STATSPP_LEAGUE": slug, "STATSPLUS_COOKIE": cookie}
+        if statsplus_slug:
+            env["STATSPLUS_LEAGUE_URL"] = statsplus_slug
         result = subprocess.run(
-            [sys.executable, str(script), str(_bg_cfg.year)],
-            capture_output=True, text=True, timeout=600
+            [sys.executable, str(script), str(bg_cfg.year)],
+            capture_output=True, text=True, timeout=600, env=env,
         )
         if result.stdout:
             for line in result.stdout.strip().splitlines():
                 _log.debug(line)
         if result.returncode == 0:
-            _bg_cfg.reload()
-            state = queries.get_state(force=True)
+            bg_cfg.reload()
+            import json as _json
+            state = _json.loads(bg_cfg.state_path.read_text())
             # Post-refresh validation
             warnings = []
             try:
-                from web_league_context import get_db
-                conn = get_db()
+                conn = _db_mod.get_conn(league_dir)
                 for tbl, minimum in [("players", 100), ("ratings", 100),
                                       ("teams", 10), ("contracts", 50)]:
                     n = conn.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]
@@ -735,7 +749,7 @@ def api_draft_picks():
         from league_context import get_statsplus_cookie
         cfg = _get_cfg()
         slug = cfg.settings.get("statsplus_slug", "")
-        cookie = get_statsplus_cookie()
+        cookie = get_statsplus_cookie(cfg.league_dir)
         if slug and cookie:
             client.configure(slug, cookie)
         raw = client.get_draft()
@@ -1101,15 +1115,16 @@ def settings():
             cfg.reload()
 
         elif action == "save_cookie":
-            from league_context import APP_CONFIG_PATH
-            app_cfg = _json.loads(APP_CONFIG_PATH.read_text()) if APP_CONFIG_PATH.exists() else {}
+            from league_context import set_statsplus_cookie
             sid = request.form.get("session_id", "").strip()
             csrf = request.form.get("csrf_token", "").strip()
             cookie = f"sessionid={sid}" if sid else ""
             if cookie and csrf:
                 cookie += f";csrftoken={csrf}"
-            app_cfg["statsplus_cookie"] = cookie
-            APP_CONFIG_PATH.write_text(_json.dumps(app_cfg, indent=2) + "\n")
+            # Per-league — different leagues can require different login
+            # sessions, so this is scoped to whichever league is currently
+            # active (cfg.league_dir), not a single shared value.
+            set_statsplus_cookie(cookie, cfg.league_dir)
 
         elif action == "save_structure":
             try:
@@ -1132,14 +1147,13 @@ def settings():
                 current_team = queries.get_my_team_id()
                 teams = sorted(cfg.team_names_map.items(), key=lambda x: x[1])
                 state = queries.get_state()
-                from league_context import APP_CONFIG_PATH as _acp
-                _ac = _json.loads(_acp.read_text()) if _acp.exists() else {}
+                from league_context import get_statsplus_cookie as _gsc
                 from web_league_context import get_db as _gdb
                 conn = _gdb()
                 counts = {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
                           for t in ["players","ratings","batting_stats","pitching_stats","contracts","teams"]}
                 conn.close()
-                _ck = _ac.get("statsplus_cookie", "")
+                _ck = _gsc(cfg.league_dir)
                 _sid, _csrf = "", ""
                 for _p in _ck.split(";"):
                     _p = _p.strip()
@@ -1160,9 +1174,8 @@ def settings():
     state = queries.get_state()
 
     # Connection info
-    from league_context import APP_CONFIG_PATH
-    app_cfg = _json.loads(APP_CONFIG_PATH.read_text()) if APP_CONFIG_PATH.exists() else {}
-    cookie = app_cfg.get("statsplus_cookie", "")
+    from league_context import get_statsplus_cookie
+    cookie = get_statsplus_cookie(cfg.league_dir)
     session_id, csrf_token = "", ""
     for part in cookie.split(";"):
         part = part.strip()
@@ -1344,10 +1357,22 @@ def onboard_start_refresh():
     state_path = config_dir / "state.json"
     if not state_path.exists():
         state_path.write_text(_json.dumps({"game_date": "", "year": 2033, "my_team_id": 1}, indent=2) + "\n")
-    # Set as active league so refresh.py writes to the right directory
+    # Set as the global default (for brand-new sessions) and this session's
+    # active league (so the browser currently running onboarding actually
+    # switches to it — the global default alone no longer drives an
+    # existing session once it has a session["active_league"] set).
     app_cfg = _json.loads(APP_CONFIG_PATH.read_text()) if APP_CONFIG_PATH.exists() else {}
     app_cfg["active_league"] = slug
     APP_CONFIG_PATH.write_text(_json.dumps(app_cfg, indent=2) + "\n")
+    session["active_league"] = slug
+    # Transplant the bootstrap cookie (captured globally in onboard step 1,
+    # before this league's own directory existed) into this league's own
+    # per-league storage, so future refreshes for it don't depend on the
+    # shared global fallback (which a second onboarded league would overwrite).
+    from league_context import get_statsplus_cookie, set_statsplus_cookie
+    bootstrap_cookie = get_statsplus_cookie(league_dir)
+    if bootstrap_cookie:
+        set_statsplus_cookie(bootstrap_cookie, league_dir)
 
     _onboard_refresh.update(running=True, stage="Starting...", error="", done=False, slug=slug)
     ratings_poll_url = data.get("ratings_poll_url", "")
@@ -1453,10 +1478,18 @@ def onboard_step3():
 def refresh():
     if not _refresh_lock.acquire(blocking=False):
         return jsonify({"status": "already_running"}), 409
+    # Capture the current session's active league now, while we still have
+    # request context — the background thread has none.
+    from league_context import get_statsplus_cookie
+    cfg = _get_cfg()
+    slug = g.league_slug
+    league_dir = g.league_dir
+    statsplus_slug = cfg.settings.get("statsplus_slug", "")
+    cookie = get_statsplus_cookie(league_dir)
     _refresh_status["running"] = True
     _refresh_status["result"] = None
     _refresh_status["message"] = ""
-    threading.Thread(target=_run_refresh, daemon=True).start()
+    threading.Thread(target=_run_refresh, args=(slug, league_dir, statsplus_slug, cookie), daemon=True).start()
     return jsonify({"status": "started"})
 
 
@@ -1478,7 +1511,7 @@ def api_game_date():
         from league_context import get_statsplus_cookie
         cfg = _get_cfg()
         slug = cfg.settings.get("statsplus_slug", "")
-        cookie = get_statsplus_cookie()
+        cookie = get_statsplus_cookie(cfg.league_dir)
         if slug and cookie:
             client.configure(slug, cookie)
         remote_date = client.get_date().strip()
@@ -1489,9 +1522,9 @@ def api_game_date():
 
 @app.route("/api/session-cookie")
 def api_session_cookie():
-    """Return current session cookie components."""
+    """Return current session cookie components for the active league."""
     from league_context import get_statsplus_cookie
-    cookie = get_statsplus_cookie() or ""
+    cookie = get_statsplus_cookie(_get_cfg().league_dir) or ""
     sid = ""
     csrf = ""
     for part in cookie.split(";"):
@@ -1505,9 +1538,8 @@ def api_session_cookie():
 
 @app.route("/api/save-session-cookie", methods=["POST"])
 def api_save_session_cookie():
-    """Save a new session cookie."""
-    import json as _json
-    from league_context import APP_CONFIG_PATH
+    """Save a new session cookie for the active league."""
+    from league_context import set_statsplus_cookie
     data = request.get_json(silent=True) or {}
     sid = data.get("session_id", "").strip()
     csrf = data.get("csrf_token", "").strip()
@@ -1515,9 +1547,7 @@ def api_save_session_cookie():
     if cookie and csrf:
         cookie += f";csrftoken={csrf}"
     try:
-        app_cfg = _json.loads(APP_CONFIG_PATH.read_text()) if APP_CONFIG_PATH.exists() else {}
-        app_cfg["statsplus_cookie"] = cookie
-        APP_CONFIG_PATH.write_text(_json.dumps(app_cfg, indent=2) + "\n")
+        set_statsplus_cookie(cookie, _get_cfg().league_dir)
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
@@ -1532,7 +1562,7 @@ def api_test_connection():
     cookie = data.get("cookie", "").strip()
     if not cookie:
         from league_context import get_statsplus_cookie
-        cookie = get_statsplus_cookie()
+        cookie = get_statsplus_cookie(cfg.league_dir)
     if not cookie:
         return jsonify({"ok": False, "error": "No cookie configured"})
     try:

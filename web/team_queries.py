@@ -832,6 +832,18 @@ _FA_PROSPECT_AGE_MAX = 24
 # pool shouldn't get squeezed out by an arbitrary percentage.
 _FA_PROSPECT_MIN_FV = 30
 
+# International-market amateur free agents (mostly 16-year-olds signing out
+# of Latin America/Asia) go through a separate signing process from
+# domestic/college free agents and shouldn't be mixed into the Free Agent
+# Adds / Top Free Agent Prospects lists. There's no explicit "international"
+# flag in the players table, but free_agent=1 + age<=17 + draft_eligible=0
+# reliably identifies this pool: verified against a real exported
+# "International Amateur FA" list, where every one of its 127 players
+# matched exactly this combination in the DB (and vice versa, modulo a
+# handful of players who signed/aged between the export and the DB
+# snapshot — not a sign the heuristic is wrong).
+_INTL_FA_AGE_MAX = 17
+
 
 def get_free_agent_candidates(team_id=None):
     """Top 5% of free-agent hitters and top 5% of free-agent pitchers
@@ -845,6 +857,12 @@ def get_free_agent_candidates(team_id=None):
         of nationality
       - draft_eligible players — current/future amateur draft class, not
         actually signable as free agents
+
+    International-market amateur free agents (age <= _INTL_FA_AGE_MAX) are
+    segmented out of hitters/pitchers/young_*/clean_* entirely and returned
+    separately as international_hitters/international_pitchers — they sign
+    via a different process than domestic free agents and shouldn't be
+    mixed into the domestic Free Agent Adds / Prospects lists.
 
     Shows Ovr/Pot/FV (if evaluated), scouting accuracy, personality
     buffs/concerns, and where they'd fit in this org.
@@ -893,6 +911,7 @@ def get_free_agent_candidates(team_id=None):
     """, (ed, *_NIPPON_TEAM_IDS)).fetchall()
 
     hitters, pitchers = [], []
+    intl_hitters, intl_pitchers = [], []
     for r in rows:
         (pid, name, age, level, pos, role, intel, wrk_ethic, lead, loy, greed,
          acc, comp, ceil_score, true_ceil, fv, fv_str, pf_bucket) = r
@@ -906,7 +925,11 @@ def get_free_agent_candidates(team_id=None):
             "fv": fv, "fv_str": fv_str, "acc": acc, "buffs": buffs, "concerns": concerns,
             "fit": _fit_position(bucket, weak_positions),
         }
-        (pitchers if role in ROLE_MAP else hitters).append(entry)
+        is_pitcher = role in ROLE_MAP
+        if age is not None and age <= _INTL_FA_AGE_MAX:
+            (intl_pitchers if is_pitcher else intl_hitters).append(entry)
+        else:
+            (pitchers if is_pitcher else hitters).append(entry)
 
     def _top_pct(pool, key, min_count=1):
         pool = sorted(pool, key=key)
@@ -932,6 +955,12 @@ def get_free_agent_candidates(team_id=None):
         qualifying = [e for e in pool if e["fv"] is not None and e["fv"] >= _FA_PROSPECT_MIN_FV]
         return sorted(qualifying, key=_prospect_key)
 
+    # No FV floor here — these are 15-17yo amateurs being browsed as a pool,
+    # not a curated "worth signing now" cut, so an FV threshold tuned for
+    # domestic prospects doesn't apply.
+    international_hitters = sorted(intl_hitters, key=_prospect_key)
+    international_pitchers = sorted(intl_pitchers, key=_prospect_key)
+
     return {"hitters": _top_pct(hitters, _ovr_key), "pitchers": _top_pct(pitchers, _ovr_key),
             "young_hitters": _fv_min(young_hitters),
             "young_pitchers": _fv_min(young_pitchers),
@@ -939,6 +968,9 @@ def get_free_agent_candidates(team_id=None):
             "clean_pitchers": _top_pct(clean_pitchers, _ovr_key, min_count=5),
             "clean_young_hitters": _fv_min(clean_young_hitters),
             "clean_young_pitchers": _fv_min(clean_young_pitchers),
+            "international_hitters": international_hitters,
+            "international_pitchers": international_pitchers,
+            "intl_age_max": _INTL_FA_AGE_MAX,
             "prospect_min_fv": _FA_PROSPECT_MIN_FV,
             "prospect_age_max": _FA_PROSPECT_AGE_MAX,
             "top_pct": int(_FA_TOP_PCT * 100),

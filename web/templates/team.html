@@ -1120,6 +1120,17 @@
     <h3 style="font-size:13px; margin:16px 0 6px">Pitchers</h3>
     {{ add_table(fa_candidates.clean_young_pitchers, "fa-clean-young-pitchers", false) }}
   </div>
+
+  <div class="panel">
+    <h2>International Free Agent Pool <span style="color:var(--text-dim); font-weight:400; font-size:13px">({{ fa_candidates.international_hitters|length }} hitters, {{ fa_candidates.international_pitchers|length }} pitchers)</span></h2>
+    <div style="font-size:12px; color:var(--text-dim); margin-bottom:8px">
+      International-market amateur free agents (age {{ fa_candidates.intl_age_max }} or under) — these sign via a separate process from domestic free agents and are kept out of the lists above. Ranked by FV (or potential ceiling when unevaluated); no FV floor applied since these are early-stage amateur evaluations, not a curated "sign now" cut.
+    </div>
+    <h3 style="font-size:13px; margin:12px 0 6px">Hitters</h3>
+    {{ add_table(fa_candidates.international_hitters, "fa-intl-hitters", false) }}
+    <h3 style="font-size:13px; margin:16px 0 6px">Pitchers</h3>
+    {{ add_table(fa_candidates.international_pitchers, "fa-intl-pitchers", false) }}
+  </div>
 </div>
 
 <style>

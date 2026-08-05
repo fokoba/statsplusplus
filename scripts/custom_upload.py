@@ -355,15 +355,15 @@ def evaluate_row(d: dict) -> dict | None:
     of_rng = _num(d.get("OF RNG"))
     best_position, best_position_grade = (None, None) if is_pitcher else _best_position(d)
 
-    # NOTE: unverified against a real example. This sample export was your
-    # own signed roster, so Claim/WAIV/DFA/TM never show a free-agent or
-    # waivers row here to confirm against. Best guess based on standard OOTP
-    # convention: a free agent's "TM" field literally reads "Free Agent";
-    # "on waivers" is inferred from the Claim/WAIV/DFA columns being
-    # populated (non "-") rather than blank. Verify once you upload an
-    # export that actually contains such players.
-    tm_field = (d.get("TM") or "").strip()
-    is_free_agent = tm_field.lower() == "free agent"
+    # Verified against a real "All Free Agents" export (1,926 rows, zero
+    # exceptions): a free agent's "TM" field holds their *former* team name
+    # (e.g. "Cleveland Indians"), not literal "Free Agent" text — ORG="-"
+    # combined with RET="No" is the actual signal (ORG="-" alone also
+    # matches retired legacy players, hence the RET check).
+    # "on waivers" is still an unverified guess (no real waiver-wire export
+    # seen yet): inferred from the Claim/WAIV/DFA columns being populated
+    # (non "-") rather than blank.
+    is_free_agent = org_name == "-" and (d.get("RET") or "").strip().lower() == "no"
     on_waivers = any((d.get(c) or "-").strip() != "-" for c in ("Claim", "WAIV", "DFA"))
     platoon_gap, platoon_strong_side = _platoon_split(d, is_pitcher)
 

@@ -97,6 +97,7 @@
         <th data-sort="str">Risk</th>
         <th data-sort="str">Scout</th>
         <th data-sort="str">R5</th>
+        <th data-sort="num">Ask</th>
         <th data-sort="str">Best Pos</th>
         <th data-sort="num">Grade</th>
         <th data-sort="str">Platoon</th>
@@ -117,6 +118,7 @@
         <td style="color:{% if p.risk == 'Low' %}#4caf50{% elif p.risk == 'Medium' %}#ffc107{% elif p.risk == 'High' %}#ff9800{% else %}#f44336{% endif %}">{{ p.risk }}</td>
         <td>{{ p.acc }}</td>
         <td>{{ 'Yes' if p.rule5_eligible else '' }}</td>
+        <td>{{ p.ask or '-' }}</td>
         <td>{{ p.best_position or '' }}</td>
         <td>{{ p.best_position_grade if p.best_position_grade is not none else '' }}</td>
         <td>{{ p.platoon_strong_side or '' }}</td>

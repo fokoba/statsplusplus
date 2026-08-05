@@ -344,6 +344,13 @@ def evaluate_row(d: dict) -> dict | None:
     fv_grade, risk = calc_fv(fv_input)
 
     rule5_eligible = (d.get("R5") or "").strip().lower() == "yes"
+    # Annual salary demand ("$9.0m" etc.) — verified against a real free
+    # agent export: DEM is set for ~22% of free agents (the rest show "-",
+    # seemingly players who haven't been actively shopped/negotiated with
+    # yet, no clean correlation with scouting accuracy). No MLB/MiLB
+    # contract-preference field exists anywhere in this export.
+    _dem = (d.get("DEM") or "").strip()
+    ask = _dem if _dem and _dem != "-" else None
     if_rng = _num(d.get("IF RNG"))
     of_rng = _num(d.get("OF RNG"))
     best_position, best_position_grade = (None, None) if is_pitcher else _best_position(d)
@@ -367,7 +374,7 @@ def evaluate_row(d: dict) -> dict | None:
         "composite_score": composite, "ceiling_score": ceiling,
         "true_ceiling": true_ceiling, "fv": fv_grade, "risk": risk,
         "acc": acc, "org": org_name, "org_abbr": org_abbr,
-        "rule5_eligible": rule5_eligible,
+        "rule5_eligible": rule5_eligible, "ask": ask,
         "if_rng": if_rng, "of_rng": of_rng,
         "best_position": best_position, "best_position_grade": best_position_grade,
         "is_free_agent": is_free_agent, "on_waivers": on_waivers,

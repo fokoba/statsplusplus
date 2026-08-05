@@ -85,7 +85,7 @@
   <table id="custom-upload-table">
     <thead>
       <tr>
-        <th></th>
+        <th><input type="checkbox" id="cu-select-all" title="Select/deselect all"></th>
         <th data-sort="str" class="left">Name</th>
         <th data-sort="str">Pos</th>
         <th data-sort="str" class="left">Team</th>
@@ -206,6 +206,21 @@ function cuFilterResults() {
       saveMarks(marks);
     });
   });
+
+  var selectAll = document.getElementById('cu-select-all');
+  if (selectAll) {
+    selectAll.addEventListener('change', function() {
+      document.querySelectorAll('.cu-checkbox').forEach(function(cb) {
+        var row = cb.closest('.cu-row');
+        // Only affect rows currently visible under the active filters.
+        if (row.style.display === 'none') return;
+        if (cb.checked !== selectAll.checked) {
+          cb.checked = selectAll.checked;
+          cb.dispatchEvent(new Event('change'));
+        }
+      });
+    });
+  }
 })();
 </script>
 {% endif %}

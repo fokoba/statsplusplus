@@ -365,7 +365,12 @@ def get_hitter_percentiles(pid, split_id=1, year=None, level=None):
     is_current = (year == current_year)
 
     games = _level_games(conn, year, level)
-    min_pa = max(round(2.0 * games), 30) if split_id == 1 else 20
+    if split_id == 1:
+        min_pa = max(round(2.0 * games), 30)
+    else:
+        # Splits: ~35-40% of PA come vs each hand. Scale with season progress
+        # but at a lower rate so early-season splits still display (dimmed).
+        min_pa = max(round(0.7 * games), 20)
 
     # Data source based on level
     bat_table, level_filter, level_params = _level_batting_source(level)
@@ -465,11 +470,14 @@ def get_hitter_percentiles(pid, split_id=1, year=None, level=None):
         tag = None
         expected = None
         if is_current:
+            # Tags require sufficient individual sample, but NOT full qualifier status.
+            # 80+ PA is enough to detect over/underperformance vs ratings.
+            _show_tags = qualified or player_pa >= 80
             if label in HITTER_TAG_MAP:
                 sk, rk, s_inv, r_inv = HITTER_TAG_MAP[label]
                 r_pctile = _pctile(player_rat[rk], rat_vals[rk])
                 expected = r_pctile
-                if qualified:
+                if _show_tags:
                     gap = pctile - r_pctile
                     thresh = _tag_threshold(r_pctile)
                     tag = "hot" if gap >= thresh else ("cold" if gap <= -thresh else None)
@@ -481,7 +489,7 @@ def get_hitter_percentiles(pid, split_id=1, year=None, level=None):
                 else:
                     # MiLB or no model: use contact percentile as proxy
                     expected = cntct_pctile
-                if qualified:
+                if _show_tags:
                     gap = pctile - expected
                     thresh = _tag_threshold(expected)
                     tag = "lucky" if gap >= thresh else ("unlucky" if gap <= -thresh else None)
@@ -511,11 +519,19 @@ def get_pitcher_percentiles(pid, split_id=1, year=None, level=None):
     is_current = (year == current_year)
 
     games = _level_games(conn, year, level)
-    min_ip = max(round(0.7 * games), 5) if split_id == 1 else 5
+    if split_id == 1:
+        min_ip = max(round(0.7 * games), 5)
+    else:
+        # Splits: scale with season progress at a lower rate (~35% of IP come
+        # vs each hand). Floor stays at 5 so early-season data still shows.
+        min_ip = max(round(0.25 * games), 5)
 
     # RPs pitch far fewer innings — use a lower pool threshold so relievers
     # with a full workload aren't flagged as small sample.
-    rp_min_ip = max(round(0.35 * games), 5) if split_id == 1 else 5
+    if split_id == 1:
+        rp_min_ip = max(round(0.35 * games), 5)
+    else:
+        rp_min_ip = max(round(0.12 * games), 5)
 
     # Data source based on level
     pit_table, level_filter, level_params = _level_pitching_source(level)
@@ -661,11 +677,12 @@ def get_pitcher_percentiles(pid, split_id=1, year=None, level=None):
         tag = None
         expected = None
         if is_current:
+            _show_tags_p = qualified or player_ip >= 30
             if label == "HR/9":
                 rk = "hra" if _has_hra else "mov"
                 r_pctile = _pctile(player_rat.get(rk) or 0, rat_vals[rk])
                 expected = r_pctile
-                if qualified:
+                if _show_tags_p:
                     gap = pctile - r_pctile
                     thresh = _tag_threshold(r_pctile)
                     tag = "hot" if gap >= thresh else ("cold" if gap <= -thresh else None)
@@ -677,7 +694,8 @@ def get_pitcher_percentiles(pid, split_id=1, year=None, level=None):
                     exp_babip = 0.293  # league average fallback for MiLB
                 expected = _pctile(exp_babip, [pool[p]["babip"] for p in pool])
                 expected = 100 - expected  # invert (lower BABIP = higher percentile)
-                if qualified:
+                _show_tags_p = qualified or player_ip >= 30
+                if _show_tags_p:
                     gap = pctile - expected
                     thresh = _tag_threshold(expected)
                     tag = "lucky" if gap >= thresh else ("unlucky" if gap <= -thresh else None)
@@ -686,7 +704,7 @@ def get_pitcher_percentiles(pid, split_id=1, year=None, level=None):
                 if _gb_reg and player_rat.get("gb"):
                     exp_gb = _gb_reg["intercept"] + _gb_reg["slope"] * player_rat["gb"]
                     expected = _pctile(exp_gb, [pool[p]["gb_pct"] for p in pool])
-                    if qualified:
+                    if _show_tags_p:
                         gap = pctile - expected
                         thresh = _tag_threshold(expected)
                         tag = "hot" if gap >= thresh else ("cold" if gap <= -thresh else None)
@@ -694,7 +712,7 @@ def get_pitcher_percentiles(pid, split_id=1, year=None, level=None):
                 sk, rk, s_inv, r_inv = PITCHER_TAG_MAP[label]
                 r_pctile = _pctile(player_rat[rk], rat_vals[rk])
                 expected = r_pctile
-                if qualified:
+                if _show_tags_p:
                     gap = pctile - r_pctile
                     thresh = _tag_threshold(r_pctile)
                     tag = "hot" if gap >= thresh else ("cold" if gap <= -thresh else None)

@@ -2277,6 +2277,17 @@ def get_minor_league_roster(team_id):
     hitters.sort(key=lambda x: x["_sort"])
     pitchers.sort(key=lambda x: x["_sort"])
 
+
+    # Compute promotion readiness and demotion risk for all players
+    try:
+        from promotion_readiness import compute_promotion_readiness, compute_demotion_risk
+        _league_dir = get_cfg().league_dir
+        for p in hitters + pitchers:
+            p["promo"] = compute_promotion_readiness(p["pid"], conn, _league_dir)
+            p["demotion"] = compute_demotion_risk(p["pid"], conn, _league_dir)
+    except Exception:
+        pass
+
     return {"hitters": hitters, "pitchers": pitchers}
 
 
@@ -2409,6 +2420,16 @@ def get_org_minor_league_roster(parent_team_id):
 
     hitters.sort(key=lambda x: x["_sort"])
     pitchers.sort(key=lambda x: x["_sort"])
+
+    # Compute promotion readiness and demotion risk for all players
+    try:
+        from promotion_readiness import compute_promotion_readiness, compute_demotion_risk
+        _league_dir = get_cfg().league_dir
+        for p in hitters + pitchers:
+            p["promo"] = compute_promotion_readiness(p["pid"], conn, _league_dir)
+            p["demotion"] = compute_demotion_risk(p["pid"], conn, _league_dir)
+    except Exception:
+        pass
 
     return {"hitters": hitters, "pitchers": pitchers}
 

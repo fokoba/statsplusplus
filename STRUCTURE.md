@@ -67,6 +67,7 @@ statsplusplus/
 │   ├── player_queries.py       # Player detail (ratings, stats, splits, surplus)
 │   ├── trade_queries.py        # Trade tab queries (org roster, trade valuation)
 │   ├── percentiles.py          # Percentile rankings with expected-value modeling
+│   ├── promotion_readiness.py  # Promotion readiness / demotion risk assessment (league-calibrated badges)
 │   ├── templates/
 │   │   ├── base.html               # Layout (header, nav, breadcrumbs, refresh, player hover popup)
 │   │   ├── league.html             # League dashboard (standings, leaders, prospects, draft)

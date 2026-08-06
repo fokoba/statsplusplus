@@ -4,6 +4,30 @@ Completed and deferred work items, organized by session. Moved from `task_list.m
 
 ---
 
+## Session 75 (2026-08-06)
+
+### Features
+
+- **Split percentile qualification threshold scaling** (`percentiles.py`) — Split PA/IP thresholds now scale with season progress instead of a flat 20 PA cutoff. Hitters: `0.7 × team_games` (≈20 PA in April → 56 PA by mid-season → 113 PA full season). Pitchers: `0.25 × team_games` for IP. Prevents full-confidence percentile bars from appearing on 29-PA split samples. The `pctile-unqualified` CSS dimming still handles the visual distinction.
+
+- **Player stats tab improvements** (`player.html`, `player_queries.py`) — (1) Level filter dropdown defaults to MLB when both MLB and MiLB stats exist, allowing quick focus on relevant data. (2) Stats tables now sort most recent year first (was chronological). (3) MLB career totals row added for batting, pitching, and per-position fielding — shows weighted/summed career line with visual separator.
+
+- **Draft board UX overhaul** (`league.html`) — Consolidated settings flow: removed standalone ⚙️ button; Auto-Draft List now opens a settings modal with "Save & Generate List" action; new Sim modal with pick/rounds inputs and a collapsible settings section; Upload Pool modal with step-by-step OOTP export instructions inline.
+
+- **Promotion readiness + demotion risk indicators** (`web/promotion_readiness.py`, `player_queries.py`, `team_queries.py`, `player.html`, `team_minor.html`, `team_minors_all.html`) — New module provides league-calibrated assessment of whether a minor leaguer is ready for promotion or an MLB player is struggling at their current level. Badges: ↑ Ready (stat performance + age warrant immediate promotion), Knocking (trending toward promotion), Overmatched (stats suggest player is in over their head), Struggling (MLB player underperforming). Promo column added to minor league roster pages and All MiLB page. Suppresses false signals for young players at aggressive level assignments.
+
+- **Positional rankings enhancement** (`queries.py`, `league.html`) — ±Avg column shows each player's composite relative to the positional median, color-coded green (above) or red (below). Hitter groups additionally get OFF/DEF component breakdown using the actual positional defensive rating from the evaluation engine. Pitchers get ±Avg only (no forced offensive/defensive split).
+
+- **MiLB expected-value tags** (`percentiles.py`) — Extended the hot/cold/lucky/unlucky expected-value system to work at all minor league levels (was MLB-only). Lowered tag threshold to 80 PA / 30 IP (was full qualifier). Same visual treatment as MLB percentile rankings — helps identify breakouts and slumps at every level.
+
+### Bug Fixes / Infrastructure
+
+- **Refresh targeting wrong league** (PR #8, Koba) — `refresh.py` silently targeted whichever league was active in `app_config.json`, not the league the user was viewing in the browser. Fix: StatsPlus cookie is now per-league (stored in `league_settings.json`), and refresh routes pass the explicit league slug. Also fixes state.json merge (no longer overwrites user's `my_team_id` on refresh).
+
+- **Draft pool import instructions** — Step-by-step OOTP export instructions now shown directly in the Upload Pool modal, eliminating the need for external documentation.
+
+---
+
 ## Session 74 (2026-08-01 — 2026-08-02)
 
 ### Major: MiLB Stats in Prospect Evaluation

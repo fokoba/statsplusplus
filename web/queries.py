@@ -1198,7 +1198,9 @@ def get_positional_rankings():
     # MLB players with composite scores
     mlb_rows = conn.execute("""
         SELECT p.player_id, p.name, p.age, p.pos, p.role, p.team_id,
-               r.composite_score, r.true_ceiling
+               r.composite_score, r.true_ceiling,
+               r.offensive_grade, r.defensive_value, r.ctrl,
+               r.c, r.first_b, r.second_b, r.third_b, r.ss, r.lf, r.cf, r.rf
         FROM players p
         JOIN latest_ratings r ON r.player_id = p.player_id
         WHERE p.level = '1' AND r.composite_score IS NOT NULL
@@ -1242,10 +1244,11 @@ def get_positional_rankings():
     for key, cfg in _POS_GROUPS:
         group = {"label": cfg["label"], "mlb": [], "prospects": []}
 
+        # Collect all MLB players for this position (for median calculation)
+        all_composites = []
+
         # Assign MLB players
         for r in mlb_rows:
-            if len(group["mlb"]) >= 20:
-                break
             pos, role = r["pos"], r["role"]
             pid = r["player_id"]
 
@@ -1268,12 +1271,35 @@ def get_positional_rankings():
                 continue
             if r["team_id"] not in mlb_org_ids:
                 continue
-            group["mlb"].append({
-                "pid": r["player_id"], "name": r["name"], "age": r["age"],
-                "team": teams.get(r["team_id"], "?"),
-                "composite": r["composite_score"], "ceiling": r["true_ceiling"],
-                "rank": len(group["mlb"]) + 1,
-            })
+
+            all_composites.append(r["composite_score"])
+            if len(group["mlb"]) < 20:
+                from ratings import norm as _norm_r
+                # Get the defensive rating for this specific position group
+                _pos_def_map = {
+                    "C": r["c"], "1B": r["first_b"], "2B": r["second_b"],
+                    "3B": r["third_b"], "SS": r["ss"],
+                    "CF": r["cf"],
+                    "COF": max(r["lf"] or 0, r["rf"] or 0) or None,
+                }
+                _pos_def_raw = _pos_def_map.get(key)
+                group["mlb"].append({
+                    "pid": r["player_id"], "name": r["name"], "age": r["age"],
+                    "team": teams.get(r["team_id"], "?"),
+                    "composite": r["composite_score"], "ceiling": r["true_ceiling"],
+                    "off": r["offensive_grade"],
+                    "def": _norm_r(_pos_def_raw) if _pos_def_raw else None,
+                    "rank": len(group["mlb"]) + 1,
+                })
+
+        # Compute positional median and add vs_avg
+        pos_median = 0
+        if all_composites:
+            sorted_comps = sorted(all_composites)
+            pos_median = sorted_comps[len(sorted_comps) // 2]
+        group["median"] = pos_median
+        for p in group["mlb"]:
+            p["vs_avg"] = p["composite"] - pos_median if p["composite"] and pos_median else 0
 
         # Assign prospects
         for r in prospect_rows:

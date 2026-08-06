@@ -537,7 +537,7 @@
 {# ── Player Header ── #}
 <div class="summary-bar">
   <div class="summary-item">
-    <span class="label"><a class="team-link" href="/team/{{ p.tid }}">{{ p.team_abbr }}</a> · {{ p.level }}</span>
+    <span class="label"><a class="team-link" href="/team/{{ p.tid }}">{{ p.team_abbr }}</a> · {{ p.level }}{% if p.promotion_readiness and p.promotion_readiness.tier in ('ready', 'knocking') %} <span class="promo-badge promo-{{ p.promotion_readiness.tier }}" title="{{ p.promotion_readiness.reasons|join('; ') }}">{{ p.promotion_readiness.label }}</span>{% endif %}{% if p.demotion_risk %} <span class="promo-badge promo-{{ p.demotion_risk.tier }}" title="{{ p.demotion_risk.reasons|join('; ') }}">{{ p.demotion_risk.label }}</span>{% endif %}</span>
     <span class="value">{{ p.name }} <a href="{{ statsplus_base }}/player/{{ p.pid }}" target="_blank" class="ext-link" title="View on StatsPlus">↗</a></span>
   </div>
   <div class="summary-item">
@@ -1225,6 +1225,7 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
 {% if p.bat_stats or p.milb_bat_stats %}
 <div class="panel">
   <h2>Batting Stats</h2>
+  <div class="stats-filters">
   {% if p.bat_splits.vl or p.bat_splits.vr %}
   <div class="split-selector">
     <button class="split-btn active" onclick="switchSplit(this, 'overall')">Overall</button>
@@ -1232,6 +1233,21 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
     <button class="split-btn" onclick="switchSplit(this, 'vr')">vs R</button>
   </div>
   {% endif %}
+  {% if p.bat_stats and p.milb_bat_stats %}
+  {% set bat_levels_seen = [] %}
+  {% for s in p.milb_bat_stats %}{% if s.level_label not in bat_levels_seen %}{% set _ = bat_levels_seen.append(s.level_label) %}{% endif %}{% endfor %}
+  <select class="level-filter" onchange="filterStatsLevel(this)">
+    <option value="all">All Levels</option>
+    <option value="MLB" selected>MLB</option>
+    {% for lv in ["AAA","AA","A+","A","A-Short","Rookie","Indy","Intl"] %}{% if lv in bat_levels_seen %}
+    <option value="{{ lv }}">{{ lv }}</option>
+    {% endif %}{% endfor %}
+    {% for lv in bat_levels_seen %}{% if lv not in ["AAA","AA","A+","A","A-Short","Rookie","Indy","Intl"] %}
+    <option value="{{ lv }}">{{ lv }}</option>
+    {% endif %}{% endfor %}
+  </select>
+  {% endif %}
+  </div>
   <table class="split-view" data-split="overall">
     <thead>
       <tr>
@@ -1247,8 +1263,8 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
     {% set all_bat = [] %}
     {% for s in p.bat_stats %}{% set _ = all_bat.append({"src":"mlb","year":s.year,"g":s.g,"pa":s.pa,"avg":s.avg,"obp":s.obp,"slg":s.slg,"ops":s.ops,"iso":s.iso,"bb_pct":s.bb_pct,"so_pct":s.so_pct,"babip":s.babip,"hr":s.hr,"rbi":s.rbi,"sb":s.sb,"cs":s.cs,"ops_plus":s.ops_plus,"war":s.war,"team":s.team,"stints":s.stints if s.stints is defined else none}) %}{% endfor %}
     {% for s in p.milb_bat_stats %}{% set _ = all_bat.append({"src":"milb","year":s.year,"g":s.g,"pa":s.pa,"avg":s.avg,"obp":s.obp,"slg":s.slg,"ops":s.ops,"iso":s.iso,"bb_pct":s.bb_pct,"so_pct":s.so_pct,"babip":s.babip,"hr":s.hr,"rbi":s.rbi,"sb":s.sb,"cs":none,"ops_plus":none,"war":s.war,"team":s.team_name,"level_label":s.level_label,"league_name":s.league_name,"stints":none}) %}{% endfor %}
-    {% for s in all_bat|sort(attribute='year') %}
-    <tr{% if s.stints %} class="totals-row"{% endif %}>
+    {% for s in all_bat|sort(attribute='year', reverse=true) %}
+    <tr{% if s.stints %} class="totals-row"{% endif %} data-level="{% if s.src == 'mlb' %}MLB{% else %}{{ s.level_label }}{% endif %}">
       <td>{{ s.year }}{% if s.stints %} <span class="stint-count">({{ s.stints|length }} teams)</span>{% endif %}</td>
       <td class="left">{% if s.src == 'mlb' %}MLB{% else %}{{ s.level_label }}{% endif %}</td>
       <td class="left"{% if s.src == 'milb' %} title="{{ s.league_name }}"{% endif %}>{% if s.stints %}{% elif s.team %}{{ s.team }}{% endif %}</td>
@@ -1260,7 +1276,7 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
     </tr>
     {% if s.stints %}
     {% for st in s.stints %}
-    <tr class="stint-row">
+    <tr class="stint-row" data-level="MLB">
       <td></td><td></td><td class="left stint-team">↳ {{ st.team }}</td><td>{{ st.g }}</td><td>{{ st.pa }}</td>
       <td>{{ "%.3f"|format(st.avg) }}</td><td>{{ "%.3f"|format(st.obp) }}</td><td>{{ "%.3f"|format(st.slg) }}</td><td>{{ "%.3f"|format(st.ops) }}</td><td>{{ "%.3f"|format(st.iso) }}</td>
       <td>{{ "%.1f"|format(st.bb_pct) }}</td><td>{{ "%.1f"|format(st.so_pct) }}</td><td>{{ "%.3f"|format(st.babip) }}</td>
@@ -1270,6 +1286,18 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
     {% endfor %}
     {% endif %}
     {% endfor %}
+    {% if p.bat_career %}
+    <tr class="career-totals-row" data-level="MLB">
+      <td><strong>Career</strong></td>
+      <td class="left">MLB</td>
+      <td class="left"></td>
+      <td>{{ p.bat_career.g }}</td><td>{{ p.bat_career.pa }}</td>
+      <td><strong>{{ "%.3f"|format(p.bat_career.avg) }}</strong></td><td><strong>{{ "%.3f"|format(p.bat_career.obp) }}</strong></td><td><strong>{{ "%.3f"|format(p.bat_career.slg) }}</strong></td><td><strong>{{ "%.3f"|format(p.bat_career.ops) }}</strong></td><td>{{ "%.3f"|format(p.bat_career.iso) }}</td>
+      <td>{{ "%.1f"|format(p.bat_career.bb_pct) }}</td><td>{{ "%.1f"|format(p.bat_career.so_pct) }}</td><td>{{ "%.3f"|format(p.bat_career.babip) }}</td>
+      <td>{{ p.bat_career.hr }}</td><td>{{ p.bat_career.rbi }}</td><td>{{ p.bat_career.sb }}</td><td>{{ p.bat_career.cs }}</td>
+      <td>{{ p.bat_career.ops_plus }}</td><td><strong>{{ "%.1f"|format(p.bat_career.war) }}</strong></td>
+    </tr>
+    {% endif %}
     </tbody>
   </table>
   {% for key in ["vl","vr"] %}
@@ -1300,6 +1328,7 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
 {% if p.pit_stats or p.milb_pit_stats %}
 <div class="panel" style="margin-top:16px">
   <h2>Pitching Stats</h2>
+  <div class="stats-filters">
   {% if p.pit_splits.vl or p.pit_splits.vr %}
   <div class="split-selector">
     <button class="split-btn active" onclick="switchSplit(this, 'overall')">Overall</button>
@@ -1307,6 +1336,21 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
     <button class="split-btn" onclick="switchSplit(this, 'vr')">vs R</button>
   </div>
   {% endif %}
+  {% if p.pit_stats and p.milb_pit_stats %}
+  {% set pit_levels_seen = [] %}
+  {% for s in p.milb_pit_stats %}{% if s.level_label not in pit_levels_seen %}{% set _ = pit_levels_seen.append(s.level_label) %}{% endif %}{% endfor %}
+  <select class="level-filter" onchange="filterStatsLevel(this)">
+    <option value="all">All Levels</option>
+    <option value="MLB" selected>MLB</option>
+    {% for lv in ["AAA","AA","A+","A","A-Short","Rookie","Indy","Intl"] %}{% if lv in pit_levels_seen %}
+    <option value="{{ lv }}">{{ lv }}</option>
+    {% endif %}{% endfor %}
+    {% for lv in pit_levels_seen %}{% if lv not in ["AAA","AA","A+","A","A-Short","Rookie","Indy","Intl"] %}
+    <option value="{{ lv }}">{{ lv }}</option>
+    {% endif %}{% endfor %}
+  </select>
+  {% endif %}
+  </div>
   <table class="split-view" data-split="overall">
     <thead>
       <tr>
@@ -1322,8 +1366,8 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
     {% set all_pit = [] %}
     {% for s in p.pit_stats %}{% set _ = all_pit.append({"src":"mlb","year":s.year,"g":s.g,"gs":s.gs,"ip":s.ip,"era":s.era,"era_plus":s.era_plus,"fip":s.fip,"siera":s.siera,"k_pct":s.k_pct,"bb_pct":s.bb_pct,"k_bb_pct":s.k_bb_pct,"gb_pct":s.gb_pct,"babip":s.babip,"w":s.w,"l":s.l,"sv":s.sv,"hld":s.hld,"war":s.war,"team":s.team,"stints":s.stints if s.stints is defined else none}) %}{% endfor %}
     {% for s in p.milb_pit_stats %}{% set _ = all_pit.append({"src":"milb","year":s.year,"g":s.g,"gs":s.gs,"ip":s.ip,"era":s.era,"era_plus":none,"fip":none,"siera":none,"k_pct":s.k_pct,"bb_pct":s.bb_pct,"k_bb_pct":s.k_bb_pct,"gb_pct":s.gb_pct,"babip":s.babip,"w":s.w,"l":s.l,"sv":s.sv,"hld":s.hld,"war":s.war,"team":s.team_name,"level_label":s.level_label,"league_name":s.league_name,"stints":none}) %}{% endfor %}
-    {% for s in all_pit|sort(attribute='year') %}
-    <tr{% if s.stints %} class="totals-row"{% endif %}>
+    {% for s in all_pit|sort(attribute='year', reverse=true) %}
+    <tr{% if s.stints %} class="totals-row"{% endif %} data-level="{% if s.src == 'mlb' %}MLB{% else %}{{ s.level_label }}{% endif %}">
       <td>{{ s.year }}{% if s.stints %} <span class="stint-count">({{ s.stints|length }} teams)</span>{% endif %}</td>
       <td class="left">{% if s.src == 'mlb' %}MLB{% else %}{{ s.level_label }}{% endif %}</td>
       <td class="left"{% if s.src == 'milb' %} title="{{ s.league_name }}"{% endif %}>{% if s.stints %}{% elif s.team %}{{ s.team }}{% endif %}</td>
@@ -1339,7 +1383,7 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
     </tr>
     {% if s.stints %}
     {% for st in s.stints %}
-    <tr class="stint-row">
+    <tr class="stint-row" data-level="MLB">
       <td></td><td></td><td class="left stint-team">↳ {{ st.team }}</td><td>{{ st.g }}</td><td>{{ st.gs }}</td><td>{{ st.ip|fmt_ip }}</td>
       <td>{{ "%.2f"|format(st.era) if st.era is not none else "-" }}</td><td>-</td>
       <td>{{ "%.2f"|format(st.fip) }}</td><td>-</td>
@@ -1351,6 +1395,22 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
     {% endfor %}
     {% endif %}
     {% endfor %}
+    {% if p.pit_career %}
+    <tr class="career-totals-row" data-level="MLB">
+      <td><strong>Career</strong></td>
+      <td class="left">MLB</td>
+      <td class="left"></td>
+      <td>{{ p.pit_career.g }}</td><td>{{ p.pit_career.gs }}</td><td>{{ p.pit_career.ip|fmt_ip }}</td>
+      <td><strong>{{ "%.2f"|format(p.pit_career.era) }}</strong></td>
+      <td>{{ p.pit_career.era_plus }}</td>
+      <td><strong>{{ "%.2f"|format(p.pit_career.fip) }}</strong></td>
+      <td>{{ "%.2f"|format(p.pit_career.siera) }}</td>
+      <td>{{ "%.1f"|format(p.pit_career.k_pct) }}</td><td>{{ "%.1f"|format(p.pit_career.bb_pct) }}</td><td>{{ "%.1f"|format(p.pit_career.k_bb_pct) }}</td>
+      <td>{{ "%.1f"|format(p.pit_career.gb_pct) }}</td><td>{{ "%.3f"|format(p.pit_career.babip) }}</td>
+      <td>{{ p.pit_career.w }}</td><td>{{ p.pit_career.l }}</td><td>{{ p.pit_career.sv }}</td><td>{{ p.pit_career.hld }}</td>
+      <td><strong>{{ "%.1f"|format(p.pit_career.war) }}</strong></td>
+    </tr>
+    {% endif %}
     </tbody>
   </table>
   {% for key in ["vl","vr"] %}
@@ -1403,6 +1463,18 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
         <td>{{ "%.1f"|format(f.arm) if f.arm is not none else "-" }}</td>
       </tr>
       {% endfor %}
+      {% if p.fielding_career %}
+      {% for f in p.fielding_career %}
+      <tr class="career-totals-row">
+        <td><strong>Career</strong></td><td class="left"><strong>{{ f.pos }}</strong></td><td>{{ f.g }}</td>
+        <td>{{ f.ip|fmt_ip }}</td><td>{{ f.tc }}</td><td>{{ f.a }}</td>
+        <td>{{ f.e }}</td><td>{{ f.dp }}</td>
+        <td><strong>{{ "%.3f"|format(f.fpct) }}</strong></td>
+        <td>{{ "%.1f"|format(f.zr) if f.zr is not none else "-" }}</td>
+        <td>{{ "%.1f"|format(f.arm) if f.arm is not none else "-" }}</td>
+      </tr>
+      {% endfor %}
+      {% endif %}
     </tbody>
   </table>
 </div>
@@ -1455,6 +1527,43 @@ function switchSplit(btn, split) {
     t.style.display = t.dataset.split === split ? '' : 'none';
   });
 }
+
+function filterStatsLevel(select) {
+  var panel = select.closest('.panel');
+  var level = select.value;
+  var showSplits = (level === 'all' || level === 'MLB');
+  // Filter rows in the overall table
+  panel.querySelectorAll('table.split-view[data-split="overall"] tbody tr').forEach(function(row) {
+    if (level === 'all') {
+      row.style.display = '';
+    } else {
+      row.style.display = row.dataset.level === level ? '' : 'none';
+    }
+  });
+  // Hide/show split selector buttons (vL/vR only relevant for MLB)
+  var splitSelector = panel.querySelector('.split-selector');
+  if (splitSelector) {
+    splitSelector.style.display = showSplits ? '' : 'none';
+    // If switching away from MLB, reset to Overall view
+    if (!showSplits) {
+      panel.querySelectorAll('.split-btn').forEach(function(b) { b.classList.remove('active'); });
+      var overallBtn = panel.querySelector('.split-btn');
+      if (overallBtn) overallBtn.classList.add('active');
+      panel.querySelectorAll('.split-view').forEach(function(t) {
+        t.style.display = t.dataset.split === 'overall' ? '' : 'none';
+      });
+    }
+  }
+}
+
+// On page load, apply default filter (MLB selected) for any level-filter dropdowns
+document.addEventListener('DOMContentLoaded', function() {
+  document.querySelectorAll('.level-filter').forEach(function(select) {
+    if (select.value !== 'all') {
+      filterStatsLevel(select);
+    }
+  });
+});
 
 function loadPctileYear(pid, year) {
   // When year changes, update level dropdown and reload

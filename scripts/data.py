@@ -1,13 +1,20 @@
 """
 data.py — Data access layer. All DB reads go through here.
 Analysis scripts must not issue raw SQL or read JSON directly.
+
+MIGRATION NOTE: Uses statsplusplus.data.db.get_connection() for connections.
 """
 
-from db import get_conn
+from statsplusplus.data.db import get_connection
+
+
+def get_conn():
+    """Get a DB connection. Shorthand for package get_connection()."""
+    return get_connection()
 
 
 def get_players(parent_team_id: int) -> list[dict]:
-    with get_conn() as conn:
+    with get_connection() as conn:
         rows = conn.execute("""
             SELECT player_id, name AS Name, age AS Age,
                    team_id, parent_team_id, level AS Level,
@@ -18,11 +25,7 @@ def get_players(parent_team_id: int) -> list[dict]:
 
 
 def get_ratings(parent_team_id: int, snapshot_date: str = None, level: int = None) -> list[dict]:
-    """Returns most recent snapshot per player if snapshot_date is None.
-    level: optional integer level filter (1=MLB, 2=AAA, 3=AA, 4=A, 5=Short-A, 6=Rookie, 8=International)
-    Field names match the original JSON keys (e.g. 'Ovr', 'Pot', 'Age') for
-    drop-in compatibility with existing callers.
-    """
+    """Returns most recent snapshot per player if snapshot_date is None."""
     select = """
         SELECT r.player_id AS ID,
                p.name AS Name, p.age AS Age,
@@ -64,7 +67,7 @@ def get_ratings(parent_team_id: int, snapshot_date: str = None, level: int = Non
     level_clause = " AND p.level = ?" if level is not None else ""
     base_params = (parent_team_id, parent_team_id)
     level_params = (str(level),) if level is not None else ()
-    with get_conn() as conn:
+    with get_connection() as conn:
         if snapshot_date:
             rows = conn.execute(select + level_clause + " AND r.snapshot_date = ?",
                                 base_params + level_params + (snapshot_date,)).fetchall()
@@ -80,7 +83,7 @@ def get_ratings(parent_team_id: int, snapshot_date: str = None, level: int = Non
 
 def get_contracts(parent_team_id: int) -> list[dict]:
     salary_cols = ", ".join(f"salary_{i} AS salary{i}" for i in range(15))
-    with get_conn() as conn:
+    with get_connection() as conn:
         rows = conn.execute(
             f"SELECT player_id, team_id, contract_team_id, is_major, season_year, "
             f"years, current_year, {salary_cols}, no_trade, "
@@ -92,7 +95,7 @@ def get_contracts(parent_team_id: int) -> list[dict]:
 
 
 def get_batting_stats(parent_team_id: int, year: int, split_id: int = 1) -> list[dict]:
-    with get_conn() as conn:
+    with get_connection() as conn:
         rows = conn.execute("""
             SELECT s.* FROM mlb_batting_stats s
             JOIN players p ON s.player_id = p.player_id
@@ -102,7 +105,7 @@ def get_batting_stats(parent_team_id: int, year: int, split_id: int = 1) -> list
 
 
 def get_pitching_stats(parent_team_id: int, year: int, split_id: int = 1) -> list[dict]:
-    with get_conn() as conn:
+    with get_connection() as conn:
         rows = conn.execute("""
             SELECT s.* FROM mlb_pitching_stats s
             JOIN players p ON s.player_id = p.player_id

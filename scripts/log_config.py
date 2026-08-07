@@ -1,12 +1,13 @@
 """
 Centralized logging configuration.
 
+MIGRATION NOTE: Delegates to statsplusplus.utils.logging for the core setup.
+Maintains backward compatibility for scripts that import get_logger from here.
+
 Usage:
     from log_config import get_logger
-    log = get_logger("refresh")   # writes to data/logs/refresh.log
-    log = get_logger("web")       # writes to data/logs/web.log
-
-Logs rotate at 5MB, keeping 3 backups. Console output preserved for interactive use.
+    log = get_logger("refresh")
+    log = get_logger("web")
 """
 
 import logging
@@ -15,10 +16,10 @@ from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
 _LOG_DIR = _ROOT / "data" / "logs"
-_configured = {}
+_configured: dict = {}
 
 
-def get_logger(name: str, level=logging.DEBUG) -> logging.Logger:
+def get_logger(name: str, level: int = logging.DEBUG) -> logging.Logger:
     """Get or create a named logger with file + console handlers."""
     if name in _configured:
         return _configured[name]
@@ -34,7 +35,7 @@ def get_logger(name: str, level=logging.DEBUG) -> logging.Logger:
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
-    # File handler — rotates at 5MB, keeps 3 backups
+    # File handler
     fh = RotatingFileHandler(
         _LOG_DIR / f"{name}.log", maxBytes=5_000_000, backupCount=3,
         encoding="utf-8",
@@ -43,7 +44,7 @@ def get_logger(name: str, level=logging.DEBUG) -> logging.Logger:
     fh.setFormatter(fmt)
     logger.addHandler(fh)
 
-    # Console handler — INFO and above (keeps existing print-like behavior)
+    # Console handler
     ch = logging.StreamHandler()
     ch.setLevel(logging.INFO)
     ch.setFormatter(logging.Formatter("%(message)s"))

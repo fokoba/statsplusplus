@@ -1,7 +1,7 @@
 {
-  "last_posted_commit": "e04ee4e",
-  "last_posted_date": "2026-08-01",
-  "last_posted_title": "Critical Migration Fixes",
+  "last_posted_commit": "b6215da",
+  "last_posted_date": "2026-08-06",
+  "last_posted_title": "Promotion Readiness, Split Thresholds & Draft Board UX",
   "history": [
     {
       "date": "2026-07-22",
@@ -52,6 +52,16 @@
       "date": "2026-07-28",
       "commit": "689fab7",
       "title": "API Integration Complete \u2014 MiLB Stats, Trade Block, Real Standings & Contract Options"
+    },
+    {
+      "date": "2026-08-01",
+      "commit": "e04ee4e",
+      "title": "Critical Migration Fixes"
+    },
+    {
+      "date": "2026-08-06",
+      "commit": "b6215da",
+      "title": "Promotion Readiness, Split Thresholds & Draft Board UX"
     }
   ]
 }

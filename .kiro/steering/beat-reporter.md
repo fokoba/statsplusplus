@@ -13,6 +13,9 @@ for the EMLB StatsPlus simulation league. All data lives in `league.db` (SQLite)
 - `config/league_averages.json` — league-wide stat baselines (AVG, ERA, OPS, $/WAR)
 
 **Running tools:** All scripts run from the project root (`~/statsplusplus`).
+Both invocation forms work:
+- `python3 scripts/standings.py --actual` (legacy path, still functional)
+- `python3 -m statsplusplus.cli.standings --actual` (new package path)
 Web query functions require `sys.path.insert(0, 'scripts'); sys.path.insert(0, 'web')`.
 
 **Data freshness:** Do not run `refresh.py`. If data seems stale, inform the user.

@@ -399,7 +399,6 @@ def get_player(pid):
     # Bio
     p = conn.execute("SELECT player_id, name, age, team_id, parent_team_id, level, pos, role FROM players WHERE player_id=?", (pid,)).fetchone()
     if not p:
-        conn.close()
         return None
 
     player_id, name, age, team_id, parent_team_id, level, pos, role = p
@@ -1341,7 +1340,6 @@ def get_player(pid):
     red_flag_tools = eval_data["red_flag_tools"]
     two_way_scores = eval_data["two_way_scores"]
 
-    conn.close()
 
     # Surplus breakdown
     surplus_detail = None
@@ -1609,7 +1607,6 @@ def get_player(pid):
         fld_pctile_years = [r[0] for r in conn.execute(
             "SELECT DISTINCT year FROM mlb_fielding_stats WHERE player_id=? ORDER BY year DESC",
             (pid,)).fetchall()]
-        conn.close()
 
     # Percentile history for Advanced tab
     pctile_history = get_percentile_history(pid, is_pitcher=is_pitcher)
@@ -2016,7 +2013,6 @@ def get_player_popup(pid):
         (pid,)
     ).fetchone()
     if not p:
-        conn.close()
         return None
 
     is_pitcher = p["role"] in (11, 12, 13)
@@ -2102,7 +2098,6 @@ def get_player_popup(pid):
         _sal = conn.execute("SELECT salary_0 FROM contracts WHERE player_id=?", (pid,)).fetchone()
         _pap = calc_pap(_war, _sal[0] if _sal else 0, _tg, _dpw)
 
-    conn.close()
 
     pos_str = ROLE_MAP.get(p["role"], pos_map().get(p["pos"], "?")) if is_pitcher else pos_map().get(p["pos"], "?")
     level_str = level_map().get(str(p["level"]), str(p["level"]))

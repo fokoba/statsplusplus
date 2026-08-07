@@ -97,11 +97,13 @@ documentation pass.
 - Minimal code — no surplus abstractions, no speculative generalization.
 - **Team/league agnostic** — no hardcoded team IDs, league size, year, or org-specific
   assumptions. Use `my_team_id` from `state.json`, pass team/league context as parameters.
-- Scripts are both CLI tools and importable libraries where noted (contract_value,
-  prospect_value, trade_calculator).
-- `constants.py` — single source of truth for valuation tables.
-- `player_utils.py` — shared evaluation logic.
-- `league_config.py` — single abstraction for league-specific settings.
+- **New code goes in the package** (`src/statsplusplus/`). Legacy `scripts/` and `web/`
+  directories are being migrated incrementally. Do not add new functions to legacy modules.
+- **Typed interfaces** — new cross-module interfaces use dataclasses from `statsplusplus.models`.
+  Pure computation goes in `statsplusplus.evaluation` (no I/O, no DB, no global state).
+- `statsplusplus.evaluation.constants` — single source of truth for all model constants.
+- `statsplusplus.config` — league resolution and ratings normalization (pure functions).
+- `statsplusplus.data.db` — connection management (request-scoped in web, context manager in CLI).
 - SQLite WAL mode for concurrent reads during writes.
 - Web layer is read-only against the DB. All writes go through `refresh.py` or `fv_calc.py`.
 - **Do not run tests** unless the user explicitly asks to run them.

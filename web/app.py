@@ -64,6 +64,11 @@ def _set_league_context():
 
 @app.teardown_request
 def _close_db(exc):
+    # Close the request-scoped DB connection (if one was opened)
+    conn = getattr(g, "_db_conn", None)
+    if conn is not None:
+        conn.close()
+        g._db_conn = None
     if exc and not isinstance(exc, werkzeug.exceptions.HTTPException):
         log.error("Request teardown error: %s", exc, exc_info=exc)
 
@@ -626,7 +631,6 @@ def api_player_percentiles(pid):
         _is_pit = False
         conn = get_db()
         _role_check = conn.execute("SELECT role FROM players WHERE player_id=?", (pid,)).fetchone()
-        conn.close()
         if _role_check:
             _is_pit = _role_check[0] in (11, 12, 13)
         _yrs = _apy(pid, is_pitcher=_is_pit, level=level)
@@ -635,7 +639,6 @@ def api_player_percentiles(pid):
             return jsonify({"error": "no data for level"}), 404
     conn = get_db()
     role = conn.execute("SELECT role FROM players WHERE player_id=?", (pid,)).fetchone()
-    conn.close()
     if not role:
         return jsonify({"error": "not found"}), 404
 
@@ -664,7 +667,6 @@ def api_player_percentile_history(pid):
     split_id = request.args.get("split", 1, type=int)
     conn = get_db()
     role = conn.execute("SELECT role FROM players WHERE player_id=?", (pid,)).fetchone()
-    conn.close()
     if not role:
         return jsonify({"error": "not found"}), 404
     is_pitcher = role[0] in (11, 12, 13)
@@ -1090,7 +1092,6 @@ def settings():
                 conn = _gdb()
                 counts = {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
                           for t in ["players","ratings","batting_stats","pitching_stats","contracts","teams"]}
-                conn.close()
                 _ck = _gsc(cfg.league_dir)
                 _sid, _csrf = "", ""
                 for _p in _ck.split(";"):
@@ -1129,7 +1130,6 @@ def settings():
         conn = get_db()
         for tbl in ["players", "ratings", "batting_stats", "pitching_stats", "contracts", "teams"]:
             counts[tbl] = conn.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]
-        conn.close()
     except Exception:
         counts = {t: 0 for t in ["players", "ratings", "batting_stats", "pitching_stats", "contracts", "teams"]}
 
@@ -1359,7 +1359,6 @@ def onboard_step3():
             detected_scale = "1-20"
         else:
             detected_scale = "20-80"
-        conn.close()
         # Load auto-detected structure for the editor
         settings_path = league_dir / "config" / "league_settings.json"
         s = _json.loads(settings_path.read_text()) if settings_path.exists() else {}

@@ -64,6 +64,18 @@ def set_my_team(team_id):
 
 # ── league-level queries ────────────────────────────────────────────────
 
+def _get_prospect_eval_date():
+    """Get the most recent prospect_fv eval_date, cached per request."""
+    from flask import g as _g, has_request_context as _hrc
+    if _hrc() and hasattr(_g, "_pf_eval_date_cache"):
+        return _g._pf_eval_date_cache
+    conn = get_db()
+    ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
+    if _hrc():
+        _g._pf_eval_date_cache = ed
+    return ed
+
+
 _ETA_BASE = {"MLB": 0, "AAA": 1, "AA": 2, "A": 3,
              "A-Short": 4, "Rookie": 4, "USL": 5, "DSL": 5, "Intl": 5}
 
@@ -77,7 +89,7 @@ def _calc_eta(level, ovr, pot):
 def get_top_prospects(n=100):
     conn = get_db()
     conn.row_factory = None
-    ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
+    ed = _get_prospect_eval_date()
 
     _abbr = team_abbr_map()
     _names = team_names_map()
@@ -258,7 +270,7 @@ def get_all_prospects():
     """All FV≥40 prospects for by-team/by-position views."""
     conn = get_db()
     conn.row_factory = None
-    ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
+    ed = _get_prospect_eval_date()
 
     _abbr = team_abbr_map()
     _names = team_names_map()
@@ -309,7 +321,7 @@ def get_prospect_summary(pid):
     """Prospect side-panel data: ratings, FV, surplus, scouting summary."""
     conn = get_db()
     conn.row_factory = None
-    ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
+    ed = _get_prospect_eval_date()
 
     pf = conn.execute("""
         SELECT pf.fv, pf.fv_str, pf.bucket, pf.level, pf.prospect_surplus,
@@ -569,7 +581,7 @@ def get_prospect_comps(pid):
                 "SS": "r.ss", "LF": "r.lf", "CF": "r.cf", "RF": "r.rf", "COF": "r.cf"}
 
     # Get prospect info
-    ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
+    ed = _get_prospect_eval_date()
     bucket_row = conn.execute(
         "SELECT bucket FROM prospect_fv WHERE eval_date=? AND player_id=?", (ed, pid)).fetchone()
     if not bucket_row:
@@ -752,7 +764,7 @@ def get_prospect_comp_stats(pid):
     from ratings import norm_continuous as _norm
 
     conn = get_db()
-    ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
+    ed = _get_prospect_eval_date()
     row = conn.execute("""
         SELECT r.pot_cntct, r.pot_pow, r.pot_eye, r.pot_gap,
                r.pot_stf, r.pot_mov, r.pot_ctrl,
@@ -1423,5 +1435,4 @@ def get_waiver_wire():
             "pit_stats": {"year": pit_row[0], "ip": round(pit_row[1], 1), "era": round(pit_row[2], 2), "war": round(pit_row[3], 1)} if pit_row else None,
         })
 
-    conn.close()
     return results

@@ -40,6 +40,9 @@ def _pap_context(conn, tid, year):
 
 
 def _get_state():
+    from flask import g as _g, has_request_context as _hrc
+    if _hrc() and hasattr(_g, "_tq_state_cache"):
+        return _g._tq_state_cache
     import json
     cfg = get_cfg()
     with open(cfg.state_path) as f:
@@ -51,7 +54,21 @@ def _get_state():
         "SELECT MAX(year) FROM mlb_batting_stats WHERE year <= ?", (state["year"],)
     ).fetchone()
     state["stats_year"] = row[0] if row and row[0] else state["year"]
+    if _hrc():
+        _g._tq_state_cache = state
     return state
+
+
+def _get_eval_date():
+    """Get the most recent eval_date, cached per request."""
+    from flask import g as _g, has_request_context as _hrc
+    if _hrc() and hasattr(_g, "_tq_eval_date_cache"):
+        return _g._tq_eval_date_cache
+    conn = get_db()
+    ed = conn.execute("SELECT MAX(eval_date) FROM player_surplus").fetchone()[0]
+    if _hrc():
+        _g._tq_eval_date_cache = ed
+    return ed
 
 
 def get_summary(team_id=None):
@@ -60,7 +77,7 @@ def get_summary(team_id=None):
     conn.row_factory = None
     year = state.get("stats_year", state["year"])
     tid = team_id or my_team_id()
-    ed = conn.execute("SELECT MAX(eval_date) FROM player_surplus").fetchone()[0]
+    ed = _get_eval_date()
     mlb_surplus = conn.execute(
         "SELECT COALESCE(SUM(surplus),0) FROM player_surplus WHERE eval_date=? AND team_id=?",
         (ed, tid)).fetchone()[0]
@@ -113,7 +130,7 @@ def get_power_rankings():
     conn.row_factory = None
 
     # Surplus for display only
-    ed = conn.execute("SELECT MAX(eval_date) FROM player_surplus").fetchone()[0]
+    ed = _get_eval_date()
     surplus_map = dict(conn.execute(
         "SELECT team_id, SUM(surplus) FROM player_surplus WHERE eval_date=? GROUP BY team_id",
         (ed,)).fetchall())
@@ -301,7 +318,7 @@ def get_roster(team_id=None):
     conn.row_factory = None
     year = state.get("stats_year", state["year"])
     tid = team_id or my_team_id()
-    ed = conn.execute("SELECT MAX(eval_date) FROM player_surplus").fetchone()[0]
+    ed = _get_eval_date()
 
     players = conn.execute("""
         SELECT p.player_id, p.name, p.age, p.pos, p.role,
@@ -363,7 +380,7 @@ def get_roster_hitters(team_id=None):
     conn = get_db()
     year = state.get("stats_year", state["year"])
     tid = team_id or my_team_id()
-    ed = conn.execute("SELECT MAX(eval_date) FROM player_surplus").fetchone()[0]
+    ed = _get_eval_date()
 
     # Position players
     players = conn.execute("""
@@ -478,7 +495,7 @@ def get_roster_pitchers(team_id=None):
     conn = get_db()
     year = state.get("stats_year", state["year"])
     tid = team_id or my_team_id()
-    ed = conn.execute("SELECT MAX(eval_date) FROM player_surplus").fetchone()[0]
+    ed = _get_eval_date()
 
     players = conn.execute("""
         SELECT p.player_id, p.name, p.age, p.pos, p.role,
@@ -650,7 +667,7 @@ def get_team_stats(team_id):
 def get_contracts(team_id):
     conn = get_db()
     conn.row_factory = None
-    ed = conn.execute("SELECT MAX(eval_date) FROM player_surplus").fetchone()[0]
+    ed = _get_eval_date()
 
     rows = conn.execute("""
         SELECT c.player_id, p.name, c.years, c.current_year,
@@ -806,7 +823,7 @@ def get_roster_summary(team_id):
 def get_upcoming_fa(team_id):
     conn = get_db()
     conn.row_factory = None
-    ed = conn.execute("SELECT MAX(eval_date) FROM player_surplus").fetchone()[0]
+    ed = _get_eval_date()
 
     rows = conn.execute("""
         SELECT c.player_id, p.name, p.age, c.years, c.current_year,
@@ -841,7 +858,7 @@ def get_upcoming_fa(team_id):
 def get_surplus_leaders(team_id):
     conn = get_db()
     conn.row_factory = None
-    ed = conn.execute("SELECT MAX(eval_date) FROM player_surplus").fetchone()[0]
+    ed = _get_eval_date()
 
     mlb = conn.execute("""
         SELECT ps.player_id, p.name, ps.bucket, ps.surplus, 'MLB' as src

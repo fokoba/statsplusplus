@@ -70,7 +70,6 @@ def available_pctile_years(pid, is_pitcher=False, level=None):
     if level is not None and level != 1:
         lids = _get_level_league_ids(level)
         if not lids:
-            conn.close()
             return []
         placeholders = ",".join("?" * len(lids))
         rows = conn.execute(
@@ -85,7 +84,6 @@ def available_pctile_years(pid, is_pitcher=False, level=None):
             f"SELECT DISTINCT year FROM {view} WHERE player_id=? AND split_id=1 ORDER BY year DESC",
             (pid,)
         ).fetchall()
-    conn.close()
     return [r[0] for r in rows]
 
 
@@ -126,7 +124,6 @@ def available_pctile_levels(pid, is_pitcher=False):
             if has_data:
                 levels.append((lv, _level_label(lv)))
 
-    conn.close()
     return levels
 
 # ── constants ────────────────────────────────────────────────────────────
@@ -359,7 +356,6 @@ def get_hitter_percentiles(pid, split_id=1, year=None, level=None):
     resolved = _resolve_level_year(conn, year, level, stat_type="batting",
                                    fallback=not explicit_year)
     if resolved is None:
-        conn.close()
         return None
     year = resolved
     is_current = (year == current_year)
@@ -406,7 +402,6 @@ def get_hitter_percentiles(pid, split_id=1, year=None, level=None):
         f"SELECT cntct, speed{_babip_col} FROM ratings WHERE player_id=? ORDER BY snapshot_date DESC LIMIT 1",
         (pid,)).fetchone()
     exp_babip = _babip_expected(pid, _pc[0] or 0, _pc[1] or 0, conn, year, _pc[2] if len(_pc) > 2 else None) if _pc else None
-    conn.close()
 
     if not rows:
         return None
@@ -513,7 +508,6 @@ def get_pitcher_percentiles(pid, split_id=1, year=None, level=None):
     resolved = _resolve_level_year(conn, year, level, stat_type="pitching",
                                    fallback=not explicit_year)
     if resolved is None:
-        conn.close()
         return None
     year = resolved
     is_current = (year == current_year)
@@ -588,7 +582,6 @@ def get_pitcher_percentiles(pid, split_id=1, year=None, level=None):
 
     # Pre-fetch league-wide extended ratings before closing conn
     _ext_lgw = None
-    conn.close()
 
     if not rows:
         return None
@@ -740,7 +733,6 @@ def get_fielding_percentiles(pid, year=None):
     explicit_year = year is not None
     year = _resolve_pctile_year(conn, year or current_year, "mlb_fielding_stats", fallback=not explicit_year)
     if year is None:
-        conn.close()
         return None
     games = _est_team_games(conn, year)
     min_ip = max(round(1.0 * games), 15)
@@ -754,7 +746,6 @@ def get_fielding_percentiles(pid, year=None):
         "WHERE f.player_id=? AND f.year=? AND f.position > 1",
         (pid, year)).fetchall()
     if not player_rows:
-        conn.close()
         return None
 
     results = []
@@ -833,7 +824,6 @@ def get_fielding_percentiles(pid, year=None):
         if stats:
             results.append({"pos": _POS_NAMES.get(pos, str(pos)), "stats": stats, "qualified": qualified})
 
-    conn.close()
     return results if results else None
 
 
@@ -865,7 +855,6 @@ def get_percentile_history(pid, is_pitcher=False, split_id=1):
             "SELECT year, SUM(pa) FROM mlb_batting_stats WHERE player_id=? AND split_id=? GROUP BY year",
             (pid, split_id)).fetchall():
             sample_sizes[row[0]] = row[1] or 0
-    conn.close()
 
     stat_defs = PITCHER_PCTILE_STATS if is_pitcher else HITTER_PCTILE_STATS
     # Only include overall stats (skip splits-only stats)
@@ -1012,7 +1001,6 @@ def get_percentile_history_all_levels(pid, is_pitcher=False):
                 "stats": stat_data,
             })
 
-    conn.close()
 
     if not rows:
         return None
@@ -1051,7 +1039,6 @@ def get_fielding_percentile_history(pid):
     years = [r[0] for r in conn.execute(
         "SELECT DISTINCT year FROM mlb_fielding_stats WHERE player_id=? ORDER BY year DESC",
         (pid,)).fetchall()]
-    conn.close()
     if not years:
         return None
 

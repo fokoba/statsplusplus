@@ -523,7 +523,7 @@ def get_player_card(pid):
     # Divergence detection
     if _tool_only is not None and rd.get("ovr") is not None:
         try:
-            from evaluation_engine import detect_divergence
+            from statsplusplus.data.evaluation_engine import detect_divergence
             out["divergence"] = detect_divergence(_tool_only, rd.get("ovr"))
         except Exception:
             pass
@@ -572,7 +572,7 @@ def get_prospect_comps(pid):
     Returns list of {tier, pct, comp_pid, comp_name, comp_team, comp_ovr, comp_war, comp_age}.
     """
     from math import sqrt
-    from player_utils import peak_war_from_ovr
+    from statsplusplus.evaluation.war import peak_war_from_score as peak_war_from_ovr
 
     conn = get_db()
     _abbr = team_abbr_map()
@@ -761,7 +761,7 @@ def get_prospect_comp_stats(pid):
     Returns dict with {n, mean, median, p25, p75, min, max, implied_fv} or None.
     """
     from comp_validate import find_comps, summarize
-    from ratings import norm_continuous as _norm
+    from statsplusplus.config.ratings import norm_continuous as _norm
 
     conn = get_db()
     ed = _get_prospect_eval_date()
@@ -911,8 +911,8 @@ def get_draft_pool():
     conn = get_db()
     amateur_levels = _detect_amateur_levels(conn)
 
-    from fv_calc import RATINGS_SQL
-    from player_utils import (assign_bucket, calc_fv, norm, LEVEL_NORM_AGE)
+    from statsplusplus.data.fv_calc import RATINGS_SQL
+    from statsplusplus.utils.positions import assign_bucket, LEVEL_NORM_AGE; from fv_model import calc_fv; from statsplusplus.config.ratings import norm
 
     # Extend RATINGS_SQL with bats/throws which aren't in the base query
     _DRAFT_SQL = RATINGS_SQL.replace("r.league_id AS LeagueId",
@@ -1069,7 +1069,7 @@ def get_draft_pool():
     # Try to load uploaded draft pool first
     uploaded_pids = None
     try:
-        from league_context import get_league_dir
+        from statsplusplus.config.league_context import get_league_dir
         pool_path = get_league_dir() / "config" / "draft_pool.json"
         if pool_path.exists():
             import json as _json
@@ -1081,7 +1081,7 @@ def get_draft_pool():
     picks = []
     try:
         from statsplus import client as _dc
-        from league_context import get_statsplus_cookie
+        from statsplusplus.config.league_context import get_statsplus_cookie
         cfg = get_cfg()
         slug = cfg.settings.get("statsplus_slug", "")
         cookie = get_statsplus_cookie()
@@ -1202,7 +1202,7 @@ def get_positional_rankings():
 
     # Get MLB org IDs for filtering
     try:
-        from league_config import LeagueConfig
+        from statsplusplus.config.league_config import LeagueConfig
         mlb_org_ids = LeagueConfig().mlb_team_ids
     except Exception:
         mlb_org_ids = set(teams.keys())
@@ -1286,7 +1286,7 @@ def get_positional_rankings():
 
             all_composites.append(r["composite_score"])
             if len(group["mlb"]) < 20:
-                from ratings import norm as _norm_r
+                from statsplusplus.config.ratings import norm as _norm_r
                 # Get the defensive rating for this specific position group
                 _pos_def_map = {
                     "C": r["c"], "1B": r["first_b"], "2B": r["second_b"],

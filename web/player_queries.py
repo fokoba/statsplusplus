@@ -46,8 +46,8 @@ def _mlb_context(conn, bucket, composite, ceiling):
     data still produces meaningful comparisons.
     Full-season targets: Hitters 200 PA, SP 80 IP, RP 30 IP.
     """
-    from player_utils import assign_bucket as _ab
-    from league_config import config as _lc
+    from statsplusplus.utils.positions import assign_bucket as _ab
+    from statsplusplus.config.league_config import LeagueConfig; _lc = LeagueConfig()
     _rm = {str(k): v for k, v in _lc.role_map.items()}
 
     _year = conn.execute("SELECT MAX(year) FROM mlb_batting_stats").fetchone()[0]
@@ -212,7 +212,7 @@ def _build_evaluation_data(rd: dict | None, is_pitcher: bool, norm_fn,
     if not is_pitcher and position_bucket and result["offensive_grade"] is not None:
         try:
             from pathlib import Path as _Path
-            from evaluation_engine import compute_carrying_tool_bonus, load_carrying_tool_config
+            from statsplusplus.data.evaluation_engine import compute_carrying_tool_bonus, load_carrying_tool_config
             # Map display position back to internal bucket for config lookup
             _internal_bucket = "COF" if position_bucket == "OF" else position_bucket
             _ct_config = load_carrying_tool_config(_Path(league_dir)) if league_dir else load_carrying_tool_config(_Path("."))
@@ -232,7 +232,7 @@ def _build_evaluation_data(rd: dict | None, is_pitcher: bool, norm_fn,
 
     # Divergence detection (tool_only vs OVR, ceiling vs POT)
     try:
-        from evaluation_engine import detect_divergence
+        from statsplusplus.data.evaluation_engine import detect_divergence
         _ovr = rd.get("ovr")
         _pot = rd.get("pot")
         if tool_only_score is not None and _ovr is not None:
@@ -250,7 +250,7 @@ def _build_evaluation_data(rd: dict | None, is_pitcher: bool, norm_fn,
     # Tool profile analysis: archetype, carrying tools, red-flag tools
     if composite_score is not None:
         try:
-            from evaluation_engine import classify_archetype, identify_carrying_tools, identify_red_flag_tools
+            from statsplusplus.data.evaluation_engine import classify_archetype, identify_carrying_tools, identify_red_flag_tools
             if is_pitcher:
                 _tools = {
                     "stuff": norm_fn(rd.get("stf")),
@@ -289,7 +289,7 @@ def _build_evaluation_data(rd: dict | None, is_pitcher: bool, norm_fn,
     # Two-way player: include both role scores and combined value
     if secondary_composite is not None and composite_score is not None:
         try:
-            from evaluation_engine import compute_combined_value
+            from statsplusplus.data.evaluation_engine import compute_combined_value
             combined = compute_combined_value(composite_score, secondary_composite)
             if is_pitcher:
                 result["two_way_scores"] = {
@@ -1037,11 +1037,11 @@ def get_player(pid):
             if len(_hist_rows) == 2:
                 _cur_snap = dict(zip(_hist_col_names, _hist_rows[0]))
                 _prev_snap = dict(zip(_hist_col_names, _hist_rows[1]))
-                from evaluation_engine import compute_snapshot_deltas
+                from statsplusplus.data.evaluation_engine import compute_snapshot_deltas
                 snapshot_deltas = compute_snapshot_deltas(_cur_snap, _prev_snap)
                 # Pre-compute display-ready tool breakdown for the template
                 # Tool deltas are on raw (1-100) scale; normalize to 20-80 for display
-                from ratings import norm as _norm_r
+                from statsplusplus.config.ratings import norm as _norm_r
                 _TOOL_LABELS = {
                     "cntct":"Con", "gap":"Gap", "pow":"Pow", "eye":"Eye", "ks":"Avoid K", "speed":"Spd",
                     "stf":"Stf", "mov":"Mov", "ctrl":"Ctrl", "stm":"Stm",
@@ -1071,7 +1071,7 @@ def get_player(pid):
     # Development history — full timeline from ratings_history
     dev_history = None
     try:
-        from ratings import norm as _norm_hist
+        from statsplusplus.config.ratings import norm as _norm_hist
         _dh_rows = conn.execute(
             "SELECT * FROM ratings_history WHERE player_id=? ORDER BY snapshot_date",
             (pid,)
@@ -1448,8 +1448,8 @@ def get_player(pid):
         if not valuation and outcome_probs is None and level_str != 'MLB':
             try:
                 import prospect_value as _pv
-                from player_utils import assign_bucket, calc_fv, LEVEL_NORM_AGE
-                from fv_calc import RATINGS_SQL, LEVEL_INT_KEY
+                from statsplusplus.utils.positions import assign_bucket, LEVEL_NORM_AGE; from fv_model import calc_fv
+                from statsplusplus.data.fv_calc import RATINGS_SQL, LEVEL_INT_KEY
                 _conn2 = get_db()
                 _rat = _conn2.execute(RATINGS_SQL + " AND r.player_id = ?", (pid,)).fetchone()
                 if _rat:
@@ -1790,8 +1790,8 @@ def get_player(pid):
         if level != 1 or (age and age <= 25):
             import sys as _sys
             _sys.path.insert(0, "scripts") if "scripts" not in _sys.path else None
-            from evaluation_engine import _load_milb_stat_seasons, _load_milb_averages
-            from fv_model import compute_performance_adjusted_ceiling, compute_stat_risk_modifier
+            from statsplusplus.data.evaluation_engine import _load_milb_stat_seasons, _load_milb_averages
+            from statsplusplus.evaluation.fv import compute_performance_adjusted_ceiling, compute_stat_risk_modifier
             _league_dir = get_cfg().league_dir
             _ma = _load_milb_averages(_league_dir)
             if _ma:
@@ -1943,7 +1943,7 @@ def get_player(pid):
     if level_str and level_str != "MLB":
         try:
             from promotion_readiness import compute_promotion_readiness, compute_demotion_risk
-            import db as _pr_db
+            from statsplusplus.data import db as _pr_db
             _pr_league_dir = get_cfg().league_dir
             _pr_conn = _pr_db.get_conn(_pr_league_dir)
             promotion_readiness = compute_promotion_readiness(pid, _pr_conn, _pr_league_dir)
@@ -1954,7 +1954,7 @@ def get_player(pid):
     elif level_str == "MLB":
         try:
             from promotion_readiness import compute_demotion_risk
-            import db as _pr_db
+            from statsplusplus.data import db as _pr_db
             _pr_league_dir = get_cfg().league_dir
             _pr_conn = _pr_db.get_conn(_pr_league_dir)
             demotion_risk = compute_demotion_risk(pid, _pr_conn, _pr_league_dir)

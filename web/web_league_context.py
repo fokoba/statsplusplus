@@ -28,13 +28,13 @@ def get_db():
 
     if has_request_context() and hasattr(g, "league_dir"):
         if not hasattr(g, "_db_conn") or g._db_conn is None:
-            import db as _db
-            raw_conn = _db.get_conn(g.league_dir)
+            from statsplusplus.data import db as _db
+            raw_conn = _db.get_connection(g.league_dir)
             g._db_conn = raw_conn
         # Return a scoped view that tracks its own row_factory
         return _ScopedConnection(g._db_conn)
-    import db as _db
-    return _db.get_conn()
+    from statsplusplus.data import db as _db
+    return _db.get_connection()
 
 
 class _ScopedConnection:
@@ -94,7 +94,7 @@ def get_cfg():
     """Get the LeagueConfig for the current league."""
     if has_request_context() and hasattr(g, "league_config"):
         return g.league_config
-    from league_config import config
+    from statsplusplus.config.league_config import LeagueConfig; config = LeagueConfig()
     return config
 
 

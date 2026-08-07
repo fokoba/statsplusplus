@@ -31,7 +31,7 @@ def _get_cfg():
     """Get config from request context or fallback."""
     if hasattr(g, "league_config"):
         return g.league_config
-    from league_config import config
+    from statsplusplus.config.league_config import LeagueConfig; config = LeagueConfig()
     return config
 
 
@@ -339,7 +339,7 @@ def onboard_step3():
     league_dir = APP_CONFIG_PATH.parent / slug
 
     if request.method == "GET":
-        import db as _db
+        from statsplusplus.data import db as _db
         conn = _db.get_conn(league_dir)
         from statsplus import client
         api_teams = {t["ID"]: f"{t['Name']} {t['Nickname']}" for t in client.get_teams()

@@ -31,7 +31,7 @@ def _get_cfg():
     """Get config from request context or fallback."""
     if hasattr(g, "league_config"):
         return g.league_config
-    from league_config import config
+    from statsplusplus.config.league_config import LeagueConfig; config = LeagueConfig()
     return config
 
 
@@ -190,8 +190,9 @@ def api_open_file_location():
 def api_draft_detail(pid):
     """Compact grid data for draft prospect detail panel."""
     from web_league_context import get_db
-    from player_utils import norm as _pnorm
-    n = lambda v: _pnorm(v) if v else None
+    from statsplusplus.config.ratings import norm as _pnorm_raw
+    _scale = _get_cfg().ratings_scale
+    n = lambda v: _pnorm_raw(v, _scale) if v else None
 
     conn = get_db()
     p = conn.execute("SELECT name, age, pos, role, level FROM players WHERE player_id=?", (pid,)).fetchone()
@@ -208,8 +209,8 @@ def api_draft_detail(pid):
         1: 'P', 2: 'C', 3: '1B', 4: '2B', 5: '3B', 6: 'SS', 7: 'LF', 8: 'CF', 9: 'RF'
     }.get(p["pos"], "?")
 
-    from player_utils import assign_bucket
-    from league_config import config as _cfg
+    from statsplusplus.utils.positions import assign_bucket
+    from statsplusplus.config.league_config import LeagueConfig; _cfg = LeagueConfig()
     _p = dict(r)
     _p["pos"] = str(p["pos"]); _p["role"] = p["role"]
     _p["_role"] = {str(k): v for k, v in _cfg.role_map.items()}.get(str(p["role"] or 0), "position_player")
@@ -223,7 +224,7 @@ def api_draft_detail(pid):
         if pos_str == "P":
             pos_str = {2: 'C', 3: '1B', 4: '2B', 5: '3B', 6: 'SS', 7: 'LF', 8: 'CF', 9: 'RF'}.get(p["pos"], bucket)
 
-    from player_utils import height_str as _ht
+    from statsplusplus.utils.formatting import height_str as _ht
     out = {
         "pid": pid, "name": p["name"], "age": p["age"], "pos": pos_str,
         "ovr": n(r["ovr"]) or r.get("composite_score") or 0,
@@ -549,8 +550,8 @@ def _run_refresh(slug, league_dir, statsplus_slug, cookie):
     _log = get_logger("web")
     _log.info("=== dashboard refresh started (league=%s) ===", slug)
     try:
-        import db as _db_mod
-        from league_config import LeagueConfig
+        from statsplusplus.data import db as _db_mod
+        from statsplusplus.config.league_config import LeagueConfig
         bg_cfg = LeagueConfig(base_dir=league_dir)
         script = Path(__file__).parent.parent / "scripts" / "refresh.py"
         env = {**os.environ, "STATSPP_LEAGUE": slug, "STATSPLUS_COOKIE": cookie}
@@ -569,7 +570,7 @@ def _run_refresh(slug, league_dir, statsplus_slug, cookie):
             state = json.loads(bg_cfg.state_path.read_text())
             warnings = []
             try:
-                conn = _db_mod.get_conn(league_dir)
+                conn = _db_mod.get_connection(league_dir)
                 for tbl, minimum in [("players", 100), ("ratings", 100),
                                       ("teams", 10), ("contracts", 50)]:
                     n = conn.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]

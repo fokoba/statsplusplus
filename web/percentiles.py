@@ -309,15 +309,15 @@ def _babip_expected(pid, cntct, speed, conn, year, babip_rating=None):
         # BABIP rating → expected stat-line BABIP.
         # League average BABIP ≈ .300, rating 50 = average on both scales.
         # On 1-100: each point ≈ 0.002 BABIP. On 20-80: each point ≈ 0.00333.
-        from ratings import get_ratings_scale as _get_ratings_scale
-        if _get_ratings_scale() == "20-80":
+        from statsplusplus.config.ratings import norm as _ratings_norm
+        if get_cfg().ratings_scale == "20-80":
             model_babip = 0.200 + (babip_rating - 20) / 60 * 0.200
         else:
             model_babip = 0.200 + babip_rating * 0.002
     else:
-        from ratings import get_ratings_scale as _get_ratings_scale
+        from statsplusplus.config.ratings import norm as _ratings_norm
         c, s = cntct, speed
-        if _get_ratings_scale() == "20-80":
+        if get_cfg().ratings_scale == "20-80":
             c = (cntct - 20) / 60 * 100
             s = (speed - 20) / 60 * 100
         model_babip = _BABIP_B0 + _BABIP_B1 * c + _BABIP_B2 * s
@@ -334,8 +334,8 @@ def _babip_expected(pid, cntct, speed, conn, year, babip_rating=None):
             if denom <= 0:
                 continue
             actual = (h - hr) / denom
-            pred_c = (rc - 20) / 60 * 100 if _get_ratings_scale() == "20-80" else (rc or 0)
-            pred_s = (rs - 20) / 60 * 100 if _get_ratings_scale() == "20-80" else (rs or 0)
+            pred_c = (rc - 20) / 60 * 100 if get_cfg().ratings_scale == "20-80" else (rc or 0)
+            pred_s = (rs - 20) / 60 * 100 if get_cfg().ratings_scale == "20-80" else (rs or 0)
             pred = _BABIP_B0 + _BABIP_B1 * pred_c + _BABIP_B2 * pred_s
             resids.append(actual - pred)
         if len(resids) >= 2:

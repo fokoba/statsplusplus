@@ -30,7 +30,7 @@ app.register_blueprint(api_bp)
 # Run DB schema migration on startup for all leagues (adds new columns if missing).
 # This is idempotent and fast (only ALTERs if columns are absent).
 try:
-    import db as _db_mod
+    from statsplusplus.data import db as _db_mod
     for _ld in Path(_PROJECT_ROOT, "data").iterdir():
         if _ld.is_dir() and (_ld / "league.db").exists():
             _db_mod.init_schema(_ld)
@@ -86,7 +86,7 @@ def _get_cfg():
     """Get config — works both in and out of request context."""
     if hasattr(g, "league_config"):
         return g.league_config
-    from league_config import config
+    from statsplusplus.config.league_config import LeagueConfig; config = LeagueConfig()
     return config
 
 
@@ -94,7 +94,7 @@ def _get_cfg():
 def _inject_globals():
     cfg = _get_cfg()
     slug = cfg.settings.get("statsplus_slug", "")
-    from league_context import APP_CONFIG_PATH
+    from statsplusplus.config.league_context import APP_CONFIG_PATH
     import json as _json
     data_dir = APP_CONFIG_PATH.parent
     league_list = []

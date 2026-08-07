@@ -730,10 +730,15 @@ def get_payroll_summary(team_id):
 
     # Project salaries for 1yr contract players using arb model (no non-tender gate)
     from contract_value import _resolve
-    from arb_model import estimate_control as _estimate_control
-    from player_utils import league_minimum, aging_mult
-    import db as _scripts_db, math
-    cv_conn = _scripts_db.get_conn()
+    from statsplusplus.evaluation.arb import estimate_control as _estimate_control_raw
+    from statsplusplus.config.league_config import league_minimum as _lm_fn; from statsplusplus.evaluation.war import aging_mult
+    _lmin = league_minimum()
+    _perp = get_cfg().perpetual_arb
+    def _estimate_control(conn, pid, age, sal, bucket=None):
+        return _estimate_control_raw(conn, pid, age, sal, min_sal=_lmin, perpetual_arb=_perp, bucket=bucket)
+    from statsplusplus.data import db as _scripts_db
+    import math
+    cv_conn = _scripts_db.get_connection(get_cfg().league_dir)
     lmin = league_minimum()
     projections = {}  # pid -> [(year_offset, salary), ...]
     for r in rows:
@@ -749,7 +754,7 @@ def get_payroll_summary(team_id):
             ctrl, _, pre_arb = est
             if not ctrl or ctrl <= 1:
                 continue
-            from arb_model import arb_salary as _arb_salary
+            from statsplusplus.evaluation.arb import arb_salary as _arb_salary
             proj = []
             prev_sal = sal
             for i in range(1, ctrl):
@@ -1252,7 +1257,7 @@ def _resolve_depth_score(row, is_pitcher=False):
         if val is not None and val > 0:
             tools.append(val)
     if tools:
-        from ratings import norm_continuous
+        from statsplusplus.config.ratings import norm_continuous
         # Average the tools and normalize to 20-80 scale
         avg = sum(tools) / len(tools)
         normed = norm_continuous(int(avg))
@@ -1426,9 +1431,13 @@ def get_depth_chart(team_id):
         assign_diamond_positions, allocate_playing_time, allocate_pitcher_time,
         roster_availability, LEVEL_DISCOUNT, DEFAULT_TEAM_PA, DEFAULT_TEAM_IP,
     )
-    from player_utils import stat_peak_war, load_stat_history
+    from statsplusplus.evaluation.war import stat_peak_war, load_stat_history
     from contract_value import contract_value as _cv
-    from arb_model import estimate_control as _estimate_control
+    from statsplusplus.evaluation.arb import estimate_control as _ec_raw
+    _lmin2 = league_minimum()
+    _perp2 = get_cfg().perpetual_arb
+    def _estimate_control(conn, pid, age, sal, bucket=None):
+        return _ec_raw(conn, pid, age, sal, min_sal=_lmin2, perpetual_arb=_perp2, bucket=bucket)
     from prospect_value import prospect_surplus as _pv
 
     state = _get_state()
@@ -2012,7 +2021,11 @@ def get_org_overview(team_id):
         payroll_shape.append({"year": yr, "total": payroll_data["totals"][i]})
 
     # ── Retention priorities: positive surplus, ≤2 years estimated control ──
-    from arb_model import estimate_control as _estimate_control
+    from statsplusplus.evaluation.arb import estimate_control as _ec_raw3
+    _lmin3 = league_minimum()
+    _perp3 = get_cfg().perpetual_arb
+    def _estimate_control(conn, pid, age, sal, bucket=None):
+        return _ec_raw3(conn, pid, age, sal, min_sal=_lmin3, perpetual_arb=_perp3, bucket=bucket)
     retention = []
     ctrl_rows = conn.execute("""
         SELECT c.player_id, p.name, p.age, c.years, c.current_year,
@@ -2185,7 +2198,7 @@ def get_minor_league_team(team_id):
 def get_minor_league_roster(team_id):
     """Full roster for a minor league team, split into hitters and pitchers with tool ratings."""
     conn = get_db()
-    from ratings import norm as _norm_rating
+    from statsplusplus.config.ratings import norm as _norm_rating
 
     rows = conn.execute("""
         SELECT p.player_id, p.name, p.age, p.pos, p.role, p.level,
@@ -2302,7 +2315,7 @@ def get_minor_league_roster(team_id):
 def get_org_minor_league_roster(parent_team_id):
     """Full minor league roster for an entire org (all levels), split into hitters and pitchers."""
     conn = get_db()
-    from ratings import norm as _norm_rating
+    from statsplusplus.config.ratings import norm as _norm_rating
 
     # Get all affiliate team_ids for this org
     aff_rows = conn.execute("""

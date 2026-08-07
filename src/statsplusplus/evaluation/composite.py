@@ -17,7 +17,7 @@ Public API:
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 from statsplusplus.evaluation.constants import (
     TOOL_TRANSFORM_LOW_THRESHOLD,
@@ -582,3 +582,42 @@ def compute_combined_value(primary_composite: int, secondary_composite: int) -> 
     """
     secondary_bonus = min(8, max(0, (secondary_composite - 35) * 0.3))
     return min(80, round(primary_composite + secondary_bonus))
+
+
+def defensive_score(
+    p: dict[str, Any],
+    bucket: str,
+    scale: str,
+    defensive_weights: dict[str, dict[str, float]] | None = None,
+) -> float:
+    """Compute weighted defensive score on 20-80 scale for a position bucket.
+
+    Args:
+        p: Player dict with defensive tool ratings (IFR, IFA, IFE, TDP, OFR, etc.).
+        bucket: Positional bucket (C, SS, 2B, 3B, CF, COF, 1B, SP, RP).
+        scale: Ratings scale string ("1-100", "20-80").
+        defensive_weights: Weight dicts per position. If None, uses defaults.
+
+    Returns:
+        Weighted defensive score. 0.0 if bucket has no defensive component.
+    """
+    from statsplusplus.config.ratings import norm as _norm
+    from statsplusplus.evaluation.constants import DEFENSIVE_WEIGHTS
+
+    if defensive_weights is None:
+        defensive_weights = DEFENSIVE_WEIGHTS
+
+    def _n(val: Any) -> float:
+        return float(_norm(val, scale) or 0)
+
+    if bucket == "COF":
+        lf_weights = defensive_weights.get("COF_LF", {})
+        rf_weights = defensive_weights.get("COF_RF", {})
+        lf = sum(_n(p.get(f, 0) or 0) * w for f, w in lf_weights.items())
+        rf = sum(_n(p.get(f, 0) or 0) * w for f, w in rf_weights.items())
+        return max(lf, rf)
+
+    weights = defensive_weights.get(bucket)
+    if not weights:
+        return 0.0
+    return sum(_n(p.get(f, 0) or 0) * w for f, w in weights.items())

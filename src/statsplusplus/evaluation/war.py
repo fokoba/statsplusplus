@@ -221,3 +221,98 @@ def _two_way_peak_war(
     weights = list(_STAT_WEIGHTS[:len(combined)])
     total = sum(float(w) * c for w, c in zip(weights, combined))
     return total / sum(weights)
+
+
+# ---------------------------------------------------------------------------
+# Stat history loading (DB access)
+# ---------------------------------------------------------------------------
+
+
+def load_stat_history(
+    conn: Any,
+    game_date: str,
+    dh_rule: str = "Universal DH",
+) -> tuple[dict[int, list[dict[str, Any]]], dict[int, list[dict[str, Any]]], set[int]]:
+    """Load season stats into memory for WAR projection.
+
+    Args:
+        conn: SQLite connection with sqlite3.Row row_factory.
+        game_date: Current game date string (YYYY-MM-DD).
+        dh_rule: League DH rule ("No DH", "Universal DH", "AL Only DH").
+            Affects the AB threshold for two-way player detection.
+
+    Returns:
+        Tuple of (bat_hist, pit_hist, two_way_pids):
+        - bat_hist: {player_id: [{year, war, incomplete, season_pct}, ...]}
+        - pit_hist: {player_id: [{year, war, is_sp, incomplete, season_pct}, ...]}
+        - two_way_pids: set of player IDs who qualify as two-way
+    """
+    game_year = int(game_date[:4])
+    game_month = int(game_date[5:7])
+
+    if game_month >= 11:
+        season_pct = 1.0
+    else:
+        max_g = conn.execute(
+            """SELECT MAX(cnt) FROM (
+                SELECT COUNT(*) as cnt FROM games
+                WHERE date LIKE ? AND played=1 AND game_type=0
+                GROUP BY home_team)""",
+            (f"{game_year}%",)
+        ).fetchone()
+        season_pct = min((max_g[0] or 0) / 162.0, 1.0) if max_g and max_g[0] else 0.0
+
+    cutoff_year = game_year + 1
+
+    bat_rows = conn.execute(
+        """SELECT player_id, year, SUM(war) as war, SUM(ab) as ab,
+                  MAX(stint) as max_stint, COUNT(team_id) as team_count
+           FROM mlb_batting_stats WHERE split_id=1 AND year < ?
+           GROUP BY player_id, year""", (cutoff_year,)
+    ).fetchall()
+    pit_rows = conn.execute(
+        """SELECT player_id, year,
+                  SUM((war + COALESCE(ra9war, war)) / 2.0) as war,
+                  SUM(gs) as gs, SUM(ip) as ip,
+                  MAX(stint) as max_stint, COUNT(team_id) as team_count
+           FROM mlb_pitching_stats WHERE split_id=1 AND year < ?
+           GROUP BY player_id, year""", (cutoff_year,)
+    ).fetchall()
+
+    bat_hist: dict[int, list[dict[str, Any]]] = {}
+    for r in bat_rows:
+        if (r["ab"] or 0) < 130:
+            continue
+        incomplete = (r["max_stint"] == 1 and r["team_count"] == 1)
+        is_current = r["year"] == game_year
+        bat_hist.setdefault(r["player_id"], []).append(
+            {"year": r["year"], "war": r["war"] or 0, "incomplete": incomplete,
+             "season_pct": season_pct if is_current else 1.0})
+
+    pit_hist: dict[int, list[dict[str, Any]]] = {}
+    for r in pit_rows:
+        incomplete = (r["max_stint"] == 1 and r["team_count"] == 1)
+        is_current = r["year"] == game_year
+        pit_hist.setdefault(r["player_id"], []).append(
+            {"year": r["year"], "war": r["war"] or 0,
+             "is_sp": (r["gs"] or 0) >= 10, "incomplete": incomplete,
+             "season_pct": season_pct if is_current else 1.0})
+
+    # Two-way detection
+    two_way: set[int] = set()
+    bat_by_year: dict[int, set[int]] = {}
+    ab_thresh = 250 if dh_rule == "No DH" else 130
+    for r in bat_rows:
+        if (r["ab"] or 0) >= ab_thresh:
+            bat_by_year.setdefault(r["player_id"], set()).add(r["year"])
+    for r in pit_rows:
+        if (r["gs"] or 0) >= 10:
+            pid = r["player_id"]
+            if pid in bat_by_year and r["year"] in bat_by_year[pid]:
+                two_way.add(pid)
+
+    for d in (bat_hist, pit_hist):
+        for pid in d:
+            d[pid].sort(key=lambda x: x["year"], reverse=True)
+
+    return bat_hist, pit_hist, two_way

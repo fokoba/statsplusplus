@@ -191,3 +191,64 @@ class LeagueConfig:
                 "SELECT 1 FROM ratings WHERE babip IS NOT NULL LIMIT 1"
             ).fetchone() is not None
         return self._has_extended
+
+
+# ---------------------------------------------------------------------------
+# Financial helpers (league-scoped, explicit parameters)
+# ---------------------------------------------------------------------------
+
+
+def dollars_per_war(league_dir: Path) -> int:
+    """Get the league's $/WAR from league_averages.json.
+
+    Falls back to a scaled default based on minimum salary if averages
+    haven't been computed yet.
+
+    Args:
+        league_dir: Path to the league data directory.
+
+    Returns:
+        Dollar value of one WAR in this league.
+    """
+    import json
+    from statsplusplus.evaluation.constants import (
+        DEFAULT_DOLLARS_PER_WAR,
+        DEFAULT_MINIMUM_SALARY,
+    )
+
+    path = league_dir / "config" / "league_averages.json"
+    if path.exists():
+        try:
+            data = json.loads(path.read_text())
+            if "dollar_per_war" in data:
+                return int(data["dollar_per_war"])
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    # Fallback: scale default by minimum salary ratio
+    min_sal = league_minimum(league_dir)
+    if min_sal and min_sal != DEFAULT_MINIMUM_SALARY:
+        return round(DEFAULT_DOLLARS_PER_WAR * min_sal / DEFAULT_MINIMUM_SALARY)
+    return DEFAULT_DOLLARS_PER_WAR
+
+
+def league_minimum(league_dir: Path) -> int:
+    """Get the league's minimum salary from settings.
+
+    Args:
+        league_dir: Path to the league data directory.
+
+    Returns:
+        Minimum salary in dollars.
+    """
+    import json
+    from statsplusplus.evaluation.constants import DEFAULT_MINIMUM_SALARY
+
+    settings_path = league_dir / "config" / "league_settings.json"
+    if settings_path.exists():
+        try:
+            s = json.loads(settings_path.read_text())
+            return int(s.get("minimum_salary", DEFAULT_MINIMUM_SALARY))
+        except (json.JSONDecodeError, OSError, ValueError):
+            pass
+    return DEFAULT_MINIMUM_SALARY

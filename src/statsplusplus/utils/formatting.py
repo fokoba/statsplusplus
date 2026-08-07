@@ -117,3 +117,20 @@ def fmt_avg(val: float | None) -> str:
     if formatted.startswith("0."):
         return formatted[1:]  # Strip leading zero
     return formatted
+
+
+def fmt_table(headers: list[str], values: list[str]) -> str:
+    """Format a single-row markdown table.
+
+    Args:
+        headers: Column header strings.
+        values: Column value strings.
+
+    Returns:
+        Formatted markdown table with header, separator, and value rows.
+    """
+    col_w = [max(len(h), len(v)) for h, v in zip(headers, values)]
+    h_row = "| " + " | ".join(h.ljust(w) for h, w in zip(headers, col_w)) + " |"
+    s_row = "| " + " | ".join("-" * w for w in col_w) + " |"
+    v_row = "| " + " | ".join(v.ljust(w) for v, w in zip(values, col_w)) + " |"
+    return "\n".join([h_row, s_row, v_row])

@@ -21,7 +21,11 @@ from statsplusplus.evaluation.constants import (
     ARB_RAISE_INTERCEPT,
     ARB_RAISE_SLOPE,
     ARB_RAISE_MIN,
+    ARB_DEEP_SALARY_THRESHOLD,
     DEFAULT_MINIMUM_SALARY,
+    SERVICE_GAMES_HITTER,
+    SERVICE_STARTS_SP,
+    SERVICE_GAMES_RP,
 )
 
 # Default perpetual arb model parameters.
@@ -117,3 +121,103 @@ def arb_salary_perpetual(
 
     salary = max(min_sal, min(growth_sal, ceiling_sal))
     return int(round(salary))
+
+
+# ---------------------------------------------------------------------------
+# Service time estimation (requires DB access)
+# ---------------------------------------------------------------------------
+
+
+def estimate_service_time(conn: Any, player_id: int) -> float:
+    """Get MLB service time as fractional years.
+
+    Prefers exact values from the players table (mlb_service_days).
+    Falls back to games-based estimation.
+
+    Args:
+        conn: SQLite connection.
+        player_id: Player ID.
+
+    Returns:
+        Fractional years of MLB service (e.g. 3.5 = 3 years, 86 days).
+    """
+    row = conn.execute(
+        "SELECT mlb_service_years, mlb_service_days FROM players WHERE player_id=?",
+        (player_id,)
+    ).fetchone()
+    if row and row[0] is not None:
+        days = row[1] or 0
+        return days / 172.0
+
+    return _estimate_service_time_from_games(conn, player_id)
+
+
+def _estimate_service_time_from_games(conn: Any, player_id: int) -> float:
+    """Estimate fractional MLB service years from games played."""
+    bat_by_year: dict[int, int] = {row[0]: row[1] for row in conn.execute(
+        "SELECT year, SUM(g) FROM mlb_batting_stats WHERE player_id=? AND split_id=1 GROUP BY year",
+        (player_id,)).fetchall()}
+
+    pit_by_year: dict[int, tuple[int, int]] = {row[0]: (row[1], row[2]) for row in conn.execute(
+        "SELECT year, SUM(g), SUM(gs) FROM mlb_pitching_stats WHERE player_id=? AND split_id=1 GROUP BY year",
+        (player_id,)).fetchall()}
+
+    total = 0.0
+    for yr in set(bat_by_year) | set(pit_by_year):
+        bat_frac = bat_by_year.get(yr, 0) / SERVICE_GAMES_HITTER
+        pg, pgs = pit_by_year.get(yr, (0, 0))
+        pit_frac = (pgs / SERVICE_STARTS_SP if pgs >= pg * 0.5 else pg / SERVICE_GAMES_RP) if pg else 0.0
+        total += min(1.0, max(bat_frac, pit_frac))
+    return total
+
+
+def estimate_control(
+    conn: Any,
+    player_id: int,
+    age: int,
+    salary: int,
+    min_sal: int,
+    perpetual_arb: bool = False,
+    bucket: Optional[str] = None,
+) -> tuple[Optional[int], Optional[list[None]], int]:
+    """Estimate remaining team control years and salary schedule.
+
+    Args:
+        conn: SQLite connection.
+        player_id: Player ID.
+        age: Player's current age.
+        salary: Current salary.
+        min_sal: League minimum salary.
+        perpetual_arb: Whether the league uses perpetual arb (no free agency).
+        bucket: Positional bucket (unused currently, reserved for future).
+
+    Returns:
+        Tuple of (remaining_years, salary_schedule, pre_arb_years_left).
+        Returns (None, None, None) if player appears to be a free agent.
+    """
+    svc = estimate_service_time(conn, player_id)
+
+    arb_flag = conn.execute(
+        "SELECT has_received_arbitration FROM players WHERE player_id=?",
+        (player_id,)
+    ).fetchone()
+    has_arb = arb_flag[0] if arb_flag and arb_flag[0] is not None else None
+
+    if perpetual_arb:
+        remaining = max(1, 38 - age)
+        return remaining, [None] * remaining, 0
+
+    if salary <= min_sal:
+        if age >= 30 or (age >= 28 and svc >= 3) or svc >= 6:
+            return None, None, None  # type: ignore[return-value]
+        svc_years = int(svc)
+        remaining = max(1, 6 - svc_years)
+        pre_arb_left = max(0, 3 - svc_years)
+        return remaining, [None] * remaining, pre_arb_left
+
+    if age >= 30:
+        return None, None, None  # type: ignore[return-value]
+
+    est_svc = max(math.ceil(svc), 4 if salary > ARB_DEEP_SALARY_THRESHOLD else 3)
+    remaining = max(1, 6 - est_svc)
+    return remaining, [None] * remaining, 0

@@ -338,3 +338,34 @@ def prospect_surplus(
         "scarcity_mult": scar_mult,
         "total_surplus": base_surplus, "breakdown": rows,
     }
+
+
+def calc_pap(
+    war: float | None,
+    salary: int | float,
+    team_games: int | None,
+    dpw: int | float,
+    pap_scale: float = 25_000_000,
+) -> float | None:
+    """Compute Payroll-Adjusted Performance score (1-10 scale).
+
+    PAP measures how much surplus value a player is producing relative to
+    their salary. 5.0 = break-even, >5 = surplus, <5 = overpaid.
+
+    Args:
+        war: Player's WAR (None → returns None).
+        salary: Player's salary in dollars.
+        team_games: Games played by the team (for annualization).
+        dpw: Dollars per WAR for this league.
+        pap_scale: Scaling factor for the tanh curve (default $25M).
+
+    Returns:
+        PAP score rounded to 2 decimal places, or None if inputs invalid.
+    """
+    from math import tanh
+
+    if war is None or team_games is None or team_games < 5:
+        return None
+    annualized = war * (162 / team_games)
+    surplus = annualized * dpw - salary
+    return round(5 + 5 * tanh(surplus / pap_scale), 2)

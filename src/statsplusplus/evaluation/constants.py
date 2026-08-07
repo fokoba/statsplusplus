@@ -294,3 +294,18 @@ def load_model_weights(league_dir: Path) -> ModelWeights:
         return ModelWeights(raw=raw)
     except (json.JSONDecodeError, OSError):
         return ModelWeights()
+
+
+# ---------------------------------------------------------------------------
+# Defensive weights per positional bucket
+# ---------------------------------------------------------------------------
+
+DEFENSIVE_WEIGHTS: dict[str, dict[str, float]] = {
+    "C":      {"CFrm": 0.45, "CBlk": 0.35, "CArm": 0.20},
+    "SS":     {"IFR": 0.40, "IFE": 0.20, "IFA": 0.20, "TDP": 0.20},
+    "2B":     {"IFR": 0.35, "TDP": 0.30, "IFE": 0.20, "IFA": 0.15},
+    "3B":     {"IFA": 0.35, "IFE": 0.30, "IFR": 0.25, "TDP": 0.10},
+    "CF":     {"OFR": 0.55, "OFE": 0.25, "OFA": 0.20},
+    "COF_LF": {"OFR": 0.50, "OFE": 0.30, "OFA": 0.20},
+    "COF_RF": {"OFR": 0.40, "OFA": 0.35, "OFE": 0.25},
+}

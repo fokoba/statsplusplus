@@ -4,7 +4,7 @@ Team queries: web/team_queries.py
 Player queries: web/player_queries.py
 Percentiles: web/percentiles.py
 
-Note: many query functions set conn.row_factory = None to use tuple rows instead
+Note: query functions use sqlite3.Row access. Integer indexing (r[0]) still works
 of sqlite3.Row. This is intentional — these functions use positional indexing (r[0],
 r[1], etc.) for performance. Do not change without updating all index references.
 """
@@ -88,7 +88,6 @@ def _calc_eta(level, ovr, pot):
 
 def get_top_prospects(n=100):
     conn = get_db()
-    conn.row_factory = None
     ed = _get_prospect_eval_date()
 
     _abbr = team_abbr_map()
@@ -171,7 +170,6 @@ def get_batting_leaders(yr=None, min_pa=50):
     """Top 5 per stat, keyed by 'All' + each league short name."""
     yr = yr or year()
     conn = get_db()
-    conn.row_factory = None
     tip = conn.execute("SELECT AVG(ip) FROM team_pitching_stats WHERE year=? AND split_id=1",
                        (yr,)).fetchone()
     team_g = round(tip[0] / 9) if tip and tip[0] else 0
@@ -214,7 +212,6 @@ def get_pitching_leaders(yr=None, min_ip=10):
     """Top 5 per stat, keyed by 'All' + each league short name."""
     yr = yr or year()
     conn = get_db()
-    conn.row_factory = None
     tip = conn.execute("SELECT AVG(ip) FROM team_pitching_stats WHERE year=? AND split_id=1",
                        (yr,)).fetchone()
     team_g = round(tip[0] / 9) if tip and tip[0] else 0
@@ -238,7 +235,6 @@ def search_players(query):
     if not query or len(query) < 2:
         return []
     conn = get_db()
-    conn.row_factory = None
     _abbr = team_abbr_map()
     _lm = level_map()
     _pm = {str(k): v for k, v in get_cfg().pos_map.items()}
@@ -269,7 +265,6 @@ def search_players(query):
 def get_all_prospects():
     """All FV≥40 prospects for by-team/by-position views."""
     conn = get_db()
-    conn.row_factory = None
     ed = _get_prospect_eval_date()
 
     _abbr = team_abbr_map()
@@ -320,7 +315,6 @@ def get_all_prospects():
 def get_prospect_summary(pid):
     """Prospect side-panel data: ratings, FV, surplus, scouting summary."""
     conn = get_db()
-    conn.row_factory = None
     ed = _get_prospect_eval_date()
 
     pf = conn.execute("""
@@ -459,7 +453,6 @@ def _build_tools(rd, is_pitcher, out):
 def get_player_card(pid):
     """Side-panel-style card data for any player (MLB or prospect)."""
     conn = get_db()
-    conn.row_factory = None
     _abbr = team_abbr_map()
 
     p = conn.execute("""
@@ -574,7 +567,6 @@ def get_prospect_comps(pid):
     from player_utils import peak_war_from_ovr
 
     conn = get_db()
-    conn.row_factory = None
     _abbr = team_abbr_map()
 
     _DEF_COL = {"C": "r.c", "1B": "r.first_b", "2B": "r.second_b", "3B": "r.third_b",
@@ -1349,7 +1341,6 @@ def get_waiver_wire():
     - FV grade if prospect-eligible
     """
     conn = get_db()
-    conn.row_factory = None
 
     rows = conn.execute("""
         SELECT p.player_id, p.name, p.age, p.pos, p.role, p.level,

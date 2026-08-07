@@ -1,7 +1,7 @@
 {
-  "last_posted_commit": "b6215da",
-  "last_posted_date": "2026-08-06",
-  "last_posted_title": "Promotion Readiness, Split Thresholds & Draft Board UX",
+  "last_posted_commit": "7ec5d87",
+  "last_posted_date": "2026-08-07",
+  "last_posted_title": "Architecture Overhaul & Performance Optimization",
   "history": [
     {
       "date": "2026-07-22",
@@ -62,6 +62,11 @@
       "date": "2026-08-06",
       "commit": "b6215da",
       "title": "Promotion Readiness, Split Thresholds & Draft Board UX"
+    },
+    {
+      "date": "2026-08-07",
+      "commit": "7ec5d87",
+      "title": "Architecture Overhaul & Performance Optimization"
     }
   ]
 }

@@ -19,12 +19,10 @@ from flask import g, has_request_context
 def get_db():
     """Get the request-scoped DB connection for the current league.
 
-    Returns a SharedConnection wrapper that isolates row_factory changes.
-    Each function can set conn.row_factory = None without affecting other
-    functions sharing the same underlying connection.
-
-    The wrapper resets row_factory to sqlite3.Row before each execute() call
-    unless the function has explicitly set it to None for that scope.
+    Returns a _ScopedConnection wrapper around a single shared connection.
+    All query functions now use sqlite3.Row access (no row_factory mutations),
+    so the wrapper primarily provides the no-op close() for backward compat
+    with any remaining conn.close() calls.
     """
     import sqlite3
 

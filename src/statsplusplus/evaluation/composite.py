@@ -562,3 +562,23 @@ def pitcher_stat_to_2080(stat_plus: float) -> float:
     else:
         raw = 50.0 + (stat_plus - 100.0) * 0.30
     return max(20.0, min(80.0, raw))
+
+
+def compute_combined_value(primary_composite: int, secondary_composite: int) -> int:
+    """Compute the combined value for a two-way player.
+
+    Formula: ``primary + min(8, max(0, (secondary - 35) * 0.3))``
+
+    The secondary bonus reflects partial additional value from the secondary
+    role. Only applies when the secondary score exceeds replacement level (35).
+    Capped at +8 to prevent unrealistically high combined scores.
+
+    Args:
+        primary_composite: The higher of the two role scores (20-80).
+        secondary_composite: The lower of the two role scores (20-80).
+
+    Returns:
+        Combined value as an integer. Always >= primary_composite.
+    """
+    secondary_bonus = min(8, max(0, (secondary_composite - 35) * 0.3))
+    return min(80, round(primary_composite + secondary_bonus))

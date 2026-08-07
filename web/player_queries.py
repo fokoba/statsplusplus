@@ -393,7 +393,6 @@ def _compute_insights(rd: dict | None, is_pitcher: bool, composite: int | None,
 
 def get_player(pid):
     conn = get_db()
-    conn.row_factory = None
     year = get_cfg().year
 
     # Bio
@@ -401,7 +400,7 @@ def get_player(pid):
     if not p:
         return None
 
-    player_id, name, age, team_id, parent_team_id, level, pos, role = p
+    player_id, name, age, team_id, parent_team_id, level, pos, role = p["player_id"], p["name"], p["age"], p["team_id"], p["parent_team_id"], p["level"], p["pos"], p["role"]
     is_pitcher = role in (11, 12, 13)
     org_id = team_id if parent_team_id == 0 else parent_team_id
     level_str = level_map().get(str(level), str(level))
@@ -413,14 +412,14 @@ def get_player(pid):
         "FROM players WHERE player_id=?", (pid,)).fetchone()
     player_status = None
     if _status_row:
-        _inj = _status_row[0] or 0
-        _inj_left = _status_row[1] or 0
-        _dl_left = _status_row[2] or 0
-        _on_dl = _status_row[3] or 0
-        _on_dl60 = _status_row[4] or 0
-        _dfa = _status_row[5] or 0
-        _waivers = _status_row[6] or 0
-        _waivers_left = _status_row[7] or 0
+        _inj = _status_row["injury_is_injured"] or 0
+        _inj_left = _status_row["injury_left"] or 0
+        _dl_left = _status_row["injury_dl_left"] or 0
+        _on_dl = _status_row["is_on_dl"] or 0
+        _on_dl60 = _status_row["is_on_dl60"] or 0
+        _dfa = _status_row["designated_for_assignment"] or 0
+        _waivers = _status_row["is_on_waivers"] or 0
+        _waivers_left = _status_row["days_on_waivers_left"] or 0
 
         if _dfa:
             player_status = {"type": "DFA", "label": "Designated for Assignment", "severity": "high"}
@@ -448,8 +447,7 @@ def get_player(pid):
     # Build dict from row
     rd = {}
     if r:
-        cols = [d[0] for d in conn.execute("SELECT * FROM ratings LIMIT 0").description]
-        rd = dict(zip(cols, r))
+        rd = dict(r)
 
     ratings = None
     if rd:
@@ -480,9 +478,10 @@ def get_player(pid):
             "SELECT int_, wrk_ethic, greed, loy, lead FROM ratings "
             "WHERE player_id=? AND wrk_ethic IN ('VL','L','N','H','VH') "
             "ORDER BY snapshot_date DESC LIMIT 1", (pid,)).fetchone()
-        if not pers_row:
-            pers_row = (g("int_"), g("wrk_ethic"), g("greed"), g("loy"), g("lead"))
-        p_int, p_ethic, p_greed, p_loy, p_lead = pers_row
+        if pers_row:
+            p_int, p_ethic, p_greed, p_loy, p_lead = pers_row["int_"], pers_row["wrk_ethic"], pers_row["greed"], pers_row["loy"], pers_row["lead"]
+        else:
+            p_int, p_ethic, p_greed, p_loy, p_lead = g("int_"), g("wrk_ethic"), g("greed"), g("loy"), g("lead")
 
         ratings = {"ovr": ovr, "pot": pot, "height": _height_str(height), "bats": bats, "throws": throws,
                    "personality": {"int": _char_label(p_int), "ethic": _char_label(p_ethic),

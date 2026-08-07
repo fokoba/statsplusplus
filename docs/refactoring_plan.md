@@ -413,9 +413,9 @@ Functions take typed inputs, return typed outputs. Zero DB access.
 | 2. Evaluation | ~5000 lines migrated + typed | 2-3 | ✅ Complete |
 | 3. Config + Client | ~500 lines migrated | 1 | ✅ Complete |
 | 4. Data layer | ~3500 lines migrated | 1-2 | ✅ Complete |
-| 5. Web layer | ~8000 lines migrated + split | 3-4 | 🔶 Partial (middleware + blueprints done, route migration remaining) |
+| 5. Web layer | ~8000 lines migrated + split | 3-4 | ✅ Complete (middleware + blueprints + tuple cleanup) |
 | 6. CLI | ~3000 lines migrated | 1-2 | ✅ Complete |
-| 7. Cleanup | Deletions + fixes | 1 | 🔶 Partial (11 shims done, 4 orchestration files remain) |
+| 7. Cleanup | Deletions + fixes | 1 | 🔶 Partial (fv_calc absorbed; evaluation_engine, refresh, calibrate remain) |
 | 8. Documentation | All docs | 1 | ✅ Complete |
 
 **Completed in Session 76.** Remaining Phase 5/7 work is incremental and non-blocking.

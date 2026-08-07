@@ -1,7 +1,7 @@
 """Team-level DB queries for the web dashboard.
 
-Note: query functions use conn.row_factory = None (tuple rows) with positional
-indexing for performance. Do not change without updating all index references.
+Note: query functions use sqlite3.Row access. Integer indexing (r[0]) is used
+for compactness in many functions; named access (r["col"]) works equally well.
 """
 
 import os, sys
@@ -74,7 +74,6 @@ def _get_eval_date():
 def get_summary(team_id=None):
     state = _get_state()
     conn = get_db()
-    conn.row_factory = None
     year = state.get("stats_year", state["year"])
     tid = team_id or my_team_id()
     ed = _get_eval_date()
@@ -127,7 +126,6 @@ def get_power_rankings():
     state = _get_state()
     year = state.get("stats_year", state["year"])
     conn = get_db()
-    conn.row_factory = None
 
     # Surplus for display only
     ed = _get_eval_date()
@@ -211,7 +209,6 @@ def get_power_rankings():
 def get_standings():
     state = _get_state()
     conn = get_db()
-    conn.row_factory = None
     year = state.get("stats_year", state["year"])
 
     bat = {r[0]: (r[1], r[2]) for r in conn.execute(
@@ -315,7 +312,6 @@ def get_division_standings(team_id=None):
 def get_roster(team_id=None):
     state = _get_state()
     conn = get_db()
-    conn.row_factory = None
     year = state.get("stats_year", state["year"])
     tid = team_id or my_team_id()
     ed = _get_eval_date()
@@ -588,7 +584,6 @@ def _r3(v):
 
 def get_farm(team_id=None):
     conn = get_db()
-    conn.row_factory = None
     tid = team_id or my_team_id()
     ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
 
@@ -623,7 +618,6 @@ def get_team_stats(team_id):
     state = _get_state()
     year = state.get("stats_year", state["year"])
     conn = get_db()
-    conn.row_factory = None
 
     bat_rows = conn.execute(
         "SELECT team_id, avg, obp, slg, ops, hr, r, bb_pct, k_pct, iso FROM team_batting_stats WHERE year=? AND split_id=1", (year,)
@@ -666,7 +660,6 @@ def get_team_stats(team_id):
 
 def get_contracts(team_id):
     conn = get_db()
-    conn.row_factory = None
     ed = _get_eval_date()
 
     rows = conn.execute("""
@@ -713,7 +706,6 @@ def get_payroll_summary(team_id):
     state = _get_state()
     year = state.get("stats_year", state["year"])
     conn = get_db()
-    conn.row_factory = None
     rows = conn.execute("""
         SELECT c.player_id, p.name, c.years, c.current_year,
                c.salary_0, c.salary_1, c.salary_2, c.salary_3, c.salary_4,
@@ -799,7 +791,6 @@ def get_roster_summary(team_id):
     state = _get_state()
     year = state.get("stats_year", state["year"])
     conn = get_db()
-    conn.row_factory = None
     rows = conn.execute("""
         SELECT p.role, p.age FROM players p
         WHERE p.team_id=? AND p.level='1'
@@ -822,7 +813,6 @@ def get_roster_summary(team_id):
 
 def get_upcoming_fa(team_id):
     conn = get_db()
-    conn.row_factory = None
     ed = _get_eval_date()
 
     rows = conn.execute("""
@@ -857,7 +847,6 @@ def get_upcoming_fa(team_id):
 
 def get_surplus_leaders(team_id):
     conn = get_db()
-    conn.row_factory = None
     ed = _get_eval_date()
 
     mlb = conn.execute("""
@@ -887,7 +876,6 @@ def get_age_distribution(team_id):
     state = _get_state()
     year = state.get("stats_year", state["year"])
     conn = get_db()
-    conn.row_factory = None
 
     mlb_breaks = [("≤25", 0, 25), ("26-29", 26, 29), ("30-33", 30, 33), ("34+", 34, 99)]
     farm_breaks = [("≤20", 0, 20), ("21-23", 21, 23), ("24+", 24, 99)]
@@ -960,7 +948,6 @@ def get_record_breakdown(team_id):
     state = _get_state()
     year = state.get("stats_year", state["year"])
     conn = get_db()
-    conn.row_factory = None
     rows = conn.execute("""
         SELECT home_team, away_team, runs0, runs1
         FROM games
@@ -1027,7 +1014,6 @@ def get_recent_games(team_id, n=10):
     state = _get_state()
     year = state.get("stats_year", state["year"])
     conn = get_db()
-    conn.row_factory = None
     rows = conn.execute("""
         SELECT g.date, g.home_team, g.away_team, g.runs0, g.runs1,
                g.winning_pitcher, g.losing_pitcher, g.save_pitcher,
@@ -1122,7 +1108,6 @@ def get_stat_leaders(team_id):
     state = _get_state()
     year = state.get("stats_year", state["year"])
     conn = get_db()
-    conn.row_factory = None
 
     # Team games for MLB qualification thresholds
     tip = conn.execute("SELECT ip FROM team_pitching_stats WHERE team_id=? AND year=? AND split_id=1",
@@ -1176,7 +1161,6 @@ def get_stat_leaders(team_id):
 
 def get_farm_depth(team_id):
     conn = get_db()
-    conn.row_factory = None
     ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
 
     by_bucket = conn.execute("""
@@ -2093,7 +2077,6 @@ def get_org_overview(team_id):
 def get_affiliates(team_id):
     """Get list of minor league affiliates for an MLB team."""
     conn = get_db()
-    conn.row_factory = None
     rows = conn.execute("""
         SELECT DISTINCT t.team_id, t.name, p.level
         FROM teams t
@@ -2131,7 +2114,6 @@ _LEVEL_AGE_NORMS = {
 def get_minor_league_team(team_id):
     """Get minor league team info: name, level, parent org, affiliates."""
     conn = get_db()
-    conn.row_factory = None
 
     row = conn.execute(
         "SELECT team_id, name, level, parent_team_id FROM teams WHERE team_id=?",
@@ -2193,7 +2175,6 @@ def get_minor_league_team(team_id):
 def get_minor_league_roster(team_id):
     """Full roster for a minor league team, split into hitters and pitchers with tool ratings."""
     conn = get_db()
-    conn.row_factory = None
     from ratings import norm as _norm_rating
 
     rows = conn.execute("""
@@ -2311,7 +2292,6 @@ def get_minor_league_roster(team_id):
 def get_org_minor_league_roster(parent_team_id):
     """Full minor league roster for an entire org (all levels), split into hitters and pitchers."""
     conn = get_db()
-    conn.row_factory = None
     from ratings import norm as _norm_rating
 
     # Get all affiliate team_ids for this org
@@ -2454,7 +2434,6 @@ def get_org_minor_league_roster(parent_team_id):
 def get_minor_league_notables(team_id):
     """Notable players on a minor league team: prospects + worth-tracking players."""
     conn = get_db()
-    conn.row_factory = None
 
     # Get player level for age norm lookup
     lvl_row = conn.execute(

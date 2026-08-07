@@ -325,3 +325,92 @@ def calc_fv(
         risk = "Extreme"
 
     return fv_grade, risk, fv_continuous
+
+
+def compute_performance_adjusted_ceiling(
+    true_ceiling: float,
+    stat_2080: float,
+    player_age: int,
+    norm_age: int,
+    effective_pa: float,
+    tool_only_score: float,
+) -> int:
+    """Compute performance-adjusted ceiling from MiLB stat signal.
+
+    Adjusts the ceiling up or down based on how the player's level-relative
+    production compares to their pure tool composite. Young players get more
+    credit for outperformance; older players get penalized more for
+    underperformance.
+
+    Args:
+        true_ceiling: Ceiling score on 20-80 scale.
+        stat_2080: Level-relative production converted to 20-80 scale.
+        player_age: Player's current age.
+        norm_age: Expected age for a typical player at this level.
+        effective_pa: Level-discounted effective PA (sample size).
+        tool_only_score: Pure tool composite score.
+
+    Returns:
+        Adjusted ceiling, clamped to 20-80.
+    """
+    if effective_pa < 30 or true_ceiling <= 0:
+        return int(true_ceiling)
+
+    signal = (stat_2080 - tool_only_score) / 30.0
+    signal = max(-1.0, min(1.0, signal))
+    age_context = norm_age - player_age
+
+    if signal > 0:
+        age_mult = 1.0 + age_context * 0.15 if age_context > 0 else max(0.4, 1.0 + age_context * 0.20)
+    else:
+        age_mult = max(0.25, 1.0 - age_context * 0.25) if age_context > 0 else 1.0 + abs(age_context) * 0.15
+
+    sample_confidence = min(1.0, (effective_pa - 30) / 270.0)
+    max_adjustment = 6.0
+    adjustment = signal * age_mult * sample_confidence * max_adjustment
+    adjustment = max(-max_adjustment, min(max_adjustment, adjustment))
+
+    result = true_ceiling + round(adjustment)
+    return max(20, min(80, int(result)))
+
+
+def compute_stat_risk_modifier(
+    stat_2080: float,
+    player_age: int,
+    norm_age: int,
+    effective_pa: float,
+    tool_only_score: float,
+) -> float:
+    """Compute risk modifier based on MiLB stat performance.
+
+    Returns a value between -0.12 and +0.12 that adjusts the development
+    confidence used in risk label assignment. Positive = reduced risk (player
+    is outperforming tools), negative = increased risk.
+
+    Args:
+        stat_2080: Level-relative production on 20-80 scale.
+        player_age: Player's current age.
+        norm_age: Expected age for a typical player at this level.
+        effective_pa: Level-discounted effective PA.
+        tool_only_score: Pure tool composite score.
+
+    Returns:
+        Risk modifier in [-0.12, +0.12].
+    """
+    if effective_pa < 50:
+        return 0.0
+
+    perf_delta = stat_2080 - tool_only_score
+    normalized = max(-1.0, min(1.0, perf_delta / 15.0))
+    age_context = norm_age - player_age
+    sample_factor = min(1.0, (effective_pa - 50) / 200.0)
+    base_mod = normalized * 0.08 * sample_factor
+
+    if normalized > 0 and age_context > 0:
+        base_mod *= (1.0 + age_context * 0.25)
+    elif normalized < 0 and age_context < 0:
+        base_mod *= (1.0 + abs(age_context) * 0.20)
+    elif normalized < 0 and age_context > 0:
+        base_mod *= max(0.2, 1.0 - age_context * 0.30)
+
+    return max(-0.12, min(0.12, base_mod))

@@ -347,7 +347,6 @@ def _babip_expected(pid, cntct, speed, conn, year, babip_rating=None):
 
 def get_hitter_percentiles(pid, split_id=1, year=None, level=None):
     conn = get_db()
-    conn.row_factory = None
     current_year = get_cfg().year
     explicit_year = year is not None
     year = year or current_year
@@ -499,7 +498,6 @@ def get_hitter_percentiles(pid, split_id=1, year=None, level=None):
 
 def get_pitcher_percentiles(pid, split_id=1, year=None, level=None):
     conn = get_db()
-    conn.row_factory = None
     current_year = get_cfg().year
     explicit_year = year is not None
     year = year or current_year
@@ -728,7 +726,6 @@ def get_fielding_percentiles(pid, year=None):
     Returns a list of dicts: [{pos, stats: [{label, value, pctile, ...}], qualified}]
     """
     conn = get_db()
-    conn.row_factory = None
     current_year = get_cfg().year
     explicit_year = year is not None
     year = _resolve_pctile_year(conn, year or current_year, "mlb_fielding_stats", fallback=not explicit_year)

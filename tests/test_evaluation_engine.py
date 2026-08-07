@@ -4071,7 +4071,7 @@ class TestProperty8DivergenceClassificationThresholdsPreserved:
 # Validates: Requirements 5.1, 5.2, 5.3
 # ===================================================================
 
-from fv_model import positional_access_premium, POSITIONAL_ACCESS
+from statsplusplus.evaluation.fv import positional_access_premium, POSITIONAL_ACCESS
 
 # Strategies for positional access tests
 _premium_position_st = st.sampled_from(["SS", "C", "CF"])

@@ -14,7 +14,7 @@ import pytest
 BASE = Path(__file__).parent.parent
 sys.path.insert(0, str(BASE / "scripts"))
 
-from db import _migrate_ratings, _migrate_ratings_history, _migrate_ratings_components
+from statsplusplus.data.db import _migrate_ratings, _migrate_ratings_history, _migrate_ratings_components
 
 
 class TestRatingsMigration:
@@ -134,7 +134,7 @@ class TestFreshSchema:
     """Verify fresh SCHEMA string includes all new columns."""
 
     def test_ratings_schema_has_new_columns(self):
-        from db import SCHEMA
+        from statsplusplus.data.db import SCHEMA
         conn = sqlite3.connect(":memory:")
         conn.executescript(SCHEMA)
         cols = {row[1] for row in conn.execute("PRAGMA table_info(ratings)").fetchall()}
@@ -144,7 +144,7 @@ class TestFreshSchema:
         assert "secondary_composite" in cols
 
     def test_ratings_history_schema_has_new_columns(self):
-        from db import SCHEMA
+        from statsplusplus.data.db import SCHEMA
         conn = sqlite3.connect(":memory:")
         conn.executescript(SCHEMA)
         cols = {row[1] for row in conn.execute("PRAGMA table_info(ratings_history)").fetchall()}

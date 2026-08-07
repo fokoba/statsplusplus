@@ -69,26 +69,26 @@ def test_norm_zero_returns_none():
 # ---------------------------------------------------------------------------
 
 def test_calc_fv_sp():
-    from fv_model import calc_fv
+    from statsplusplus.evaluation.fv import calc_fv_from_dict as calc_fv
     fv, risk = calc_fv(_sp())
     assert fv == 65  # expected peak with ceiling blend
     assert risk in ("Low", "Medium", "High", "Extreme")
 
 def test_calc_fv_ss():
-    from fv_model import calc_fv
+    from statsplusplus.evaluation.fv import calc_fv_from_dict as calc_fv
     fv, risk = calc_fv(_ss())
     assert fv == 60
     assert risk in ("Low", "Medium", "High", "Extreme")
 
 def test_calc_fv_rp():
-    from fv_model import calc_fv
+    from statsplusplus.evaluation.fv import calc_fv_from_dict as calc_fv
     fv, risk = calc_fv(_rp())
     assert fv == 50  # ceiling 60 * 0.85 RP discount = 51 → FV 50
     assert risk in ("Low", "Medium", "High", "Extreme")
 
 def test_calc_fv_rp_capped_at_55():
     """RPs should never exceed FV 55 regardless of ratings."""
-    from fv_model import calc_fv
+    from statsplusplus.evaluation.fv import calc_fv_from_dict as calc_fv
     p = _rp()
     p['Pot'] = 80
     p['Ovr'] = 70

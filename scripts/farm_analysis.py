@@ -17,7 +17,7 @@ from statsplusplus.config.ratings import norm as _norm_pkg, norm_floor as _norm_
 from statsplusplus.utils.formatting import height_str, fmt_table
 from statsplusplus.utils.positions import assign_bucket, PITCH_FIELDS, PITCH_NAMES, LEVEL_NORM_AGE
 from statsplusplus.evaluation.fv import dev_weight
-from fv_model import calc_fv  # dict-based adapter (retained until full migration)
+from statsplusplus.evaluation.fv import calc_fv_from_dict as calc_fv
 
 league_dir = get_league_dir(get_active_league_slug())
 _cfg = LeagueConfig(base_dir=league_dir)

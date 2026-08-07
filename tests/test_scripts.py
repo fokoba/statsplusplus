@@ -185,7 +185,7 @@ class TestFvCalcHelpers:
     def test_fv_tier_discrepancy_no_warning_when_no_defensive_value(self, caplog):
         """No warning when _defensive_value is not set."""
         import logging
-        from fv_calc import _check_fv_tier_discrepancy
+        from statsplusplus.data.fv_calc import _check_fv_tier_discrepancy
         p = {"ID": 100, "Ovr": 55, "Pot": 65, "Age": 21,
              "_is_pitcher": False, "_bucket": "SS", "_norm_age": 24, "_level": "aa"}
         with caplog.at_level(logging.WARNING, logger="fv_calc"):
@@ -195,14 +195,14 @@ class TestFvCalcHelpers:
     def test_fv_tier_discrepancy_no_warning_within_one_tier(self, caplog):
         """No warning when component-based and raw-tool-based FV are within one tier."""
         import logging
-        from fv_calc import _check_fv_tier_discrepancy
+        from statsplusplus.data.fv_calc import _check_fv_tier_discrepancy
         p = {"ID": 101, "Ovr": 55, "Pot": 65, "Age": 21,
              "_is_pitcher": False, "_bucket": "SS", "_norm_age": 24, "_level": "aa",
              "_defensive_value": 60, "_mlb_median": 48,
              "IFR": 130, "IFE": 120, "IFA": 120, "TDP": 120,
              "PotSS": 160, "SS": 160, "WrkEthic": "N", "Acc": "N",
              "PotCntct": 130, "Cntct_L": 0, "Cntct_R": 0}
-        from fv_model import calc_fv
+        from statsplusplus.evaluation.fv import calc_fv_from_dict as calc_fv
         fv_base, fv_risk = calc_fv(p)
         with caplog.at_level(logging.WARNING, logger="fv_calc"):
             _check_fv_tier_discrepancy(p, fv_base, fv_risk)
@@ -211,7 +211,7 @@ class TestFvCalcHelpers:
     def test_fv_tier_discrepancy_warning_when_exceeds_one_tier(self, caplog):
         """Warning logged when component-based FV differs from raw-tool by >5 points."""
         import logging
-        from fv_calc import _check_fv_tier_discrepancy
+        from statsplusplus.data.fv_calc import _check_fv_tier_discrepancy
         # Set _defensive_value very high (80) but raw defensive tools very low
         # This should create a large discrepancy in the defensive bonus
         p = {"ID": 102, "Ovr": 50, "Pot": 65, "Age": 20,
@@ -220,7 +220,7 @@ class TestFvCalcHelpers:
              "IFR": 20, "IFE": 20, "IFA": 20, "TDP": 20,
              "PotSS": 160, "SS": 160, "WrkEthic": "N", "Acc": "N",
              "PotCntct": 130, "Cntct_L": 0, "Cntct_R": 0}
-        from fv_model import calc_fv
+        from statsplusplus.evaluation.fv import calc_fv_from_dict as calc_fv
         # Compute FV with _defensive_value (component-based path)
         fv_new, plus_new = calc_fv(p)
         # Compute FV without _defensive_value (old path)
@@ -275,7 +275,7 @@ class TestFvDefensiveValueIntegration:
         """calc_fv produces valid FV grades regardless of _defensive_value.
         The ceiling-credit FV formula uses composite/ceiling scores, not
         defensive_score directly, so _defensive_value doesn't change FV."""
-        from fv_model import calc_fv
+        from statsplusplus.evaluation.fv import calc_fv_from_dict as calc_fv
         init_ratings_scale = lambda s: None  # no-op: pipeline reads scale from league config
         init_ratings_scale("1-100")
 
@@ -294,7 +294,7 @@ class TestFvDefensiveValueIntegration:
     def test_calc_fv_falls_back_when_defensive_value_absent(self):
         """When _defensive_value is NOT set, calc_fv uses defensive_score() from
         raw tools. The FV should be identical to the pre-reframe behavior."""
-        from fv_model import calc_fv
+        from statsplusplus.evaluation.fv import calc_fv_from_dict as calc_fv
         init_ratings_scale = lambda s: None  # no-op: pipeline reads scale from league config
         init_ratings_scale("1-100")
 
@@ -318,7 +318,7 @@ class TestFvDefensiveValueIntegration:
     def test_fv_grades_remain_on_same_scale(self):
         """FV grades produced with _defensive_value are still on the standard scale:
         rounded to nearest 5, within [20, 80]."""
-        from fv_model import calc_fv
+        from statsplusplus.evaluation.fv import calc_fv_from_dict as calc_fv
         init_ratings_scale = lambda s: None  # no-op: pipeline reads scale from league config
         init_ratings_scale("1-100")
 

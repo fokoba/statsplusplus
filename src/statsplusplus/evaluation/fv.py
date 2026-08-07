@@ -414,3 +414,135 @@ def compute_stat_risk_modifier(
         base_mod *= max(0.2, 1.0 - age_context * 0.30)
 
     return max(-0.12, min(0.12, base_mod))
+
+
+# ---------------------------------------------------------------------------
+# Positional access premium
+# ---------------------------------------------------------------------------
+
+POSITIONAL_ACCESS: dict[str, dict[str, float]] = {
+    "SS": {"access_threshold": 50, "base_premium": 2.0, "offense_scale": 0.06},
+    "C":  {"access_threshold": 50, "base_premium": 1.5, "offense_scale": 0.05},
+    "CF": {"access_threshold": 50, "base_premium": 1.5, "offense_scale": 0.05},
+}
+
+
+def positional_access_premium(
+    bucket: str,
+    offensive_grade: float,
+    defensive_value: float,
+    access_threshold: float = 50,
+) -> float:
+    """Compute positional value premium for premium defensive positions.
+
+    Premium positions (SS, C, CF) get a bonus when the player has sufficient
+    defensive ability to stick at the position AND elite offensive production.
+
+    Args:
+        bucket: Positional bucket.
+        offensive_grade: Offensive composite grade (20-80 scale).
+        defensive_value: Defensive rating at the position.
+        access_threshold: Minimum defensive value to qualify for premium.
+
+    Returns:
+        Premium value (0-5 range, typically 1-3 for qualifying players).
+    """
+    params = POSITIONAL_ACCESS.get(bucket)
+    if params is None:
+        return 0.0
+    if defensive_value < access_threshold:
+        return 0.0
+    base_premium = params["base_premium"]
+    offense_scale = params["offense_scale"]
+    return base_premium + (offensive_grade - 40) * offense_scale
+
+
+# ---------------------------------------------------------------------------
+# Dict-based adapter (legacy calling convention)
+# ---------------------------------------------------------------------------
+
+
+def calc_fv_from_dict(
+    p: dict,
+    scale: str = "1-100",
+    league_dir: "Path | None" = None,
+) -> tuple[int, str]:
+    """Compute FV for a prospect from a player dict (legacy interface).
+
+    This is a convenience wrapper around calc_fv() for callers that work
+    with pre-built player dicts. Mutates p by setting p["_fv_continuous"].
+
+    Args:
+        p: Player dict with keys: Ovr, Pot, Age, _bucket, _is_pitcher,
+           Acc, Cntct_L, Cntct_R, Stf_L, Stf_R, _offensive_ceiling,
+           _stat_risk_modifier, WrkEthic, Int, _norm_age.
+        scale: Ratings scale for norm_floor.
+        league_dir: League directory for loading calibrated dev curves.
+
+    Returns:
+        (fv_grade, risk_label) tuple.
+    """
+    from pathlib import Path
+    from statsplusplus.config.ratings import norm_floor as _nf
+
+    # Load calibrated dev curves
+    gap_closure_h = dict(GAP_CLOSURE_HITTER_DEFAULT)
+    gap_closure_p = dict(GAP_CLOSURE_PITCHER_DEFAULT)
+    expected_gap_h = dict(EXPECTED_GAP_HITTER_DEFAULT)
+    expected_gap_p = dict(EXPECTED_GAP_PITCHER_DEFAULT)
+
+    if league_dir is not None:
+        import json
+        mw_path = Path(league_dir) / "config" / "model_weights.json"
+        if mw_path.exists():
+            try:
+                w = json.loads(mw_path.read_text())
+                for key, target in [
+                    ("gap_closure_hitter", gap_closure_h),
+                    ("gap_closure_pitcher", gap_closure_p),
+                    ("expected_gap_hitter", expected_gap_h),
+                    ("expected_gap_pitcher", expected_gap_p),
+                ]:
+                    raw = w.get(key)
+                    if isinstance(raw, dict):
+                        target.clear()
+                        target.update({int(k): v for k, v in raw.items()})
+            except (json.JSONDecodeError, OSError):
+                pass
+
+    ovr = p.get("Ovr") or 0
+    pot = p.get("Pot") or 0
+    age = p["Age"]
+    bucket = p["_bucket"]
+    is_pitcher = bool(p.get("_is_pitcher"))
+
+    accuracy = p.get("Acc", "N")
+    contact_l = _nf(p.get("Cntct_L", 0), scale)
+    contact_r = _nf(p.get("Cntct_R", 0), scale)
+    stuff_l = _nf(p.get("Stf_L", 0), scale)
+    stuff_r = _nf(p.get("Stf_R", 0), scale)
+    offensive_ceiling = p.get("_offensive_ceiling")
+    stat_risk_modifier = p.get("_stat_risk_modifier", 0.0)
+    work_ethic = p.get("WrkEthic", "N")
+    intelligence = p.get("Int", "N")
+    norm_age = p.get("_norm_age", 22)
+
+    gap_closure = gap_closure_p if is_pitcher else gap_closure_h
+    expected_gap = expected_gap_p if is_pitcher else expected_gap_h
+
+    fv_grade, risk, fv_continuous = calc_fv(
+        ovr=ovr, pot=pot, age=age, bucket=bucket, norm_age=norm_age,
+        is_pitcher=is_pitcher, accuracy=accuracy,
+        contact_l=contact_l, contact_r=contact_r,
+        stuff_l=stuff_l, stuff_r=stuff_r,
+        offensive_ceiling=offensive_ceiling,
+        stat_risk_modifier=stat_risk_modifier,
+        work_ethic=work_ethic, intelligence=intelligence,
+        gap_closure_table=gap_closure,
+        expected_gap_table=expected_gap,
+    )
+
+    # Mutate player dict (legacy behavior)
+    p["_fv_continuous"] = fv_continuous
+
+    return fv_grade, risk

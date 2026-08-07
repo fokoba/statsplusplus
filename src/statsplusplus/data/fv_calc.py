@@ -356,6 +356,29 @@ def _apply_milb_context(
         )
 
 
+def _check_fv_tier_discrepancy(p: dict, fv_base: int, fv_risk: str) -> None:
+    """Log a warning when the component-based defensive bonus produces an FV
+    grade differing from the old defensive_score() path by more than one FV
+    tier (5 FV points). Only runs when ``_defensive_value`` was used."""
+    if p.get("_defensive_value") is None:
+        return
+    import sys
+    _scripts = str(Path(__file__).resolve().parent.parent.parent.parent / "scripts")
+    if _scripts not in sys.path:
+        sys.path.insert(0, _scripts)
+    from fv_model import calc_fv
+    p_old = dict(p)
+    del p_old["_defensive_value"]
+    fv_old, _ = calc_fv(p_old)
+
+    if abs(fv_base - fv_old) > 5:
+        logger.warning(
+            "FV tier discrepancy for player %s: component-based=%d, "
+            "raw-tool-based=%d (defensive_value=%s)",
+            p.get("ID", "?"), fv_base, fv_old, p["_defensive_value"],
+        )
+
+
 def main() -> None:
     """CLI entry point."""
     run()

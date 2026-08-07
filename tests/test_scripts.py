@@ -57,7 +57,7 @@ def mock_cfg_scripts():
 
 class TestAssignBucket:
     def test_normal_ss(self):
-        from player_utils import assign_bucket
+        from statsplusplus.utils.positions import assign_bucket
         p = {"Pos": "6", "ss": 55, "pot_ss": 60, "Age": 25,
              "C": 30, "2B": 45, "CF": 40, "LF": 40, "RF": 40, "3B": 40, "1B": 40,
              "PotC": 30, "Pot2B": 45, "PotCF": 40, "PotLF": 40, "PotRF": 40, "Pot3B": 40, "Pot1B": 40}
@@ -65,7 +65,7 @@ class TestAssignBucket:
 
     def test_empty_string_defensive_grades(self):
         """API sometimes returns '' instead of 0 for defensive grades — must not crash."""
-        from player_utils import assign_bucket
+        from statsplusplus.utils.positions import assign_bucket
         p = {"Pos": "1", "Age": 28, "_role": "starter",
              "C": "", "SS": "", "2B": "", "CF": "", "LF": "", "RF": "", "3B": "", "1B": "",
              "PotC": "", "PotSS": "", "Pot2B": "", "PotCF": "", "PotLF": "", "PotRF": "", "Pot3B": "", "Pot1B": "",
@@ -76,7 +76,7 @@ class TestAssignBucket:
 
     def test_none_defensive_grades(self):
         """None values for defensive grades must not crash."""
-        from player_utils import assign_bucket
+        from statsplusplus.utils.positions import assign_bucket
         p = {"Pos": "3", "Age": 30, "_role": "position_player",
              "C": None, "SS": None, "2B": None, "CF": None,
              "LF": None, "RF": None, "3B": None, "1B": 50,
@@ -87,7 +87,7 @@ class TestAssignBucket:
 
     def test_string_numeric_grades(self):
         """String '55' should be coerced to int 55."""
-        from player_utils import assign_bucket
+        from statsplusplus.utils.positions import assign_bucket
         p = {"Pos": "6", "Age": 25, "_role": "position_player",
              "C": "30", "SS": "55", "2B": "45", "CF": "40",
              "LF": "40", "RF": "40", "3B": "40", "1B": "40",
@@ -166,7 +166,7 @@ class TestCalibrateHelpers:
 class TestFvCalcHelpers:
     def test_fv_calc_skips_empty_string_ovr(self):
         """fv_calc must skip players with non-numeric Ovr without crashing."""
-        from player_utils import assign_bucket
+        from statsplusplus.utils.positions import assign_bucket
         # Simulate what fv_calc does with a malformed row
         p = {"ID": 998, "Age": 22, "Ovr": "", "Pot": "", "level": "3",
              "Pos": "6", "_role": "position_player", "_is_pitcher": False,
@@ -202,7 +202,7 @@ class TestFvCalcHelpers:
              "IFR": 130, "IFE": 120, "IFA": 120, "TDP": 120,
              "PotSS": 160, "SS": 160, "WrkEthic": "N", "Acc": "N",
              "PotCntct": 130, "Cntct_L": 0, "Cntct_R": 0}
-        from player_utils import calc_fv
+        from fv_model import calc_fv
         fv_base, fv_risk = calc_fv(p)
         with caplog.at_level(logging.WARNING, logger="fv_calc"):
             _check_fv_tier_discrepancy(p, fv_base, fv_risk)
@@ -220,7 +220,7 @@ class TestFvCalcHelpers:
              "IFR": 20, "IFE": 20, "IFA": 20, "TDP": 20,
              "PotSS": 160, "SS": 160, "WrkEthic": "N", "Acc": "N",
              "PotCntct": 130, "Cntct_L": 0, "Cntct_R": 0}
-        from player_utils import calc_fv
+        from fv_model import calc_fv
         # Compute FV with _defensive_value (component-based path)
         fv_new, plus_new = calc_fv(p)
         # Compute FV without _defensive_value (old path)
@@ -250,7 +250,7 @@ class TestFvDefensiveValueIntegration:
     def _make_ss_prospect(**overrides):
         """Build a SS prospect dict with strong positional composite (PotSS >= 60 norm)
         so the defensive bonus path is exercised."""
-        from ratings import init_ratings_scale
+        init_ratings_scale = lambda s: None  # no-op: pipeline reads scale from league config
         init_ratings_scale("1-100")
         p = {
             "Ovr": 55, "Pot": 65, "Age": 21,
@@ -275,8 +275,8 @@ class TestFvDefensiveValueIntegration:
         """calc_fv produces valid FV grades regardless of _defensive_value.
         The ceiling-credit FV formula uses composite/ceiling scores, not
         defensive_score directly, so _defensive_value doesn't change FV."""
-        from player_utils import calc_fv
-        from ratings import init_ratings_scale
+        from fv_model import calc_fv
+        init_ratings_scale = lambda s: None  # no-op: pipeline reads scale from league config
         init_ratings_scale("1-100")
 
         p_with = self._make_ss_prospect(_defensive_value=70)
@@ -294,8 +294,8 @@ class TestFvDefensiveValueIntegration:
     def test_calc_fv_falls_back_when_defensive_value_absent(self):
         """When _defensive_value is NOT set, calc_fv uses defensive_score() from
         raw tools. The FV should be identical to the pre-reframe behavior."""
-        from player_utils import calc_fv
-        from ratings import init_ratings_scale
+        from fv_model import calc_fv
+        init_ratings_scale = lambda s: None  # no-op: pipeline reads scale from league config
         init_ratings_scale("1-100")
 
         # Player without _defensive_value — raw tool path
@@ -318,8 +318,8 @@ class TestFvDefensiveValueIntegration:
     def test_fv_grades_remain_on_same_scale(self):
         """FV grades produced with _defensive_value are still on the standard scale:
         rounded to nearest 5, within [20, 80]."""
-        from player_utils import calc_fv
-        from ratings import init_ratings_scale
+        from fv_model import calc_fv
+        init_ratings_scale = lambda s: None  # no-op: pipeline reads scale from league config
         init_ratings_scale("1-100")
 
         valid_fv_bases = {20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80}
@@ -353,7 +353,7 @@ class TestCalibrateCarryingTools:
             player_id, pos (int), cntct, gap, pow, eye, war, year (optional)
         Tool values should be on the 1-100 raw scale (norm(75)=65, norm(50)=50).
         """
-        from ratings import init_ratings_scale
+        init_ratings_scale = lambda s: None  # no-op: pipeline reads scale from league config
         init_ratings_scale("1-100")
 
         conn = sqlite3.connect(":memory:")

@@ -74,7 +74,7 @@ class TestToolTransform:
 
     def test_matches_legacy(self):
         """Verify identical to legacy _tool_transform."""
-        from evaluation_engine import _tool_transform
+        from statsplusplus.data.evaluation_engine import _tool_transform
         for val in [20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80]:
             assert tool_transform(float(val)) == _tool_transform(float(val)), f"Mismatch at {val}"
 
@@ -98,7 +98,7 @@ class TestSubMlbFloorPenalty:
         assert sub_mlb_floor_penalty(tools) == pytest.approx(1.25)
 
     def test_matches_legacy(self):
-        from evaluation_engine import _sub_mlb_floor_penalty
+        from statsplusplus.data.evaluation_engine import _sub_mlb_floor_penalty
         test_cases = [
             {"contact": 50, "power": 60, "eye": 45},
             {"contact": 25, "power": 30, "eye": 50},
@@ -167,7 +167,7 @@ class TestCompositeHitter:
 
     def test_matches_legacy(self, standard_weights, def_weights):
         """Verify identical output to legacy compute_composite_hitter."""
-        from evaluation_engine import compute_composite_hitter as legacy_hitter
+        from statsplusplus.data.evaluation_engine import compute_composite_hitter as legacy_hitter
         test_profiles = [
             {"contact": 55, "gap": 50, "power": 60, "eye": 45, "speed": 50, "steal": 45, "stl_rt": 45},
             {"contact": 70, "gap": 65, "power": 40, "eye": 70, "speed": 60, "steal": 55, "stl_rt": 50},
@@ -209,7 +209,7 @@ class TestCompositePitcher:
         assert low_stm < high_stm
 
     def test_matches_legacy(self, sp_weights):
-        from evaluation_engine import compute_composite_pitcher as legacy_pitcher
+        from statsplusplus.data.evaluation_engine import compute_composite_pitcher as legacy_pitcher
         tools = {"stuff": 60, "movement": 55, "control": 50}
         arsenal = {"Fst": 65, "Sld": 55, "Chg": 50}
         new = compute_composite_pitcher(tools, sp_weights, arsenal, 50, "SP")
@@ -268,7 +268,7 @@ class TestCompositeMLB:
         assert young > old  # Young player trusts tools more
 
     def test_matches_legacy(self):
-        from evaluation_engine import compute_composite_mlb as legacy_mlb
+        from statsplusplus.data.evaluation_engine import compute_composite_mlb as legacy_mlb
         cases = [
             (55, [60.0, 58.0], 28, 28, False),
             (65, [50.0, 45.0, 48.0], 28, 30, False),
@@ -322,7 +322,7 @@ class TestWarProjection:
 
     def test_matches_legacy(self):
         """Verify default-path WAR matches legacy _interp() on default table."""
-        from war_model import _interp
+        from statsplusplus.evaluation.war import _interp_table as _interp
         from statsplusplus.evaluation.constants import OVR_TO_WAR_DEFAULT
         for score in [40, 50, 55, 60, 65, 70, 75]:
             for bucket, col in [("SS", 1), ("SP", 2), ("RP", 3)]:
@@ -330,7 +330,7 @@ class TestWarProjection:
                 old = _interp(OVR_TO_WAR_DEFAULT, score, col)
                 assert abs(new - old) < 0.01, f"WAR mismatch at {bucket}/{score}: {new} vs {old}"
         # Aging curve should always match (no calibrated version exists)
-        from war_model import aging_mult as legacy_aging
+        from statsplusplus.evaluation.war import aging_mult as legacy_aging
         for age in [25, 28, 30, 33, 36, 40]:
             for bucket in ["SS", "SP"]:
                 new = aging_mult(age, bucket)
@@ -632,7 +632,7 @@ class TestArbSalary:
 
     def test_matches_legacy(self):
         """Verify identical to legacy arb_salary."""
-        from arb_model import arb_salary as legacy_arb
+        from statsplusplus.evaluation.arb import arb_salary as legacy_arb
         cases = [
             (55, "SS", 1, 825_000, 825_000),
             (60, "SP", 2, 2_000_000, 825_000),
@@ -877,7 +877,7 @@ class TestCarryingToolBonus:
 
     def test_matches_legacy(self, ss_config):
         """Verify identical to legacy compute_carrying_tool_bonus."""
-        from evaluation_engine import compute_carrying_tool_bonus as legacy_ct
+        from statsplusplus.data.evaluation_engine import compute_carrying_tool_bonus as legacy_ct
         tools = {"contact": 72, "gap": 60, "power": 68, "eye": 65}
         new_bonus, new_bd = new_ct_bonus(tools, "SS", ss_config)
         old_bonus, old_bd = legacy_ct(tools, "SS", ss_config)

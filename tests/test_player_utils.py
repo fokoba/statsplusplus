@@ -40,34 +40,28 @@ def _rp():
 # ---------------------------------------------------------------------------
 
 def test_norm_100scale_high():
-    from player_utils import norm, init_ratings_scale
-    init_ratings_scale('1-100')
-    assert norm(75) == 65
+    from statsplusplus.config.ratings import norm
+    assert norm(75, "1-100") == 65
 
 def test_norm_100scale_mid():
-    from player_utils import norm, init_ratings_scale
-    init_ratings_scale('1-100')
-    assert norm(50) == 50
+    from statsplusplus.config.ratings import norm
+    assert norm(50, "1-100") == 50
 
 def test_norm_80scale_exact():
-    from player_utils import norm, init_ratings_scale
-    init_ratings_scale('20-80')
-    assert norm(65) == 65
+    from statsplusplus.config.ratings import norm
+    assert norm(65, "20-80") == 65
 
 def test_norm_80scale_rounds():
-    from player_utils import norm, init_ratings_scale
-    init_ratings_scale('20-80')
-    assert norm(43) == 45
+    from statsplusplus.config.ratings import norm
+    assert norm(43, "20-80") == 45
 
 def test_norm_none_returns_none():
-    from player_utils import norm, init_ratings_scale
-    init_ratings_scale('1-100')
-    assert norm(None) is None
+    from statsplusplus.config.ratings import norm
+    assert norm(None, "1-100") is None
 
 def test_norm_zero_returns_none():
-    from player_utils import norm, init_ratings_scale
-    init_ratings_scale('1-100')
-    assert norm(0) is None
+    from statsplusplus.config.ratings import norm
+    assert norm(0, "1-100") is None
 
 
 # ---------------------------------------------------------------------------
@@ -75,26 +69,26 @@ def test_norm_zero_returns_none():
 # ---------------------------------------------------------------------------
 
 def test_calc_fv_sp():
-    from player_utils import calc_fv
+    from fv_model import calc_fv
     fv, risk = calc_fv(_sp())
     assert fv == 65  # expected peak with ceiling blend
     assert risk in ("Low", "Medium", "High", "Extreme")
 
 def test_calc_fv_ss():
-    from player_utils import calc_fv
+    from fv_model import calc_fv
     fv, risk = calc_fv(_ss())
     assert fv == 60
     assert risk in ("Low", "Medium", "High", "Extreme")
 
 def test_calc_fv_rp():
-    from player_utils import calc_fv
+    from fv_model import calc_fv
     fv, risk = calc_fv(_rp())
     assert fv == 50  # ceiling 60 * 0.85 RP discount = 51 → FV 50
     assert risk in ("Low", "Medium", "High", "Extreme")
 
 def test_calc_fv_rp_capped_at_55():
     """RPs should never exceed FV 55 regardless of ratings."""
-    from player_utils import calc_fv
+    from fv_model import calc_fv
     p = _rp()
     p['Pot'] = 80
     p['Ovr'] = 70
@@ -108,31 +102,31 @@ def test_calc_fv_rp_capped_at_55():
 
 def test_peak_war_sp():
     """SP at OVR 60 should produce reasonable WAR (2-4 range)."""
-    from player_utils import peak_war_from_ovr
+    from statsplusplus.evaluation.war import peak_war_from_score as peak_war_from_ovr
     war = peak_war_from_ovr(60, 'SP')
     assert 2.0 <= war <= 4.0
 
 def test_peak_war_rp():
     """RP at OVR 55 should produce lower WAR than SP (RP cap)."""
-    from player_utils import peak_war_from_ovr
+    from statsplusplus.evaluation.war import peak_war_from_score as peak_war_from_ovr
     war = peak_war_from_ovr(55, 'RP')
     assert 0.5 <= war <= 1.5
 
 def test_peak_war_ss():
     """SS at OVR 65 should produce premium-position WAR."""
-    from player_utils import peak_war_from_ovr
+    from statsplusplus.evaluation.war import peak_war_from_score as peak_war_from_ovr
     war = peak_war_from_ovr(65, 'SS')
     assert 4.0 <= war <= 7.0
 
 def test_peak_war_cof():
     """COF at OVR 55 should produce moderate WAR."""
-    from player_utils import peak_war_from_ovr
+    from statsplusplus.evaluation.war import peak_war_from_score as peak_war_from_ovr
     war = peak_war_from_ovr(55, 'COF')
     assert 2.0 <= war <= 4.0
 
 def test_peak_war_monotonic():
     """Higher Ovr should always produce higher WAR for the same bucket."""
-    from player_utils import peak_war_from_ovr
+    from statsplusplus.evaluation.war import peak_war_from_score as peak_war_from_ovr
     for bucket in ('SP', 'RP', 'SS', 'COF'):
         wars = [peak_war_from_ovr(ovr, bucket) for ovr in range(40, 85, 5)]
         assert wars == sorted(wars), f"{bucket} WAR not monotonic: {wars}"
@@ -143,28 +137,28 @@ def test_peak_war_monotonic():
 # ---------------------------------------------------------------------------
 
 def test_aging_sp_at_peak():
-    from player_utils import aging_mult
+    from statsplusplus.evaluation.war import aging_mult
     assert aging_mult(28, 'SP') == 1.0
 
 def test_aging_hitter_at_peak():
-    from player_utils import aging_mult
+    from statsplusplus.evaluation.war import aging_mult
     assert aging_mult(28, 'SS') == 1.0
 
 def test_aging_sp_decline():
-    from player_utils import aging_mult
+    from statsplusplus.evaluation.war import aging_mult
     assert round(aging_mult(33, 'SP'), 4) == 0.6600
 
 def test_aging_hitter_decline():
-    from player_utils import aging_mult
+    from statsplusplus.evaluation.war import aging_mult
     assert round(aging_mult(30, 'SS'), 4) == 0.9200
 
 def test_aging_rp_late():
-    from player_utils import aging_mult
+    from statsplusplus.evaluation.war import aging_mult
     assert round(aging_mult(35, 'RP'), 4) == 0.4300
 
 def test_aging_monotonic_decline():
     """Aging multiplier should be non-increasing from peak age onward."""
-    from player_utils import aging_mult
+    from statsplusplus.evaluation.war import aging_mult
     for bucket in ('SP', 'SS'):
         mults = [aging_mult(age, bucket) for age in range(28, 41)]
         assert mults == sorted(mults, reverse=True), f"{bucket} aging not monotonic"

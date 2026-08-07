@@ -17,7 +17,7 @@ from hypothesis import strategies as st
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
-from evaluation_engine import (
+from statsplusplus.data.evaluation_engine import (
     DEFAULT_TOOL_WEIGHTS,
     DEFAULT_CARRYING_TOOL_CONFIG,
     EvaluationResult,
@@ -58,7 +58,7 @@ from evaluation_engine import (
     compute_positional_medians,
     compute_positional_percentile,
 )
-from fv_model import DEFENSIVE_WEIGHTS
+from statsplusplus.evaluation.constants import DEFENSIVE_WEIGHTS
 
 
 # ---------------------------------------------------------------------------
@@ -1741,7 +1741,7 @@ class TestProperty23FVBackwardCompatibility:
     def test_fv_within_tolerance_when_scores_close(self, ovr, pot, age, bucket):
         """**Validates: Requirements 9.3** — FV grades are within ±5 when
         Composite_Score is within 3 of OVR and Ceiling_Score is within 3 of POT."""
-        from fv_model import calc_fv, LEVEL_NORM_AGE
+        from fv_model import calc_fv; from statsplusplus.utils.positions import LEVEL_NORM_AGE
 
         # Ensure pot >= ovr (realistic constraint)
         pot = max(pot, ovr)
@@ -1809,7 +1809,7 @@ class TestProperty23FVBackwardCompatibility:
     def test_fv_tolerance_with_offsets(self, ovr, pot, comp_offset, ceil_offset, age, bucket):
         """**Validates: Requirements 9.3** — FV grades within ±5 across the
         full ±3 offset range for both Composite_Score and Ceiling_Score."""
-        from fv_model import calc_fv, LEVEL_NORM_AGE
+        from fv_model import calc_fv; from statsplusplus.utils.positions import LEVEL_NORM_AGE
 
         pot = max(pot, ovr)
         composite = max(20, min(80, ovr + comp_offset))
@@ -4396,7 +4396,7 @@ class TestReadCase:
             "defensive_value": 55,
         }
         weights = DEFAULT_TOOL_WEIGHTS["hitter"]["SS"]
-        from fv_model import DEFENSIVE_WEIGHTS
+        from statsplusplus.evaluation.constants import DEFENSIVE_WEIGHTS
         def_weights = DEFENSIVE_WEIGHTS.get("SS", {})
         defense = {k: 55 for k in def_weights}
         config = DEFAULT_CARRYING_TOOL_CONFIG
@@ -4745,7 +4745,7 @@ class TestBatchPipelineIntegration:
         weights = DEFAULT_TOOL_WEIGHTS["hitter"]["SS"]
         config = DEFAULT_CARRYING_TOOL_CONFIG
         recombo = DEFAULT_TOOL_WEIGHTS["recombination"]["SS"]
-        from fv_model import DEFENSIVE_WEIGHTS
+        from statsplusplus.evaluation.constants import DEFENSIVE_WEIGHTS
         def_weights = DEFENSIVE_WEIGHTS.get("SS", {})
 
         # --- Pass 1: Compute scores for multiple SS hitters ---

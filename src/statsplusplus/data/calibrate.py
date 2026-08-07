@@ -17,24 +17,35 @@ import json, os, sys, math
 from collections import defaultdict
 from pathlib import Path
 
-# Ensure scripts/ is importable for legacy dependencies
-_SCRIPTS_DIR = str(Path(__file__).resolve().parent.parent.parent.parent / "scripts")
-if _SCRIPTS_DIR not in sys.path:
-    sys.path.insert(0, _SCRIPTS_DIR)
+# Ensure project root is on path for statsplus.client (used by refresh)
+_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent.parent)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
 
-import db as _db
-from league_context import get_league_dir
-from league_config import config as _cfg
-from player_utils import assign_bucket
-from ratings import norm
-from fv_model import defensive_score, DEFENSIVE_WEIGHTS
+from statsplusplus.data.db import get_connection as _get_connection, init_schema as _init_schema
+from statsplusplus.config.league_context import get_league_dir
+from statsplusplus.config.league_config import LeagueConfig
+from statsplusplus.utils.positions import assign_bucket
+from statsplusplus.config.ratings import norm as _norm_pkg
+from statsplusplus.evaluation.composite import defensive_score as _def_score_pkg
+from statsplusplus.evaluation.constants import DEFENSIVE_WEIGHTS, OVR_TO_WAR_DEFAULT as OVR_TO_WAR, \
+    FV_TO_PEAK_WAR_DEFAULT as FV_TO_PEAK_WAR, FV_TO_PEAK_WAR_RP_DEFAULT as FV_TO_PEAK_WAR_RP, \
+    ARB_PCT_DEFAULT as ARB_PCT, SCARCITY_MULT_DEFAULT as SCARCITY_MULT, \
+    MIN_REGRESSION_N, CALIBRATION_YEARS, DEFAULT_DOLLARS_PER_WAR, DEFAULT_MINIMUM_SALARY
+
+_cfg = LeagueConfig()
+_scale = _cfg.ratings_scale
+
+def norm(val):
+    return _norm_pkg(val, _scale)
+
+def defensive_score(p, bucket):
+    return _def_score_pkg(p, bucket, _scale)
+
 from statsplusplus.data.evaluation_engine import (
     derive_tool_weights, normalize_coefficients, recombine_component_weights,
     DEFAULT_TOOL_WEIGHTS,
 )
-from constants import (OVR_TO_WAR, FV_TO_PEAK_WAR, FV_TO_PEAK_WAR_RP,
-                        ARB_PCT, SCARCITY_MULT, MIN_REGRESSION_N, CALIBRATION_YEARS,
-                        DEFAULT_DOLLARS_PER_WAR, DEFAULT_MINIMUM_SALARY)
 HITTER_BUCKETS = ("C", "SS", "2B", "3B", "CF", "COF", "1B")
 PITCHER_BUCKETS = ("SP", "RP")
 
@@ -1434,7 +1445,7 @@ def _calibrate_positional_models(conn):
 
 def calibrate(dry_run=False):
     league_dir = get_league_dir()
-    conn = _db.get_conn(league_dir)
+    conn = _get_connection(league_dir)
 
     with open(league_dir / "config" / "state.json") as f:
         state = json.load(f)
@@ -1579,7 +1590,7 @@ def calibrate(dry_run=False):
 
     # Step 5: PAP scale (2× stdev of surplus_yr1)
     pap_scale = 25_000_000  # fallback
-    conn2 = _db.get_conn(league_dir)
+    conn2 = _get_connection(league_dir)
     yr1_rows = conn2.execute(
         "SELECT surplus_yr1 FROM player_surplus WHERE surplus_yr1 IS NOT NULL AND eval_date=?",
         (game_date,)).fetchall()
@@ -1592,7 +1603,7 @@ def calibrate(dry_run=False):
 
     # Step: COMPOSITE_TO_WAR regression (skipped on first run)
     print("\n=== COMPOSITE_TO_WAR Regression ===")
-    conn3 = _db.get_conn(league_dir)
+    conn3 = _get_connection(league_dir)
     comp_regressions, comp_bucket_data = _calibrate_composite_to_war(conn3, game_year, role_map)
     conn3.close()
 
@@ -1621,7 +1632,7 @@ def calibrate(dry_run=False):
 
     # Step 6: Carrying tool calibration
     print("\n=== CARRYING_TOOL_CONFIG ===")
-    conn4 = _db.get_conn(league_dir)
+    conn4 = _get_connection(league_dir)
     ct_config = _calibrate_carrying_tools(conn4, game_year, role_map)
     conn4.close()
 

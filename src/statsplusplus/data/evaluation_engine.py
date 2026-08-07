@@ -32,10 +32,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-# Ensure scripts/ is importable for legacy dependencies (ratings, player_utils, etc.)
-_SCRIPTS_DIR = str(Path(__file__).resolve().parent.parent.parent.parent / "scripts")
-if _SCRIPTS_DIR not in sys.path:
-    sys.path.insert(0, _SCRIPTS_DIR)
+# Project root on path for statsplus.client (used indirectly via refresh)
+_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent.parent)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
 
 log = logging.getLogger("statspp.evaluation_engine")
 
@@ -1482,7 +1482,7 @@ def compute_ceiling(
     peak_bonus = sum(max(0, t - 60) for t in ceiling_tools)
     # Scale-aware cap: on 1-100 scale, tools normalize higher so more
     # tools cross 60 and the bonus accumulates faster. Use a lower cap.
-    from ratings import get_ratings_scale as _get_scale
+    from statsplusplus.config.league_config import LeagueConfig; _get_scale = lambda: LeagueConfig().ratings_scale
     _peak_cap = 10 if _get_scale() == "1-100" else 15
     raw_ceiling += min(peak_bonus, _peak_cap)
 
@@ -1763,7 +1763,7 @@ def is_two_way_player(
         # In no-DH leagues, all pitchers accumulate AB from batting in their
         # lineup spot. Require much higher AB threshold to distinguish true
         # two-way players from pitchers who simply bat because there's no DH.
-        from league_config import config as _cfg
+        from statsplusplus.config.league_config import LeagueConfig; _cfg = LeagueConfig()
         ab_threshold = 250 if _cfg.settings.get("dh_rule") == "No DH" and is_pitcher else 130
         batting_years = {s.get("year") for s in batting_stats if s.get("ab", 0) >= ab_threshold}
         pitching_years = {s.get("year") for s in pitching_stats if s.get("ip", 0) >= 40}
@@ -2558,7 +2558,7 @@ def _extract_defense_tools(row: dict, norm_fn=None) -> dict[str, float | None]:
 
 def _get_def_weights_for_bucket(bucket: str) -> dict[str, float]:
     """Return DEFENSIVE_WEIGHTS for a bucket, importing from fv_model."""
-    from fv_model import DEFENSIVE_WEIGHTS
+    from statsplusplus.evaluation.constants import DEFENSIVE_WEIGHTS
     if bucket == "COF":
         # Use the better of LF/RF weights — compute both in compute_composite_hitter
         # For COF, we pass both COF_LF and COF_RF and let the caller pick max
@@ -2574,7 +2574,7 @@ def _compute_defensive_score_for_bucket(
 
     This mirrors the approach in fv_model.py but works with our extracted tools.
     """
-    from fv_model import DEFENSIVE_WEIGHTS
+    from statsplusplus.evaluation.constants import DEFENSIVE_WEIGHTS
 
     def _n(val):
         return norm_fn(val) or 0
@@ -2832,13 +2832,13 @@ def run(
     """
     # -- Resolve dependencies via injection or defaults --
     if league_dir is None:
-        from league_context import get_league_dir as _get_league_dir
+        from statsplusplus.config.league_context import get_league_dir as _get_league_dir
         league_dir = _get_league_dir()
 
     own_conn = False
     if conn is None:
-        import db as _db
-        conn = _db.get_conn(league_dir)
+        from statsplusplus.data import db as _db
+        conn = _db.get_connection(league_dir)
         own_conn = True
 
     try:
@@ -2853,10 +2853,14 @@ def run(
 
 def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
     """Internal implementation of the batch evaluation pipeline."""
-    from ratings import norm_continuous as _norm
-    from ratings import norm as _norm_display
-    from player_utils import assign_bucket as _assign_bucket
-    from fv_model import DEFENSIVE_WEIGHTS
+    from statsplusplus.config.ratings import norm_continuous as _norm_pkg
+    from statsplusplus.config.ratings import norm as _norm_display_pkg
+    from statsplusplus.utils.positions import assign_bucket as _assign_bucket
+    from statsplusplus.evaluation.constants import DEFENSIVE_WEIGHTS
+    from statsplusplus.config.league_config import LeagueConfig as _LC
+    _scale = _LC(base_dir=league_dir).ratings_scale
+    def _norm(val): return _norm_pkg(val, _scale)
+    def _norm_display(val): return _norm_display_pkg(val, _scale)
 
     # -- Load tool weights --
     weights = load_tool_weights(league_dir)
@@ -2887,10 +2891,10 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
     # batting and pitching. Falls back to empty set if unavailable.
     stat_two_way: set = set()
     try:
-        from league_config import config as _lc
+        from statsplusplus.config.league_config import LeagueConfig; _lc = LeagueConfig()
         game_date = _lc.game_date
         if game_date:
-            from war_model import load_stat_history as _load_stat_history
+            from statsplusplus.evaluation.war import load_stat_history as _load_stat_history
             _, _, stat_two_way = _load_stat_history(conn, game_date)
     except Exception as exc:
         log.warning("Could not load stat-based two-way set: %s — falling back to tool-based detection only", exc)

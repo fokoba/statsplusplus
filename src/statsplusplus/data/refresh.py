@@ -15,23 +15,21 @@ import json, os, sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Ensure scripts/ and project root are importable for legacy dependencies
-_SCRIPTS_DIR = str(Path(__file__).resolve().parent.parent.parent.parent / "scripts")
+# Ensure project root is on path for statsplus.client
 _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent.parent)
-if _SCRIPTS_DIR not in sys.path:
-    sys.path.insert(0, _SCRIPTS_DIR)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
 BASE = Path(__file__).resolve().parent.parent.parent.parent
 
 from statsplus import client
-import db as _db
-from league_config import config as _cfg
-from league_context import get_league_dir
-from log_config import get_logger
+from statsplusplus.data.db import get_connection as _get_connection, init_schema as _init_schema
+from statsplusplus.config.league_config import LeagueConfig
+from statsplusplus.config.league_context import get_league_dir
+from statsplusplus.utils.logging import get_logger
 
 log = get_logger("refresh")
+_cfg = LeagueConfig()
 
 
 def _upsert_teams(conn, teams):
@@ -721,8 +719,8 @@ def refresh_league(year, game_date=None):
     import time as _time
     log.info("=== refresh_league started (year=%s) ===", year)
     league_dir = get_league_dir()
-    _db.init_schema(league_dir)
-    conn = _db.get_conn(league_dir)
+    _init_schema(league_dir)
+    conn = _get_connection(league_dir)
 
     # Kick off ratings export first — it takes 30s+ to generate on the server.
     # If RATINGS_POLL_URL is set (from onboarding auth check), reuse it.
@@ -1031,7 +1029,7 @@ def _refresh_dollar_per_war(year):
     acquire WAR — the relevant figure for surplus calculations.
     """
     league_dir = get_league_dir()
-    conn = _db.get_conn(league_dir)
+    conn = _get_connection(league_dir)
 
     from player_utils import league_minimum
     from constants import DEFAULT_MINIMUM_SALARY
@@ -1109,7 +1107,7 @@ def _write_json(path, data):
 def _detect_minimum_salary():
     """Detect league minimum salary from the mode of lowest MLB contract salaries."""
     league_dir = get_league_dir()
-    conn = _db.get_conn(league_dir)
+    conn = _get_connection(league_dir)
     rows = conn.execute("""
         SELECT c.salary_0 FROM contracts c
         JOIN players p ON c.player_id = p.player_id
@@ -1248,7 +1246,7 @@ def _refresh_stat_percentiles(year):
     if lg_obp <= 0 or lg_slg <= 0 or lg_era <= 0:
         return
 
-    conn = _db.get_conn(league_dir)
+    conn = _get_connection(league_dir)
 
     # P95 OPS+ from qualifying hitters (PA >= 300)
     # Use prior year if available for full-season samples; fall back to current year
@@ -1373,7 +1371,7 @@ def _run_evaluation_engine():
     log.info("── evaluation engine")
     try:
         league_dir = get_league_dir()
-        _db.init_schema(league_dir)  # ensure new columns exist before engine runs
+        _init_schema(league_dir)  # ensure new columns exist before engine runs
         t0 = _time.monotonic()
         from statsplusplus.data.evaluation_engine import run as eval_run
         eval_run(league_dir=league_dir)

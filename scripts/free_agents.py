@@ -94,7 +94,7 @@ def upcoming_fas(year, years_out=1, bucket=None, min_war=None, my_team_only=Fals
                 svc = svc_days / 172.0
             else:
                 # Fallback to estimation if service time not available
-                from arb_model import estimate_service_time as _est_svc
+                from statsplusplus.evaluation.arb import estimate_service_time as _est_svc
                 conn2 = _get_conn()
                 svc = _est_svc(conn2, r["player_id"])
                 conn2.close()

@@ -264,7 +264,7 @@ def prospect_surplus(fv, age, level, bucket, positional_adjust=False, fv_plus=Fa
             _cum_war = sum(r["war"] for r in rows) + war
             _perp_model = None
             try:
-                from league_context import get_league_dir
+                from statsplusplus.config.league_context import get_league_dir
                 import json as _json
                 _mw_path = get_league_dir() / "config" / "model_weights.json"
                 if _mw_path.exists():
@@ -491,7 +491,7 @@ def career_outcome_probs(fv, age, level, bucket, ovr=None, pot=None, def_rating=
     likely_hi = tiers[p75_idx]["war"]
 
     # Position average starter WAR (Ovr ~52)
-    from player_utils import peak_war_from_ovr
+    from statsplusplus.evaluation.war import peak_war_from_score as peak_war_from_ovr
     pos_avg_war = round(peak_war_from_ovr(52, bucket), 1)
 
     return {"tiers": tiers, "thresholds": thresholds, "confidence": round(conf, 2),

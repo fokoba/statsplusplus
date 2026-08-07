@@ -70,7 +70,7 @@ def project_war(ovr, pot, age, bucket, year_offset=0, stat_war=None):
 def _to_model_scale(val):
     """Convert a tool rating to the 1-100 scale used by projection model coefficients.
     On 1-100 leagues this is a no-op. On 20-80 leagues, maps 20→0, 50→50, 80→100."""
-    from ratings import get_ratings_scale as _get_ratings_scale
+    from statsplusplus.config.league_config import LeagueConfig; _get_ratings_scale = lambda: LeagueConfig().ratings_scale
     if _get_ratings_scale() == "20-80":
         return (val - 20) / 60 * 100
     return val
@@ -653,7 +653,7 @@ def roster_availability(players, year_offsets=(0, 1, 2)):
                 # Check non-tender gate for arb-eligible years
                 pre_arb = ctrl.get("pre_arb_left", 0)
                 if off >= pre_arb:
-                    from arb_model import arb_salary as _arb_salary
+                    from statsplusplus.evaluation.arb import arb_salary as _arb_salary
                     arb_yr = off - pre_arb + 1  # 1-indexed
                     base_sal = c["salaries"][0] if c["salaries"] else min_sal
                     arb_sal = _arb_salary(ovr, bucket, arb_yr, base_sal, min_sal)

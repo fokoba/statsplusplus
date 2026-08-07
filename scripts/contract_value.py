@@ -60,7 +60,7 @@ def _load_perp_arb_model():
     """
     if "model" not in _perp_arb_model_cache:
         try:
-            from league_context import get_league_dir
+            from statsplusplus.config.league_context import get_league_dir
             mw_path = get_league_dir() / "config" / "model_weights.json"
             if mw_path.exists():
                 mw = json.load(open(mw_path))
@@ -73,7 +73,7 @@ def _load_perp_arb_model():
 
 def _get_state():
     if not _state_cache:
-        from league_context import get_league_dir
+        from statsplusplus.config.league_context import get_league_dir
         state_path = get_league_dir() / "config" / "state.json"
         with open(state_path) as f:
             _state_cache.update(json.load(f))
@@ -178,7 +178,7 @@ def contract_value(player_id, retention_pct=0.0, _conn=None, _hist=None):
 
     dpw     = dollars_per_war()
     min_sal = league_minimum()
-    from constants import MLB_SCARCITY
+    from statsplusplus.evaluation.constants import MLB_SCARCITY
     scarcity = MLB_SCARCITY.get(bucket, 1.0)
 
     years_total  = c["years"]
@@ -223,7 +223,7 @@ def contract_value(player_id, retention_pct=0.0, _conn=None, _hist=None):
     # For perpetual arb: track cumulative career WAR (used by salary model)
     _career_war_accum = 0.0
     try:
-        from league_config import config as _cfg_init
+        from statsplusplus.config.league_config import LeagueConfig; _cfg_init = LeagueConfig()
         if _cfg_init.perpetual_arb:
             # Sum prior career WAR from stats
             _cw_bat = conn.execute(
@@ -262,7 +262,7 @@ def contract_value(player_id, retention_pct=0.0, _conn=None, _hist=None):
         # Determine salary for this year
         if ctrl_type == "estimated" and i > 0:
             # Year 0 uses actual contract salary; future years are projected
-            from league_config import config as _cfg_cv
+            from statsplusplus.config.league_config import LeagueConfig; _cfg_cv = LeagueConfig()
             if _cfg_cv.perpetual_arb:
                 # Perpetual arb: salary based on career WAR accumulation + ceiling
                 # Salary can decrease if WAR declines. No pre-arb concept.
@@ -365,7 +365,7 @@ def contract_breakdown(query):
 
     dpw     = dollars_per_war()
     min_sal = league_minimum()
-    from constants import MLB_SCARCITY
+    from statsplusplus.evaluation.constants import MLB_SCARCITY
     scarcity = MLB_SCARCITY.get(bucket, 1.0)
 
     years_total  = c["years"]

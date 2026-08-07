@@ -13,15 +13,15 @@ from pathlib import Path
 
 from flask import Blueprint, g, jsonify, redirect, render_template, request
 
-from constants import DEFAULT_MINIMUM_SALARY
-from league_context import (
+from statsplusplus.evaluation.constants import DEFAULT_MINIMUM_SALARY
+from statsplusplus.config.league_context import (
     APP_CONFIG_PATH,
     get_active_league_slug,
     get_league_dir,
     get_statsplus_cookie,
     set_statsplus_cookie,
 )
-from log_config import get_logger
+from statsplusplus.utils.logging import get_logger
 
 settings_bp = Blueprint("settings", __name__)
 log = get_logger("web.settings")

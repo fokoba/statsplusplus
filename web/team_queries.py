@@ -9,11 +9,21 @@ from collections import defaultdict
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, "scripts"))
-from player_utils import display_pos as _display_pos, calc_pap, dollars_per_war as _dollars_per_war, league_minimum
+from statsplusplus.utils.positions import display_pos as _display_pos
+from statsplusplus.evaluation.surplus import calc_pap
+from statsplusplus.config.league_config import dollars_per_war as _dpw_pkg, league_minimum as _lm_pkg
+from statsplusplus.utils.positions import ROLE_MAP
+from statsplusplus.evaluation.constants import DEFAULT_MINIMUM_SALARY
 from web_league_context import (get_db, get_cfg, team_abbr_map, team_names_map,
                                  level_map, pos_map, pos_order, pyth_exp, my_team_id,
                                  mlb_team_ids, league_averages as _load_la)
-from constants import (ROLE_MAP, DEFAULT_MINIMUM_SALARY)
+
+# Local wrappers using request-scoped league_dir
+def _dollars_per_war():
+    return _dpw_pkg(get_cfg().league_dir)
+
+def league_minimum():
+    return _lm_pkg(get_cfg().league_dir)
 
 
 # SQL fragment + params to filter contracts to players currently in a given org.

@@ -4,7 +4,7 @@ import os, sys
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, "scripts"))
-from player_utils import display_pos as _display_pos
+from statsplusplus.utils.positions import display_pos as _display_pos
 from contract_value import contract_value
 from prospect_value import prospect_surplus_with_option, find_player, career_outcome_probs
 from web_league_context import get_db, get_cfg, team_abbr_map, level_map, year

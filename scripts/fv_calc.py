@@ -8,7 +8,7 @@ import logging
 import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
 
-from statsplusplus.data.fv_calc import run
+from statsplusplus.data.fv_calc import run, RATINGS_SQL
 
 logger = logging.getLogger(__name__)
 

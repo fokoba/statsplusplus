@@ -11,9 +11,9 @@ if _PROJECT_ROOT not in sys.path:
 from flask import Flask, render_template, redirect, request, g
 import werkzeug.exceptions
 import queries
-from league_config import LeagueConfig
-from league_context import get_league_dir, get_active_league_slug
-from log_config import get_logger
+from statsplusplus.config.league_config import LeagueConfig
+from statsplusplus.config.league_context import get_league_dir, get_active_league_slug
+from statsplusplus.utils.logging import get_logger
 
 log = get_logger("web")
 

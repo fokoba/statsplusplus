@@ -15,10 +15,23 @@ def _fmt_money_py(val):
         return f"${val / 1e3:.0f}K"
     return f"${val:,.0f}"
 sys.path.insert(0, os.path.join(BASE, "scripts"))
-from player_utils import norm as _norm, norm_floor as _norm_floor, height_str as _height_str, display_pos as _display_pos, calc_pap, dollars_per_war as _dollars_per_war
+from statsplusplus.config.ratings import norm as _norm_raw, norm_floor as _norm_floor_raw
+from statsplusplus.utils.formatting import height_str as _height_str
+from statsplusplus.utils.positions import display_pos as _display_pos
+from statsplusplus.evaluation.surplus import calc_pap
+from statsplusplus.config.league_config import dollars_per_war as _dpw_pkg
+from statsplusplus.utils.positions import ROLE_MAP
 from percentiles import get_hitter_percentiles, get_pitcher_percentiles, get_fielding_percentiles, available_pctile_years, available_pctile_levels, get_percentile_history, get_percentile_history_all_levels, get_fielding_percentile_history
 from web_league_context import get_db, get_cfg, team_abbr_map, team_names_map, level_map, pos_map
-from constants import ROLE_MAP
+
+def _norm(val):
+    return _norm_raw(val, get_cfg().ratings_scale)
+
+def _norm_floor(val, floor=20):
+    return _norm_floor_raw(val, get_cfg().ratings_scale, floor)
+
+def _dollars_per_war():
+    return _dpw_pkg(get_cfg().league_dir)
 
 
 # ---------------------------------------------------------------------------

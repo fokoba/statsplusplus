@@ -13,9 +13,17 @@ import os, sys, json
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, "scripts"))
-from player_utils import display_pos as _display_pos, norm as _norm, norm_floor as _norm_floor
+from statsplusplus.utils.positions import display_pos as _display_pos
+from statsplusplus.config.ratings import norm as _norm_raw, norm_floor as _norm_floor_raw
 from web_league_context import get_db, get_cfg, team_abbr_map, team_names_map, pos_order, year, mlb_team_ids, level_map
-from constants import ROLE_MAP
+from statsplusplus.utils.positions import ROLE_MAP
+
+# Wrap norm functions to use the request-scoped scale
+def _norm(val):
+    return _norm_raw(val, get_cfg().ratings_scale)
+
+def _norm_floor(val, floor=20):
+    return _norm_floor_raw(val, get_cfg().ratings_scale, floor)
 
 # Legacy module-level aliases — used by app.py and re-export consumers.
 # These are properties that re-evaluate each access via get_cfg().

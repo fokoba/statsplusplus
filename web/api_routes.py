@@ -12,13 +12,13 @@ from pathlib import Path
 
 from flask import Blueprint, g, jsonify, request
 
-from league_context import (
+from statsplusplus.config.league_context import (
     APP_CONFIG_PATH,
     get_league_dir,
     get_statsplus_cookie,
     set_statsplus_cookie,
 )
-from log_config import get_logger
+from statsplusplus.utils.logging import get_logger
 
 api_bp = Blueprint("api", __name__)
 log = get_logger("web.api")

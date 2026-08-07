@@ -21,11 +21,11 @@ BASE = Path(__file__).parent.parent
 sys.path.insert(0, str(BASE / "scripts"))
 sys.path.insert(0, str(BASE / "web"))
 
-import db as _db
-from league_context import get_league_dir, get_active_league_slug
-from league_config import LeagueConfig
-from player_utils import assign_bucket
-from ratings import norm
+from statsplusplus.config.league_context import get_league_dir, get_active_league_slug
+from statsplusplus.config.league_config import LeagueConfig
+from statsplusplus.config.ratings import norm as _norm_pkg
+from statsplusplus.data.db import get_connection
+from statsplusplus.utils.positions import assign_bucket
 
 
 # ---------------------------------------------------------------------------
@@ -214,7 +214,7 @@ def _load_prospect_data(conn, cfg):
 def compute_benchmark(league_slug):
     """Compute all benchmark metrics for a league. Returns a results dict."""
     league_dir = get_league_dir(league_slug)
-    conn = _db.get_conn(league_dir)
+    conn = get_connection(league_dir)
     cfg = LeagueConfig(league_dir)
 
     with open(league_dir / "config" / "state.json") as f:

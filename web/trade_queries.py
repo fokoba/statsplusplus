@@ -4,7 +4,7 @@ import os, sys
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, "scripts"))
-from player_utils import display_pos as _display_pos
+from statsplusplus.utils.positions import display_pos as _display_pos
 from contract_value import contract_value
 from prospect_value import prospect_surplus_with_option, find_player, career_outcome_probs
 from web_league_context import get_db, get_cfg, team_abbr_map, level_map, year
@@ -15,7 +15,6 @@ SENSITIVITY = {"pessimistic": 0.85, "base": 1.00, "optimistic": 1.15}
 def get_org_players(team_id):
     """Full org roster (MLB + farm) for the trade tab roster table."""
     conn = get_db()
-    conn.row_factory = None
     yr = year()
     _lm = level_map()
     _pm = {str(k): v for k, v in get_cfg().pos_map.items()}
@@ -31,7 +30,7 @@ def get_org_players(team_id):
             JOIN prospect_fv pf ON ps.player_id = pf.player_id
             WHERE ps.eval_date = ? AND pf.eval_date = ?
         """, (ed_s, ed_p)).fetchall()
-        rookie_pids = {r[0] for r in rows}
+        rookie_pids = {r["player_id"] for r in rows}
 
     # MLB players (exclude rookie-eligible — they'll appear as prospects)
     mlb = []
@@ -53,17 +52,17 @@ def get_org_players(team_id):
         """, (yr, team_id, yr, team_id, ed_s, team_id)).fetchall()
 
         for r in mlb_rows:
-            pid = r[0]
+            pid = r["player_id"]
             if pid in rookie_pids:
                 continue
             mlb.append({
-                "pid": pid, "name": r[1],
-                "pos": _display_pos(r[2], r[7]) if r[2] else _pm.get(str(r[7]), "?"),
-                "age": r[3], "level": "MLB",
-                "ovr": r[4], "pot": r[6],
+                "pid": pid, "name": r["name"],
+                "pos": _display_pos(r["bucket"], r["pos"]) if r["bucket"] else _pm.get(str(r["pos"]), "?"),
+                "age": r["age"], "level": "MLB",
+                "ovr": r["ovr"], "pot": r["pot"],
                 "fv": None, "fv_str": None,
-                "surplus": r[5] or 0,
-                "war": round(r[8], 1) if r[8] else None,
+                "surplus": r["surplus"] or 0,
+                "war": round(r["war"], 1) if r["war"] else None,
             })
     mlb.sort(key=lambda x: -(x["surplus"] or 0))
 
@@ -82,12 +81,12 @@ def get_org_players(team_id):
 
         for r in pro_rows:
             prospects.append({
-                "pid": r[0], "name": r[1],
-                "pos": _display_pos(r[2], r[10]) if r[2] else _pm.get(str(r[10]), "?"),
-                "age": r[3], "level": _lm.get(str(r[6]), r[6]) if r[6] else "?",
-                "ovr": r[8], "pot": r[9],
-                "fv": r[4], "fv_str": r[5],
-                "surplus": r[7] or 0,
+                "pid": r["player_id"], "name": r["name"],
+                "pos": _display_pos(r["bucket"], r["pos"]) if r["bucket"] else _pm.get(str(r["pos"]), "?"),
+                "age": r["age"], "level": _lm.get(str(r["level"]), r["level"]) if r["level"] else "?",
+                "ovr": r["ovr"], "pot": r["pot"],
+                "fv": r["fv"], "fv_str": r["fv_str"],
+                "surplus": r["prospect_surplus"] or 0,
                 "war": None,
             })
 
@@ -115,20 +114,29 @@ def get_trade_value(player_id, retention_pct=0.0):
     """, (player_id,)).fetchone()
 
     if pf:
-        fv, fv_str, level, bucket = pf[0], pf[1], pf[2], pf[3]
-        age, name, tid, ptid, pos_code = pf[4], pf[5], pf[6], pf[7], pf[8]
-        fv_continuous = pf[9]
+        fv = pf["fv"]
+        fv_str = pf["fv_str"]
+        level = pf["level"]
+        bucket = pf["bucket"]
+        age = pf["age"]
+        name = pf["name"]
+        tid = pf["team_id"]
+        ptid = pf["parent_team_id"]
+        pos_code = pf["pos"]
+        fv_continuous = pf["fv_continuous"]
         fv_plus = str(fv_str).endswith("+")
         # Use fv_continuous (pre-rounding) for surplus — matches fv_calc.py
         fv_for_surplus = fv_continuous if fv_continuous is not None else fv
         fv_plus_for_surplus = False if fv_continuous is not None else fv_plus
-        rr = conn.execute("SELECT ovr, pot, pot_cf, pot_ss, pot_c, pot_second_b, pot_third_b, "
-                          "composite_score, true_ceiling, ceiling_score "
-                          "FROM latest_ratings WHERE player_id=?", (player_id,)).fetchone()
+        rr = conn.execute("""
+            SELECT ovr, pot, pot_cf, pot_ss, pot_c, pot_second_b, pot_third_b,
+                   composite_score, true_ceiling, ceiling_score
+            FROM latest_ratings WHERE player_id=?
+        """, (player_id,)).fetchone()
         # Use model scores for certainty/option value and scarcity
-        ovr = (rr[7] if rr and rr[7] else None) or (rr[0] if rr else None)
-        pot = (rr[8] or rr[9] if rr else None) or (rr[1] if rr else None)
-        _dk = {'CF': 2, 'SS': 3, 'C': 4, '2B': 5, '3B': 6}
+        ovr = (rr["composite_score"] if rr and rr["composite_score"] else None) or (rr["ovr"] if rr else None)
+        pot = (rr["true_ceiling"] or rr["ceiling_score"] if rr else None) or (rr["pot"] if rr else None)
+        _dk = {'CF': 'pot_cf', 'SS': 'pot_ss', 'C': 'pot_c', '2B': 'pot_second_b', '3B': 'pot_third_b'}
         def_rating = rr[_dk[bucket]] if rr and bucket in _dk else None
 
         base = prospect_surplus_with_option(fv_for_surplus, age, level, bucket,
@@ -163,15 +171,15 @@ def get_trade_value(player_id, retention_pct=0.0):
     d = result
     tid_row = conn.execute("SELECT team_id, pos FROM players WHERE player_id=?",
                            (player_id,)).fetchone()
-    team = _tam.get(tid_row[0], "?") if tid_row else "?"
+    team = _tam.get(tid_row["team_id"], "?") if tid_row else "?"
     rr = conn.execute("SELECT pot FROM latest_ratings WHERE player_id=?",
                       (player_id,)).fetchone()
 
     return {
         "player_id": player_id, "name": d["name"], "type": "contract",
         "team": team, "age": d["age"],
-        "pos": _display_pos(d["bucket"], tid_row[1] if tid_row else 0),
-        "ovr": d["ovr"], "pot": rr[0] if rr else None,
+        "pos": _display_pos(d["bucket"], tid_row["pos"] if tid_row else 0),
+        "ovr": d["ovr"], "pot": rr["pot"] if rr else None,
         "years_left": d["years_left"],
         "flags": d["flags"],
         "retention_pct": retention_pct,

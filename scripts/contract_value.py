@@ -7,15 +7,46 @@ Usage:
 
 import json, os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import db
-from player_utils import assign_bucket, dollars_per_war, league_minimum, \
-    peak_war_from_ovr, aging_mult, load_stat_history, stat_peak_war
-from arb_model import estimate_control, arb_salary as _arb_salary, arb_salary_perpetual as _arb_salary_perp
-from constants import ARB_PCT, MLB_SCARCITY, \
+
+from statsplusplus.config.league_context import get_league_dir, get_active_league_slug
+from statsplusplus.config.league_config import LeagueConfig
+from statsplusplus.config.league_config import dollars_per_war as _dollars_per_war_pkg
+from statsplusplus.config.league_config import league_minimum as _league_minimum_pkg
+from statsplusplus.data.db import get_connection
+from statsplusplus.utils.positions import assign_bucket
+from statsplusplus.evaluation.war import peak_war_from_score as peak_war_from_ovr, aging_mult, stat_peak_war
+from statsplusplus.evaluation.arb import estimate_control as _estimate_control_pkg, arb_salary as _arb_salary, arb_salary_perpetual as _arb_salary_perp
+from statsplusplus.evaluation.constants import \
     PEAK_AGE_PITCHER, PEAK_AGE_HITTER, \
-    NO_TRACK_RECORD_DISCOUNT
+    NO_TRACK_RECORD_DISCOUNT, MLB_SCARCITY
+from statsplusplus.evaluation.constants import load_model_weights
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Resolve league context once at module level
+_league_dir = get_league_dir(get_active_league_slug())
+_cfg = LeagueConfig(base_dir=_league_dir)
+_weights = load_model_weights(_league_dir)
+ARB_PCT = _weights.arb_pct
+
+# Local wrappers to maintain no-arg calling convention used throughout this file
+def dollars_per_war():
+    return _dollars_per_war_pkg(_league_dir)
+
+def league_minimum():
+    return _league_minimum_pkg(_league_dir)
+
+def estimate_control(conn, player_id, age, salary, bucket=None):
+    return _estimate_control_pkg(conn, player_id, age, salary,
+                                  min_sal=league_minimum(),
+                                  perpetual_arb=_cfg.perpetual_arb,
+                                  bucket=bucket)
+
+# Override load_stat_history to pass league's DH rule
+from statsplusplus.evaluation.war import load_stat_history as _load_stat_history_pkg
+
+def load_stat_history(conn, game_date):
+    return _load_stat_history_pkg(conn, game_date, dh_rule=_cfg.settings.get("dh_rule", "Universal DH"))
 
 _state_cache = {}
 _perp_arb_model_cache = {}
@@ -29,7 +60,7 @@ def _load_perp_arb_model():
     """
     if "model" not in _perp_arb_model_cache:
         try:
-            from league_context import get_league_dir
+            from statsplusplus.config.league_context import get_league_dir
             mw_path = get_league_dir() / "config" / "model_weights.json"
             if mw_path.exists():
                 mw = json.load(open(mw_path))
@@ -42,7 +73,7 @@ def _load_perp_arb_model():
 
 def _get_state():
     if not _state_cache:
-        from league_context import get_league_dir
+        from statsplusplus.config.league_context import get_league_dir
         state_path = get_league_dir() / "config" / "state.json"
         with open(state_path) as f:
             _state_cache.update(json.load(f))
@@ -108,7 +139,7 @@ def contract_value(player_id, retention_pct=0.0, _conn=None, _hist=None):
     Optional _conn/_hist for batch mode (avoids repeated DB/stat loading).
     _hist = (bat_hist, pit_hist, two_way) tuple from load_stat_history().
     """
-    conn = _conn or db.get_conn()
+    conn = _conn or get_connection(_league_dir)
     result = _resolve(conn, str(player_id))
     if not result:
         return None
@@ -147,7 +178,7 @@ def contract_value(player_id, retention_pct=0.0, _conn=None, _hist=None):
 
     dpw     = dollars_per_war()
     min_sal = league_minimum()
-    from constants import MLB_SCARCITY
+    from statsplusplus.evaluation.constants import MLB_SCARCITY
     scarcity = MLB_SCARCITY.get(bucket, 1.0)
 
     years_total  = c["years"]
@@ -192,7 +223,7 @@ def contract_value(player_id, retention_pct=0.0, _conn=None, _hist=None):
     # For perpetual arb: track cumulative career WAR (used by salary model)
     _career_war_accum = 0.0
     try:
-        from league_config import config as _cfg_init
+        from statsplusplus.config.league_config import LeagueConfig; _cfg_init = LeagueConfig()
         if _cfg_init.perpetual_arb:
             # Sum prior career WAR from stats
             _cw_bat = conn.execute(
@@ -231,7 +262,7 @@ def contract_value(player_id, retention_pct=0.0, _conn=None, _hist=None):
         # Determine salary for this year
         if ctrl_type == "estimated" and i > 0:
             # Year 0 uses actual contract salary; future years are projected
-            from league_config import config as _cfg_cv
+            from statsplusplus.config.league_config import LeagueConfig; _cfg_cv = LeagueConfig()
             if _cfg_cv.perpetual_arb:
                 # Perpetual arb: salary based on career WAR accumulation + ceiling
                 # Salary can decrease if WAR declines. No pre-arb concept.
@@ -302,12 +333,12 @@ def contract_value(player_id, retention_pct=0.0, _conn=None, _hist=None):
 
 def get_player_info(player_id):
     """Legacy shim for trade_calculator compatibility."""
-    conn = db.get_conn()
+    conn = get_connection(_league_dir)
     return _resolve(conn, str(player_id))
 
 
 def contract_breakdown(query):
-    conn = db.get_conn()
+    conn = get_connection(_league_dir)
     result = _resolve(conn, query)
     if not result:
         print(f"Player not found: {query}")
@@ -334,7 +365,7 @@ def contract_breakdown(query):
 
     dpw     = dollars_per_war()
     min_sal = league_minimum()
-    from constants import MLB_SCARCITY
+    from statsplusplus.evaluation.constants import MLB_SCARCITY
     scarcity = MLB_SCARCITY.get(bucket, 1.0)
 
     years_total  = c["years"]

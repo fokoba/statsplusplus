@@ -109,49 +109,34 @@ Go to **Settings → Add League** and repeat the onboarding process. Switch betw
 
 ```
 statsplusplus/
+├── src/statsplusplus/      # Core package (typed, tested, mypy-strict)
+│   ├── models/                 # Typed dataclasses — contracts between layers
+│   ├── evaluation/             # Pure computation (composite, FV, WAR, surplus)
+│   ├── config/                 # League context resolution, ratings normalization
+│   ├── client/                 # StatsPlus API client
+│   ├── data/                   # DB schema, pipelines (evaluation, refresh, calibrate, fv_calc)
+│   ├── web/                    # Flask app factory, request-scoped context
+│   ├── cli/                    # CLI entry points (spp-* commands)
+│   └── utils/                  # Formatting, positions, logging
+│
 ├── web/                    # Flask web application
-│   ├── app.py                  # Routes, refresh endpoint, onboarding wizard
-│   ├── queries.py              # League-wide queries (prospects, standings, leaders)
-│   ├── team_queries.py         # Team-specific queries (roster, depth chart, contracts)
-│   ├── player_queries.py       # Player page data (ratings, stats, splits)
-│   ├── trade_queries.py        # Trade workbench queries
-│   ├── percentiles.py          # Percentile calculations with expected-value modeling
-│   ├── web_league_context.py   # Per-request league context (DB connection, config)
+│   ├── app.py                  # Core routes (team, league, player) + middleware
+│   ├── settings_routes.py      # Settings/onboarding blueprint
+│   ├── api_routes.py           # API/refresh blueprint
+│   ├── web_league_context.py   # Per-request DB connection (shared, scoped)
+│   ├── queries.py              # League-wide queries
+│   ├── team_queries.py         # Team-specific queries
+│   ├── player_queries.py       # Player page data
 │   ├── templates/              # Jinja2 templates
 │   └── static/                 # CSS, JS, favicon assets
 │
-├── scripts/                # Core logic and CLI tools
-│   ├── refresh.py              # API → DB pipeline (full league refresh)
-│   ├── db.py                   # SQLite schema, migrations, connection management
-│   ├── evaluation_engine.py    # Composite/ceiling score computation for all players
-│   ├── fv_calc.py              # Prospect FV grades and surplus value computation
-│   ├── fv_model.py             # FV grade formula and development model
-│   ├── war_model.py            # WAR projection, stat history, aging curves
-│   ├── arb_model.py            # Arbitration salary projection
-│   ├── calibrate.py            # Per-league model calibration (tool weights, WAR curves)
-│   ├── player_utils.py         # Shared evaluation (WAR curves, aging, bucketing)
-│   ├── contract_value.py       # Contract surplus analysis
-│   ├── prospect_value.py       # Prospect surplus and career outcome projections
-│   ├── projections.py          # Player projections for depth chart planning
-│   ├── ratings.py              # Rating scale normalization (1-100, 20-80, 1-20)
-│   ├── constants.py            # FV→WAR mappings, aging curves, financial constants
-│   ├── league_config.py        # League settings abstraction
-│   ├── league_context.py       # Active league resolver
-│   ├── draft_board.py          # CLI: Draft board, simulation, auto-draft list
-│   ├── draft_settings.py       # Draft board per-round slider settings
-│   ├── roster_analysis.py      # CLI: MLB roster scaffold generator
-│   ├── farm_analysis.py        # CLI: Farm system report generator
-│   ├── prospect_query.py       # CLI: League-wide prospect rankings
-│   ├── free_agents.py          # CLI: Free agent class analysis
+├── scripts/                # CLI tools (import from package)
+│   ├── draft_board.py          # CLI: Draft board, simulation, auto-draft
 │   ├── trade_calculator.py     # CLI: Trade surplus balance calculator
 │   ├── trade_targets.py        # CLI: Trade target finder by position
-│   ├── trade_assets.py         # CLI: Tradeable assets for any team
-│   ├── team_needs.py           # CLI: Positional needs vs league average
-│   ├── standings.py            # CLI: Pythagorean standings + playoff picture
-│   └── discord_post.py         # Discord webhook posting utility
-│
-├── statsplus/              # StatsPlus API client
-│   └── client.py               # HTTP client, CSV parsing, ratings format handling
+│   ├── contract_value.py       # MLB player surplus calculation
+│   ├── prospect_value.py       # Prospect surplus calculation
+│   └── ...                     # Additional CLI tools (see CLI Tools below)
 │
 ├── data/                   # Runtime data (gitignored)
 │   ├── app_config.json         # Active league, session cookie
@@ -239,6 +224,18 @@ python3 scripts/trade_calculator.py --trade '<json>'
 python3 scripts/draft_board.py pick 6      # Pre-draft ranked list for pick #6
 python3 scripts/draft_board.py upload      # Generate auto-draft file
 python3 scripts/draft_board.py sim 6       # Simulate draft from pick #6
+```
+
+After `pip install -e .`, short commands are also available:
+
+```bash
+spp-standings --actual
+spp-targets --bucket SP --sellers-only
+spp-needs --team ANA
+spp-draft pick 6
+spp-trade --offer '...' --receive '...'
+spp-fa --my-team
+spp-prospects team ANA --n 20
 ```
 
 ## Configuration

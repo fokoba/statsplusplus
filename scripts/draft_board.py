@@ -24,7 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from league_context import get_league_dir
+from statsplusplus.config.league_context import get_league_dir, get_active_league_slug
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -60,7 +60,7 @@ def _connect():
 
 def _get_num_teams():
     try:
-        from league_config import LeagueConfig
+        from statsplusplus.config.league_config import LeagueConfig
         return len(LeagueConfig().mlb_team_ids)
     except Exception:
         return 30
@@ -83,8 +83,8 @@ def _get_taken_pids():
     """Fetch already-drafted player IDs from StatsPlus API."""
     try:
         from statsplus import client
-        from league_context import get_statsplus_cookie
-        from league_config import LeagueConfig
+        from statsplusplus.config.league_context import get_statsplus_cookie
+        from statsplusplus.config.league_config import LeagueConfig
         cfg = LeagueConfig()
         slug = cfg.settings.get("statsplus_slug", "")
         cookie = get_statsplus_cookie()
@@ -331,7 +331,7 @@ def compute_org_needs(conn):
     Returns bucket -> bonus (0, 1, or 2).
     """
     try:
-        from league_config import LeagueConfig
+        from statsplusplus.config.league_config import LeagueConfig
         cfg = LeagueConfig()
         my_team = cfg.my_team_id
         is_perpetual = cfg.settings.get("perpetual_arb", False)

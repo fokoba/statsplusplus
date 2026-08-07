@@ -22,15 +22,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from evaluation_engine import (
+from statsplusplus.evaluation.composite import (
     compute_composite_hitter, compute_composite_pitcher,
-    compute_ceiling, compute_true_ceiling,
-    DEFAULT_TOOL_WEIGHTS,
 )
-from fv_model import calc_fv, DEFENSIVE_WEIGHTS, LEVEL_NORM_AGE
-from constants import PITCH_FIELDS
-from player_utils import display_pos
-from db import get_conn
+from statsplusplus.evaluation.ceiling import compute_ceiling, compute_true_ceiling
+from statsplusplus.data.evaluation_engine import DEFAULT_TOOL_WEIGHTS
+from statsplusplus.evaluation.fv import calc_fv_from_dict as calc_fv
+from statsplusplus.evaluation.constants import DEFENSIVE_WEIGHTS
+from statsplusplus.utils.positions import LEVEL_NORM_AGE, PITCH_FIELDS, display_pos
+from statsplusplus.data.db import get_conn
 
 # Same exclusion set as web/team_queries.py's get_free_agent_candidates —
 # NPB-drafted players aren't actually signable even when marked a free agent.
@@ -228,7 +228,7 @@ def _bucket_for_assign(d, is_pitcher, role_str, stamina):
     for f in PITCH_FIELDS:
         col = {v: k for k, v in _PITCH_COL_MAP.items()}.get(f)
         p[f"Pot{f}"] = _num(d.get(f"{col}P")) if col else None
-    from player_utils import assign_bucket
+    from statsplusplus.utils.positions import assign_bucket
     if is_pitcher:
         p["_role"] = {"SP": "starter", "RP": "reliever", "CL": "closer"}.get(role_str, "reliever")
         p["Pos"] = "P"
@@ -306,6 +306,7 @@ def evaluate_row(d: dict) -> dict | None:
         ceiling = compute_ceiling(
             pot_tools, weights, composite, accuracy=acc, work_ethic=wrk_ethic,
             is_pitcher=True, arsenal=arsenal, stamina=stamina, role=role, age=age or 25,
+            ratings_scale="20-80",
         )
         true_ceiling = compute_true_ceiling(
             pot_tools, weights, composite, accuracy=acc, work_ethic=wrk_ethic,
@@ -324,6 +325,7 @@ def evaluate_row(d: dict) -> dict | None:
         ceiling = compute_ceiling(
             pot_tools, weights, composite, accuracy=acc, work_ethic=wrk_ethic,
             defense=pot_defense, def_weights=def_weights, age=age or 25,
+            ratings_scale="20-80",
         )
         true_ceiling = compute_true_ceiling(
             pot_tools, weights, composite, accuracy=acc, work_ethic=wrk_ethic,
@@ -341,7 +343,7 @@ def evaluate_row(d: dict) -> dict | None:
         "Stf_L": stf_l, "Stf_R": stf_r,
         "_offensive_ceiling": offensive_ceiling,
     }
-    fv_grade, risk = calc_fv(fv_input)
+    fv_grade, risk = calc_fv(fv_input, scale="20-80")
 
     rule5_eligible = (d.get("R5") or "").strip().lower() == "yes"
     # Annual salary demand ("$9.0m" etc.) — verified against a real free

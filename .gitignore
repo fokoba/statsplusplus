@@ -5,7 +5,7 @@ __pycache__/
 .venv/
 
 # Data (league DBs, configs, logs — user-specific)
-data/
+/data/
 
 # Environment / secrets
 .env

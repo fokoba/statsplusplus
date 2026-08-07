@@ -1,7 +1,7 @@
 {
-  "last_posted_commit": "e04ee4e",
-  "last_posted_date": "2026-08-01",
-  "last_posted_title": "Critical Migration Fixes",
+  "last_posted_commit": "d19ce77",
+  "last_posted_date": "2026-08-07",
+  "last_posted_title": "Complete Architecture Overhaul \u2014 All Shims Eliminated",
   "history": [
     {
       "date": "2026-07-22",
@@ -52,6 +52,27 @@
       "date": "2026-07-28",
       "commit": "689fab7",
       "title": "API Integration Complete \u2014 MiLB Stats, Trade Block, Real Standings & Contract Options"
+    },
+    {
+      "date": "2026-08-01",
+      "commit": "e04ee4e",
+      "title": "Critical Migration Fixes"
+    },
+    {
+      "date": "2026-08-06",
+      "commit": "b6215da",
+      "title": "Promotion Readiness, Split Thresholds & Draft Board UX"
+    },
+    {
+      "date": "2026-08-07",
+      "commit": "7ec5d87",
+      "title": "Architecture Overhaul & Performance Optimization"
+    },
+    {
+      "date": "2026-08-07",
+      "commit": "d19ce77",
+      "title": "Complete Architecture Overhaul \u2014 All Shims Eliminated (PENDING - webhook 403)"
     }
-  ]
+  ],
+  "pending_post": "Webhook returned 403 \u2014 post pending when webhook is restored"
 }

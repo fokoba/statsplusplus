@@ -15,10 +15,23 @@ def _fmt_money_py(val):
         return f"${val / 1e3:.0f}K"
     return f"${val:,.0f}"
 sys.path.insert(0, os.path.join(BASE, "scripts"))
-from player_utils import norm as _norm, norm_floor as _norm_floor, height_str as _height_str, display_pos as _display_pos, calc_pap, dollars_per_war as _dollars_per_war
+from statsplusplus.config.ratings import norm as _norm_raw, norm_floor as _norm_floor_raw
+from statsplusplus.utils.formatting import height_str as _height_str
+from statsplusplus.utils.positions import display_pos as _display_pos
+from statsplusplus.evaluation.surplus import calc_pap
+from statsplusplus.config.league_config import dollars_per_war as _dpw_pkg
+from statsplusplus.utils.positions import ROLE_MAP
 from percentiles import get_hitter_percentiles, get_pitcher_percentiles, get_fielding_percentiles, available_pctile_years, available_pctile_levels, get_percentile_history, get_percentile_history_all_levels, get_fielding_percentile_history
 from web_league_context import get_db, get_cfg, team_abbr_map, team_names_map, level_map, pos_map
-from constants import ROLE_MAP
+
+def _norm(val):
+    return _norm_raw(val, get_cfg().ratings_scale)
+
+def _norm_floor(val, floor=20):
+    return _norm_floor_raw(val, get_cfg().ratings_scale, floor)
+
+def _dollars_per_war():
+    return _dpw_pkg(get_cfg().league_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -33,8 +46,8 @@ def _mlb_context(conn, bucket, composite, ceiling):
     data still produces meaningful comparisons.
     Full-season targets: Hitters 200 PA, SP 80 IP, RP 30 IP.
     """
-    from player_utils import assign_bucket as _ab
-    from league_config import config as _lc
+    from statsplusplus.utils.positions import assign_bucket as _ab
+    from statsplusplus.config.league_config import LeagueConfig; _lc = LeagueConfig()
     _rm = {str(k): v for k, v in _lc.role_map.items()}
 
     _year = conn.execute("SELECT MAX(year) FROM mlb_batting_stats").fetchone()[0]
@@ -199,7 +212,7 @@ def _build_evaluation_data(rd: dict | None, is_pitcher: bool, norm_fn,
     if not is_pitcher and position_bucket and result["offensive_grade"] is not None:
         try:
             from pathlib import Path as _Path
-            from evaluation_engine import compute_carrying_tool_bonus, load_carrying_tool_config
+            from statsplusplus.data.evaluation_engine import compute_carrying_tool_bonus, load_carrying_tool_config
             # Map display position back to internal bucket for config lookup
             _internal_bucket = "COF" if position_bucket == "OF" else position_bucket
             _ct_config = load_carrying_tool_config(_Path(league_dir)) if league_dir else load_carrying_tool_config(_Path("."))
@@ -219,7 +232,7 @@ def _build_evaluation_data(rd: dict | None, is_pitcher: bool, norm_fn,
 
     # Divergence detection (tool_only vs OVR, ceiling vs POT)
     try:
-        from evaluation_engine import detect_divergence
+        from statsplusplus.data.evaluation_engine import detect_divergence
         _ovr = rd.get("ovr")
         _pot = rd.get("pot")
         if tool_only_score is not None and _ovr is not None:
@@ -237,7 +250,7 @@ def _build_evaluation_data(rd: dict | None, is_pitcher: bool, norm_fn,
     # Tool profile analysis: archetype, carrying tools, red-flag tools
     if composite_score is not None:
         try:
-            from evaluation_engine import classify_archetype, identify_carrying_tools, identify_red_flag_tools
+            from statsplusplus.data.evaluation_engine import classify_archetype, identify_carrying_tools, identify_red_flag_tools
             if is_pitcher:
                 _tools = {
                     "stuff": norm_fn(rd.get("stf")),
@@ -276,7 +289,7 @@ def _build_evaluation_data(rd: dict | None, is_pitcher: bool, norm_fn,
     # Two-way player: include both role scores and combined value
     if secondary_composite is not None and composite_score is not None:
         try:
-            from evaluation_engine import compute_combined_value
+            from statsplusplus.data.evaluation_engine import compute_combined_value
             combined = compute_combined_value(composite_score, secondary_composite)
             if is_pitcher:
                 result["two_way_scores"] = {
@@ -393,16 +406,14 @@ def _compute_insights(rd: dict | None, is_pitcher: bool, composite: int | None,
 
 def get_player(pid):
     conn = get_db()
-    conn.row_factory = None
     year = get_cfg().year
 
     # Bio
     p = conn.execute("SELECT player_id, name, age, team_id, parent_team_id, level, pos, role FROM players WHERE player_id=?", (pid,)).fetchone()
     if not p:
-        conn.close()
         return None
 
-    player_id, name, age, team_id, parent_team_id, level, pos, role = p
+    player_id, name, age, team_id, parent_team_id, level, pos, role = p["player_id"], p["name"], p["age"], p["team_id"], p["parent_team_id"], p["level"], p["pos"], p["role"]
     is_pitcher = role in (11, 12, 13)
     org_id = team_id if parent_team_id == 0 else parent_team_id
     level_str = level_map().get(str(level), str(level))
@@ -414,14 +425,14 @@ def get_player(pid):
         "FROM players WHERE player_id=?", (pid,)).fetchone()
     player_status = None
     if _status_row:
-        _inj = _status_row[0] or 0
-        _inj_left = _status_row[1] or 0
-        _dl_left = _status_row[2] or 0
-        _on_dl = _status_row[3] or 0
-        _on_dl60 = _status_row[4] or 0
-        _dfa = _status_row[5] or 0
-        _waivers = _status_row[6] or 0
-        _waivers_left = _status_row[7] or 0
+        _inj = _status_row["injury_is_injured"] or 0
+        _inj_left = _status_row["injury_left"] or 0
+        _dl_left = _status_row["injury_dl_left"] or 0
+        _on_dl = _status_row["is_on_dl"] or 0
+        _on_dl60 = _status_row["is_on_dl60"] or 0
+        _dfa = _status_row["designated_for_assignment"] or 0
+        _waivers = _status_row["is_on_waivers"] or 0
+        _waivers_left = _status_row["days_on_waivers_left"] or 0
 
         if _dfa:
             player_status = {"type": "DFA", "label": "Designated for Assignment", "severity": "high"}
@@ -449,8 +460,7 @@ def get_player(pid):
     # Build dict from row
     rd = {}
     if r:
-        cols = [d[0] for d in conn.execute("SELECT * FROM ratings LIMIT 0").description]
-        rd = dict(zip(cols, r))
+        rd = dict(r)
 
     ratings = None
     if rd:
@@ -481,9 +491,10 @@ def get_player(pid):
             "SELECT int_, wrk_ethic, greed, loy, lead FROM ratings "
             "WHERE player_id=? AND wrk_ethic IN ('VL','L','N','H','VH') "
             "ORDER BY snapshot_date DESC LIMIT 1", (pid,)).fetchone()
-        if not pers_row:
-            pers_row = (g("int_"), g("wrk_ethic"), g("greed"), g("loy"), g("lead"))
-        p_int, p_ethic, p_greed, p_loy, p_lead = pers_row
+        if pers_row:
+            p_int, p_ethic, p_greed, p_loy, p_lead = pers_row["int_"], pers_row["wrk_ethic"], pers_row["greed"], pers_row["loy"], pers_row["lead"]
+        else:
+            p_int, p_ethic, p_greed, p_loy, p_lead = g("int_"), g("wrk_ethic"), g("greed"), g("loy"), g("lead")
 
         ratings = {"ovr": ovr, "pot": pot, "height": _height_str(height), "bats": bats, "throws": throws,
                    "personality": {"int": _char_label(p_int), "ethic": _char_label(p_ethic),
@@ -636,7 +647,7 @@ def get_player(pid):
     fielding_stats = []
     for row in conn.execute(
         "SELECT year, position, g, gs, ip, tc, a, po, e, dp, pb, sba, rto, zr, framing, arm "
-        "FROM mlb_fielding_stats WHERE player_id=? ORDER BY year, position", (pid,)).fetchall():
+        "FROM mlb_fielding_stats WHERE player_id=? ORDER BY year DESC, position", (pid,)).fetchall():
         yr, fpos, g, gs, ip, tc, a, po, e, dp, pb, sba, rto, zr, framing, arm = row
         if g == 0:
             continue
@@ -651,6 +662,38 @@ def get_player(pid):
             "framing": framing if fpos == 2 else None,
             "arm": arm,
         })
+
+    # Per-position fielding career totals
+    fielding_career = []
+    if len(fielding_stats) > 1:
+        from collections import defaultdict
+        _fld_by_pos = defaultdict(list)
+        for f in fielding_stats:
+            _fld_by_pos[f["pos"]].append(f)
+        for fpos in _fld_by_pos:
+            entries = _fld_by_pos[fpos]
+            if len(entries) < 2:
+                continue
+            _f_g = sum(f["g"] for f in entries)
+            _f_ip = sum(f["ip"] for f in entries)
+            _f_tc = sum(f["tc"] for f in entries)
+            _f_a = sum(f["a"] for f in entries)
+            _f_po = sum(f["po"] for f in entries)
+            _f_e = sum(f["e"] for f in entries)
+            _f_dp = sum(f["dp"] for f in entries)
+            _f_fpct = (_f_po + _f_a) / _f_tc if _f_tc else 0
+            # Weight ZR and arm by IP
+            _f_zr = sum(f["zr"] * f["ip"] for f in entries if f["zr"] is not None)
+            _f_zr_ip = sum(f["ip"] for f in entries if f["zr"] is not None)
+            _f_arm = sum(f["arm"] * f["ip"] for f in entries if f["arm"] is not None)
+            _f_arm_ip = sum(f["ip"] for f in entries if f["arm"] is not None)
+            fielding_career.append({
+                "pos": fpos, "g": _f_g, "ip": _f_ip, "tc": _f_tc,
+                "a": _f_a, "e": _f_e, "dp": _f_dp, "fpct": _f_fpct,
+                "zr": _f_zr / _f_zr_ip if _f_zr_ip else None,
+                "arm": _f_arm / _f_arm_ip if _f_arm_ip else None,
+            })
+        fielding_career.sort(key=lambda x: -x["g"])
 
     # Surplus / FV
     ed = conn.execute("SELECT MAX(eval_date) FROM player_surplus").fetchone()[0]
@@ -994,11 +1037,11 @@ def get_player(pid):
             if len(_hist_rows) == 2:
                 _cur_snap = dict(zip(_hist_col_names, _hist_rows[0]))
                 _prev_snap = dict(zip(_hist_col_names, _hist_rows[1]))
-                from evaluation_engine import compute_snapshot_deltas
+                from statsplusplus.data.evaluation_engine import compute_snapshot_deltas
                 snapshot_deltas = compute_snapshot_deltas(_cur_snap, _prev_snap)
                 # Pre-compute display-ready tool breakdown for the template
                 # Tool deltas are on raw (1-100) scale; normalize to 20-80 for display
-                from ratings import norm as _norm_r
+                from statsplusplus.config.ratings import norm as _norm_r
                 _TOOL_LABELS = {
                     "cntct":"Con", "gap":"Gap", "pow":"Pow", "eye":"Eye", "ks":"Avoid K", "speed":"Spd",
                     "stf":"Stf", "mov":"Mov", "ctrl":"Ctrl", "stm":"Stm",
@@ -1028,7 +1071,7 @@ def get_player(pid):
     # Development history — full timeline from ratings_history
     dev_history = None
     try:
-        from ratings import norm as _norm_hist
+        from statsplusplus.config.ratings import norm as _norm_hist
         _dh_rows = conn.execute(
             "SELECT * FROM ratings_history WHERE player_id=? ORDER BY snapshot_date",
             (pid,)
@@ -1309,7 +1352,6 @@ def get_player(pid):
     red_flag_tools = eval_data["red_flag_tools"]
     two_way_scores = eval_data["two_way_scores"]
 
-    conn.close()
 
     # Surplus breakdown
     surplus_detail = None
@@ -1406,8 +1448,8 @@ def get_player(pid):
         if not valuation and outcome_probs is None and level_str != 'MLB':
             try:
                 import prospect_value as _pv
-                from player_utils import assign_bucket, calc_fv, LEVEL_NORM_AGE
-                from fv_calc import RATINGS_SQL, LEVEL_INT_KEY
+                from statsplusplus.utils.positions import assign_bucket, LEVEL_NORM_AGE; from statsplusplus.evaluation.fv import calc_fv_from_dict as calc_fv
+                from statsplusplus.data.fv_calc import RATINGS_SQL, LEVEL_INT_KEY
                 _conn2 = get_db()
                 _rat = _conn2.execute(RATINGS_SQL + " AND r.player_id = ?", (pid,)).fetchone()
                 if _rat:
@@ -1577,7 +1619,6 @@ def get_player(pid):
         fld_pctile_years = [r[0] for r in conn.execute(
             "SELECT DISTINCT year FROM mlb_fielding_stats WHERE player_id=? ORDER BY year DESC",
             (pid,)).fetchall()]
-        conn.close()
 
     # Percentile history for Advanced tab
     pctile_history = get_percentile_history(pid, is_pitcher=is_pitcher)
@@ -1749,8 +1790,8 @@ def get_player(pid):
         if level != 1 or (age and age <= 25):
             import sys as _sys
             _sys.path.insert(0, "scripts") if "scripts" not in _sys.path else None
-            from evaluation_engine import _load_milb_stat_seasons, _load_milb_averages
-            from fv_model import compute_performance_adjusted_ceiling, compute_stat_risk_modifier
+            from statsplusplus.data.evaluation_engine import _load_milb_stat_seasons, _load_milb_averages
+            from statsplusplus.evaluation.fv import compute_performance_adjusted_ceiling, compute_stat_risk_modifier
             _league_dir = get_cfg().league_dir
             _ma = _load_milb_averages(_league_dir)
             if _ma:
@@ -1822,6 +1863,105 @@ def get_player(pid):
         import logging as _mp_log
         _mp_log.getLogger("statspp").warning("milb_perf computation failed for pid=%s: %s", pid, _mp_err)
 
+    # ── MLB career totals ─────────────────────────────────────────────────
+    bat_career = None
+    if bat_stats and len(bat_stats) > 1:
+        _c_ab = sum(s["ab"] for s in bat_stats)
+        _c_h = sum(s["h"] for s in bat_stats)
+        _c_d = sum(s.get("_d", 0) for s in bat_stats)
+        _c_t = sum(s.get("_t", 0) for s in bat_stats)
+        _c_hr = sum(s["hr"] for s in bat_stats)
+        _c_rbi = sum(s["rbi"] for s in bat_stats)
+        _c_bb = sum(s["bb"] for s in bat_stats)
+        _c_k = sum(s["k"] for s in bat_stats)
+        _c_sb = sum(s["sb"] for s in bat_stats)
+        _c_cs = sum(s["cs"] for s in bat_stats)
+        _c_pa = sum(s["pa"] for s in bat_stats)
+        _c_war = sum(s["war"] for s in bat_stats)
+        _c_g = sum(s["g"] for s in bat_stats)
+        _c_hbp = sum(s.get("_hbp", 0) for s in bat_stats)
+        _c_sf = sum(s.get("_sf", 0) for s in bat_stats)
+        _c_avg = _c_h / _c_ab if _c_ab else 0
+        _c_obp = (_c_h + _c_bb + _c_hbp) / (_c_ab + _c_bb + _c_hbp + _c_sf) if (_c_ab + _c_bb + _c_hbp + _c_sf) else 0
+        _c_slg = (_c_h + _c_d + 2 * _c_t + 3 * _c_hr) / _c_ab if _c_ab else 0
+        _c_ops = _c_obp + _c_slg
+        _c_iso = _c_slg - _c_avg
+        _c_babip_d = _c_ab - _c_k - _c_hr + _c_sf
+        _c_babip = (_c_h - _c_hr) / _c_babip_d if _c_babip_d > 0 else 0
+        _c_bb_pct = _c_bb / _c_pa * 100 if _c_pa else 0
+        _c_so_pct = _c_k / _c_pa * 100 if _c_pa else 0
+        _c_ops_plus = round(_c_ops / lg_ops * 100) if lg_ops and _c_ops else 0
+        bat_career = {
+            "g": _c_g, "pa": _c_pa, "hr": _c_hr, "rbi": _c_rbi, "sb": _c_sb, "cs": _c_cs,
+            "war": round(_c_war, 1), "avg": _c_avg, "obp": _c_obp, "slg": _c_slg,
+            "ops": _c_ops, "iso": _c_iso, "babip": _c_babip,
+            "bb_pct": _c_bb_pct, "so_pct": _c_so_pct, "ops_plus": _c_ops_plus,
+        }
+
+    pit_career = None
+    if pit_stats and len(pit_stats) > 1:
+        _c_ip = sum(s["ip"] for s in pit_stats)
+        _c_k = sum(s["k"] for s in pit_stats)
+        _c_bb = sum(s["bb"] for s in pit_stats)
+        _c_w = sum(s["w"] for s in pit_stats)
+        _c_l = sum(s["l"] for s in pit_stats)
+        _c_sv = sum(s["sv"] for s in pit_stats)
+        _c_war = sum(s["war"] for s in pit_stats)
+        _c_gs = sum(s["gs"] for s in pit_stats)
+        _c_g = sum(s["g"] for s in pit_stats)
+        _c_hld = sum(s["hld"] for s in pit_stats)
+        _c_er = sum(s.get("_er", 0) for s in pit_stats)
+        _c_hra = sum(s.get("_hra", 0) for s in pit_stats)
+        _c_bf = sum(s.get("_bf", 0) for s in pit_stats)
+        _c_hp = sum(s.get("_hp", 0) for s in pit_stats)
+        _c_ha = sum(s.get("_ha", 0) for s in pit_stats)
+        _c_gb = sum(s.get("_gb", 0) for s in pit_stats)
+        _c_fb = sum(s.get("_fb", 0) for s in pit_stats)
+        _c_era = _c_er * 27 / (_c_ip * 3) if _c_ip else 0
+        _c_fip = ((13 * _c_hra + 3 * (_c_bb + _c_hp) - 2 * _c_k) / _c_ip + fip_const) if _c_ip else 0
+        _c_era_plus = round(lg_era / _c_era * 100) if _c_era else 0
+        _c_babip_d = _c_bf - _c_k - _c_hra - _c_bb - _c_hp
+        _c_babip = (_c_ha - _c_hra) / _c_babip_d if _c_babip_d > 0 else 0
+        _c_k_pct = _c_k / _c_bf * 100 if _c_bf else 0
+        _c_bb_pct = _c_bb / _c_bf * 100 if _c_bf else 0
+        _c_k_bb = _c_k_pct - _c_bb_pct
+        _c_gb_pct = _c_gb / (_c_gb + _c_fb) * 100 if (_c_gb + _c_fb) else 0
+        _c_siera_k = _c_k / _c_bf if _c_bf else 0
+        _c_siera_bb = _c_bb / _c_bf if _c_bf else 0
+        _c_siera = (6.145 - 16.986 * _c_siera_k + 11.434 * _c_siera_bb
+                    + 7.653 * _c_siera_k**2 + 6.664 * _c_siera_bb**2 + 0.9) if _c_bf else 0
+        pit_career = {
+            "g": _c_g, "gs": _c_gs, "ip": _c_ip, "era": _c_era, "era_plus": _c_era_plus,
+            "fip": _c_fip, "siera": _c_siera, "k_pct": _c_k_pct, "bb_pct": _c_bb_pct,
+            "k_bb_pct": _c_k_bb, "gb_pct": _c_gb_pct, "babip": _c_babip,
+            "w": _c_w, "l": _c_l, "sv": _c_sv, "hld": _c_hld, "war": round(_c_war, 1),
+        }
+
+    # ── Promotion readiness ───────────────────────────────────────────────
+    promotion_readiness = None
+    demotion_risk = None
+    if level_str and level_str != "MLB":
+        try:
+            from promotion_readiness import compute_promotion_readiness, compute_demotion_risk
+            from statsplusplus.data import db as _pr_db
+            _pr_league_dir = get_cfg().league_dir
+            _pr_conn = _pr_db.get_conn(_pr_league_dir)
+            promotion_readiness = compute_promotion_readiness(pid, _pr_conn, _pr_league_dir)
+            demotion_risk = compute_demotion_risk(pid, _pr_conn, _pr_league_dir)
+            _pr_conn.close()
+        except Exception:
+            pass
+    elif level_str == "MLB":
+        try:
+            from promotion_readiness import compute_demotion_risk
+            from statsplusplus.data import db as _pr_db
+            _pr_league_dir = get_cfg().league_dir
+            _pr_conn = _pr_db.get_conn(_pr_league_dir)
+            demotion_risk = compute_demotion_risk(pid, _pr_conn, _pr_league_dir)
+            _pr_conn.close()
+        except Exception:
+            pass
+
     return {
         "pid": pid, "player_id": pid, "name": name, "age": age, "pos": pos_str,
         "year": get_cfg().year,
@@ -1831,9 +1971,10 @@ def get_player(pid):
         "player_status": player_status,
         "ratings": ratings, "hit_ratings": hit_ratings, "valuation": valuation, "contract": contract,
         "bat_stats": bat_stats, "pit_stats": pit_stats, "summary": summary,
+        "bat_career": bat_career, "pit_career": pit_career,
         "bat_splits": bat_splits, "pit_splits": pit_splits,
         "surplus_detail": surplus_detail, "outcome_probs": outcome_probs, "percentiles": percentiles,
-        "pctile_splits": pctile_splits, "fielding_stats": fielding_stats,
+        "pctile_splits": pctile_splits, "fielding_stats": fielding_stats, "fielding_career": fielding_career,
         "fielding_pctiles": fielding_pctiles, "fld_pctile_years": fld_pctile_years,
         "bat_percentiles": bat_percentiles, "bat_pctile_splits": bat_pctile_splits,
         "pctile_year": pctile_year, "pctile_years": pctile_years_available,
@@ -1869,6 +2010,8 @@ def get_player(pid):
         "pctile_level": pctile_level,
         "pctile_year_levels": pctile_year_levels,
         "milb_perf": milb_perf,
+        "promotion_readiness": promotion_readiness,
+        "demotion_risk": demotion_risk,
     }
 
 
@@ -1882,7 +2025,6 @@ def get_player_popup(pid):
         (pid,)
     ).fetchone()
     if not p:
-        conn.close()
         return None
 
     is_pitcher = p["role"] in (11, 12, 13)
@@ -1968,7 +2110,6 @@ def get_player_popup(pid):
         _sal = conn.execute("SELECT salary_0 FROM contracts WHERE player_id=?", (pid,)).fetchone()
         _pap = calc_pap(_war, _sal[0] if _sal else 0, _tg, _dpw)
 
-    conn.close()
 
     pos_str = ROLE_MAP.get(p["role"], pos_map().get(p["pos"], "?")) if is_pitcher else pos_map().get(p["pos"], "?")
     level_str = level_map().get(str(p["level"]), str(p["level"]))

@@ -4,7 +4,7 @@ Team queries: web/team_queries.py
 Player queries: web/player_queries.py
 Percentiles: web/percentiles.py
 
-Note: many query functions set conn.row_factory = None to use tuple rows instead
+Note: query functions use sqlite3.Row access. Integer indexing (r[0]) still works
 of sqlite3.Row. This is intentional — these functions use positional indexing (r[0],
 r[1], etc.) for performance. Do not change without updating all index references.
 """
@@ -13,9 +13,17 @@ import os, sys, json
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, "scripts"))
-from player_utils import display_pos as _display_pos, norm as _norm, norm_floor as _norm_floor
+from statsplusplus.utils.positions import display_pos as _display_pos
+from statsplusplus.config.ratings import norm as _norm_raw, norm_floor as _norm_floor_raw
 from web_league_context import get_db, get_cfg, team_abbr_map, team_names_map, pos_order, year, mlb_team_ids, level_map
-from constants import ROLE_MAP
+from statsplusplus.utils.positions import ROLE_MAP
+
+# Wrap norm functions to use the request-scoped scale
+def _norm(val):
+    return _norm_raw(val, get_cfg().ratings_scale)
+
+def _norm_floor(val, floor=20):
+    return _norm_floor_raw(val, get_cfg().ratings_scale, floor)
 
 # Legacy module-level aliases — used by app.py and re-export consumers.
 # These are properties that re-evaluate each access via get_cfg().
@@ -64,6 +72,18 @@ def set_my_team(team_id):
 
 # ── league-level queries ────────────────────────────────────────────────
 
+def _get_prospect_eval_date():
+    """Get the most recent prospect_fv eval_date, cached per request."""
+    from flask import g as _g, has_request_context as _hrc
+    if _hrc() and hasattr(_g, "_pf_eval_date_cache"):
+        return _g._pf_eval_date_cache
+    conn = get_db()
+    ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
+    if _hrc():
+        _g._pf_eval_date_cache = ed
+    return ed
+
+
 _ETA_BASE = {"MLB": 0, "AAA": 1, "AA": 2, "A": 3,
              "A-Short": 4, "Rookie": 4, "USL": 5, "DSL": 5, "Intl": 5}
 
@@ -76,8 +96,7 @@ def _calc_eta(level, ovr, pot):
 
 def get_top_prospects(n=100):
     conn = get_db()
-    conn.row_factory = None
-    ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
+    ed = _get_prospect_eval_date()
 
     _abbr = team_abbr_map()
     _names = team_names_map()
@@ -159,7 +178,6 @@ def get_batting_leaders(yr=None, min_pa=50):
     """Top 5 per stat, keyed by 'All' + each league short name."""
     yr = yr or year()
     conn = get_db()
-    conn.row_factory = None
     tip = conn.execute("SELECT AVG(ip) FROM team_pitching_stats WHERE year=? AND split_id=1",
                        (yr,)).fetchone()
     team_g = round(tip[0] / 9) if tip and tip[0] else 0
@@ -202,7 +220,6 @@ def get_pitching_leaders(yr=None, min_ip=10):
     """Top 5 per stat, keyed by 'All' + each league short name."""
     yr = yr or year()
     conn = get_db()
-    conn.row_factory = None
     tip = conn.execute("SELECT AVG(ip) FROM team_pitching_stats WHERE year=? AND split_id=1",
                        (yr,)).fetchone()
     team_g = round(tip[0] / 9) if tip and tip[0] else 0
@@ -226,7 +243,6 @@ def search_players(query):
     if not query or len(query) < 2:
         return []
     conn = get_db()
-    conn.row_factory = None
     _abbr = team_abbr_map()
     _lm = level_map()
     _pm = {str(k): v for k, v in get_cfg().pos_map.items()}
@@ -257,8 +273,7 @@ def search_players(query):
 def get_all_prospects():
     """All FV≥40 prospects for by-team/by-position views."""
     conn = get_db()
-    conn.row_factory = None
-    ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
+    ed = _get_prospect_eval_date()
 
     _abbr = team_abbr_map()
     _names = team_names_map()
@@ -308,8 +323,7 @@ def get_all_prospects():
 def get_prospect_summary(pid):
     """Prospect side-panel data: ratings, FV, surplus, scouting summary."""
     conn = get_db()
-    conn.row_factory = None
-    ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
+    ed = _get_prospect_eval_date()
 
     pf = conn.execute("""
         SELECT pf.fv, pf.fv_str, pf.bucket, pf.level, pf.prospect_surplus,
@@ -447,7 +461,6 @@ def _build_tools(rd, is_pitcher, out):
 def get_player_card(pid):
     """Side-panel-style card data for any player (MLB or prospect)."""
     conn = get_db()
-    conn.row_factory = None
     _abbr = team_abbr_map()
 
     p = conn.execute("""
@@ -510,7 +523,7 @@ def get_player_card(pid):
     # Divergence detection
     if _tool_only is not None and rd.get("ovr") is not None:
         try:
-            from evaluation_engine import detect_divergence
+            from statsplusplus.data.evaluation_engine import detect_divergence
             out["divergence"] = detect_divergence(_tool_only, rd.get("ovr"))
         except Exception:
             pass
@@ -559,17 +572,16 @@ def get_prospect_comps(pid):
     Returns list of {tier, pct, comp_pid, comp_name, comp_team, comp_ovr, comp_war, comp_age}.
     """
     from math import sqrt
-    from player_utils import peak_war_from_ovr
+    from statsplusplus.evaluation.war import peak_war_from_score as peak_war_from_ovr
 
     conn = get_db()
-    conn.row_factory = None
     _abbr = team_abbr_map()
 
     _DEF_COL = {"C": "r.c", "1B": "r.first_b", "2B": "r.second_b", "3B": "r.third_b",
                 "SS": "r.ss", "LF": "r.lf", "CF": "r.cf", "RF": "r.rf", "COF": "r.cf"}
 
     # Get prospect info
-    ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
+    ed = _get_prospect_eval_date()
     bucket_row = conn.execute(
         "SELECT bucket FROM prospect_fv WHERE eval_date=? AND player_id=?", (ed, pid)).fetchone()
     if not bucket_row:
@@ -749,10 +761,10 @@ def get_prospect_comp_stats(pid):
     Returns dict with {n, mean, median, p25, p75, min, max, implied_fv} or None.
     """
     from comp_validate import find_comps, summarize
-    from ratings import norm_continuous as _norm
+    from statsplusplus.config.ratings import norm_continuous as _norm
 
     conn = get_db()
-    ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
+    ed = _get_prospect_eval_date()
     row = conn.execute("""
         SELECT r.pot_cntct, r.pot_pow, r.pot_eye, r.pot_gap,
                r.pot_stf, r.pot_mov, r.pot_ctrl,
@@ -900,8 +912,8 @@ def get_draft_pool():
     conn = get_db()
     amateur_levels = _detect_amateur_levels(conn)
 
-    from fv_calc import RATINGS_SQL
-    from player_utils import (assign_bucket, calc_fv, norm, LEVEL_NORM_AGE)
+    from statsplusplus.data.fv_calc import RATINGS_SQL
+    from statsplusplus.utils.positions import assign_bucket, LEVEL_NORM_AGE; from statsplusplus.evaluation.fv import calc_fv_from_dict as calc_fv; from statsplusplus.config.ratings import norm
 
     # Extend RATINGS_SQL with bats/throws which aren't in the base query
     _DRAFT_SQL = RATINGS_SQL.replace("r.league_id AS LeagueId",
@@ -956,7 +968,7 @@ def get_draft_pool():
         }
         if p["_is_pitcher"]:
             # Count viable pitches (pot >= 45)
-            from constants import PITCH_FIELDS
+            from statsplusplus.utils.positions import PITCH_FIELDS
             _pitch_names = {'Fst':'FB','Snk':'SI','Crv':'CB','Sld':'SL','Chg':'CH',
                             'Splt':'SPL','Cutt':'CUT','CirChg':'CC','Scr':'SCR',
                             'Frk':'FRK','Kncrv':'KC','Knbl':'KN'}
@@ -1058,7 +1070,7 @@ def get_draft_pool():
     # Try to load uploaded draft pool first
     uploaded_pids = None
     try:
-        from league_context import get_league_dir
+        from statsplusplus.config.league_context import get_league_dir
         pool_path = get_league_dir() / "config" / "draft_pool.json"
         if pool_path.exists():
             import json as _json
@@ -1070,7 +1082,7 @@ def get_draft_pool():
     picks = []
     try:
         from statsplus import client as _dc
-        from league_context import get_statsplus_cookie
+        from statsplusplus.config.league_context import get_statsplus_cookie
         cfg = get_cfg()
         slug = cfg.settings.get("statsplus_slug", "")
         cookie = get_statsplus_cookie()
@@ -1191,7 +1203,7 @@ def get_positional_rankings():
 
     # Get MLB org IDs for filtering
     try:
-        from league_config import LeagueConfig
+        from statsplusplus.config.league_config import LeagueConfig
         mlb_org_ids = LeagueConfig().mlb_team_ids
     except Exception:
         mlb_org_ids = set(teams.keys())
@@ -1199,7 +1211,9 @@ def get_positional_rankings():
     # MLB players with composite scores
     mlb_rows = conn.execute("""
         SELECT p.player_id, p.name, p.age, p.pos, p.role, p.team_id,
-               r.composite_score, r.true_ceiling
+               r.composite_score, r.true_ceiling,
+               r.offensive_grade, r.defensive_value, r.ctrl,
+               r.c, r.first_b, r.second_b, r.third_b, r.ss, r.lf, r.cf, r.rf
         FROM players p
         JOIN latest_ratings r ON r.player_id = p.player_id
         WHERE p.level = '1' AND r.composite_score IS NOT NULL
@@ -1243,10 +1257,11 @@ def get_positional_rankings():
     for key, cfg in _POS_GROUPS:
         group = {"label": cfg["label"], "mlb": [], "prospects": []}
 
+        # Collect all MLB players for this position (for median calculation)
+        all_composites = []
+
         # Assign MLB players
         for r in mlb_rows:
-            if len(group["mlb"]) >= 20:
-                break
             pos, role = r["pos"], r["role"]
             pid = r["player_id"]
 
@@ -1269,12 +1284,35 @@ def get_positional_rankings():
                 continue
             if r["team_id"] not in mlb_org_ids:
                 continue
-            group["mlb"].append({
-                "pid": r["player_id"], "name": r["name"], "age": r["age"],
-                "team": teams.get(r["team_id"], "?"),
-                "composite": r["composite_score"], "ceiling": r["true_ceiling"],
-                "rank": len(group["mlb"]) + 1,
-            })
+
+            all_composites.append(r["composite_score"])
+            if len(group["mlb"]) < 20:
+                from statsplusplus.config.ratings import norm as _norm_r
+                # Get the defensive rating for this specific position group
+                _pos_def_map = {
+                    "C": r["c"], "1B": r["first_b"], "2B": r["second_b"],
+                    "3B": r["third_b"], "SS": r["ss"],
+                    "CF": r["cf"],
+                    "COF": max(r["lf"] or 0, r["rf"] or 0) or None,
+                }
+                _pos_def_raw = _pos_def_map.get(key)
+                group["mlb"].append({
+                    "pid": r["player_id"], "name": r["name"], "age": r["age"],
+                    "team": teams.get(r["team_id"], "?"),
+                    "composite": r["composite_score"], "ceiling": r["true_ceiling"],
+                    "off": r["offensive_grade"],
+                    "def": _norm_r(_pos_def_raw) if _pos_def_raw else None,
+                    "rank": len(group["mlb"]) + 1,
+                })
+
+        # Compute positional median and add vs_avg
+        pos_median = 0
+        if all_composites:
+            sorted_comps = sorted(all_composites)
+            pos_median = sorted_comps[len(sorted_comps) // 2]
+        group["median"] = pos_median
+        for p in group["mlb"]:
+            p["vs_avg"] = p["composite"] - pos_median if p["composite"] and pos_median else 0
 
         # Assign prospects
         for r in prospect_rows:
@@ -1312,7 +1350,6 @@ def get_waiver_wire():
     - FV grade if prospect-eligible
     """
     conn = get_db()
-    conn.row_factory = None
 
     rows = conn.execute("""
         SELECT p.player_id, p.name, p.age, p.pos, p.role, p.level,
@@ -1398,5 +1435,4 @@ def get_waiver_wire():
             "pit_stats": {"year": pit_row[0], "ip": round(pit_row[1], 1), "era": round(pit_row[2], 2), "war": round(pit_row[3], 1)} if pit_row else None,
         })
 
-    conn.close()
     return results

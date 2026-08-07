@@ -10,16 +10,29 @@ from datetime import date
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from player_utils import (norm, norm_floor, height_str, fmt_table, assign_bucket,
-                           calc_fv, dev_weight,
-                           PITCH_FIELDS, PITCH_NAMES, LEVEL_NORM_AGE)
-from league_config import config as _cfg
-from league_context import get_league_dir
+
+from statsplusplus.config.league_context import get_league_dir, get_active_league_slug
+from statsplusplus.config.league_config import LeagueConfig
+from statsplusplus.config.ratings import norm as _norm_pkg, norm_floor as _norm_floor_pkg
+from statsplusplus.utils.formatting import height_str, fmt_table
+from statsplusplus.utils.positions import assign_bucket, PITCH_FIELDS, PITCH_NAMES, LEVEL_NORM_AGE
+from statsplusplus.evaluation.fv import dev_weight
+from statsplusplus.evaluation.fv import calc_fv_from_dict as calc_fv
+
+league_dir = get_league_dir(get_active_league_slug())
+_cfg = LeagueConfig(base_dir=league_dir)
+_scale = _cfg.ratings_scale
+
+def norm(val):
+    return _norm_pkg(val, _scale)
+
+def norm_floor(val, floor=20):
+    return _norm_floor_pkg(val, _scale, floor)
 
 ORG_ID = _cfg.my_team_id
 
 def _league_dir():
-    return str(get_league_dir())
+    return str(league_dir)
 
 # ---------------------------------------------------------------------------
 # Config
@@ -75,13 +88,23 @@ def top_pitches(p, n=4):
 # ---------------------------------------------------------------------------
 
 def load_level(level_key, game_date=None):
-    import data as _data
-    import db as _db
+    from statsplusplus.data.db import get_connection
+    conn = get_connection(league_dir)
     level_int = FARM_LEVEL_INT[level_key]
 
-    # Intl complex players now stored as level=8 after refresh.py fix
-    ratings = _data.get_ratings(ORG_ID, level=level_int)
-    all_players = _data.get_players(ORG_ID)
+    # Get ratings for this org's players at this level
+    ratings = [dict(r) for r in conn.execute("""
+        SELECT r.player_id AS ID, p.name AS Name, p.age AS Age,
+               r.ovr AS Ovr, r.pot AS Pot, r.*
+        FROM ratings r JOIN players p ON r.player_id = p.player_id
+        WHERE (p.team_id = ? OR p.parent_team_id = ?) AND p.level = ?
+          AND r.snapshot_date = (SELECT MAX(r2.snapshot_date) FROM ratings r2 WHERE r2.player_id = r.player_id)
+    """, (ORG_ID, ORG_ID, level_int)).fetchall()]
+    all_players = [dict(r) for r in conn.execute("""
+        SELECT player_id, name AS Name, age AS Age, team_id, parent_team_id,
+               level AS Level, pos AS Pos, role AS Role
+        FROM players WHERE team_id = ? OR parent_team_id = ?
+    """, (ORG_ID, ORG_ID)).fetchall()]
     roster = {p["player_id"]: p for p in all_players if str(p.get("Level")) == str(level_int)}
 
     role_map = {str(k): v for k, v in _cfg.role_map.items()}

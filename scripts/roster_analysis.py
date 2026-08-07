@@ -7,11 +7,26 @@ Usage: python3 scripts/roster_analysis.py
 
 import json, os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from constants import PITCH_FIELDS
-from player_utils import norm, norm_floor, height_str, fmt_table, PITCH_NAMES
-from league_config import config as _cfg
-from league_context import get_league_dir
-import db as _db
+
+from statsplusplus.config.league_context import get_league_dir, get_active_league_slug
+from statsplusplus.config.league_config import LeagueConfig
+from statsplusplus.config.ratings import norm as _norm_pkg, norm_floor as _norm_floor_pkg
+from statsplusplus.data.db import get_connection
+from statsplusplus.utils.formatting import height_str, fmt_table
+from statsplusplus.utils.positions import PITCH_FIELDS, PITCH_NAMES
+
+league_dir = get_league_dir(get_active_league_slug())
+_cfg = LeagueConfig(base_dir=league_dir)
+_scale = _cfg.ratings_scale
+
+def norm(val):
+    return _norm_pkg(val, _scale)
+
+def norm_floor(val, floor=20):
+    return _norm_floor_pkg(val, _scale, floor)
+
+def _get_conn():
+    return get_connection(league_dir)
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -139,7 +154,7 @@ def pitcher_grade_table(p):
     viable.sort(key=lambda x: x[1], reverse=True)
     top4 = viable[:4]
 
-    ctrl = p.get("Ctrl") or (p.get("Ctrl_R", 1) + p.get("Ctrl_L", 1)) / 2
+    ctrl = p.get("Ctrl") or ((p.get("Ctrl_R") or 1) + (p.get("Ctrl_L") or 1)) / 2
     stf  = norm(p.get("Stf", 1))
     mov  = norm(p.get("Mov", 1))
     ctl  = norm(ctrl)
@@ -256,7 +271,7 @@ def mlb_bucket(p, role_str):
 # Notes
 # ---------------------------------------------------------------------------
 
-NOTES_PATH = os.path.join(str(get_league_dir()), "history", "roster_notes.json")
+NOTES_PATH = os.path.join(str(league_dir), "history", "roster_notes.json")
 
 def load_notes():
     if not os.path.exists(NOTES_PATH):
@@ -360,7 +375,7 @@ def contract_table(players_with_contracts):
 # ---------------------------------------------------------------------------
 
 def main():
-    ld = str(get_league_dir())
+    ld = str(league_dir)
     game_date = _cfg.game_date
     year      = _cfg.year
     my_tid    = _cfg.my_team_id
@@ -368,7 +383,7 @@ def main():
     lg        = json.load(open(os.path.join(ld, "config", "league_averages.json")))
     role_map  = {str(k): v for k, v in _cfg.role_map.items()}
 
-    conn = _db.get_conn()
+    conn = _get_conn()
 
     # MLB roster: level=1, my org, exclude intl complex (league_id < 0)
     roster_rows = conn.execute("""

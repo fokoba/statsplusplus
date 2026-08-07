@@ -19,8 +19,15 @@ import argparse, os, sys
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, "scripts"))
 
-import db as _db
-from league_config import config as _cfg
+from statsplusplus.config.league_context import get_league_dir, get_active_league_slug
+from statsplusplus.config.league_config import LeagueConfig
+from statsplusplus.data.db import get_connection
+
+league_dir = get_league_dir(get_active_league_slug())
+_cfg = LeagueConfig(base_dir=league_dir)
+
+def _get_conn():
+    return get_connection(league_dir)
 
 
 def _resolve_team(team_arg):
@@ -40,7 +47,7 @@ def _resolve_team(team_arg):
 def get_assets(team_id=None, bucket=None, min_surplus_m=0,
                prospects_only=False, mlb_only=False):
     team_id = team_id or _cfg.my_team_id
-    conn = _db.get_conn()
+    conn = _get_conn()
 
     ed_s = conn.execute("SELECT MAX(eval_date) FROM player_surplus").fetchone()[0]
     ed_f = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]

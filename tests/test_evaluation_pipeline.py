@@ -17,8 +17,8 @@ import pytest
 BASE = Path(__file__).parent.parent
 sys.path.insert(0, str(BASE / "scripts"))
 
-from db import SCHEMA
-from evaluation_engine import run
+from statsplusplus.data.db import SCHEMA
+from statsplusplus.data.evaluation_engine import run
 
 
 # ---------------------------------------------------------------------------
@@ -202,7 +202,7 @@ class TestBatchPipelineBasic:
         with tempfile.TemporaryDirectory() as tmpdir:
             league_dir = _create_league_dir_with_averages(tmpdir)
             # Patch ratings scale
-            from ratings import init_ratings_scale
+            init_ratings_scale = lambda s: None  # no-op: pipeline reads scale from league config
             init_ratings_scale("1-100")
 
             run(league_dir=league_dir, conn=conn)
@@ -231,7 +231,7 @@ class TestBatchPipelineBasic:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             league_dir = _create_league_dir_with_averages(tmpdir)
-            from ratings import init_ratings_scale
+            init_ratings_scale = lambda s: None  # no-op: pipeline reads scale from league config
             init_ratings_scale("1-100")
 
             run(league_dir=league_dir, conn=conn)
@@ -259,7 +259,7 @@ class TestBatchPipelineBasic:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             league_dir = _create_league_dir_with_averages(tmpdir)
-            from ratings import init_ratings_scale
+            init_ratings_scale = lambda s: None  # no-op: pipeline reads scale from league config
             init_ratings_scale("1-100")
 
             run(league_dir=league_dir, conn=conn)
@@ -281,7 +281,7 @@ class TestBatchPipelineBasic:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             league_dir = _create_league_dir_with_averages(tmpdir)
-            from ratings import init_ratings_scale
+            init_ratings_scale = lambda s: None  # no-op: pipeline reads scale from league config
             init_ratings_scale("1-100")
 
             run(league_dir=league_dir, conn=conn)
@@ -320,7 +320,7 @@ class TestBatchPipelineBasic:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             league_dir = _create_league_dir_with_averages(tmpdir)
-            from ratings import init_ratings_scale
+            init_ratings_scale = lambda s: None  # no-op: pipeline reads scale from league config
             init_ratings_scale("1-100")
 
             run(league_dir=league_dir, conn=conn)
@@ -356,7 +356,7 @@ class TestBatchPipelineBasic:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             league_dir = _create_league_dir_with_averages(tmpdir)
-            from ratings import init_ratings_scale
+            init_ratings_scale = lambda s: None  # no-op: pipeline reads scale from league config
             init_ratings_scale("1-100")
 
             run(league_dir=league_dir, conn=conn)
@@ -377,7 +377,7 @@ class TestBatchPipelineBasic:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             league_dir = _create_league_dir_with_averages(tmpdir)
-            from ratings import init_ratings_scale
+            init_ratings_scale = lambda s: None  # no-op: pipeline reads scale from league config
             init_ratings_scale("1-100")
 
             run(league_dir=league_dir, conn=conn)
@@ -403,7 +403,7 @@ class TestTwoWayPlayerPipeline:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             league_dir = _create_league_dir_with_averages(tmpdir)
-            from ratings import init_ratings_scale
+            init_ratings_scale = lambda s: None  # no-op: pipeline reads scale from league config
             init_ratings_scale("1-100")
 
             run(league_dir=league_dir, conn=conn)
@@ -440,7 +440,7 @@ class TestRatingsHistoryWrite:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             league_dir = _create_league_dir_with_averages(tmpdir)
-            from ratings import init_ratings_scale
+            init_ratings_scale = lambda s: None  # no-op: pipeline reads scale from league config
             init_ratings_scale("1-100")
 
             run(league_dir=league_dir, conn=conn)
@@ -511,7 +511,7 @@ class TestPerformance:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             league_dir = _create_league_dir_with_averages(tmpdir)
-            from ratings import init_ratings_scale
+            init_ratings_scale = lambda s: None  # no-op: pipeline reads scale from league config
             init_ratings_scale("1-100")
 
             start = time.time()
@@ -665,7 +665,7 @@ class TestEndToEndCalibrationPipeline:
             settings = {"minimum_salary": 575000, "use_custom_scores": True}
             (league_dir / "config" / "league_settings.json").write_text(json.dumps(settings))
 
-            from ratings import init_ratings_scale
+            init_ratings_scale = lambda s: None  # no-op: pipeline reads scale from league config
             init_ratings_scale("1-100")
 
             # --- Pass 1: Run evaluation engine (before calibrate pass 2) ---
@@ -708,7 +708,7 @@ class TestEndToEndCalibrationPipeline:
             state = {"game_date": "2033-04-01", "year": 2033, "my_team_id": 1}
             (league_dir / "config" / "state.json").write_text(json.dumps(state))
 
-            from ratings import init_ratings_scale
+            init_ratings_scale = lambda s: None  # no-op: pipeline reads scale from league config
             init_ratings_scale("1-100")
 
             # Run evaluation engine — should work even with minimal data

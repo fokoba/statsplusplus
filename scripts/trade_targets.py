@@ -22,9 +22,16 @@ import argparse, os, sys
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, "scripts"))
 
-import db as _db
-from league_config import config as _cfg
+from statsplusplus.config.league_context import get_league_dir, get_active_league_slug
+from statsplusplus.config.league_config import LeagueConfig
+from statsplusplus.data.db import get_connection
 from standings import _standings_from_db
+
+league_dir = get_league_dir(get_active_league_slug())
+_cfg = LeagueConfig(base_dir=league_dir)
+
+def _get_conn():
+    return get_connection(league_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -59,7 +66,7 @@ def _classify_sellers(year):
     Prefers real standings from the `standings` table (sourced from /lgdata).
     Falls back to pythagorean standings when real standings aren't available.
     """
-    conn = _db.get_conn()
+    conn = _get_conn()
 
     # Try real standings first
     real = conn.execute(
@@ -166,7 +173,7 @@ def find_targets(bucket, min_ovr=50, sellers_only=False, include_controlled=Fals
                  max_salary_m=None, year=None, vs_hand=None, exclude_injured=False,
                  on_block_only=False):
     year = year or _cfg.year
-    conn = _db.get_conn()
+    conn = _get_conn()
 
     sellers = _classify_sellers(year)
 
@@ -294,8 +301,8 @@ def find_targets(bucket, min_ovr=50, sellers_only=False, include_controlled=Fals
         # Detect arb-eligible: salary above minimum but service time < 6 years
         # These are NOT true rentals — acquiring team doesn't control them post-season
         if status == "RENTAL" and sal > (_cfg.minimum_salary / 1e6):
-            from arb_model import estimate_service_time as _est_svc
-            conn2 = _db.get_conn()
+            from statsplusplus.evaluation.arb import estimate_service_time as _est_svc
+            conn2 = _get_conn()
             svc = _est_svc(conn2, pid)
             conn2.close()
             if svc is not None and svc < 6.0:

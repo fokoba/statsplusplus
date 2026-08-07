@@ -6,24 +6,95 @@ to the default league resolution.
 
 Usage in query modules:
     from web_league_context import get_db, get_cfg, get_team_abbr_map, ...
+
+NOTE: get_db() now returns a request-scoped connection (cached on g) rather
+than opening a new connection on every call. This is the key performance
+optimization — a single page load now uses ONE connection instead of 17+.
+The connection is closed automatically on request teardown via web/context.py.
 """
 
 from flask import g, has_request_context
 
 
 def get_db():
-    """Get a new DB connection for the current league."""
-    import db as _db
+    """Get the request-scoped DB connection for the current league.
+
+    Returns a _ScopedConnection wrapper around a single shared connection.
+    All query functions now use sqlite3.Row access (no row_factory mutations),
+    so the wrapper primarily provides the no-op close() for backward compat
+    with any remaining conn.close() calls.
+    """
+    import sqlite3
+
     if has_request_context() and hasattr(g, "league_dir"):
-        return _db.get_conn(g.league_dir)
-    return _db.get_conn()
+        if not hasattr(g, "_db_conn") or g._db_conn is None:
+            from statsplusplus.data import db as _db
+            raw_conn = _db.get_connection(g.league_dir)
+            g._db_conn = raw_conn
+        # Return a scoped view that tracks its own row_factory
+        return _ScopedConnection(g._db_conn)
+    from statsplusplus.data import db as _db
+    return _db.get_connection()
+
+
+class _ScopedConnection:
+    """Wrapper around a shared sqlite3.Connection that isolates row_factory.
+
+    Each instance tracks its own row_factory setting without mutating the
+    underlying connection. This allows multiple functions to share one
+    connection while independently choosing tuple vs Row access.
+    """
+
+    __slots__ = ("_conn", "_row_factory")
+
+    def __init__(self, conn):
+        self._conn = conn
+        self._row_factory = conn.row_factory  # Start with connection default (Row)
+
+    @property
+    def row_factory(self):
+        return self._row_factory
+
+    @row_factory.setter
+    def row_factory(self, value):
+        self._row_factory = value
+
+    def execute(self, sql, parameters=()):
+        cur = self._conn.cursor()
+        cur.row_factory = self._row_factory
+        return cur.execute(sql, parameters)
+
+    def executemany(self, sql, seq_of_parameters):
+        cur = self._conn.cursor()
+        cur.row_factory = self._row_factory
+        return cur.executemany(sql, seq_of_parameters)
+
+    def executescript(self, sql_script):
+        return self._conn.executescript(sql_script)
+
+    def commit(self):
+        return self._conn.commit()
+
+    def close(self):
+        pass  # No-op — shared connection closed by teardown
+
+    def cursor(self):
+        cur = self._conn.cursor()
+        cur.row_factory = self._row_factory
+        return cur
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        pass  # No-op — shared connection managed by teardown
 
 
 def get_cfg():
     """Get the LeagueConfig for the current league."""
     if has_request_context() and hasattr(g, "league_config"):
         return g.league_config
-    from league_config import config
+    from statsplusplus.config.league_config import LeagueConfig; config = LeagueConfig()
     return config
 
 
@@ -65,7 +136,6 @@ def has_extended_ratings():
         return g._has_ext_ratings
     conn = get_db()
     cols = {row[1] for row in conn.execute("PRAGMA table_info(ratings)").fetchall()}
-    conn.close()
     result = "babip" in cols
     if has_request_context():
         g._has_ext_ratings = result

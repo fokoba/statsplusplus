@@ -1,7 +1,7 @@
 """Team-level DB queries for the web dashboard.
 
-Note: query functions use conn.row_factory = None (tuple rows) with positional
-indexing for performance. Do not change without updating all index references.
+Note: query functions use sqlite3.Row access. Integer indexing (r[0]) is used
+for compactness in many functions; named access (r["col"]) works equally well.
 """
 
 import os, sys
@@ -9,11 +9,21 @@ from collections import defaultdict
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, "scripts"))
-from player_utils import display_pos as _display_pos, calc_pap, dollars_per_war as _dollars_per_war, league_minimum
+from statsplusplus.utils.positions import display_pos as _display_pos
+from statsplusplus.evaluation.surplus import calc_pap
+from statsplusplus.config.league_config import dollars_per_war as _dpw_pkg, league_minimum as _lm_pkg
+from statsplusplus.utils.positions import ROLE_MAP
+from statsplusplus.evaluation.constants import DEFAULT_MINIMUM_SALARY
 from web_league_context import (get_db, get_cfg, team_abbr_map, team_names_map,
                                  level_map, pos_map, pos_order, pyth_exp, my_team_id,
                                  mlb_team_ids, league_averages as _load_la)
-from constants import (ROLE_MAP, DEFAULT_MINIMUM_SALARY)
+
+# Local wrappers using request-scoped league_dir
+def _dollars_per_war():
+    return _dpw_pkg(get_cfg().league_dir)
+
+def league_minimum():
+    return _lm_pkg(get_cfg().league_dir)
 
 
 # SQL fragment + params to filter contracts to players currently in a given org.
@@ -40,6 +50,9 @@ def _pap_context(conn, tid, year):
 
 
 def _get_state():
+    from flask import g as _g, has_request_context as _hrc
+    if _hrc() and hasattr(_g, "_tq_state_cache"):
+        return _g._tq_state_cache
     import json
     cfg = get_cfg()
     with open(cfg.state_path) as f:
@@ -51,16 +64,29 @@ def _get_state():
         "SELECT MAX(year) FROM mlb_batting_stats WHERE year <= ?", (state["year"],)
     ).fetchone()
     state["stats_year"] = row[0] if row and row[0] else state["year"]
+    if _hrc():
+        _g._tq_state_cache = state
     return state
+
+
+def _get_eval_date():
+    """Get the most recent eval_date, cached per request."""
+    from flask import g as _g, has_request_context as _hrc
+    if _hrc() and hasattr(_g, "_tq_eval_date_cache"):
+        return _g._tq_eval_date_cache
+    conn = get_db()
+    ed = conn.execute("SELECT MAX(eval_date) FROM player_surplus").fetchone()[0]
+    if _hrc():
+        _g._tq_eval_date_cache = ed
+    return ed
 
 
 def get_summary(team_id=None):
     state = _get_state()
     conn = get_db()
-    conn.row_factory = None
     year = state.get("stats_year", state["year"])
     tid = team_id or my_team_id()
-    ed = conn.execute("SELECT MAX(eval_date) FROM player_surplus").fetchone()[0]
+    ed = _get_eval_date()
     mlb_surplus = conn.execute(
         "SELECT COALESCE(SUM(surplus),0) FROM player_surplus WHERE eval_date=? AND team_id=?",
         (ed, tid)).fetchone()[0]
@@ -110,10 +136,9 @@ def get_power_rankings():
     state = _get_state()
     year = state.get("stats_year", state["year"])
     conn = get_db()
-    conn.row_factory = None
 
     # Surplus for display only
-    ed = conn.execute("SELECT MAX(eval_date) FROM player_surplus").fetchone()[0]
+    ed = _get_eval_date()
     surplus_map = dict(conn.execute(
         "SELECT team_id, SUM(surplus) FROM player_surplus WHERE eval_date=? GROUP BY team_id",
         (ed,)).fetchall())
@@ -194,7 +219,6 @@ def get_power_rankings():
 def get_standings():
     state = _get_state()
     conn = get_db()
-    conn.row_factory = None
     year = state.get("stats_year", state["year"])
 
     bat = {r[0]: (r[1], r[2]) for r in conn.execute(
@@ -298,10 +322,9 @@ def get_division_standings(team_id=None):
 def get_roster(team_id=None):
     state = _get_state()
     conn = get_db()
-    conn.row_factory = None
     year = state.get("stats_year", state["year"])
     tid = team_id or my_team_id()
-    ed = conn.execute("SELECT MAX(eval_date) FROM player_surplus").fetchone()[0]
+    ed = _get_eval_date()
 
     players = conn.execute("""
         SELECT p.player_id, p.name, p.age, p.pos, p.role,
@@ -363,7 +386,7 @@ def get_roster_hitters(team_id=None):
     conn = get_db()
     year = state.get("stats_year", state["year"])
     tid = team_id or my_team_id()
-    ed = conn.execute("SELECT MAX(eval_date) FROM player_surplus").fetchone()[0]
+    ed = _get_eval_date()
 
     # Position players
     players = conn.execute("""
@@ -480,7 +503,7 @@ def get_roster_pitchers(team_id=None):
     conn = get_db()
     year = state.get("stats_year", state["year"])
     tid = team_id or my_team_id()
-    ed = conn.execute("SELECT MAX(eval_date) FROM player_surplus").fetchone()[0]
+    ed = _get_eval_date()
 
     players = conn.execute("""
         SELECT p.player_id, p.name, p.age, p.pos, p.role,
@@ -980,7 +1003,6 @@ def get_free_agent_candidates(team_id=None):
 
 def get_farm(team_id=None):
     conn = get_db()
-    conn.row_factory = None
     tid = team_id or my_team_id()
     ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
 
@@ -1015,7 +1037,6 @@ def get_team_stats(team_id):
     state = _get_state()
     year = state.get("stats_year", state["year"])
     conn = get_db()
-    conn.row_factory = None
 
     bat_rows = conn.execute(
         "SELECT team_id, avg, obp, slg, ops, hr, r, bb_pct, k_pct, iso FROM team_batting_stats WHERE year=? AND split_id=1", (year,)
@@ -1058,8 +1079,7 @@ def get_team_stats(team_id):
 
 def get_contracts(team_id):
     conn = get_db()
-    conn.row_factory = None
-    ed = conn.execute("SELECT MAX(eval_date) FROM player_surplus").fetchone()[0]
+    ed = _get_eval_date()
 
     rows = conn.execute("""
         SELECT c.player_id, p.name, c.years, c.current_year,
@@ -1105,7 +1125,6 @@ def get_payroll_summary(team_id):
     state = _get_state()
     year = state.get("stats_year", state["year"])
     conn = get_db()
-    conn.row_factory = None
     rows = conn.execute("""
         SELECT c.player_id, p.name, c.years, c.current_year,
                c.salary_0, c.salary_1, c.salary_2, c.salary_3, c.salary_4,
@@ -1120,10 +1139,15 @@ def get_payroll_summary(team_id):
 
     # Project salaries for 1yr contract players using arb model (no non-tender gate)
     from contract_value import _resolve
-    from arb_model import estimate_control as _estimate_control
-    from player_utils import league_minimum, aging_mult
-    import db as _scripts_db, math
-    cv_conn = _scripts_db.get_conn()
+    from statsplusplus.evaluation.arb import estimate_control as _estimate_control_raw
+    from statsplusplus.config.league_config import league_minimum as _lm_fn; from statsplusplus.evaluation.war import aging_mult
+    _lmin = league_minimum()
+    _perp = get_cfg().perpetual_arb
+    def _estimate_control(conn, pid, age, sal, bucket=None):
+        return _estimate_control_raw(conn, pid, age, sal, min_sal=_lmin, perpetual_arb=_perp, bucket=bucket)
+    from statsplusplus.data import db as _scripts_db
+    import math
+    cv_conn = _scripts_db.get_connection(get_cfg().league_dir)
     lmin = league_minimum()
     projections = {}  # pid -> [(year_offset, salary), ...]
     for r in rows:
@@ -1139,7 +1163,7 @@ def get_payroll_summary(team_id):
             ctrl, _, pre_arb = est
             if not ctrl or ctrl <= 1:
                 continue
-            from arb_model import arb_salary as _arb_salary
+            from statsplusplus.evaluation.arb import arb_salary as _arb_salary
             proj = []
             prev_sal = sal
             for i in range(1, ctrl):
@@ -1191,7 +1215,6 @@ def get_roster_summary(team_id):
     state = _get_state()
     year = state.get("stats_year", state["year"])
     conn = get_db()
-    conn.row_factory = None
     rows = conn.execute("""
         SELECT p.role, p.age FROM players p
         WHERE p.team_id=? AND p.level='1'
@@ -1214,8 +1237,7 @@ def get_roster_summary(team_id):
 
 def get_upcoming_fa(team_id):
     conn = get_db()
-    conn.row_factory = None
-    ed = conn.execute("SELECT MAX(eval_date) FROM player_surplus").fetchone()[0]
+    ed = _get_eval_date()
 
     rows = conn.execute("""
         SELECT c.player_id, p.name, p.age, c.years, c.current_year,
@@ -1249,8 +1271,7 @@ def get_upcoming_fa(team_id):
 
 def get_surplus_leaders(team_id):
     conn = get_db()
-    conn.row_factory = None
-    ed = conn.execute("SELECT MAX(eval_date) FROM player_surplus").fetchone()[0]
+    ed = _get_eval_date()
 
     mlb = conn.execute("""
         SELECT ps.player_id, p.name, ps.bucket, ps.surplus, 'MLB' as src
@@ -1279,7 +1300,6 @@ def get_age_distribution(team_id):
     state = _get_state()
     year = state.get("stats_year", state["year"])
     conn = get_db()
-    conn.row_factory = None
 
     mlb_breaks = [("≤25", 0, 25), ("26-29", 26, 29), ("30-33", 30, 33), ("34+", 34, 99)]
     farm_breaks = [("≤20", 0, 20), ("21-23", 21, 23), ("24+", 24, 99)]
@@ -1352,7 +1372,6 @@ def get_record_breakdown(team_id):
     state = _get_state()
     year = state.get("stats_year", state["year"])
     conn = get_db()
-    conn.row_factory = None
     rows = conn.execute("""
         SELECT home_team, away_team, runs0, runs1
         FROM games
@@ -1419,7 +1438,6 @@ def get_recent_games(team_id, n=10):
     state = _get_state()
     year = state.get("stats_year", state["year"])
     conn = get_db()
-    conn.row_factory = None
     rows = conn.execute("""
         SELECT g.date, g.home_team, g.away_team, g.runs0, g.runs1,
                g.winning_pitcher, g.losing_pitcher, g.save_pitcher,
@@ -1514,7 +1532,6 @@ def get_stat_leaders(team_id):
     state = _get_state()
     year = state.get("stats_year", state["year"])
     conn = get_db()
-    conn.row_factory = None
 
     # Team games for MLB qualification thresholds
     tip = conn.execute("SELECT ip FROM team_pitching_stats WHERE team_id=? AND year=? AND split_id=1",
@@ -1568,7 +1585,6 @@ def get_stat_leaders(team_id):
 
 def get_farm_depth(team_id):
     conn = get_db()
-    conn.row_factory = None
     ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
 
     by_bucket = conn.execute("""
@@ -1650,7 +1666,7 @@ def _resolve_depth_score(row, is_pitcher=False):
         if val is not None and val > 0:
             tools.append(val)
     if tools:
-        from ratings import norm_continuous
+        from statsplusplus.config.ratings import norm_continuous
         # Average the tools and normalize to 20-80 scale
         avg = sum(tools) / len(tools)
         normed = norm_continuous(int(avg))
@@ -1824,9 +1840,13 @@ def get_depth_chart(team_id):
         assign_diamond_positions, allocate_playing_time, allocate_pitcher_time,
         roster_availability, LEVEL_DISCOUNT, DEFAULT_TEAM_PA, DEFAULT_TEAM_IP,
     )
-    from player_utils import stat_peak_war, load_stat_history
+    from statsplusplus.evaluation.war import stat_peak_war, load_stat_history
     from contract_value import contract_value as _cv
-    from arb_model import estimate_control as _estimate_control
+    from statsplusplus.evaluation.arb import estimate_control as _ec_raw
+    _lmin2 = league_minimum()
+    _perp2 = get_cfg().perpetual_arb
+    def _estimate_control(conn, pid, age, sal, bucket=None):
+        return _ec_raw(conn, pid, age, sal, min_sal=_lmin2, perpetual_arb=_perp2, bucket=bucket)
     from prospect_value import prospect_surplus as _pv
 
     state = _get_state()
@@ -2410,7 +2430,11 @@ def get_org_overview(team_id):
         payroll_shape.append({"year": yr, "total": payroll_data["totals"][i]})
 
     # ── Retention priorities: positive surplus, ≤2 years estimated control ──
-    from arb_model import estimate_control as _estimate_control
+    from statsplusplus.evaluation.arb import estimate_control as _ec_raw3
+    _lmin3 = league_minimum()
+    _perp3 = get_cfg().perpetual_arb
+    def _estimate_control(conn, pid, age, sal, bucket=None):
+        return _ec_raw3(conn, pid, age, sal, min_sal=_lmin3, perpetual_arb=_perp3, bucket=bucket)
     retention = []
     ctrl_rows = conn.execute("""
         SELECT c.player_id, p.name, p.age, c.years, c.current_year,
@@ -2485,7 +2509,6 @@ def get_org_overview(team_id):
 def get_affiliates(team_id):
     """Get list of minor league affiliates for an MLB team."""
     conn = get_db()
-    conn.row_factory = None
     rows = conn.execute("""
         SELECT DISTINCT t.team_id, t.name, p.level
         FROM teams t
@@ -2523,7 +2546,6 @@ _LEVEL_AGE_NORMS = {
 def get_minor_league_team(team_id):
     """Get minor league team info: name, level, parent org, affiliates."""
     conn = get_db()
-    conn.row_factory = None
 
     row = conn.execute(
         "SELECT team_id, name, level, parent_team_id FROM teams WHERE team_id=?",
@@ -2585,8 +2607,7 @@ def get_minor_league_team(team_id):
 def get_minor_league_roster(team_id):
     """Full roster for a minor league team, split into hitters and pitchers with tool ratings."""
     conn = get_db()
-    conn.row_factory = None
-    from ratings import norm as _norm_rating
+    from statsplusplus.config.ratings import norm as _norm_rating
 
     rows = conn.execute("""
         SELECT p.player_id, p.name, p.age, p.pos, p.role, p.level,
@@ -2686,14 +2707,24 @@ def get_minor_league_roster(team_id):
     hitters.sort(key=lambda x: x["_sort"])
     pitchers.sort(key=lambda x: x["_sort"])
 
+
+    # Compute promotion readiness and demotion risk for all players
+    try:
+        from promotion_readiness import compute_promotion_readiness, compute_demotion_risk
+        _league_dir = get_cfg().league_dir
+        for p in hitters + pitchers:
+            p["promo"] = compute_promotion_readiness(p["pid"], conn, _league_dir)
+            p["demotion"] = compute_demotion_risk(p["pid"], conn, _league_dir)
+    except Exception:
+        pass
+
     return {"hitters": hitters, "pitchers": pitchers}
 
 
 def get_org_minor_league_roster(parent_team_id):
     """Full minor league roster for an entire org (all levels), split into hitters and pitchers."""
     conn = get_db()
-    conn.row_factory = None
-    from ratings import norm as _norm_rating
+    from statsplusplus.config.ratings import norm as _norm_rating
 
     # Get all affiliate team_ids for this org
     aff_rows = conn.execute("""
@@ -2819,13 +2850,22 @@ def get_org_minor_league_roster(parent_team_id):
     hitters.sort(key=lambda x: x["_sort"])
     pitchers.sort(key=lambda x: x["_sort"])
 
+    # Compute promotion readiness and demotion risk for all players
+    try:
+        from promotion_readiness import compute_promotion_readiness, compute_demotion_risk
+        _league_dir = get_cfg().league_dir
+        for p in hitters + pitchers:
+            p["promo"] = compute_promotion_readiness(p["pid"], conn, _league_dir)
+            p["demotion"] = compute_demotion_risk(p["pid"], conn, _league_dir)
+    except Exception:
+        pass
+
     return {"hitters": hitters, "pitchers": pitchers}
 
 
 def get_minor_league_notables(team_id):
     """Notable players on a minor league team: prospects + worth-tracking players."""
     conn = get_db()
-    conn.row_factory = None
 
     # Get player level for age norm lookup
     lvl_row = conn.execute(

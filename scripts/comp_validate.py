@@ -24,10 +24,18 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import db
-from league_context import get_league_dir
-from ratings import norm_continuous as norm
-from player_utils import assign_bucket
+from statsplusplus.config.league_context import get_league_dir, get_active_league_slug
+from statsplusplus.config.league_config import LeagueConfig
+from statsplusplus.config.ratings import norm_continuous as _norm_c
+from statsplusplus.data.db import get_connection
+from statsplusplus.utils.positions import assign_bucket
+
+_league_dir = get_league_dir(get_active_league_slug())
+_cfg = LeagueConfig(base_dir=_league_dir)
+_scale = _cfg.ratings_scale
+
+def norm(val):
+    return _norm_c(val, _scale)
 
 
 _POS_CLAUSE = {
@@ -241,7 +249,7 @@ def main():
     parser.add_argument("--recent", type=int, metavar="N", help="Restrict to last N years")
     args = parser.parse_args()
 
-    conn = db.get_conn(get_league_dir())
+    conn = get_connection(_league_dir)
 
     if args.name:
         tools, bucket, full_name = get_prospect_profile(conn, args.name, args.ceiling)
@@ -285,7 +293,7 @@ def main():
         min_year = max_year = args.year
     elif args.recent:
         import json
-        with open(get_league_dir() / "config" / "state.json") as f:
+        with open(_league_dir / "config" / "state.json") as f:
             cur_year = int(json.load(f)["game_date"][:4])
         min_year = cur_year - args.recent + 1
 

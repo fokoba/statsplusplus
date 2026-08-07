@@ -13,14 +13,21 @@ import argparse, json, os, sys
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, "scripts"))
-import db as _db
-from league_config import config as _cfg
-from league_context import get_league_dir
-from constants import DEFAULT_MINIMUM_SALARY
+
+from statsplusplus.config.league_context import get_league_dir, get_active_league_slug
+from statsplusplus.config.league_config import LeagueConfig
+from statsplusplus.data.db import get_connection
+from statsplusplus.evaluation.constants import DEFAULT_MINIMUM_SALARY
+
+league_dir = get_league_dir(get_active_league_slug())
+_cfg = LeagueConfig(base_dir=league_dir)
+
+def _get_conn():
+    return get_connection(league_dir)
 
 
 def upcoming_fas(year, years_out=1, bucket=None, min_war=None, my_team_only=False):
-    conn = _db.get_conn()
+    conn = _get_conn()
 
     # Get latest eval_date
     eval_date = conn.execute(
@@ -68,7 +75,7 @@ def upcoming_fas(year, years_out=1, bucket=None, min_war=None, my_team_only=Fals
         # Estimate projected WAR from OVR (rough, using surplus as proxy)
         # For min_war filter, use surplus / $/WAR as approximation
         if min_war is not None:
-            settings = json.load(open(os.path.join(str(get_league_dir()), "config", "league_averages.json")))
+            settings = json.load(open(os.path.join(str(league_dir), "config", "league_averages.json")))
             dpw = settings.get("dollar_per_war", 8621429)
             est_war = surplus / dpw if dpw else 0
             if est_war < min_war:
@@ -87,8 +94,8 @@ def upcoming_fas(year, years_out=1, bucket=None, min_war=None, my_team_only=Fals
                 svc = svc_days / 172.0
             else:
                 # Fallback to estimation if service time not available
-                from arb_model import estimate_service_time as _est_svc
-                conn2 = _db.get_conn()
+                from statsplusplus.evaluation.arb import estimate_service_time as _est_svc
+                conn2 = _get_conn()
                 svc = _est_svc(conn2, r["player_id"])
                 conn2.close()
             if svc is not None and svc < 6.0:

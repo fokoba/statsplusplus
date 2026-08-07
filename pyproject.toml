@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "statsplusplus"
+version = "1.0.0"
+description = "Assistant GM dashboard for OOTP Baseball / StatsPlus leagues"
+requires-python = ">=3.10"
+dependencies = [
+    "flask==3.1.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.5",
+    "mypy==1.15.0",
+]
+
+[project.scripts]
+spp-draft = "statsplusplus.cli.draft_board:main"
+spp-trade = "statsplusplus.cli.trade_calculator:main"
+spp-targets = "statsplusplus.cli.trade_targets:main"
+spp-assets = "statsplusplus.cli.trade_assets:main"
+spp-needs = "statsplusplus.cli.team_needs:main"
+spp-standings = "statsplusplus.cli.standings:main"
+spp-fa = "statsplusplus.cli.free_agents:main"
+spp-prospects = "statsplusplus.cli.prospect_query:main"
+spp-farm = "statsplusplus.cli.farm_analysis:main"
+spp-roster = "statsplusplus.cli.roster_analysis:main"
+spp-contract = "statsplusplus.cli.contract_value:main"
+spp-prospect-value = "statsplusplus.cli.prospect_value:main"
+spp-refresh = "statsplusplus.data.refresh:main"
+spp-calibrate = "statsplusplus.data.calibrate:main"
+spp-web = "statsplusplus.web.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.mypy]
+packages = ["statsplusplus.models", "statsplusplus.evaluation", "statsplusplus.config", "statsplusplus.utils", "statsplusplus.data"]
+strict = true
+
+[[tool.mypy.overrides]]
+module = ["statsplusplus.web.*"]
+strict = false
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["statsplusplus.client.*"]
+strict = false
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["statsplusplus.config.league_config"]
+disallow_any_expr = false
+warn_return_any = false

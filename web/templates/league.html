@@ -302,13 +302,14 @@
   <div style="display:grid; grid-template-columns:1fr 1fr; gap:32px">
     <div>
       <h3>MLB — {{ group.label }}</h3>
+      {% set is_hitter_group = key not in ('SP', 'RP') %}
       <table class="pointed sortable">
-        <thead><tr><th>#</th><th class="left">Name</th><th>Age</th><th>Team</th><th>Comp</th><th>Ceil</th></tr></thead>
+        <thead><tr><th>#</th><th class="left">Name</th><th>Age</th><th>Team</th><th>Comp</th><th>±Avg</th>{% if is_hitter_group %}<th>OFF</th><th>DEF</th>{% endif %}<th>Ceil</th></tr></thead>
         <tbody>
         {% for p in group.mlb %}
-        <tr{% if p.team == my_abbr %} class="highlight"{% endif %}><td>{{ p.rank }}</td><td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td><td>{{ p.age }}</td><td>{{ p.team }}</td><td><span class="ovr-color" data-g="{{ p.composite }}">{{ p.composite }}</span></td><td>{{ p.ceiling or '-' }}</td></tr>
+        <tr{% if p.team == my_abbr %} class="highlight"{% endif %}><td>{{ p.rank }}</td><td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td><td>{{ p.age }}</td><td>{{ p.team }}</td><td><span class="ovr-color" data-g="{{ p.composite }}">{{ p.composite }}</span></td><td style="color:{% if p.vs_avg > 0 %}var(--green){% elif p.vs_avg < 0 %}var(--red){% else %}var(--text-dim){% endif %}">{{ "%+d"|format(p.vs_avg) }}</td>{% if is_hitter_group %}<td>{% if p.off %}<span class="ovr-color" data-g="{{ p.off }}">{{ p.off }}</span>{% else %}—{% endif %}</td><td>{% if p.def %}<span class="ovr-color" data-g="{{ p.def }}">{{ p.def }}</span>{% else %}—{% endif %}</td>{% endif %}<td>{{ p.ceiling or '-' }}</td></tr>
         {% endfor %}
-        {% if not group.mlb %}<tr><td colspan="6" style="color:var(--text-dim)">No players</td></tr>{% endif %}
+        {% if not group.mlb %}<tr><td colspan="{% if is_hitter_group %}9{% else %}7{% endif %}" style="color:var(--text-dim)">No players</td></tr>{% endif %}
         </tbody>
       </table>
     </div>
@@ -416,17 +417,14 @@
             <button class="btn" onclick="updateDraftPicks(this)">⟳ Update Picks</button>
             {% endif %}
             {% if dp_state in ('uploaded', 'active') %}
-            <button class="btn" onclick="runDraftSim()" title="Simulate draft based on your pick position">🎲 Sim</button>
-            <button class="btn" onclick="generateUploadList()" title="Generate auto-draft list file">📋 Auto-Draft List</button>
+            <button class="btn" onclick="openDraftSimModal()" title="Simulate draft based on your pick position">🎲 Sim</button>
+            <button class="btn" onclick="openDraftListSettings()" title="Review settings and generate auto-draft list">📋 Auto-Draft List</button>
             {% else %}
             <button class="btn" style="opacity:0.5" title="Requires uploaded draft pool" onclick="alert('Simulation requires an uploaded draft pool.\n\nUpload an OOTP draft-eligible player export via the 📁 Upload Pool button.')">🎲 Sim</button>
             <button class="btn" style="opacity:0.5" title="Requires uploaded draft pool" onclick="alert('Auto-draft list requires an uploaded draft pool.\n\nThe current board is an approximation from amateur-level players in the database. Upload an OOTP draft-eligible player export via the 📁 Upload Pool button for accurate list generation.')">📋 Auto-Draft List</button>
             {% endif %}
             <button class="btn" onclick="exportTableCSV('draft-table', 'draft_board.csv')" title="Export current view as CSV">⬇ CSV</button>
-            <button class="btn" onclick="openDraftSettings()" title="Configure auto-draft list preferences">⚙️</button>
-            <label class="btn" style="cursor:pointer">📁 Upload Pool
-              <input type="file" accept=".csv" style="display:none" onchange="uploadDraftPool(this)">
-            </label>
+            <button class="btn" onclick="openUploadPoolModal()">📁 Upload Pool</button>
           </div>
         </div>
         <div class="draft-tool-filters" id="draft-tool-filters" style="display:none">
@@ -481,10 +479,8 @@
   </div>
 {% else %}
   <div class="panel">
-    <p class="text-dim">No draft pool available. Upload a draft-eligible player list exported from OOTP, or wait for the draft to begin in StatsPlus.</p>
-    <label class="btn" style="cursor:pointer;margin-top:8px;display:inline-block">📁 Upload Draft Pool
-      <input type="file" accept=".csv" style="display:none" onchange="uploadDraftPool(this)">
-    </label>
+    <p class="text-dim">No draft pool available. Upload a draft-eligible player export from OOTP to enable rankings, simulation, and auto-draft list generation.</p>
+    <button class="btn" style="margin-top:10px" onclick="openUploadPoolModal()">📁 Upload Draft Pool</button>
   </div>
 {% endif %}
 
@@ -523,12 +519,87 @@
       </div>
       <div class="ds-footer-right">
         <button class="ds-btn-secondary" onclick="resetDraftSettings()">Reset to Defaults</button>
-        <button class="ds-btn-primary" onclick="saveDraftSettings(false)">Save</button>
-        <button class="ds-btn-primary" onclick="saveDraftSettings(true)">Save &amp; Close</button>
+        <button class="ds-btn-secondary" id="ds-btn-save" onclick="saveDraftSettings(false)" style="display:none">Save</button>
+        <button class="ds-btn-primary" id="ds-btn-save-close" onclick="saveDraftSettings(true)" style="display:none">Save &amp; Close</button>
+        <button class="ds-btn-primary" id="ds-btn-generate" onclick="saveAndGenerateList()" style="display:none">Save &amp; Generate List</button>
       </div>
     </div>
   </div>
 </div>
+</div>
+
+{# ── Draft Sim Modal ── #}
+<div id="draft-sim-modal" class="ds-modal-overlay hidden">
+  <div class="ds-modal" style="max-width:500px">
+    <div class="ds-modal-header">
+      <h3>Draft Simulation</h3>
+      <button class="ds-modal-close" onclick="closeDraftSimModal()">✕</button>
+    </div>
+
+    <div style="padding:12px 16px">
+      <div style="display:flex;gap:16px;align-items:center;margin-bottom:12px">
+        <label style="font-size:12px;white-space:nowrap">Pick position (1-{{ num_teams }}):</label>
+        <input type="number" id="sim-pick-input" min="1" max="{{ num_teams }}" value="1" style="width:60px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:12px">
+      </div>
+      <div style="display:flex;gap:16px;align-items:center;margin-bottom:16px">
+        <label style="font-size:12px;white-space:nowrap">Rounds to simulate:</label>
+        <input type="number" id="sim-rounds-input" min="1" max="30" value="10" style="width:60px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:12px">
+      </div>
+
+      <details style="margin-bottom:12px">
+        <summary style="cursor:pointer;font-size:12px;color:var(--text-dim)">⚙️ Draft Settings</summary>
+        <div style="margin-top:8px;font-size:11px;color:var(--text-dim);margin-bottom:6px">These settings control how prospects are ranked during the simulation.</div>
+        <div class="ds-presets" style="margin-bottom:8px">
+          <span class="ds-presets-label">Preset:</span>
+          <button class="ds-preset-btn sim-preset-btn active" data-preset="balanced" onclick="applyDraftPreset('balanced')">Balanced</button>
+          <button class="ds-preset-btn sim-preset-btn" data-preset="upside" onclick="applyDraftPreset('upside')">Upside</button>
+          <button class="ds-preset-btn sim-preset-btn" data-preset="conservative" onclick="applyDraftPreset('conservative')">Conservative</button>
+          <button class="ds-preset-btn sim-preset-btn" data-preset="org_needs" onclick="applyDraftPreset('org_needs')">Org Needs</button>
+        </div>
+        <div id="sim-ds-groups"></div>
+      </details>
+    </div>
+
+    <div class="ds-footer" style="justify-content:flex-end">
+      <div class="ds-footer-right">
+        <button class="ds-btn-secondary" onclick="closeDraftSimModal()">Cancel</button>
+        <button class="ds-btn-primary" onclick="saveAndRunSim()">Run Simulation</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ── Upload Pool Modal ── #}
+<div id="upload-pool-modal" class="ds-modal-overlay hidden">
+  <div class="ds-modal" style="max-width:500px">
+    <div class="ds-modal-header">
+      <h3>Upload Draft Pool</h3>
+      <button class="ds-modal-close" onclick="closeUploadPoolModal()">✕</button>
+    </div>
+    <div style="padding:12px 16px;font-size:12px;line-height:1.7">
+      <p style="margin-bottom:10px">Upload a CSV export of draft-eligible players from OOTP. The Player ID column can be anywhere in the file — it's detected automatically.</p>
+      <strong>How to export from OOTP:</strong>
+      <ol style="margin:6px 0 0 18px;padding:0">
+        <li>In OOTP, go to the <strong>Rookie Draft</strong> page and open the draft pool</li>
+        <li>Set filters: <strong>SHOW: All Players</strong> and <strong>POSITION: All Players</strong> to include the full pool</li>
+        <li>Click <strong>View → Customize</strong> to open the view settings panel</li>
+        <li>Check the <strong>ID</strong> field to include Player ID in the view, then click <strong>OK</strong></li>
+        <li>Click <strong>Export to CSV</strong> (bottom of screen or right-click menu)</li>
+        <li>Choose <strong>Save as Global</strong> so it's easy to find</li>
+        <li>Find the file in your OOTP folder: <code>import_export/csv/</code></li>
+      </ol>
+      <p style="margin-top:8px;color:var(--text-dim)">The Player ID column can be anywhere in the file — it's detected automatically.</p>
+    </div>
+    <div class="ds-footer" style="justify-content:flex-end">
+      <div class="ds-footer-right">
+        <button class="ds-btn-secondary" onclick="closeUploadPoolModal()">Cancel</button>
+        <label class="ds-btn-primary" style="cursor:pointer">
+          Upload CSV
+          <input type="file" accept=".csv" style="display:none" onchange="uploadDraftPool(this); closeUploadPoolModal();">
+        </label>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -1260,6 +1331,14 @@ function bustPct(oc) {
   return (100 - Math.round((oc.thresholds.Contributor||0)*100)) + '%';
 }
 
+function openUploadPoolModal() {
+  document.getElementById('upload-pool-modal').classList.remove('hidden');
+}
+
+function closeUploadPoolModal() {
+  document.getElementById('upload-pool-modal').classList.add('hidden');
+}
+
 function uploadDraftPool(input) {
   if (!input.files.length) return;
   var fd = new FormData();
@@ -1272,11 +1351,12 @@ function uploadDraftPool(input) {
     }).catch(function() { alert('Upload failed'); });
 }
 
-function runDraftSim() {
-  var pick = prompt('Your pick position in each round (1-' + {{ num_teams }} + '):', '1');
-  if (!pick) return;
-  var rounds = prompt('Number of rounds to simulate (you get 1 pick per round):', '10');
-  if (!rounds) return;
+function runDraftSim(pick, rounds) {
+  if (!pick || !rounds) {
+    // Fallback: open the sim modal if called without args (e.g., from re-run button)
+    openDraftSimModal();
+    return;
+  }
   var panel = document.getElementById('draft-sim-panel');
   var results = document.getElementById('draft-sim-results');
   results.innerHTML = '<p class="text-dim">Running simulation…</p>';
@@ -1393,9 +1473,16 @@ var DS_ADVANCED_CONFIG = [
    tooltip: 'Controls how aggressively the board enforces the pitcher/hitter target ratio. Off = no balance correction applied. Strong = large score bonuses to keep the draft class on-target.'}
 ];
 
-function openDraftSettings() {
+var _dsMode = 'list'; // 'list' or 'settings'
+
+function openDraftSettings(mode) {
+  _dsMode = mode || 'settings';
   var modal = document.getElementById('draft-settings-modal');
   modal.classList.remove('hidden');
+  // Show/hide mode-specific footer buttons
+  document.getElementById('ds-btn-save').style.display = _dsMode === 'settings' ? '' : 'none';
+  document.getElementById('ds-btn-save-close').style.display = _dsMode === 'settings' ? '' : 'none';
+  document.getElementById('ds-btn-generate').style.display = _dsMode === 'list' ? '' : 'none';
   // Load current settings from API
   fetch('/api/draft-settings').then(function(r) { return r.json(); }).then(function(d) {
     if (!d.ok) return;
@@ -1406,6 +1493,75 @@ function openDraftSettings() {
   });
 }
 
+function openDraftListSettings() {
+  openDraftSettings('list');
+}
+
+function saveAndGenerateList() {
+  // Save settings then generate the list
+  fetch('/api/draft-settings', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({settings: _dsSettings})
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    if (!d.ok) { alert('Error saving settings: ' + (d.error || 'Unknown')); return; }
+    closeDraftSettings();
+    generateUploadList();
+  }).catch(function() { alert('Failed to save settings'); });
+}
+
+function openDraftSimModal() {
+  // Load settings first so the collapsible section is up to date
+  fetch('/api/draft-settings').then(function(r) { return r.json(); }).then(function(d) {
+    if (d.ok) {
+      _dsSettings = d.settings;
+      _dsPresets = d.presets;
+      renderSimSettingsGroups();
+      updateSimPresetButtons();
+    }
+  });
+  document.getElementById('draft-sim-modal').classList.remove('hidden');
+}
+
+function closeDraftSimModal() {
+  document.getElementById('draft-sim-modal').classList.add('hidden');
+}
+
+function renderSimSettingsGroups() {
+  var container = document.getElementById('sim-ds-groups');
+  if (!container) return;
+  var groups = _dsSettings.round_groups;
+  var html = '';
+  for (var i = 0; i < groups.length; i++) {
+    html += renderDraftGroupCard(i, groups[i], groups.length);
+  }
+  container.innerHTML = html;
+}
+
+function updateSimPresetButtons() {
+  var btns = document.querySelectorAll('.sim-preset-btn');
+  btns.forEach(function(b) {
+    b.classList.toggle('active', b.dataset.preset === (_dsSettings.active_preset || 'balanced'));
+  });
+}
+
+function saveAndRunSim() {
+  var pick = parseInt(document.getElementById('sim-pick-input').value);
+  var rounds = parseInt(document.getElementById('sim-rounds-input').value);
+  if (!pick || pick < 1) { alert('Please enter a valid pick position.'); return; }
+  if (!rounds || rounds < 1) { alert('Please enter a valid number of rounds.'); return; }
+  // Save settings (in case user changed them in the collapsible), then run sim
+  fetch('/api/draft-settings', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({settings: _dsSettings})
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    if (!d.ok) { alert('Error saving settings: ' + (d.error || 'Unknown')); return; }
+    closeDraftSimModal();
+    runDraftSim(pick, rounds);
+  }).catch(function() { alert('Failed to save settings'); });
+}
+
 function closeDraftSettings() {
   document.getElementById('draft-settings-modal').classList.add('hidden');
 }
@@ -1414,6 +1570,10 @@ function closeDraftSettings() {
 document.addEventListener('click', function(e) {
   var modal = document.getElementById('draft-settings-modal');
   if (e.target === modal) closeDraftSettings();
+  var simModal = document.getElementById('draft-sim-modal');
+  if (e.target === simModal) closeDraftSimModal();
+  var uploadModal = document.getElementById('upload-pool-modal');
+  if (e.target === uploadModal) closeUploadPoolModal();
 });
 
 function renderDraftSettingsGroups() {

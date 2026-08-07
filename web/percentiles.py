@@ -70,7 +70,6 @@ def available_pctile_years(pid, is_pitcher=False, level=None):
     if level is not None and level != 1:
         lids = _get_level_league_ids(level)
         if not lids:
-            conn.close()
             return []
         placeholders = ",".join("?" * len(lids))
         rows = conn.execute(
@@ -85,7 +84,6 @@ def available_pctile_years(pid, is_pitcher=False, level=None):
             f"SELECT DISTINCT year FROM {view} WHERE player_id=? AND split_id=1 ORDER BY year DESC",
             (pid,)
         ).fetchall()
-    conn.close()
     return [r[0] for r in rows]
 
 
@@ -126,7 +124,6 @@ def available_pctile_levels(pid, is_pitcher=False):
             if has_data:
                 levels.append((lv, _level_label(lv)))
 
-    conn.close()
     return levels
 
 # ── constants ────────────────────────────────────────────────────────────
@@ -312,15 +309,15 @@ def _babip_expected(pid, cntct, speed, conn, year, babip_rating=None):
         # BABIP rating → expected stat-line BABIP.
         # League average BABIP ≈ .300, rating 50 = average on both scales.
         # On 1-100: each point ≈ 0.002 BABIP. On 20-80: each point ≈ 0.00333.
-        from ratings import get_ratings_scale as _get_ratings_scale
-        if _get_ratings_scale() == "20-80":
+        from statsplusplus.config.ratings import norm as _ratings_norm
+        if get_cfg().ratings_scale == "20-80":
             model_babip = 0.200 + (babip_rating - 20) / 60 * 0.200
         else:
             model_babip = 0.200 + babip_rating * 0.002
     else:
-        from ratings import get_ratings_scale as _get_ratings_scale
+        from statsplusplus.config.ratings import norm as _ratings_norm
         c, s = cntct, speed
-        if _get_ratings_scale() == "20-80":
+        if get_cfg().ratings_scale == "20-80":
             c = (cntct - 20) / 60 * 100
             s = (speed - 20) / 60 * 100
         model_babip = _BABIP_B0 + _BABIP_B1 * c + _BABIP_B2 * s
@@ -337,8 +334,8 @@ def _babip_expected(pid, cntct, speed, conn, year, babip_rating=None):
             if denom <= 0:
                 continue
             actual = (h - hr) / denom
-            pred_c = (rc - 20) / 60 * 100 if _get_ratings_scale() == "20-80" else (rc or 0)
-            pred_s = (rs - 20) / 60 * 100 if _get_ratings_scale() == "20-80" else (rs or 0)
+            pred_c = (rc - 20) / 60 * 100 if get_cfg().ratings_scale == "20-80" else (rc or 0)
+            pred_s = (rs - 20) / 60 * 100 if get_cfg().ratings_scale == "20-80" else (rs or 0)
             pred = _BABIP_B0 + _BABIP_B1 * pred_c + _BABIP_B2 * pred_s
             resids.append(actual - pred)
         if len(resids) >= 2:
@@ -350,7 +347,6 @@ def _babip_expected(pid, cntct, speed, conn, year, babip_rating=None):
 
 def get_hitter_percentiles(pid, split_id=1, year=None, level=None):
     conn = get_db()
-    conn.row_factory = None
     current_year = get_cfg().year
     explicit_year = year is not None
     year = year or current_year
@@ -359,13 +355,17 @@ def get_hitter_percentiles(pid, split_id=1, year=None, level=None):
     resolved = _resolve_level_year(conn, year, level, stat_type="batting",
                                    fallback=not explicit_year)
     if resolved is None:
-        conn.close()
         return None
     year = resolved
     is_current = (year == current_year)
 
     games = _level_games(conn, year, level)
-    min_pa = max(round(2.0 * games), 30) if split_id == 1 else 20
+    if split_id == 1:
+        min_pa = max(round(2.0 * games), 30)
+    else:
+        # Splits: ~35-40% of PA come vs each hand. Scale with season progress
+        # but at a lower rate so early-season splits still display (dimmed).
+        min_pa = max(round(0.7 * games), 20)
 
     # Data source based on level
     bat_table, level_filter, level_params = _level_batting_source(level)
@@ -401,7 +401,6 @@ def get_hitter_percentiles(pid, split_id=1, year=None, level=None):
         f"SELECT cntct, speed{_babip_col} FROM ratings WHERE player_id=? ORDER BY snapshot_date DESC LIMIT 1",
         (pid,)).fetchone()
     exp_babip = _babip_expected(pid, _pc[0] or 0, _pc[1] or 0, conn, year, _pc[2] if len(_pc) > 2 else None) if _pc else None
-    conn.close()
 
     if not rows:
         return None
@@ -465,11 +464,14 @@ def get_hitter_percentiles(pid, split_id=1, year=None, level=None):
         tag = None
         expected = None
         if is_current:
+            # Tags require sufficient individual sample, but NOT full qualifier status.
+            # 80+ PA is enough to detect over/underperformance vs ratings.
+            _show_tags = qualified or player_pa >= 80
             if label in HITTER_TAG_MAP:
                 sk, rk, s_inv, r_inv = HITTER_TAG_MAP[label]
                 r_pctile = _pctile(player_rat[rk], rat_vals[rk])
                 expected = r_pctile
-                if qualified:
+                if _show_tags:
                     gap = pctile - r_pctile
                     thresh = _tag_threshold(r_pctile)
                     tag = "hot" if gap >= thresh else ("cold" if gap <= -thresh else None)
@@ -481,7 +483,7 @@ def get_hitter_percentiles(pid, split_id=1, year=None, level=None):
                 else:
                     # MiLB or no model: use contact percentile as proxy
                     expected = cntct_pctile
-                if qualified:
+                if _show_tags:
                     gap = pctile - expected
                     thresh = _tag_threshold(expected)
                     tag = "lucky" if gap >= thresh else ("unlucky" if gap <= -thresh else None)
@@ -496,7 +498,6 @@ def get_hitter_percentiles(pid, split_id=1, year=None, level=None):
 
 def get_pitcher_percentiles(pid, split_id=1, year=None, level=None):
     conn = get_db()
-    conn.row_factory = None
     current_year = get_cfg().year
     explicit_year = year is not None
     year = year or current_year
@@ -505,17 +506,24 @@ def get_pitcher_percentiles(pid, split_id=1, year=None, level=None):
     resolved = _resolve_level_year(conn, year, level, stat_type="pitching",
                                    fallback=not explicit_year)
     if resolved is None:
-        conn.close()
         return None
     year = resolved
     is_current = (year == current_year)
 
     games = _level_games(conn, year, level)
-    min_ip = max(round(0.7 * games), 5) if split_id == 1 else 5
+    if split_id == 1:
+        min_ip = max(round(0.7 * games), 5)
+    else:
+        # Splits: scale with season progress at a lower rate (~35% of IP come
+        # vs each hand). Floor stays at 5 so early-season data still shows.
+        min_ip = max(round(0.25 * games), 5)
 
     # RPs pitch far fewer innings — use a lower pool threshold so relievers
     # with a full workload aren't flagged as small sample.
-    rp_min_ip = max(round(0.35 * games), 5) if split_id == 1 else 5
+    if split_id == 1:
+        rp_min_ip = max(round(0.35 * games), 5)
+    else:
+        rp_min_ip = max(round(0.12 * games), 5)
 
     # Data source based on level
     pit_table, level_filter, level_params = _level_pitching_source(level)
@@ -572,7 +580,6 @@ def get_pitcher_percentiles(pid, split_id=1, year=None, level=None):
 
     # Pre-fetch league-wide extended ratings before closing conn
     _ext_lgw = None
-    conn.close()
 
     if not rows:
         return None
@@ -661,11 +668,12 @@ def get_pitcher_percentiles(pid, split_id=1, year=None, level=None):
         tag = None
         expected = None
         if is_current:
+            _show_tags_p = qualified or player_ip >= 30
             if label == "HR/9":
                 rk = "hra" if _has_hra else "mov"
                 r_pctile = _pctile(player_rat.get(rk) or 0, rat_vals[rk])
                 expected = r_pctile
-                if qualified:
+                if _show_tags_p:
                     gap = pctile - r_pctile
                     thresh = _tag_threshold(r_pctile)
                     tag = "hot" if gap >= thresh else ("cold" if gap <= -thresh else None)
@@ -677,7 +685,8 @@ def get_pitcher_percentiles(pid, split_id=1, year=None, level=None):
                     exp_babip = 0.293  # league average fallback for MiLB
                 expected = _pctile(exp_babip, [pool[p]["babip"] for p in pool])
                 expected = 100 - expected  # invert (lower BABIP = higher percentile)
-                if qualified:
+                _show_tags_p = qualified or player_ip >= 30
+                if _show_tags_p:
                     gap = pctile - expected
                     thresh = _tag_threshold(expected)
                     tag = "lucky" if gap >= thresh else ("unlucky" if gap <= -thresh else None)
@@ -686,7 +695,7 @@ def get_pitcher_percentiles(pid, split_id=1, year=None, level=None):
                 if _gb_reg and player_rat.get("gb"):
                     exp_gb = _gb_reg["intercept"] + _gb_reg["slope"] * player_rat["gb"]
                     expected = _pctile(exp_gb, [pool[p]["gb_pct"] for p in pool])
-                    if qualified:
+                    if _show_tags_p:
                         gap = pctile - expected
                         thresh = _tag_threshold(expected)
                         tag = "hot" if gap >= thresh else ("cold" if gap <= -thresh else None)
@@ -694,7 +703,7 @@ def get_pitcher_percentiles(pid, split_id=1, year=None, level=None):
                 sk, rk, s_inv, r_inv = PITCHER_TAG_MAP[label]
                 r_pctile = _pctile(player_rat[rk], rat_vals[rk])
                 expected = r_pctile
-                if qualified:
+                if _show_tags_p:
                     gap = pctile - r_pctile
                     thresh = _tag_threshold(r_pctile)
                     tag = "hot" if gap >= thresh else ("cold" if gap <= -thresh else None)
@@ -717,12 +726,10 @@ def get_fielding_percentiles(pid, year=None):
     Returns a list of dicts: [{pos, stats: [{label, value, pctile, ...}], qualified}]
     """
     conn = get_db()
-    conn.row_factory = None
     current_year = get_cfg().year
     explicit_year = year is not None
     year = _resolve_pctile_year(conn, year or current_year, "mlb_fielding_stats", fallback=not explicit_year)
     if year is None:
-        conn.close()
         return None
     games = _est_team_games(conn, year)
     min_ip = max(round(1.0 * games), 15)
@@ -736,7 +743,6 @@ def get_fielding_percentiles(pid, year=None):
         "WHERE f.player_id=? AND f.year=? AND f.position > 1",
         (pid, year)).fetchall()
     if not player_rows:
-        conn.close()
         return None
 
     results = []
@@ -815,7 +821,6 @@ def get_fielding_percentiles(pid, year=None):
         if stats:
             results.append({"pos": _POS_NAMES.get(pos, str(pos)), "stats": stats, "qualified": qualified})
 
-    conn.close()
     return results if results else None
 
 
@@ -847,7 +852,6 @@ def get_percentile_history(pid, is_pitcher=False, split_id=1):
             "SELECT year, SUM(pa) FROM mlb_batting_stats WHERE player_id=? AND split_id=? GROUP BY year",
             (pid, split_id)).fetchall():
             sample_sizes[row[0]] = row[1] or 0
-    conn.close()
 
     stat_defs = PITCHER_PCTILE_STATS if is_pitcher else HITTER_PCTILE_STATS
     # Only include overall stats (skip splits-only stats)
@@ -994,7 +998,6 @@ def get_percentile_history_all_levels(pid, is_pitcher=False):
                 "stats": stat_data,
             })
 
-    conn.close()
 
     if not rows:
         return None
@@ -1033,7 +1036,6 @@ def get_fielding_percentile_history(pid):
     years = [r[0] for r in conn.execute(
         "SELECT DISTINCT year FROM mlb_fielding_stats WHERE player_id=? ORDER BY year DESC",
         (pid,)).fetchall()]
-    conn.close()
     if not years:
         return None
 

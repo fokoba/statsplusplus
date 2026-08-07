@@ -71,8 +71,7 @@
     {
       "date": "2026-08-07",
       "commit": "d19ce77",
-      "title": "Complete Architecture Overhaul \u2014 All Shims Eliminated (PENDING - webhook 403)"
+      "title": "Complete Architecture Overhaul \u2014 All Shims Eliminated"
     }
-  ],
-  "pending_post": "Webhook returned 403 \u2014 post pending when webhook is restored"
+  ]
 }

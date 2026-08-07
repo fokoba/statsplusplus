@@ -5,8 +5,8 @@ Pure functions — no DB access. Takes player dicts as input, returns projection
 Used by web/team_queries.py::get_depth_chart().
 """
 
-from player_utils import peak_war_from_ovr, aging_mult
-from constants import PEAK_AGE_PITCHER, PEAK_AGE_HITTER
+from statsplusplus.evaluation.war import peak_war_from_score as peak_war_from_ovr, aging_mult
+from statsplusplus.evaluation.constants import PEAK_AGE_PITCHER, PEAK_AGE_HITTER
 
 # ---------------------------------------------------------------------------
 # OPS+ model — calibrated from 2,573 qualified hitter-seasons (PA >= 200)
@@ -589,11 +589,12 @@ def roster_availability(players, year_offsets=(0, 1, 2)):
     Returns dict of {year_offset: [player_dict, ...]} with players available
     that year. Players gain 'salary' and 'ctrl_type' fields.
     """
-    from player_utils import dollars_per_war, league_minimum
+    from statsplusplus.config.league_config import dollars_per_war, league_minimum
+    from statsplusplus.config.league_context import get_league_dir, get_active_league_slug
+    _ld = get_league_dir(get_active_league_slug())
+    dpw = dollars_per_war(_ld)
+    min_sal = league_minimum(_ld)
     import math
-
-    dpw = dollars_per_war()
-    min_sal = league_minimum()
 
     result = {off: [] for off in year_offsets}
 

@@ -19,13 +19,15 @@ from statsplusplus.evaluation.arb import estimate_control as _estimate_control_p
 from statsplusplus.evaluation.constants import \
     PEAK_AGE_PITCHER, PEAK_AGE_HITTER, \
     NO_TRACK_RECORD_DISCOUNT, MLB_SCARCITY
-from constants import ARB_PCT
+from statsplusplus.evaluation.constants import load_model_weights
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Resolve league context once at module level
 _league_dir = get_league_dir(get_active_league_slug())
 _cfg = LeagueConfig(base_dir=_league_dir)
+_weights = load_model_weights(_league_dir)
+ARB_PCT = _weights.arb_pct
 
 # Local wrappers to maintain no-arg calling convention used throughout this file
 def dollars_per_war():

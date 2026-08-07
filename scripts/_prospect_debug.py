@@ -6,17 +6,21 @@ sys.path.insert(0, "scripts")
 with open("data/app_config.json", "w") as f:
     json.dump({"statsplus_cookie": "sessionid=5tm3hnjwld3biah7c9uhh7g3yajz9xs8", "active_league": "emlb"}, f, indent=2)
 
-from league_context import get_league_dir
-from ratings import norm
-from player_utils import assign_bucket
-from evaluation_engine import (
+from statsplusplus.config.league_context import get_league_dir, get_active_league_slug
+from statsplusplus.config.league_config import LeagueConfig
+from statsplusplus.config.ratings import norm as _norm_pkg
+from statsplusplus.utils.positions import assign_bucket
+from statsplusplus.data.evaluation_engine import (
     compute_composite_hitter, compute_ceiling, load_tool_weights,
     _extract_hitter_tools, _extract_potential_hitter_tools,
     _extract_defense_tools, _get_def_weights_for_bucket,
     DEFAULT_TOOL_WEIGHTS, _KEY_MAP,
 )
 
-league_dir = get_league_dir()
+league_dir = get_league_dir(get_active_league_slug())
+_cfg = LeagueConfig(base_dir=league_dir)
+def norm(val):
+    return _norm_pkg(val, _cfg.ratings_scale)
 conn = sqlite3.connect(str(league_dir / "league.db"))
 conn.row_factory = sqlite3.Row
 snap = conn.execute("SELECT MAX(snapshot_date) as sd FROM ratings").fetchone()["sd"]

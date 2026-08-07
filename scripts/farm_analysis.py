@@ -10,16 +10,29 @@ from datetime import date
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from player_utils import (norm, norm_floor, height_str, fmt_table, assign_bucket,
-                           calc_fv, dev_weight,
-                           PITCH_FIELDS, PITCH_NAMES, LEVEL_NORM_AGE)
-from league_config import config as _cfg
-from league_context import get_league_dir
+
+from statsplusplus.config.league_context import get_league_dir, get_active_league_slug
+from statsplusplus.config.league_config import LeagueConfig
+from statsplusplus.config.ratings import norm as _norm_pkg, norm_floor as _norm_floor_pkg
+from statsplusplus.utils.formatting import height_str, fmt_table
+from statsplusplus.utils.positions import assign_bucket, PITCH_FIELDS, PITCH_NAMES, LEVEL_NORM_AGE
+from statsplusplus.evaluation.fv import dev_weight
+from fv_model import calc_fv  # dict-based adapter (retained until full migration)
+
+league_dir = get_league_dir(get_active_league_slug())
+_cfg = LeagueConfig(base_dir=league_dir)
+_scale = _cfg.ratings_scale
+
+def norm(val):
+    return _norm_pkg(val, _scale)
+
+def norm_floor(val, floor=20):
+    return _norm_floor_pkg(val, _scale, floor)
 
 ORG_ID = _cfg.my_team_id
 
 def _league_dir():
-    return str(get_league_dir())
+    return str(league_dir)
 
 # ---------------------------------------------------------------------------
 # Config

@@ -8,11 +8,49 @@ Implements Step 3 of docs/trade_analysis_guide.md.
 
 import argparse, json, os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from player_utils import dollars_per_war, league_minimum, POSITIONAL_WAR_ADJUSTMENTS, aging_mult, LEVEL_NORM_AGE, peak_war_from_ovr
-from arb_model import arb_salary, arb_salary_perpetual as _arb_salary_perp
-from constants import ARB_PCT, FV_TO_PEAK_WAR, FV_TO_PEAK_WAR_SP, FV_TO_PEAK_WAR_RP, FV_TO_PEAK_WAR_BY_POS, DEVELOPMENT_DISCOUNT, YEARS_TO_MLB, PROSPECT_DISCOUNT_RATE, SCARCITY_MULT, LEVEL_AGE_DISCOUNT_RATE, PROSPECT_WAR_RAMP, NO_TRACK_RECORD_DISCOUNT
+
+from statsplusplus.config.league_context import get_league_dir, get_active_league_slug
+from statsplusplus.config.league_config import LeagueConfig
+from statsplusplus.config.league_config import dollars_per_war as _dollars_per_war_pkg
+from statsplusplus.config.league_config import league_minimum as _league_minimum_pkg
+from statsplusplus.evaluation.war import peak_war_from_score as peak_war_from_ovr, aging_mult
+from statsplusplus.evaluation.arb import arb_salary, arb_salary_perpetual as _arb_salary_perp
+from statsplusplus.evaluation.constants import (
+    load_model_weights,
+    PROSPECT_DISCOUNT_RATE,
+    NO_TRACK_RECORD_DISCOUNT,
+)
+from statsplusplus.utils.positions import (
+    POSITIONAL_WAR_ADJUSTMENTS,
+    LEVEL_NORM_AGE,
+    DEVELOPMENT_DISCOUNT,
+    YEARS_TO_MLB as _YEARS_TO_MLB_DEFAULT,
+)
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Resolve league context
+_league_dir = get_league_dir(get_active_league_slug())
+_cfg = LeagueConfig(base_dir=_league_dir)
+_weights = load_model_weights(_league_dir)
+
+# Calibrated values from model_weights.json
+ARB_PCT = _weights.arb_pct
+FV_TO_PEAK_WAR = _weights.fv_to_peak_war
+FV_TO_PEAK_WAR_SP = _weights.fv_to_peak_war_sp
+FV_TO_PEAK_WAR_RP = _weights.fv_to_peak_war_rp
+FV_TO_PEAK_WAR_BY_POS = _weights.fv_to_peak_war_by_pos
+SCARCITY_MULT = _weights.scarcity_mult
+YEARS_TO_MLB = _weights.years_to_mlb
+LEVEL_AGE_DISCOUNT_RATE = 0.04
+PROSPECT_WAR_RAMP = {1: 0.60, 2: 0.80}
+
+# Local wrappers
+def dollars_per_war():
+    return _dollars_per_war_pkg(_league_dir)
+
+def league_minimum():
+    return _league_minimum_pkg(_league_dir)
 
 # ---------------------------------------------------------------------------
 # Core calculation
@@ -216,8 +254,7 @@ def prospect_surplus(fv, age, level, bucket, positional_adjust=False, fv_plus=Fa
         # Arb salary: raise-based model from arb_model.py
         # Arb is a raise system: arb 1 based on quality, arb 2-3 raise from prior
         try:
-            from league_config import config as _pv_cfg
-            _is_perpetual = _pv_cfg.perpetual_arb
+            _is_perpetual = _cfg.perpetual_arb
         except Exception:
             _is_perpetual = False
 

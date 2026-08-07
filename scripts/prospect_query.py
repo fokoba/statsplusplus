@@ -22,8 +22,15 @@ import argparse, os, sys
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, "scripts"))
 
-import db as _db
-from league_config import config as _cfg
+from statsplusplus.config.league_context import get_league_dir, get_active_league_slug
+from statsplusplus.config.league_config import LeagueConfig
+from statsplusplus.data.db import get_connection
+
+league_dir = get_league_dir(get_active_league_slug())
+_cfg = LeagueConfig(base_dir=league_dir)
+
+def _get_conn():
+    return get_connection(league_dir)
 
 EMLB_FILTER = """
     p.parent_team_id IN (
@@ -44,7 +51,7 @@ def _fmt_surplus(val):
 
 
 def cmd_top(args):
-    conn = _db.get_conn()
+    conn = _get_conn()
     game_date = get_game_date(conn)
 
     where = ["pf.eval_date=?", "p.level != '1'", EMLB_FILTER]
@@ -96,7 +103,7 @@ def cmd_top(args):
 
 
 def cmd_systems(args):
-    conn = _db.get_conn()
+    conn = _get_conn()
     game_date = get_game_date(conn)
 
     rows = conn.execute(f"""
@@ -145,7 +152,7 @@ def cmd_systems(args):
 
 
 def cmd_team(args):
-    conn = _db.get_conn()
+    conn = _get_conn()
     game_date = get_game_date(conn)
 
     where = ["pf.eval_date=?", "p.level != '1'", EMLB_FILTER, "LOWER(t.name) LIKE LOWER(?)"]

@@ -19,8 +19,15 @@ import argparse, json, os, sys
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, "scripts"))
 
-import db as _db
-from league_config import config as _cfg
+from statsplusplus.config.league_context import get_league_dir, get_active_league_slug
+from statsplusplus.config.league_config import LeagueConfig
+from statsplusplus.data.db import get_connection
+
+league_dir = get_league_dir(get_active_league_slug())
+_cfg = LeagueConfig(base_dir=league_dir)
+
+def _get_conn():
+    return get_connection(league_dir)
 
 POS_MAP  = {2:"C", 3:"1B", 4:"2B", 5:"3B", 6:"SS", 7:"LF", 8:"CF", 9:"RF", 10:"DH"}
 POS_ORDER = ["C","1B","2B","3B","SS","LF","CF","RF","DH"]
@@ -47,7 +54,7 @@ def _resolve_team(arg):
 def analyze(team_id=None, year=None):
     team_id = team_id or _cfg.my_team_id
     year    = year or _cfg.year
-    conn    = _db.get_conn()
+    conn    = _get_conn()
 
     la_path = os.path.join(str(_cfg.league_dir), "config", "league_averages.json")
     la      = json.load(open(la_path))
@@ -261,7 +268,7 @@ def aaa_roster(team_id=None):
     team_id = team_id or _cfg.my_team_id
     # Find AAA level key from level_map (value == 'AAA')
     aaa_level = next((k for k, v in _cfg.level_map.items() if v == "AAA"), "2")
-    conn = _db.get_conn()
+    conn = _get_conn()
     pos_map = {2:"C", 3:"1B", 4:"2B", 5:"3B", 6:"SS", 7:"LF", 8:"CF", 9:"RF", 10:"DH", 1:"P"}
     rows = conn.execute("""
         SELECT p.player_id, p.name, p.age, p.pos, r.ovr, r.pot, r.cf, t.name as team_name

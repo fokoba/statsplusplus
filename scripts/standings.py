@@ -13,15 +13,23 @@ import argparse, json, os, sys
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, "scripts"))
-import db as _db
-from league_config import config as _cfg
 
-PYTH_EXP = _cfg.pyth_exp
+from statsplusplus.config.league_context import get_league_dir, get_active_league_slug
+from statsplusplus.config.league_config import LeagueConfig
+from statsplusplus.data.db import get_connection
 
 
-def _standings_from_db(year):
-    conn = _db.get_conn()
-    conn.row_factory = None
+def _get_context():
+    """Resolve league context for this script."""
+    league_dir = get_league_dir(get_active_league_slug())
+    cfg = LeagueConfig(base_dir=league_dir)
+    return league_dir, cfg
+
+
+def _standings_from_db(year, league_dir=None):
+    if league_dir is None:
+        league_dir, _ = _get_context()
+    conn = get_connection(league_dir)
 
     bat = conn.execute(
         "SELECT team_id, name, r FROM team_batting_stats WHERE year=? AND split_id=1",
@@ -31,16 +39,20 @@ def _standings_from_db(year):
         "SELECT team_id, r, ip FROM team_pitching_stats WHERE year=? AND split_id=1",
         (year,),
     ).fetchall()
-    conn.close()
     if not bat or not pit:
         return None
 
-    rs_map = {r[0]: (r[1], r[2]) for r in bat}   # tid -> (name, RS)
-    ra_map = {r[0]: (r[1], r[2]) for r in pit}    # tid -> (RA, IP)
-    return _build_rows(rs_map, ra_map)
+    rs_map = {r["team_id"]: (r["name"], r["r"]) for r in bat}
+    ra_map = {r["team_id"]: (r["r"], r["ip"]) for r in pit}
+    # Resolve pyth_exp
+    if league_dir:
+        _cfg = LeagueConfig(base_dir=league_dir)
+    else:
+        _, _cfg = _get_context()
+    return _build_rows(rs_map, ra_map, _cfg.pyth_exp)
 
 
-def _standings_from_api(year):
+def _standings_from_api(year, league_dir=None):
     sys.path.insert(0, BASE)
     from statsplus import client
 
@@ -51,10 +63,14 @@ def _standings_from_api(year):
 
     rs_map = {t["tid"]: (t["name"], t["r"]) for t in tb if t.get("split_id") == 1}
     ra_map = {t["tid"]: (t["r"], t["ip"]) for t in tp if t.get("split_id") == 1}
-    return _build_rows(rs_map, ra_map)
+    if league_dir:
+        _cfg = LeagueConfig(base_dir=league_dir)
+    else:
+        _, _cfg = _get_context()
+    return _build_rows(rs_map, ra_map, _cfg.pyth_exp)
 
 
-def _build_rows(rs_map, ra_map):
+def _build_rows(rs_map, ra_map, pyth_exp=1.83):
     rows = []
     for tid, (name, rs) in rs_map.items():
         if tid not in ra_map:
@@ -63,7 +79,7 @@ def _build_rows(rs_map, ra_map):
         g = round(ip / 9)
         if g == 0 or rs + ra == 0:
             continue
-        pyth = rs**PYTH_EXP / (rs**PYTH_EXP + ra**PYTH_EXP)
+        pyth = rs**pyth_exp / (rs**pyth_exp + ra**pyth_exp)
         w = round(pyth * g, 1)
         l = round(g - w, 1)
         rows.append({
@@ -75,14 +91,15 @@ def _build_rows(rs_map, ra_map):
     return rows
 
 
-def actual_record(team_id, year):
+def actual_record(team_id, year, league_dir=None):
     """Return actual W-L from games table for a team in a given season.
 
     NOTE: In the games table, runs0 = AWAY team runs, runs1 = HOME team runs.
     Home team wins when runs1 > runs0. Away team wins when runs0 > runs1.
     """
-    conn = _db.get_conn()
-    conn.row_factory = None
+    if league_dir is None:
+        league_dir, _ = _get_context()
+    conn = get_connection(league_dir)
     row = conn.execute("""
         SELECT
             SUM(CASE WHEN (home_team=? AND runs1>runs0) OR (away_team=? AND runs0>runs1) THEN 1 ELSE 0 END) as w,
@@ -90,12 +107,15 @@ def actual_record(team_id, year):
         FROM games
         WHERE played=1 AND date >= ? AND (home_team=? OR away_team=?)
     """, (team_id, team_id, team_id, team_id, f"{year}-01-01", team_id, team_id)).fetchone()
-    conn.close()
-    w, l = (row[0] or 0), (row[1] or 0)
+    w, l = (row["w"] or 0), (row["l"] or 0)
     return w, l
 
 
-def print_standings(rows, my_tid=None):
+def print_standings(rows, my_tid=None, league_dir=None):
+    if league_dir is None:
+        league_dir, _cfg = _get_context()
+    else:
+        _cfg = LeagueConfig(base_dir=league_dir)
     if my_tid is None:
         my_tid = _cfg.my_team_id
     leader_pct = rows[0]["pct"] if rows else 0.5
@@ -103,10 +123,9 @@ def print_standings(rows, my_tid=None):
     # Load real standings from DB if available
     real_standings = {}
     try:
-        conn = _db.get_conn()
+        conn = get_connection(league_dir)
         for r in conn.execute("SELECT team_id, w, l FROM standings").fetchall():
             real_standings[r[0]] = (r[1], r[2])
-        conn.close()
     except Exception:
         pass
 
@@ -135,18 +154,19 @@ def print_standings(rows, my_tid=None):
             print(f"{i:>2}  {r['name']:<28} {r['w']:>5} {r['l']:>5} {r['pct']:>6.3f} {gb_str:>5} {r['rs']:>4} {r['ra']:>4} {diff_str:>5}{marker}")
 
 
-def all_actual_records(year):
+def all_actual_records(year, league_dir=None):
     """Return dict of team_id -> (w, l) for all teams from games table."""
-    conn = _db.get_conn()
-    conn.row_factory = None
+    if league_dir is None:
+        league_dir, _ = _get_context()
+    conn = get_connection(league_dir)
     rows = conn.execute("""
         SELECT home_team, away_team, runs0, runs1
         FROM games
         WHERE played=1 AND date >= ? AND game_type=0
     """, (f"{year}-01-01",)).fetchall()
-    conn.close()
     records = {}
-    for home, away, r0, r1 in rows:
+    for r in rows:
+        home, away, r0, r1 = r["home_team"], r["away_team"], r["runs0"], r["runs1"]
         # runs0 = away runs, runs1 = home runs
         if r1 > r0:
             records[home] = (records.get(home, (0, 0))[0] + 1, records.get(home, (0, 0))[1])
@@ -157,13 +177,17 @@ def all_actual_records(year):
     return records
 
 
-def league_standings_actual(year, league_name=None):
+def league_standings_actual(year, league_name=None, league_dir=None):
     """
     Return actual-record standings for a league (AL/NL) or all teams.
     Each entry: {tid, abbr, w, l, pct, division}.
     Sorted by win pct descending.
     """
-    records = all_actual_records(year)
+    if league_dir is None:
+        league_dir, _cfg = _get_context()
+    else:
+        _cfg = LeagueConfig(base_dir=league_dir)
+    records = all_actual_records(year, league_dir)
     settings = _cfg.settings
     leagues = settings.get("leagues", [])
 
@@ -198,11 +222,15 @@ def league_standings_actual(year, league_name=None):
     return results
 
 
-def playoff_picture(year, team_id):
+def playoff_picture(year, team_id, league_dir=None):
     """
     Show a team's league standings with division leaders and wild card race.
     Returns a formatted string.
     """
+    if league_dir is None:
+        league_dir, _cfg = _get_context()
+    else:
+        _cfg = LeagueConfig(base_dir=league_dir)
     settings = _cfg.settings
     leagues = settings.get("leagues", [])
     wc_per_league = settings.get("wild_cards_per_league", 3)
@@ -275,6 +303,8 @@ if __name__ == "__main__":
                     help="Show actual W-L for my team alongside pythagorean")
     args = ap.parse_args()
 
+    league_dir, _cfg = _get_context()
+
     if args.year is None:
         args.year = _cfg.year
 
@@ -282,18 +312,17 @@ if __name__ == "__main__":
     if args.team:
         tid = _cfg.team_id_from_abbr(args.team) if hasattr(_cfg, 'team_id_from_abbr') else None
         if tid is None:
-            # Manual lookup
             abbr_map = _cfg.team_abbr_map
             tid = next((int(k) for k, v in abbr_map.items() if v.upper() == args.team.upper()), None)
         if tid is None:
             print(f"Unknown team: {args.team}")
             sys.exit(1)
-        w, l = actual_record(tid, args.year)
+        w, l = actual_record(tid, args.year, league_dir)
         print(f"\n{_cfg.team_name(tid)} — Actual Record: {w}-{l} ({w/(w+l):.3f})\n")
-        print(playoff_picture(args.year, tid))
+        print(playoff_picture(args.year, tid, league_dir))
         print()
         # Also show pythagorean comparison
-        rows = _standings_from_db(args.year)
+        rows = _standings_from_db(args.year, league_dir)
         if rows:
             pyth = next((r for r in rows if r["tid"] == tid), None)
             if pyth:
@@ -309,20 +338,20 @@ if __name__ == "__main__":
 
     rows = None
     if not args.refresh:
-        rows = _standings_from_db(args.year)
+        rows = _standings_from_db(args.year, league_dir)
     if rows is None:
-        rows = _standings_from_api(args.year)
+        rows = _standings_from_api(args.year, league_dir)
 
     if not rows:
         print("No data available.")
         sys.exit(1)
 
     print(f"\n{args.year} Standings — Pythagorean ({len(rows)} teams)\n")
-    print_standings(rows)
+    print_standings(rows, league_dir=league_dir)
     print()
 
     if args.actual:
-        w, l = actual_record(_cfg.my_team_id, args.year)
+        w, l = actual_record(_cfg.my_team_id, args.year, league_dir)
         pyth = next((r for r in rows if r["tid"] == _cfg.my_team_id), None)
         if pyth:
             delta_w = w - pyth["w"]

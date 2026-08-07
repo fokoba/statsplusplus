@@ -24,7 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from league_context import get_league_dir
+from statsplusplus.config.league_context import get_league_dir, get_active_league_slug
 
 
 # ═══════════════════════════════════════════════════════════════════════════

@@ -24,11 +24,19 @@ Trade JSON format:
 
 import argparse, json, os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from player_utils import dollars_per_war
+
+from statsplusplus.config.league_context import get_league_dir, get_active_league_slug
+from statsplusplus.config.league_config import LeagueConfig, dollars_per_war
+from statsplusplus.data.db import get_connection
+
 from contract_value import contract_value, get_player_info
 from prospect_value import prospect_surplus_with_option, find_player
-import db as _db
-from league_config import config as _cfg
+
+league_dir = get_league_dir(get_active_league_slug())
+_cfg = LeagueConfig(base_dir=league_dir)
+
+def _get_conn():
+    return get_connection(league_dir)
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -42,7 +50,7 @@ def resolve_player(token):
     if token.isdigit():
         return {"player_id": int(token)}
     # Name lookup
-    conn = _db.get_conn()
+    conn = _get_conn()
     rows = conn.execute(
         "SELECT player_id, name FROM players WHERE name LIKE ? ORDER BY level LIMIT 5",
         (f"%{token}%",)
@@ -102,7 +110,7 @@ def value_player(spec):
 
     # Look up ovr/pot for certainty multiplier
     import db as _db
-    conn = _db.get_conn()
+    conn = _get_conn()
     row = conn.execute("SELECT name, age FROM players WHERE player_id=?", (pid,)).fetchone()
     name = row["name"] if row else str(pid)
     rr = conn.execute("SELECT ovr, pot, pot_cf, pot_ss, pot_c, pot_second_b, pot_third_b, "

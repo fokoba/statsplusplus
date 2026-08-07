@@ -14,6 +14,7 @@ active league set in `data/app_config.json`.
 **Running tools:** All scripts run from the project root. Both invocation forms work:
 - `python3 scripts/standings.py --actual` (legacy path, still functional)
 - `python3 -m statsplusplus.cli.standings --actual` (new package path)
+- `spp-standings --actual` (installed entry point)
 - `config/league_settings.json` — division structure, team names/abbr, financial settings
 - `config/league_averages.json` — league-wide stat baselines, $/WAR
 

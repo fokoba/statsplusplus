@@ -97,15 +97,18 @@ documentation pass.
 - Minimal code — no surplus abstractions, no speculative generalization.
 - **Team/league agnostic** — no hardcoded team IDs, league size, year, or org-specific
   assumptions. Use `my_team_id` from `state.json`, pass team/league context as parameters.
-- **New code goes in the package** (`src/statsplusplus/`). Legacy `scripts/` and `web/`
-  directories are being migrated incrementally. Do not add new functions to legacy modules.
-- **Typed interfaces** — new cross-module interfaces use dataclasses from `statsplusplus.models`.
+- **All logic in the package** (`src/statsplusplus/`). `scripts/` contains only CLI tools
+  that import from the package. No utility modules, no shared libraries in `scripts/`.
+- **No singletons or global state.** Every function receives what it needs as parameters.
+  Entry points (CLI `main()`, web `before_request`) resolve context and pass it through.
+- **Typed interfaces** — cross-module interfaces use dataclasses from `statsplusplus.models`.
   Pure computation goes in `statsplusplus.evaluation` (no I/O, no DB, no global state).
 - `statsplusplus.evaluation.constants` — single source of truth for all model constants.
-- `statsplusplus.config` — league resolution and ratings normalization (pure functions).
-- `statsplusplus.data.db` — connection management (request-scoped in web, context manager in CLI).
+- `statsplusplus.config.ratings` — pure normalization functions taking explicit `scale` parameter.
+- `statsplusplus.config.league_config` — `LeagueConfig` class, `dollars_per_war(league_dir)`, `league_minimum(league_dir)`.
+- `statsplusplus.data.db` — connection management (request-scoped in web, explicit `league_dir` in CLI).
 - SQLite WAL mode for concurrent reads during writes.
-- Web layer is read-only against the DB. All writes go through `refresh.py` or `fv_calc.py`.
+- Web layer is read-only against the DB. All writes go through `data/` pipelines.
 - **Do not run tests** unless the user explicitly asks to run them.
 - **Do not push to git** without explicit user permission. Prepare commits but wait for approval before pushing.
 

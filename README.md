@@ -114,29 +114,28 @@ statsplusplus/
 │   ├── evaluation/             # Pure computation (composite, FV, WAR, surplus)
 │   ├── config/                 # League context resolution, ratings normalization
 │   ├── client/                 # StatsPlus API client
-│   ├── data/                   # DB schema, connections, migrations
-│   ├── web/                    # Flask app factory, request-scoped context, blueprints
+│   ├── data/                   # DB schema, pipelines (evaluation, refresh, calibrate, fv_calc)
+│   ├── web/                    # Flask app factory, request-scoped context
 │   ├── cli/                    # CLI entry points (spp-* commands)
 │   └── utils/                  # Formatting, positions, logging
 │
-├── web/                    # Flask web application (running server)
-│   ├── app.py                  # Routes, refresh endpoint, onboarding wizard
-│   ├── queries.py              # League-wide queries (prospects, standings, leaders)
-│   ├── team_queries.py         # Team-specific queries (roster, depth chart, contracts)
-│   ├── player_queries.py       # Player page data (ratings, stats, splits)
-│   ├── percentiles.py          # Percentile calculations with expected-value modeling
+├── web/                    # Flask web application
+│   ├── app.py                  # Core routes (team, league, player) + middleware
+│   ├── settings_routes.py      # Settings/onboarding blueprint
+│   ├── api_routes.py           # API/refresh blueprint
 │   ├── web_league_context.py   # Per-request DB connection (shared, scoped)
+│   ├── queries.py              # League-wide queries
+│   ├── team_queries.py         # Team-specific queries
+│   ├── player_queries.py       # Player page data
 │   ├── templates/              # Jinja2 templates
 │   └── static/                 # CSS, JS, favicon assets
 │
-├── scripts/                # Pipeline scripts and CLI tools
-│   ├── refresh.py              # API → DB pipeline (full league refresh)
-│   ├── evaluation_engine.py    # Batch player evaluation (composite/ceiling scoring)
-│   ├── fv_calc.py              # Prospect FV grades and surplus value computation
-│   ├── calibrate.py            # Per-league model calibration
-│   ├── draft_board.py          # CLI: Draft board, simulation, auto-draft list
+├── scripts/                # CLI tools (import from package)
+│   ├── draft_board.py          # CLI: Draft board, simulation, auto-draft
 │   ├── trade_calculator.py     # CLI: Trade surplus balance calculator
 │   ├── trade_targets.py        # CLI: Trade target finder by position
+│   ├── contract_value.py       # MLB player surplus calculation
+│   ├── prospect_value.py       # Prospect surplus calculation
 │   └── ...                     # Additional CLI tools (see CLI Tools below)
 │
 ├── data/                   # Runtime data (gitignored)

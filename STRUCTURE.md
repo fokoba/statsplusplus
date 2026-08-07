@@ -1,10 +1,5 @@
 # Directory Structure
 
-The project uses a dual-structure during migration: the new `src/statsplusplus/`
-package contains the refactored architecture, while `scripts/` and `web/` contain
-the legacy code that still runs the application. The legacy code is being migrated
-into the package incrementally.
-
 ```
 statsplusplus/
 ├── pyproject.toml              # Package definition, entry points, pinned deps
@@ -13,65 +8,114 @@ statsplusplus/
 ├── STRUCTURE.md                # This file
 ├── RULES.md                    # Data pull and storage rules
 │
-├── src/statsplusplus/          # ← NEW: Proper Python package
+├── src/statsplusplus/          # Core package (all logic lives here)
 │   ├── models/                     # Typed dataclasses (contracts between layers)
-│   ├── evaluation/                 # Pure computation (no I/O)
+│   ├── evaluation/                 # Pure computation (no I/O, no global state)
+│   │   ├── composite.py               # Composite scores, tool transforms, defensive scoring
+│   │   ├── ceiling.py                  # Ceiling computation
+│   │   ├── fv.py                       # FV grades, risk labels, PAC, positional access
+│   │   ├── war.py                      # WAR projection, aging curves, stat history
+│   │   ├── surplus.py                  # Prospect/contract surplus, PAP
+│   │   ├── arb.py                      # Arb salary, service time, team control
+│   │   ├── carrying_tools.py           # Carrying tool bonus
+│   │   └── constants.py                # All model constants, weight loaders
 │   ├── config/                     # League resolution, ratings normalization
+│   │   ├── league_config.py            # LeagueConfig class, dollars_per_war, league_minimum
+│   │   ├── league_context.py           # Active league resolution, cookie management
+│   │   └── ratings.py                  # norm(), norm_continuous(), norm_floor() (pure, explicit scale)
 │   ├── client/                     # StatsPlus API client
-│   ├── data/                       # DB schema, connections, migrations
+│   │   └── statsplus.py
+│   ├── data/                       # DB access + write pipelines
+│   │   ├── db.py                       # Connection management, schema, all migrations
+│   │   ├── evaluation_engine.py        # Batch player evaluation (composite/ceiling)
+│   │   ├── refresh.py                  # API → DB pipeline
+│   │   ├── calibrate.py               # Per-league model calibration
+│   │   ├── fv_calc.py                  # Batch FV/surplus computation
+│   │   └── milb.py                     # MiLB stat loading
 │   ├── web/                        # Flask app factory, blueprints, context
+│   │   ├── app.py                      # App creation + middleware
+│   │   ├── context.py                  # Request-scoped DB + config
+│   │   └── routes/                     # Blueprint stubs
 │   ├── cli/                        # CLI entry points (spp-* commands)
-│   └── utils/                      # Shared formatting, positions, logging
+│   └── utils/                      # Shared utilities
+│       ├── formatting.py               # fmt_money, fmt_ip, height_str, fmt_table
+│       ├── positions.py                # assign_bucket, display_pos, level maps, pitch fields
+│       └── logging.py                  # Centralized log config
 │
-├── scripts/                    # ← LEGACY: Still active (being migrated)
-│   ├── evaluation_engine.py        # Player evaluation (3449 lines)
-│   ├── refresh.py                  # API → DB pipeline
-│   ├── calibrate.py                # Model calibration
-│   ├── fv_calc.py                  # Batch FV/surplus
-│   └── ... (20+ CLI and utility scripts)
+├── scripts/                    # CLI tools (import from package)
+│   ├── contract_value.py           # MLB player surplus calculation
+│   ├── prospect_value.py           # Prospect surplus calculation
+│   ├── draft_board.py              # Draft board, simulation, auto-draft
+│   ├── trade_calculator.py         # Trade surplus balance calculator
+│   ├── trade_targets.py            # Trade target finder by position
+│   ├── trade_assets.py             # Tradeable assets for any team
+│   ├── team_needs.py               # Positional needs vs league average
+│   ├── standings.py                # Pythagorean standings
+│   ├── free_agents.py              # Free agent class analysis
+│   ├── prospect_query.py           # Prospect rankings
+│   ├── farm_analysis.py            # Farm system report generator
+│   ├── roster_analysis.py          # Roster scaffold generator
+│   ├── projections.py              # OPS+/ERA/WAR projection models
+│   ├── benchmark.py                # Evaluation accuracy benchmark
+│   ├── comp_validate.py            # Comp-based FV validation
+│   └── draft_settings.py           # Draft board settings management
 │
-├── web/                        # ← LEGACY: Running Flask server
-│   ├── app.py                      # Routes + refresh (patched for shared conn)
-│   ├── web_league_context.py       # Request context (patched for caching)
-│   ├── team_queries.py             # Team queries (patched for caching)
-│   ├── queries.py, player_queries.py, percentiles.py, ...
+├── web/                        # Flask web application
+│   ├── app.py                      # Core routes (team, league, player) + middleware
+│   ├── settings_routes.py          # Settings/onboarding blueprint
+│   ├── api_routes.py               # API/refresh blueprint
+│   ├── web_league_context.py       # Request-scoped DB connection
+│   ├── queries.py                  # League-wide queries
+│   ├── team_queries.py             # Team-specific queries
+│   ├── player_queries.py           # Player page data
+│   ├── percentiles.py              # Percentile rankings
+│   ├── trade_queries.py            # Trade tab queries
 │   ├── templates/                  # Jinja2 templates
-│   └── static/                     # CSS, JS
+│   └── static/                     # CSS, JS, favicon assets
 │
-├── tests/                      # Test suite (696 tests)
+├── tests/                      # Test suite (674 tests)
 │   ├── models/                     # Model + utility tests
 │   ├── evaluation/                 # Pure computation tests
 │   ├── data/                       # DB integration tests
 │   ├── web/                        # Web context tests
-│   └── test_*.py                   # Legacy integration tests
+│   └── test_*.py                   # Integration tests
 │
 ├── data/                       # Runtime data (gitignored)
 │   ├── app_config.json
 │   └── <league>/league.db, config/, history/, reports/
 │
-└── docs/
-    ├── code_audit.md               # Codebase quality findings
-    ├── refactoring_plan.md         # Migration plan + status
-    └── ...
+├── statsplus/                  # StatsPlus API client library
+│   └── client.py
+│
+└── docs/                       # Documentation
 ```
 
 ## Architecture Layers
 
 ```
 ┌───────────────────────────────────────────────────────────────┐
-│  CLI (cli/)                     │  Web (web/)                   │
-│  spp-* entry points             │  Flask routes + templates     │
+│  CLI (scripts/ + cli/)          │  Web (web/)                   │
+│  spp-* commands                 │  Flask routes + templates     │
 ├─────────────────────────────────┴─────────────────────────────┤
 │  Evaluation (evaluation/)                                       │
 │  Pure computation — no I/O, no DB, no global state              │
 ├───────────────────────────────────────────────────────────────┤
 │  Data (data/)                   │  Config (config/)             │
-│  DB schema + connections        │  League resolution + ratings  │
+│  DB + pipelines (only writer)   │  League resolution + ratings  │
 ├─────────────────────────────────┴─────────────────────────────┤
 │  Models (models/)                                               │
 │  Typed dataclasses — contracts between all layers               │
 └───────────────────────────────────────────────────────────────┘
 ```
+
+## Design Principles
+
+- **No singletons or global state.** Every function receives what it needs as parameters.
+- **Entry points resolve context.** CLI `main()` and web `before_request` are the only
+  places that read `app_config.json` and create `LeagueConfig`.
+- **Package is self-contained.** `src/statsplusplus/` has zero dependency on `scripts/`.
+- **Web layer is read-only.** All DB writes go through `data/` pipelines.
+- **Pure computation in `evaluation/`.** No DB, no I/O, no global state.
 
 ## CLI Entry Points
 
@@ -95,41 +139,31 @@ After `pip install -e .`, all tools are available as `spp-*` commands:
 | `spp-calibrate` | Model calibration |
 
 Also callable as: `python3 -m statsplusplus.cli.standings --help`
+Or legacy: `python3 scripts/standings.py --actual`
 
 ## DB Tables (league.db)
 
 | Table | Owner | Description |
 |---|---|---|
-| `players` | `refresh.py` | All players across all orgs and levels |
-| `teams` | `refresh.py` | Team ID → name, level, parent org, league |
-| `ratings` | `refresh.py` | Scouting ratings (121+ cols, latest snapshot). PK: `(player_id, snapshot_date)` |
-| `ratings_history` | `refresh.py` | Monthly in-game rating snapshots. PK: `(player_id, snapshot_date)` |
-| `contracts` | `refresh.py` | Active contracts (up to 15 salary years, options, incentives) |
-| `contract_extensions` | `refresh.py` | Pending extensions |
-| `batting_stats` | `refresh.py` | Player batting stats by year/split/team. `league_id` NULL = MLB |
-| `pitching_stats` | `refresh.py` | Player pitching stats. `league_id` NULL = MLB |
-| `fielding_stats` | `refresh.py` | Fielding by position (G, IP, ZR, framing) |
-| `team_batting_stats` | `refresh.py` | Team-level batting aggregates |
-| `team_pitching_stats` | `refresh.py` | Team-level pitching aggregates |
-| `games` | `refresh.py` | Game results with scores, WP/LP/SV |
-| `standings` | `refresh.py` | Real W-L-GB from StatsPlus API |
-| `trade_block` | `refresh.py` | Players confirmed available |
-| `prospect_fv` | `fv_calc.py` | FV grades + risk labels for prospects |
-| `player_surplus` | `fv_calc.py` | Surplus value for MLB players |
+| `players` | refresh | All players across all orgs and levels |
+| `teams` | refresh | Team ID → name, level, parent org, league |
+| `ratings` | refresh | Scouting ratings (121+ cols). PK: `(player_id, snapshot_date)` |
+| `ratings_history` | refresh | Monthly in-game rating snapshots |
+| `contracts` | refresh | Active contracts (up to 15 salary years, options, incentives) |
+| `batting_stats` | refresh | Player batting stats by year/split/team. `league_id` NULL = MLB |
+| `pitching_stats` | refresh | Player pitching stats |
+| `fielding_stats` | refresh | Fielding by position |
+| `team_batting_stats` | refresh | Team-level batting aggregates |
+| `team_pitching_stats` | refresh | Team-level pitching aggregates |
+| `games` | refresh | Game results with scores |
+| `standings` | refresh | Real W-L-GB from StatsPlus API |
+| `trade_block` | refresh | Players confirmed available |
+| `prospect_fv` | fv_calc | FV grades + risk labels for prospects |
+| `player_surplus` | fv_calc | Surplus value for MLB players |
 
 | View | Description |
 |---|---|
 | `latest_ratings` | Most recent snapshot only |
-| `mlb_batting_stats` | Batting stats filtered to MLB (league_id IS NULL) |
-| `mlb_pitching_stats` | Pitching stats filtered to MLB |
-| `mlb_fielding_stats` | Fielding stats filtered to MLB |
-
-## Key Conventions
-
-- All league data in `data/<league>/league.db`. Web layer is read-only.
-- `data/<league>/config/` — JSON configuration and league-level aggregates.
-- `data/<league>/history/` — Scouting summaries and FV tracking.
-- `data/app_config.json` — Global config: active league + session cookie.
-- Request-scoped DB connection: single connection per page load, cached on Flask `g`.
-- All model constants in `src/statsplusplus/evaluation/constants.py`.
-- Typed models in `src/statsplusplus/models/` define all cross-module interfaces.
+| `mlb_batting_stats` | Batting filtered to MLB (league_id IS NULL) |
+| `mlb_pitching_stats` | Pitching filtered to MLB |
+| `mlb_fielding_stats` | Fielding filtered to MLB |

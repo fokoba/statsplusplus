@@ -967,7 +967,7 @@ def get_draft_pool():
         }
         if p["_is_pitcher"]:
             # Count viable pitches (pot >= 45)
-            from constants import PITCH_FIELDS
+            from statsplusplus.utils.positions import PITCH_FIELDS
             _pitch_names = {'Fst':'FB','Snk':'SI','Crv':'CB','Sld':'SL','Chg':'CH',
                             'Splt':'SPL','Cutt':'CUT','CirChg':'CC','Scr':'SCR',
                             'Frk':'FRK','Kncrv':'KC','Knbl':'KN'}

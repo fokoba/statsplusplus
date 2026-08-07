@@ -912,7 +912,7 @@ def get_draft_pool():
     amateur_levels = _detect_amateur_levels(conn)
 
     from statsplusplus.data.fv_calc import RATINGS_SQL
-    from statsplusplus.utils.positions import assign_bucket, LEVEL_NORM_AGE; from fv_model import calc_fv; from statsplusplus.config.ratings import norm
+    from statsplusplus.utils.positions import assign_bucket, LEVEL_NORM_AGE; from statsplusplus.evaluation.fv import calc_fv_from_dict as calc_fv; from statsplusplus.config.ratings import norm
 
     # Extend RATINGS_SQL with bats/throws which aren't in the base query
     _DRAFT_SQL = RATINGS_SQL.replace("r.league_id AS LeagueId",

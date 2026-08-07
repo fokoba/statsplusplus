@@ -55,8 +55,6 @@ def _set_league_context():
     g.league_slug = slug
     g.league_dir = league_dir
     g.league_config = cfg
-    import ratings
-    ratings._ratings_scale = cfg.ratings_scale
     g.league_ready = (league_dir / "league.db").exists() and (
         league_dir / "config" / "league_averages.json").exists()
     if not g.league_ready and not any(

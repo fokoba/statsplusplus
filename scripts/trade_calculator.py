@@ -109,7 +109,7 @@ def value_player(spec):
     fv_plus_for_surplus = False if fv_for_surplus != fv_int else fv_plus
 
     # Look up ovr/pot for certainty multiplier
-    import db as _db
+    from statsplusplus.data import db as _db
     conn = _get_conn()
     row = conn.execute("SELECT name, age FROM players WHERE player_id=?", (pid,)).fetchone()
     name = row["name"] if row else str(pid)

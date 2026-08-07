@@ -1448,7 +1448,7 @@ def get_player(pid):
         if not valuation and outcome_probs is None and level_str != 'MLB':
             try:
                 import prospect_value as _pv
-                from statsplusplus.utils.positions import assign_bucket, LEVEL_NORM_AGE; from fv_model import calc_fv
+                from statsplusplus.utils.positions import assign_bucket, LEVEL_NORM_AGE; from statsplusplus.evaluation.fv import calc_fv_from_dict as calc_fv
                 from statsplusplus.data.fv_calc import RATINGS_SQL, LEVEL_INT_KEY
                 _conn2 = get_db()
                 _rat = _conn2.execute(RATINGS_SQL + " AND r.player_id = ?", (pid,)).fetchone()

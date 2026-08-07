@@ -1741,7 +1741,7 @@ class TestProperty23FVBackwardCompatibility:
     def test_fv_within_tolerance_when_scores_close(self, ovr, pot, age, bucket):
         """**Validates: Requirements 9.3** — FV grades are within ±5 when
         Composite_Score is within 3 of OVR and Ceiling_Score is within 3 of POT."""
-        from fv_model import calc_fv; from statsplusplus.utils.positions import LEVEL_NORM_AGE
+        from statsplusplus.evaluation.fv import calc_fv_from_dict as calc_fv; from statsplusplus.utils.positions import LEVEL_NORM_AGE
 
         # Ensure pot >= ovr (realistic constraint)
         pot = max(pot, ovr)
@@ -1809,7 +1809,7 @@ class TestProperty23FVBackwardCompatibility:
     def test_fv_tolerance_with_offsets(self, ovr, pot, comp_offset, ceil_offset, age, bucket):
         """**Validates: Requirements 9.3** — FV grades within ±5 across the
         full ±3 offset range for both Composite_Score and Ceiling_Score."""
-        from fv_model import calc_fv; from statsplusplus.utils.positions import LEVEL_NORM_AGE
+        from statsplusplus.evaluation.fv import calc_fv_from_dict as calc_fv; from statsplusplus.utils.positions import LEVEL_NORM_AGE
 
         pot = max(pot, ovr)
         composite = max(20, min(80, ovr + comp_offset))

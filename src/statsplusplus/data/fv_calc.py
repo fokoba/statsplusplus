@@ -372,7 +372,7 @@ def _check_fv_tier_discrepancy(p: dict, fv_base: int, fv_risk: str) -> None:
     _scripts = str(Path(__file__).resolve().parent.parent.parent.parent / "scripts")
     if _scripts not in sys.path:
         sys.path.insert(0, _scripts)
-    from fv_model import calc_fv
+    from statsplusplus.evaluation.fv import calc_fv_from_dict as calc_fv
     p_old = dict(p)
     del p_old["_defensive_value"]
     fv_old, _ = calc_fv(p_old)

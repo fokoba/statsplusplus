@@ -97,9 +97,6 @@ def create_app(project_root: Path | None = None) -> Flask:
         g.league_dir = league_dir
         g.league_config = cfg
 
-        # Set ratings scale (still needed for legacy code during migration)
-        import ratings
-        ratings._ratings_scale = cfg.ratings_scale
 
         g.league_ready = (league_dir / "league.db").exists() and (
             league_dir / "config" / "league_averages.json"

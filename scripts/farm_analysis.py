@@ -88,13 +88,23 @@ def top_pitches(p, n=4):
 # ---------------------------------------------------------------------------
 
 def load_level(level_key, game_date=None):
-    import data as _data
-    import db as _db
+    from statsplusplus.data.db import get_connection
+    conn = get_connection(league_dir)
     level_int = FARM_LEVEL_INT[level_key]
 
-    # Intl complex players now stored as level=8 after refresh.py fix
-    ratings = _data.get_ratings(ORG_ID, level=level_int)
-    all_players = _data.get_players(ORG_ID)
+    # Get ratings for this org's players at this level
+    ratings = [dict(r) for r in conn.execute("""
+        SELECT r.player_id AS ID, p.name AS Name, p.age AS Age,
+               r.ovr AS Ovr, r.pot AS Pot, r.*
+        FROM ratings r JOIN players p ON r.player_id = p.player_id
+        WHERE (p.team_id = ? OR p.parent_team_id = ?) AND p.level = ?
+          AND r.snapshot_date = (SELECT MAX(r2.snapshot_date) FROM ratings r2 WHERE r2.player_id = r.player_id)
+    """, (ORG_ID, ORG_ID, level_int)).fetchall()]
+    all_players = [dict(r) for r in conn.execute("""
+        SELECT player_id, name AS Name, age AS Age, team_id, parent_team_id,
+               level AS Level, pos AS Pos, role AS Role
+        FROM players WHERE team_id = ? OR parent_team_id = ?
+    """, (ORG_ID, ORG_ID)).fetchall()]
     roster = {p["player_id"]: p for p in all_players if str(p.get("Level")) == str(level_int)}
 
     role_map = {str(k): v for k, v in _cfg.role_map.items()}

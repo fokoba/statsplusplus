@@ -1032,7 +1032,7 @@ def _refresh_dollar_per_war(year):
     conn = _get_connection(league_dir)
 
     from statsplusplus.config.league_config import league_minimum as _lm_fn; league_minimum = lambda: _lm_fn(league_dir)
-    from constants import DEFAULT_MINIMUM_SALARY
+    from statsplusplus.evaluation.constants import DEFAULT_MINIMUM_SALARY
     min_sal = league_minimum()
     sal_threshold = round(5_000_000 * min_sal / DEFAULT_MINIMUM_SALARY) if min_sal else 5_000_000
     sal_threshold = max(sal_threshold, min_sal * 3) if min_sal else sal_threshold

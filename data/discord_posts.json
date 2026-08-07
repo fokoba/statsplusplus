@@ -1,7 +1,7 @@
 {
-  "last_posted_commit": "7ec5d87",
+  "last_posted_commit": "d19ce77",
   "last_posted_date": "2026-08-07",
-  "last_posted_title": "Architecture Overhaul & Performance Optimization",
+  "last_posted_title": "Complete Architecture Overhaul \u2014 All Shims Eliminated",
   "history": [
     {
       "date": "2026-07-22",
@@ -67,6 +67,12 @@
       "date": "2026-08-07",
       "commit": "7ec5d87",
       "title": "Architecture Overhaul & Performance Optimization"
+    },
+    {
+      "date": "2026-08-07",
+      "commit": "d19ce77",
+      "title": "Complete Architecture Overhaul \u2014 All Shims Eliminated (PENDING - webhook 403)"
     }
-  ]
+  ],
+  "pending_post": "Webhook returned 403 \u2014 post pending when webhook is restored"
 }

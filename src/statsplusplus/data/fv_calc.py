@@ -80,10 +80,16 @@ def run(league_dir: Path | None = None) -> None:
         sys.path.insert(0, str(_base / "scripts"))
 
     import db as _db
-    from league_config import LeagueConfig
-    from player_utils import (assign_bucket, calc_fv, LEVEL_NORM_AGE,
-                              dollars_per_war, league_minimum,
-                              peak_war_from_ovr, aging_mult, load_stat_history)
+    from statsplusplus.config.league_config import LeagueConfig
+    from statsplusplus.utils.positions import assign_bucket, LEVEL_NORM_AGE
+    from statsplusplus.evaluation.fv import calc_fv_from_dict as calc_fv
+    from statsplusplus.config.league_config import dollars_per_war as _dpw_fn, league_minimum as _lm_fn
+    from statsplusplus.evaluation.war import peak_war_from_score as peak_war_from_ovr, aging_mult
+    from statsplusplus.evaluation.war import load_stat_history as _lsh_fn
+    def load_stat_history(conn, game_date):
+        return _lsh_fn(conn, game_date, dh_rule=cfg.settings.get("dh_rule", "Universal DH"))
+    dollars_per_war = lambda: _dpw_fn(league_dir)
+    league_minimum = lambda: _lm_fn(league_dir)
     from prospect_value import prospect_surplus_with_option as _prospect_surplus_opt
     from contract_value import contract_value as _contract_value
     from statsplusplus.evaluation.composite import compute_combined_value
@@ -94,7 +100,7 @@ def run(league_dir: Path | None = None) -> None:
     from statsplusplus.data.milb import load_milb_averages, load_milb_stat_seasons
 
     if league_dir is None:
-        from league_context import get_league_dir
+        from statsplusplus.config.league_context import get_league_dir
         league_dir = get_league_dir()
 
     conn = _db.get_conn(league_dir)

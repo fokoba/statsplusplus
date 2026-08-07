@@ -65,9 +65,11 @@ def _estimate_service_time_from_games(conn, player_id):
 
 def estimate_control(conn, player_id, age, salary, bucket=None):
     """Estimate remaining team control years and salary schedule."""
-    from player_utils import league_minimum
-    from league_config import config as _cfg
-    min_sal = league_minimum()
+    from statsplusplus.config.league_context import get_league_dir, get_active_league_slug
+    from statsplusplus.config.league_config import LeagueConfig, league_minimum as _lm_fn
+    _ld = get_league_dir(get_active_league_slug())
+    _cfg = LeagueConfig(base_dir=_ld)
+    min_sal = _lm_fn(_ld)
     svc = estimate_service_time(conn, player_id)
 
     arb_flag = conn.execute(

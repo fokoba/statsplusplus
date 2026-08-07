@@ -105,7 +105,7 @@ class TestCalibrateHelpers:
     def test_bucket_player_empty_string_grades(self):
         """_bucket_player must not crash when DB row has empty string defensive grades."""
         import sqlite3
-        from calibrate import _bucket_player
+        from statsplusplus.data.calibrate import _bucket_player
         # Simulate a sqlite3.Row with empty string values
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
@@ -134,7 +134,7 @@ class TestCalibrateHelpers:
     def test_bucket_player_none_grades(self):
         """_bucket_player must handle NULL defensive grades."""
         import sqlite3
-        from calibrate import _bucket_player
+        from statsplusplus.data.calibrate import _bucket_player
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
         conn.execute("""CREATE TABLE t (
@@ -420,7 +420,7 @@ class TestCalibrateCarryingTools:
 
     def test_returns_none_when_no_data(self):
         """Returns None when no hitter data exists."""
-        from calibrate import _calibrate_carrying_tools
+        from statsplusplus.data.calibrate import _calibrate_carrying_tools
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
         conn.executescript(_SCHEMA)
@@ -431,7 +431,7 @@ class TestCalibrateCarryingTools:
 
     def test_returns_none_when_insufficient_qualifying_players(self):
         """Returns None when fewer than 10 players have 65+ in any tool."""
-        from calibrate import _calibrate_carrying_tools
+        from statsplusplus.data.calibrate import _calibrate_carrying_tools
 
         # Create 9 SS players with contact 65+ (raw=75 → norm=65) below threshold of 10
         # and 5 with low contact (raw=50 → norm=50)
@@ -451,7 +451,7 @@ class TestCalibrateCarryingTools:
 
     def test_basic_carrying_tool_detection(self):
         """Detects carrying tools when 10+ players have 65+ grade with positive WAR premium."""
-        from calibrate import _calibrate_carrying_tools
+        from statsplusplus.data.calibrate import _calibrate_carrying_tools
 
         # 12 SS players with high contact (raw=75 → norm=65) and high WAR
         # 20 SS players with average contact (raw=50 → norm=50) and lower WAR
@@ -480,7 +480,7 @@ class TestCalibrateCarryingTools:
 
     def test_excludes_speed(self):
         """Speed is never included as a carrying tool, even with strong WAR premium."""
-        from calibrate import _calibrate_carrying_tools
+        from statsplusplus.data.calibrate import _calibrate_carrying_tools
 
         # Speed is not queried (not in the offensive tools list), so even if
         # we had speed data, it wouldn't appear. Verify by checking the output
@@ -506,7 +506,7 @@ class TestCalibrateCarryingTools:
 
     def test_excludes_negative_war_premium(self):
         """Tools where 65+ players have lower WAR than position mean are excluded."""
-        from calibrate import _calibrate_carrying_tools
+        from statsplusplus.data.calibrate import _calibrate_carrying_tools
 
         # 12 SS players with high contact but LOW WAR (below position mean)
         # 20 SS players with average contact and higher WAR
@@ -529,7 +529,7 @@ class TestCalibrateCarryingTools:
 
     def test_config_structure(self):
         """Output config has the expected structure matching carrying_tool_config.json schema."""
-        from calibrate import _calibrate_carrying_tools
+        from statsplusplus.data.calibrate import _calibrate_carrying_tools
 
         specs = []
         for i in range(15):
@@ -559,7 +559,7 @@ class TestCalibrateCarryingTools:
 
     def test_war_premium_factor_scaling(self):
         """war_premium_factor = raw_war_premium / 5.0."""
-        from calibrate import _calibrate_carrying_tools
+        from statsplusplus.data.calibrate import _calibrate_carrying_tools
 
         # Create data where the WAR premium is known:
         # 12 high-contact SS with WAR=6.0, 20 average SS with WAR=1.0
@@ -589,7 +589,7 @@ class TestCalibrateCarryingTools:
 
     def test_multiple_positions(self):
         """Calibration works across multiple position buckets."""
-        from calibrate import _calibrate_carrying_tools
+        from statsplusplus.data.calibrate import _calibrate_carrying_tools
 
         specs = []
         # SS players with high contact
@@ -622,7 +622,7 @@ class TestCalibrateCarryingTools:
 
     def test_calibration_metadata_included(self):
         """Each carrying tool entry includes _calibration metadata."""
-        from calibrate import _calibrate_carrying_tools
+        from statsplusplus.data.calibrate import _calibrate_carrying_tools
 
         specs = []
         for i in range(15):

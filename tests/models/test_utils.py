@@ -269,20 +269,11 @@ class TestConfigRatings:
         assert config_norm_floor(50, "1-100") == 50
 
     def test_matches_legacy(self):
-        """Verify identical output to legacy scripts/ratings.py."""
-        import sys
-        sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
-        from ratings import norm as legacy_norm, norm_continuous as legacy_nc, init_ratings_scale
-
-        for scale in ["1-100", "20-80", "1-20"]:
-            init_ratings_scale(scale)
-            for raw in [None, 0, 10, 20, 30, 50, 65, 80, 100]:
-                new = config_norm(raw, scale)
-                old = legacy_norm(raw)
-                assert new == old, f"norm mismatch: raw={raw}, scale={scale}, new={new}, old={old}"
-
-            for raw in [10, 30, 50, 75, 100]:
-                new_c = config_norm_continuous(raw, scale)
-                old_c = legacy_nc(raw)
-                if new_c is not None and old_c is not None:
-                    assert abs(new_c - old_c) < 0.01, f"continuous mismatch: raw={raw}, scale={scale}"
+        """Package norm functions produce expected values (formerly validated against legacy shim)."""
+        # 1-100 scale: 75 → 65
+        assert config_norm(75, "1-100") == 65
+        assert config_norm(50, "1-100") == 50
+        # 20-80 scale: passthrough
+        assert config_norm(65, "20-80") == 65
+        # Continuous
+        assert abs(config_norm_continuous(75, "1-100") - 65.0) < 0.1

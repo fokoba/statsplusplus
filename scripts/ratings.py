@@ -21,8 +21,8 @@ def get_ratings_scale():
     """Return the current ratings scale ('1-100' or '20-80'). Public accessor."""
     global _ratings_scale
     if _ratings_scale is None:
-        from league_config import config
-        _ratings_scale = config.ratings_scale
+        from statsplusplus.config.league_config import LeagueConfig
+        _ratings_scale = LeagueConfig().ratings_scale
     return _ratings_scale
 
 

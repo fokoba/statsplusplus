@@ -164,7 +164,7 @@ def get_trade_value(player_id, retention_pct=0.0):
         }
 
     # MLB contract path
-    result = contract_value(player_id, retention_pct=retention_pct)
+    result = contract_value(player_id, retention_pct=retention_pct, league_dir=get_cfg().league_dir)
     if not result:
         return None
 

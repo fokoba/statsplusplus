@@ -11,7 +11,7 @@ import sys
 import threading
 from pathlib import Path
 
-from flask import Blueprint, g, jsonify, redirect, render_template, request
+from flask import Blueprint, g, jsonify, redirect, render_template, request, session
 
 from statsplusplus.evaluation.constants import DEFAULT_MINIMUM_SALARY
 from statsplusplus.config.league_context import (
@@ -181,9 +181,7 @@ def switch_league(slug):
     league_dir = get_league_dir(slug)
     if not (league_dir / "config" / "league_settings.json").exists():
         return "League not found", 404
-    app_cfg = json.loads(APP_CONFIG_PATH.read_text()) if APP_CONFIG_PATH.exists() else {}
-    app_cfg["active_league"] = slug
-    APP_CONFIG_PATH.write_text(json.dumps(app_cfg, indent=2) + "\n")
+    session["active_league"] = slug
     return redirect("/")
 
 

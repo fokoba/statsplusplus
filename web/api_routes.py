@@ -10,7 +10,7 @@ import sys
 import threading
 from pathlib import Path
 
-from flask import Blueprint, g, jsonify, request
+from flask import Blueprint, g, jsonify, request, session
 
 from statsplusplus.config.league_context import (
     APP_CONFIG_PATH,
@@ -152,6 +152,10 @@ def api_wipe_league():
         app_cfg.pop("active_league", None)
         redirect_to = "/onboard"
     APP_CONFIG_PATH.write_text(json.dumps(app_cfg, indent=2) + "\n")
+
+    # Clear session if it pointed to a deleted league
+    if session.get("active_league") in targets:
+        session.pop("active_league", None)
 
     return jsonify({"ok": True, "redirect": redirect_to})
 

@@ -8,11 +8,11 @@ _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from flask import Flask, render_template, redirect, request, g
+from flask import Flask, render_template, redirect, request, g, session
 import werkzeug.exceptions
 import queries
 from statsplusplus.config.league_config import LeagueConfig
-from statsplusplus.config.league_context import get_league_dir, get_active_league_slug
+from statsplusplus.config.league_context import get_league_dir, get_active_league_slug, APP_CONFIG_PATH
 from statsplusplus.utils.logging import get_logger
 
 log = get_logger("web")
@@ -20,6 +20,16 @@ log = get_logger("web")
 app = Flask(__name__)
 app.json.sort_keys = False
 app.jinja_env.policies["json.dumps_kwargs"] = {"sort_keys": False}
+
+# Flask session secret key — generated once, persisted in app_config.json
+import json as _json
+_app_cfg = _json.loads(APP_CONFIG_PATH.read_text()) if APP_CONFIG_PATH.exists() else {}
+if "flask_secret_key" not in _app_cfg:
+    import secrets
+    _app_cfg["flask_secret_key"] = secrets.token_hex(32)
+    APP_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    APP_CONFIG_PATH.write_text(_json.dumps(_app_cfg, indent=2) + "\n")
+app.secret_key = _app_cfg["flask_secret_key"]
 
 # Register route blueprints
 from settings_routes import settings_bp
@@ -45,8 +55,13 @@ _EXEMPT_PREFIXES = ("/settings", "/onboard", "/switch-league", "/refresh",
 
 @app.before_request
 def _set_league_context():
-    """Populate Flask g with league-scoped config."""
-    slug = get_active_league_slug()
+    """Populate Flask g with league-scoped config.
+
+    Active league priority:
+      1. Flask session (per-browser, set by /switch-league)
+      2. app_config.json (global default, set by onboarding)
+    """
+    slug = session.get("active_league") or get_active_league_slug()
     league_dir = get_league_dir(slug)
     settings_exist = (league_dir / "config" / "league_settings.json").exists()
     if not settings_exist and not request.path.startswith(("/onboard", "/static")):

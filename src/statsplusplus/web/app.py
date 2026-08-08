@@ -77,13 +77,8 @@ def create_app(project_root: Path | None = None) -> Flask:
     @app.before_request
     def _set_league_context() -> None | werkzeug.wrappers.Response:
         """Populate Flask g with league-scoped config."""
-        import sys
-        scripts_dir = str(project_root / "scripts")
-        if scripts_dir not in sys.path:
-            sys.path.insert(0, scripts_dir)
-
-        from league_context import get_active_league_slug, get_league_dir
-        from league_config import LeagueConfig
+        from statsplusplus.config.league_context import get_active_league_slug, get_league_dir
+        from statsplusplus.config.league_config import LeagueConfig
 
         slug = get_active_league_slug()
         league_dir = get_league_dir(slug)

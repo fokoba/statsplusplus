@@ -23,11 +23,47 @@ from statsplusplus.evaluation.constants import load_model_weights
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Resolve league context once at module level
+# Resolve league context once at module level (CLI default — refreshed by
+# _ensure_league_context() below when called from the long-running web
+# server, where get_active_league_slug()'s global default can be stale or
+# simply wrong for the request's actual active league).
 _league_dir = get_league_dir(get_active_league_slug())
 _cfg = LeagueConfig(base_dir=_league_dir)
 _weights = load_model_weights(_league_dir)
 ARB_PCT = _weights.arb_pct
+
+
+def _ensure_league_context(league_dir=None):
+    """Refresh module-level league context if it doesn't match league_dir.
+
+    contract_value.py resolves its league context once at import time —
+    fine for the CLI (one process, one league), but this module is also
+    imported into the Flask web server, which stays alive across requests
+    for *different* leagues (multi-league support, session-scoped active
+    league). Without this, every trade valuation after the first uses
+    whichever league happened to be active when this module was first
+    imported — silently 404ing for players that don't exist in that
+    league's DB, or worse, computing surplus with the wrong league's
+    $/WAR, minimum salary, and model weights for players whose ID
+    coincidentally also exists there.
+    """
+    global _league_dir, _cfg, _weights, ARB_PCT, _state_cache, _perp_arb_model_cache
+    target = league_dir or get_league_dir(get_active_league_slug())
+    # Always refresh when an explicit league_dir is given (web callers) —
+    # not just on a change from the current target. The module-level state
+    # set at import time can itself be stale (e.g. computed before other
+    # startup side effects settle), and if that stale state's league
+    # happens to equal the caller's target, a change-only check would
+    # never clear it. Explicit callers always want a guaranteed-fresh read;
+    # the CLI's implicit (league_dir=None) resolution keeps the cheaper
+    # change-only check since it's a single-invocation process anyway.
+    if target != _league_dir or league_dir is not None:
+        _league_dir = target
+        _cfg = LeagueConfig(base_dir=_league_dir)
+        _weights = load_model_weights(_league_dir)
+        ARB_PCT = _weights.arb_pct
+        _state_cache = {}
+        _perp_arb_model_cache = {}
 
 # Local wrappers to maintain no-arg calling convention used throughout this file
 def dollars_per_war():
@@ -60,8 +96,7 @@ def _load_perp_arb_model():
     """
     if "model" not in _perp_arb_model_cache:
         try:
-            from statsplusplus.config.league_context import get_league_dir
-            mw_path = get_league_dir() / "config" / "model_weights.json"
+            mw_path = _league_dir / "config" / "model_weights.json"
             if mw_path.exists():
                 mw = json.load(open(mw_path))
                 _perp_arb_model_cache["model"] = mw.get("ARB_SALARY_MODEL")
@@ -73,8 +108,7 @@ def _load_perp_arb_model():
 
 def _get_state():
     if not _state_cache:
-        from statsplusplus.config.league_context import get_league_dir
-        state_path = get_league_dir() / "config" / "state.json"
+        state_path = _league_dir / "config" / "state.json"
         with open(state_path) as f:
             _state_cache.update(json.load(f))
     return _state_cache
@@ -128,7 +162,7 @@ def _resolve(conn, query):
     return pid, name, age, ovr, pot, bucket
 
 
-def contract_value(player_id, retention_pct=0.0, _conn=None, _hist=None):
+def contract_value(player_id, retention_pct=0.0, _conn=None, _hist=None, league_dir=None):
     """
     Programmatic interface for trade_calculator. Returns surplus dict or None.
     retention_pct: fraction of salary the sending team retains.
@@ -138,7 +172,11 @@ def contract_value(player_id, retention_pct=0.0, _conn=None, _hist=None):
 
     Optional _conn/_hist for batch mode (avoids repeated DB/stat loading).
     _hist = (bat_hist, pit_hist, two_way) tuple from load_stat_history().
+    league_dir: explicit league to value against — pass this from any
+    caller that runs inside the web server, where the module-level default
+    can be stale (see _ensure_league_context).
     """
+    _ensure_league_context(league_dir)
     conn = _conn or get_connection(_league_dir)
     result = _resolve(conn, str(player_id))
     if not result:
@@ -223,8 +261,7 @@ def contract_value(player_id, retention_pct=0.0, _conn=None, _hist=None):
     # For perpetual arb: track cumulative career WAR (used by salary model)
     _career_war_accum = 0.0
     try:
-        from statsplusplus.config.league_config import LeagueConfig; _cfg_init = LeagueConfig()
-        if _cfg_init.perpetual_arb:
+        if _cfg.perpetual_arb:
             # Sum prior career WAR from stats
             _cw_bat = conn.execute(
                 "SELECT COALESCE(SUM(war), 0) FROM mlb_batting_stats WHERE player_id=? AND split_id=1",
@@ -262,8 +299,7 @@ def contract_value(player_id, retention_pct=0.0, _conn=None, _hist=None):
         # Determine salary for this year
         if ctrl_type == "estimated" and i > 0:
             # Year 0 uses actual contract salary; future years are projected
-            from statsplusplus.config.league_config import LeagueConfig; _cfg_cv = LeagueConfig()
-            if _cfg_cv.perpetual_arb:
+            if _cfg.perpetual_arb:
                 # Perpetual arb: salary based on career WAR accumulation + ceiling
                 # Salary can decrease if WAR declines. No pre-arb concept.
                 _perp_model = _load_perp_arb_model()
@@ -283,7 +319,7 @@ def contract_value(player_id, retention_pct=0.0, _conn=None, _hist=None):
             #   value). Only fires after year 2 to avoid early truncation for
             #   players still developing.
             mkt_val = war_base * dpw * scarcity
-            if _cfg_cv.perpetual_arb:
+            if _cfg.perpetual_arb:
                 yr_surplus = mkt_val - sal_full
                 if (i >= 3 and breakdown and breakdown[0].get("surplus", 0) > 0
                         and yr_surplus < breakdown[0]["surplus"] * 0.30):

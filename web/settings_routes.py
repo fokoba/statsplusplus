@@ -250,7 +250,7 @@ def _run_onboard_refresh(slug, ratings_poll_url=""):
     _log.info("=== onboard refresh started (slug=%s) ===", slug)
     try:
         cookie = get_statsplus_cookie()
-        script = Path(__file__).parent.parent / "scripts" / "refresh.py"
+        script = Path(__file__).parent.parent / "src" / "statsplusplus" / "data" / "refresh.py"
         cmd = [sys.executable, "-u", str(script)]
         env = {**os.environ, "STATSPLUS_LEAGUE_URL": slug, "STATSPLUS_COOKIE": cookie, "STATSPP_LEAGUE": slug}
         if ratings_poll_url:
@@ -404,7 +404,7 @@ def onboard_step3():
     st["my_team_id"] = team_id
     state_path.write_text(json.dumps(st, indent=2) + "\n")
     try:
-        script = Path(__file__).parent.parent / "scripts" / "fv_calc.py"
+        script = Path(__file__).parent.parent / "src" / "statsplusplus" / "data" / "fv_calc.py"
         subprocess.run([sys.executable, str(script)],
                        capture_output=True, text=True, timeout=120)
     except Exception:

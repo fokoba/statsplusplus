@@ -34,7 +34,7 @@ def _resolve_creds():
         return _league_url, _cookie
     # Try league_context (new multi-league path)
     try:
-        from league_context import get_league_dir, get_statsplus_cookie
+        from statsplusplus.config.league_context import get_league_dir, get_statsplus_cookie
         cookie = get_statsplus_cookie()
         league_dir = get_league_dir()
         settings_path = league_dir / "config" / "league_settings.json"

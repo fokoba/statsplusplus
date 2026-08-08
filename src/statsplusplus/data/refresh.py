@@ -1351,7 +1351,7 @@ def _run_calibrate():
     import subprocess
     log.info("── calibrate")
     result = subprocess.run(
-        [sys.executable, str(BASE / "scripts" / "calibrate.py")],
+        [sys.executable, str(BASE / "src" / "statsplusplus" / "data" / "calibrate.py")],
         capture_output=True, text=True
     )
     if result.stdout:
@@ -1386,7 +1386,7 @@ def _run_fv_calc():
     import subprocess
     log.info("── fv_calc")
     result = subprocess.run(
-        [sys.executable, str(BASE / "scripts" / "fv_calc.py")],
+        [sys.executable, str(BASE / "src" / "statsplusplus" / "data" / "fv_calc.py")],
         capture_output=True, text=True
     )
     if result.stdout:

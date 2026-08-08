@@ -553,7 +553,7 @@ def _run_refresh(slug, league_dir, statsplus_slug, cookie):
         from statsplusplus.data import db as _db_mod
         from statsplusplus.config.league_config import LeagueConfig
         bg_cfg = LeagueConfig(base_dir=league_dir)
-        script = Path(__file__).parent.parent / "scripts" / "refresh.py"
+        script = Path(__file__).parent.parent / "src" / "statsplusplus" / "data" / "refresh.py"
         env = {**os.environ, "STATSPP_LEAGUE": slug, "STATSPLUS_COOKIE": cookie}
         if statsplus_slug:
             env["STATSPLUS_LEAGUE_URL"] = statsplus_slug

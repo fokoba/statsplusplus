@@ -349,9 +349,13 @@ def unified_surplus(
 
     # RP surplus discount: reliever production is volatile, replaceable, and
     # has shorter peak windows than SP/hitter production. Real-baseball trade
-    # markets heavily discount RP control years (~40-50% of equivalent SP value).
+    # markets discount RP control relative to SP/hitter control.
+    # However, elite relievers (2+ WAR) retain significant value — Mason Miller
+    # types with pre-arb control trade for top-10 prospect packages.
+    # Scale: 0.35 for replacement-level RPs, rising to 0.65 for elite (2.5+ WAR).
     if bucket == "RP":
-        combined_mult *= 0.40
+        rp_discount = 0.35 + 0.30 * min(1.0, max(0.0, (peak_war - 0.5) / 2.0))
+        combined_mult *= rp_discount
 
     final_surplus = max(0, round(total_surplus * combined_mult))
 

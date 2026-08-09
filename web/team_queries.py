@@ -27,8 +27,12 @@ def league_minimum():
 
 
 # SQL fragment + params to filter contracts to players currently in a given org.
-# contract_team_id alone is unreliable — Rule 5 picks retain the original team's
-# contract_team_id even after the drafting team takes on the contract.
+# This is the *only* org filter these queries should use — contract_team_id
+# is unreliable and must not be ANDed alongside it: Rule 5 picks and traded
+# players both retain their contract row's original contract_team_id, so a
+# hard `contract_team_id = ?` gate silently excludes them even though this
+# players-table check (their actual current team_id/parent_team_id) already
+# correctly identifies them as belonging to this org.
 _CONTRACT_ORG_SQL = (
     "AND (p.parent_team_id = ? OR (p.parent_team_id = 0 AND p.team_id = ?))"
 )
@@ -1091,10 +1095,10 @@ def get_contracts(team_id):
         FROM contracts c
         JOIN players p ON c.player_id = p.player_id
         LEFT JOIN player_surplus ps ON c.player_id = ps.player_id AND ps.eval_date = ?
-        WHERE c.contract_team_id = ?
+        WHERE 1=1
           {_CONTRACT_ORG_SQL}
         ORDER BY c.salary_0 DESC
-    """.format(_CONTRACT_ORG_SQL=_CONTRACT_ORG_SQL), (ed, team_id, *_contract_org_params(team_id))).fetchall()
+    """.format(_CONTRACT_ORG_SQL=_CONTRACT_ORG_SQL), (ed, *_contract_org_params(team_id))).fetchall()
 
     out = []
     for r in rows:
@@ -1133,9 +1137,9 @@ def get_payroll_summary(team_id):
                c.last_year_team_option, c.last_year_player_option, c.no_trade
         FROM contracts c
         JOIN players p ON c.player_id = p.player_id
-        WHERE c.contract_team_id = ? AND c.is_major = 1
+        WHERE c.is_major = 1
           {_CONTRACT_ORG_SQL}
-    """.format(_CONTRACT_ORG_SQL=_CONTRACT_ORG_SQL), (team_id, *_contract_org_params(team_id))).fetchall()
+    """.format(_CONTRACT_ORG_SQL=_CONTRACT_ORG_SQL), (*_contract_org_params(team_id),)).fetchall()
 
     # Project salaries for 1yr contract players using arb model (no non-tender gate)
     from contract_value import _resolve
@@ -1245,9 +1249,9 @@ def get_upcoming_fa(team_id):
         FROM contracts c
         JOIN players p ON c.player_id = p.player_id
         LEFT JOIN player_surplus ps ON c.player_id = ps.player_id AND ps.eval_date = ?
-        WHERE c.contract_team_id = ? AND c.is_major = 1
+        WHERE c.is_major = 1
           {_CONTRACT_ORG_SQL}
-    """.format(_CONTRACT_ORG_SQL=_CONTRACT_ORG_SQL), (ed, team_id, *_contract_org_params(team_id))).fetchall()
+    """.format(_CONTRACT_ORG_SQL=_CONTRACT_ORG_SQL), (ed, *_contract_org_params(team_id))).fetchall()
 
     out = []
     for pid, name, age, years, cur_yr, sal, surplus, ovr, bucket in rows:
@@ -2442,9 +2446,9 @@ def get_org_overview(team_id):
         FROM contracts c
         JOIN players p ON c.player_id = p.player_id
         LEFT JOIN player_surplus ps ON c.player_id = ps.player_id AND ps.eval_date = ?
-        WHERE c.contract_team_id = ? AND c.is_major = 1
+        WHERE c.is_major = 1
           {_CONTRACT_ORG_SQL}
-    """.format(_CONTRACT_ORG_SQL=_CONTRACT_ORG_SQL), (ed_s, team_id, *_contract_org_params(team_id))).fetchall()
+    """.format(_CONTRACT_ORG_SQL=_CONTRACT_ORG_SQL), (ed_s, *_contract_org_params(team_id))).fetchall()
     for r in ctrl_rows:
         surplus = r["surplus"]
         if not surplus or surplus <= 0:

@@ -394,6 +394,7 @@ def _create_legacy_views(conn, game_date: str) -> None:
         FROM player_evaluation
         WHERE stat_confidence < 0.5
         AND fv IS NOT NULL
+        AND age <= 25
     """)
 
     conn.execute("""

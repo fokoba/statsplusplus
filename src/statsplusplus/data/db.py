@@ -297,7 +297,7 @@ CREATE VIEW IF NOT EXISTS prospect_fv AS
     SELECT player_id, eval_date, fv, fv_str, level, bucket,
            surplus AS prospect_surplus, risk, fv_continuous
     FROM player_evaluation
-    WHERE stat_confidence < 0.5 AND fv IS NOT NULL;
+    WHERE stat_confidence < 0.5 AND fv IS NOT NULL AND age <= 25;
 
 CREATE VIEW IF NOT EXISTS player_surplus AS
     SELECT player_id, eval_date, name, bucket, age,

@@ -328,6 +328,32 @@ CREATE TABLE IF NOT EXISTS org_reports (
     PRIMARY KEY (team_id, report_date)
 );
 
+CREATE TABLE IF NOT EXISTS player_evaluation (
+    player_id       INTEGER,
+    eval_date       TEXT,
+    name            TEXT,
+    bucket          TEXT,
+    age             INTEGER,
+    level           TEXT,
+    team_id         INTEGER,
+    parent_team_id  INTEGER,
+    composite       INTEGER,
+    ceiling         INTEGER,
+    fv              INTEGER,
+    fv_str          TEXT,
+    fv_continuous   REAL,
+    risk            TEXT,
+    tool_war        REAL,
+    stat_war        REAL,
+    stat_confidence REAL,
+    peak_war        REAL,
+    surplus         INTEGER,
+    surplus_yr1     INTEGER,
+    years_control   INTEGER,
+    ctrl_type       TEXT,
+    PRIMARY KEY (player_id, eval_date)
+);
+
 CREATE VIEW IF NOT EXISTS mlb_batting_stats AS
     SELECT * FROM batting_stats WHERE league_id IS NULL;
 

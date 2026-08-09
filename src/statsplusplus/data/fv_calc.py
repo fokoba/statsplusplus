@@ -291,7 +291,7 @@ def run(league_dir: Path | None = None) -> None:
                 level_label, bucket, surplus, fv_risk, fv_continuous
             ))
 
-    # Write results
+    # Write results (existing tables — kept for backward compat during Phase 2)
     conn.execute("DELETE FROM prospect_fv")
     _pf_cols = {r[1] for r in conn.execute("PRAGMA table_info(prospect_fv)").fetchall()}
     if "risk" not in _pf_cols:
@@ -307,6 +307,14 @@ def run(league_dir: Path | None = None) -> None:
         PRIMARY KEY (player_id, eval_date))""")
     conn.executemany("INSERT INTO prospect_fv VALUES (?,?,?,?,?,?,?,?,?)", prospect_rows)
     conn.executemany("INSERT INTO player_surplus VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", surplus_rows)
+
+    # --- Unified evaluation (Phase 2 dual-write) ---
+    _write_unified_evaluations(
+        conn, rows, game_date, role_map, use_custom_scores,
+        _career_ab, _career_ip, bat_hist, pit_hist, two_way,
+        cfg, league_dir,
+    )
+
     conn.commit()
     conn.close()
 
@@ -379,6 +387,222 @@ def _check_fv_tier_discrepancy(p: dict, fv_base: int, fv_risk: str) -> None:
             "raw-tool-based=%d (defensive_value=%s)",
             p.get("ID", "?"), fv_base, fv_old, p["_defensive_value"],
         )
+
+
+def _write_unified_evaluations(
+    conn,
+    rows: list,
+    game_date: str,
+    role_map: dict,
+    use_custom_scores: bool,
+    career_ab: dict,
+    career_ip: dict,
+    bat_hist: dict,
+    pit_hist: dict,
+    two_way: set,
+    cfg,
+    league_dir,
+) -> None:
+    """Compute and write unified evaluations for all rated players.
+
+    Phase 2 dual-write: populates player_evaluation table alongside the
+    existing prospect_fv and player_surplus tables. Non-fatal on failure.
+    """
+    from statsplusplus.evaluation.unified import unified_surplus
+    from statsplusplus.evaluation.war import stat_peak_war
+    from statsplusplus.evaluation.constants import load_model_weights
+    from statsplusplus.config.league_config import dollars_per_war, league_minimum
+    from statsplusplus.utils.positions import assign_bucket
+    from pathlib import Path
+
+    try:
+        weights = load_model_weights(league_dir)
+        dpw = dollars_per_war(league_dir)
+        min_sal = league_minimum(league_dir)
+        perpetual_arb = cfg.perpetual_arb
+    except Exception as e:
+        logger.warning(f"unified eval: failed to load config: {e}")
+        return
+
+    # Load career PA (AB + BB + HBP + SF)
+    career_pa: dict[int, int] = {}
+    try:
+        for r in conn.execute(
+            "SELECT player_id, SUM(ab + COALESCE(bb,0) + COALESCE(hbp,0) + COALESCE(sf,0)) "
+            "FROM mlb_batting_stats WHERE split_id=1 GROUP BY player_id"
+        ).fetchall():
+            career_pa[r[0]] = int(r[1] or 0)
+    except Exception:
+        pass
+
+    # Career IP (already available from outer scope but recompute for IP specifically)
+    career_ip_totals: dict[int, float] = {}
+    try:
+        for r in conn.execute(
+            "SELECT player_id, SUM(ip) FROM mlb_pitching_stats WHERE split_id=1 GROUP BY player_id"
+        ).fetchall():
+            career_ip_totals[r[0]] = float(r[1] or 0)
+    except Exception:
+        pass
+
+    # Load prospect FV data (just written above) for FV continuous values
+    prospect_fv_data: dict[int, tuple] = {}
+    try:
+        for r in conn.execute(
+            "SELECT player_id, fv, fv_str, fv_continuous, level, bucket, risk "
+            "FROM prospect_fv WHERE eval_date = ?", (game_date,)
+        ).fetchall():
+            prospect_fv_data[r[0]] = r
+    except Exception:
+        pass
+
+    # Ensure table exists
+    conn.execute("""CREATE TABLE IF NOT EXISTS player_evaluation (
+        player_id INTEGER, eval_date TEXT, name TEXT, bucket TEXT,
+        age INTEGER, level TEXT, team_id INTEGER, parent_team_id INTEGER,
+        composite INTEGER, ceiling INTEGER,
+        fv INTEGER, fv_str TEXT, fv_continuous REAL, risk TEXT,
+        tool_war REAL, stat_war REAL, stat_confidence REAL, peak_war REAL,
+        surplus INTEGER, surplus_yr1 INTEGER, years_control INTEGER, ctrl_type TEXT,
+        PRIMARY KEY (player_id, eval_date))""")
+    conn.execute("DELETE FROM player_evaluation WHERE eval_date = ?", (game_date,))
+
+    eval_rows: list[tuple] = []
+    errors = 0
+
+    for rat in rows:
+        p = dict(rat)
+        pid = p["ID"]
+        age = p["Age"]
+        level = p["level"]
+
+        if level is None or str(level) in ("7", "8"):
+            continue
+
+        # Resolve composite/ceiling
+        if use_custom_scores:
+            composite = p.get("composite_score") or p.get("Ovr") or 0
+            ceiling = p.get("true_ceiling") or p.get("ceiling_score") or p.get("Pot") or 0
+        else:
+            composite = p.get("Ovr") or 0
+            ceiling = p.get("Pot") or 0
+
+        if not composite or not ceiling:
+            continue
+
+        # Determine bucket
+        role_str = role_map.get(str(p.get("role") or 0), "position_player")
+        p["_role"] = role_str
+        p["Pos"] = str(p.get("pos") or "")
+        p["_is_pitcher"] = (p["Pos"] == "P" or role_str in ("starter", "reliever", "closer"))
+        bucket = assign_bucket(p)
+
+        # Level string
+        level_int = int(level)
+        level_str = LEVEL_INT_LABEL.get(level_int, "MLB") if level_int != 1 else "MLB"
+
+        # FV data
+        pf = prospect_fv_data.get(pid)
+        if pf:
+            fv = pf[1]
+            fv_str = pf[2]
+            fv_continuous = pf[3] or float(pf[1])
+            risk = pf[6]
+            # Use prospect_fv's bucket (which may differ from raw assignment)
+            bucket = pf[5] or bucket
+            # For scarcity: the prospect pipeline used a PAC-adjusted ceiling.
+            # We don't have that stored, but we can approximate by using
+            # fv_continuous + 3 as the effective ceiling for scarcity lookup
+            # (since calc_fv caps FV at ceiling - 3).
+            ceiling_for_scarcity = min(ceiling, int(fv_continuous) + 5)
+        else:
+            # MLB player without prospect FV — estimate from composite/ceiling
+            fv_continuous = float(min(ceiling - 3, composite + (ceiling - composite) * 0.4))
+            fv = round(fv_continuous / 5) * 5
+            fv_str = str(fv)
+            risk = None
+            ceiling_for_scarcity = ceiling
+
+        # Career stats
+        pa = career_pa.get(pid, 0)
+        ip = career_ip_totals.get(pid, 0.0)
+
+        # Stat peak WAR
+        sw = stat_peak_war(pid, bucket, bat_hist, pit_hist, two_way=two_way)
+
+        # Estimate control period
+        ab = career_ab.get(pid, 0) or 0
+        ip_career = career_ip.get(pid, 0) or 0
+        if ab < 130 and ip_career < 50:
+            years_ctrl = 6
+            ctrl_type = "pre-arb"
+        else:
+            # Simplified: check for contract
+            c_row = conn.execute(
+                "SELECT years, current_year FROM contracts WHERE player_id=?", (pid,)
+            ).fetchone()
+            if c_row and c_row[0]:
+                years_ctrl = max(1, c_row[0] - (c_row[1] or 0))
+                ctrl_type = "contract"
+            else:
+                years_ctrl = 3  # Default arb-eligible
+                ctrl_type = "arb"
+
+        # Get salary schedule from contract if available
+        salaries = None
+        if ctrl_type == "contract":
+            c_full = conn.execute("SELECT * FROM contracts WHERE player_id=?", (pid,)).fetchone()
+            if c_full:
+                sals = []
+                start = c_full["current_year"] or 0
+                for i in range(start, c_full["years"]):
+                    key = f"salary_{i}"
+                    if key in c_full.keys():
+                        sals.append(c_full[key] or min_sal)
+                if len(sals) >= years_ctrl:
+                    salaries = sals[:years_ctrl]
+
+        try:
+            result = unified_surplus(
+                fv_continuous=fv_continuous,
+                bucket=bucket,
+                age=age,
+                level=level_str,
+                composite=composite,
+                ceiling=ceiling_for_scarcity,
+                career_pa=pa,
+                career_ip=ip,
+                stat_war=sw,
+                years_control=years_ctrl,
+                salaries=salaries,
+                dpw=dpw,
+                min_sal=min_sal,
+                perpetual_arb=perpetual_arb,
+                weights=weights,
+            )
+        except Exception:
+            errors += 1
+            continue
+
+        eval_rows.append((
+            pid, game_date, p["Name"], bucket, age, level_str,
+            p.get("team_id"), p.get("parent_team_id"),
+            composite, ceiling,
+            fv, fv_str, fv_continuous, risk,
+            result["tool_war"], result.get("stat_war"),
+            result["stat_confidence"], result["peak_war"],
+            result["surplus"], result["surplus_yr1"],
+            years_ctrl, ctrl_type,
+        ))
+
+    if eval_rows:
+        conn.executemany(
+            "INSERT OR REPLACE INTO player_evaluation VALUES "
+            "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            eval_rows,
+        )
+
+    logger.info(f"unified eval: {len(eval_rows)} players written, {errors} errors")
 
 
 def main() -> None:

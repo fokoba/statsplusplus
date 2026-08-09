@@ -1404,55 +1404,68 @@ def get_player(pid):
                     "flags": cv.get("flags", []),
                 }
         elif valuation.get("type") == "prospect":
-            import prospect_value as _pv
+            from statsplusplus.evaluation.unified import unified_surplus as _unified_surplus
+            from statsplusplus.evaluation.constants import load_model_weights as _load_mw
+            from statsplusplus.config.league_config import dollars_per_war as _dpw_fn, league_minimum as _lm_fn
+            from statsplusplus.evaluation.war import stat_peak_war as _spw
+
             fv = valuation.get("fv", 0)
-            # Use fv_continuous (pre-rounding) for accurate surplus — matches fv_calc.py
             fv_for_surplus = valuation.get("fv_continuous") or fv
             bucket_val = valuation.get("bucket", "")
             level_val = valuation.get("level", level_str)
-            _dr = valuation.get("def_rating")
-            _comp_kw = dict(offensive_grade=eval_data.get("offensive_grade"),
-                            offensive_ceiling=eval_data.get("offensive_ceiling"),
-                            defensive_value=eval_data.get("defensive_value"),
-                            durability_score=eval_data.get("durability_score"))
-            pv = _pv.prospect_surplus(fv_for_surplus, age, level_val, bucket_val,
-                                      ovr=valuation.get("ovr"), pot=valuation.get("pot"),
-                                      def_rating=_dr)
-            opt_total = _pv.prospect_surplus_with_option(
-                fv_for_surplus, age, level_val, bucket_val,
-                ovr=valuation.get("ovr"), pot=valuation.get("pot"),
-                def_rating=_dr, **_comp_kw)
-            # Use stored surplus as authoritative when available (computed by
-            # fv_calc.py with full context: fv_continuous + component scores).
-            # Fall back to live calculation for on-the-fly evaluations.
-            stored_surplus = valuation.get("surplus")
-            if stored_surplus and stored_surplus != 0:
-                authoritative_total = round(stored_surplus * 1e6)
-            else:
-                authoritative_total = opt_total
-            if pv and pv.get("breakdown"):
-                cert = pv.get("certainty_mult", 1.0)
-                scar = pv.get("scarcity_mult", 1.0)
-                combined = pv["dev_discount"] * cert * scar
-                raw_total = sum(b["market_value"] - b["salary"] for b in pv["breakdown"])
-                eta_yr = int(get_cfg().year + pv["years_to_mlb"])
+            _league_dir = get_cfg().league_dir
+            _mw = _load_mw(_league_dir)
+            _dpw = _dpw_fn(_league_dir)
+            _lm = _lm_fn(_league_dir)
+
+            # Get career stats for stat_confidence
+            _cpa = conn.execute(
+                "SELECT COALESCE(SUM(ab + COALESCE(bb,0) + COALESCE(hbp,0) + COALESCE(sf,0)), 0) "
+                "FROM mlb_batting_stats WHERE player_id=? AND split_id=1", (pid,)
+            ).fetchone()[0]
+            _cip = conn.execute(
+                "SELECT COALESCE(SUM(ip), 0) FROM mlb_pitching_stats WHERE player_id=? AND split_id=1", (pid,)
+            ).fetchone()[0]
+
+            _uval = _unified_surplus(
+                fv_continuous=float(fv_for_surplus),
+                bucket=bucket_val,
+                age=age,
+                level=level_val,
+                composite=valuation.get("ovr") or 50,
+                ceiling=valuation.get("pot") or 60,
+                career_pa=int(_cpa),
+                career_ip=float(_cip),
+                stat_war=None,  # stat_peak_war is expensive; use pre-computed
+                years_control=6,
+                dpw=_dpw, min_sal=_lm, weights=_mw,
+            )
+
+            if _uval and _uval.get("breakdown"):
+                eta_yr = int(get_cfg().year + _uval["years_to_mlb"])
                 surplus_detail = {
                     "rows": [{"year": eta_yr + b['control_year'] - 1, "age": b["player_age"],
                               "war": round(b["war"], 1),
                               "value": b["market_value"],
                               "salary": b["salary"],
                               "surplus": b["surplus"]}
-                             for b in pv["breakdown"]],
-                    "total": {"base": authoritative_total},
-                    "flags": [f"ETA: {pv['years_to_mlb']:.1f} yrs"],
-                    "discount_note": f"× {pv['dev_discount']:.0%} dev"
-                                     + (f" × {scar:.2f} scarcity" if scar < 1.0 else "")
-                                     + (f" × {cert:.2f} certainty" if cert != 1.0 else "")
-                                     + f" = {_fmt_money_py(authoritative_total)}",
-                    "raw_total": raw_total,
+                             for b in _uval["breakdown"]],
+                    "total": {"base": _uval["surplus"]},
+                    "flags": [f"ETA: {_uval['years_to_mlb']:.1f} yrs"] if _uval["years_to_mlb"] > 0 else [],
+                    "discount_note": f"× {_uval['dev_discount']:.0%} dev"
+                                     + (f" × {_uval['scarcity_mult']:.2f} scarcity" if _uval['scarcity_mult'] < 1.0 else "")
+                                     + (f" × {_uval['certainty_mult']:.2f} certainty" if _uval['certainty_mult'] != 1.0 else ""),
+                    "raw_total": sum(b["market_value"] - b["salary"] for b in _uval["breakdown"]),
                 }
+
             # Career outcome probabilities
-            outcome_probs = _pv.career_outcome_probs(
+            from statsplusplus.evaluation.outcomes import career_outcome_probs as _career_oc
+            _dr = valuation.get("def_rating")
+            _comp_kw = dict(offensive_grade=eval_data.get("offensive_grade"),
+                            offensive_ceiling=eval_data.get("offensive_ceiling"),
+                            defensive_value=eval_data.get("defensive_value"),
+                            durability_score=eval_data.get("durability_score"))
+            outcome_probs = _career_oc(
                 fv, age, level_val, bucket_val,
                 ovr=valuation.get("ovr") or eval_data.get("composite_score"),
                 pot=valuation.get("pot") or eval_data.get("ceiling_score"),

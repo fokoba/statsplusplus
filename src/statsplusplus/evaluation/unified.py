@@ -207,6 +207,13 @@ def unified_surplus(
             blend_w = max(0.0, (realization - 0.7) / 0.3) ** 2
             tool_war = tool_war * (1 - blend_w) + composite_war * blend_w
 
+    # RP cap: the FV system caps RP grades at 55 because RP production is
+    # volatile and replaceable. The composite blend can push tool_war above
+    # the FV-based projection for high-composite RPs — cap it to prevent
+    # RP overvaluation in surplus calculations.
+    if bucket == "RP":
+        tool_war = min(tool_war, peak_war_from_fv(min(fv_continuous, 55.0), bucket, weights))
+
     # --- Step 2: Blend WAR projections ---
     if stat_war is not None and sc > 0.0:
         peak_war = (1.0 - sc) * tool_war + sc * stat_war
@@ -339,6 +346,13 @@ def unified_surplus(
 
     # --- Step 6: Apply evaluation multipliers ---
     combined_mult = effective_dev_discount * effective_cert_mult * scar_mult * option_mult
+
+    # RP surplus discount: reliever production is volatile, replaceable, and
+    # has shorter peak windows than SP/hitter production. Real-baseball trade
+    # markets heavily discount RP control years (~40-50% of equivalent SP value).
+    if bucket == "RP":
+        combined_mult *= 0.40
+
     final_surplus = max(0, round(total_surplus * combined_mult))
 
     # Apply multipliers to per-year breakdown for display

@@ -168,6 +168,7 @@ def run(league_dir: Path | None = None) -> None:
 
     prospect_rows: list[tuple] = []
     surplus_rows: list[tuple] = []
+    _adjusted_ceilings: dict[int, int] = {}  # pid → PAC-adjusted ceiling for unified eval
 
     for rat in rows:
         p = dict(rat)
@@ -238,6 +239,7 @@ def run(league_dir: Path | None = None) -> None:
                 p["_norm_age"] = LEVEL_NORM_AGE["aaa"]
                 p["_level"] = "aaa"
                 _apply_milb_context(p, conn, pid, _milb_averages, _milb_discounts, _milb_norm_ages, load_milb_stat_seasons)
+                _adjusted_ceilings[pid] = int(p.get("Pot") or 0)
                 fv_base, fv_risk = calc_fv(p)
                 fv_str = str(fv_base)
                 if bucket == "RP":
@@ -268,6 +270,7 @@ def run(league_dir: Path | None = None) -> None:
             p["_norm_age"] = LEVEL_NORM_AGE[level_key]
             p["_level"] = level_key
             _apply_milb_context(p, conn, pid, _milb_averages, _milb_discounts, _milb_norm_ages, load_milb_stat_seasons)
+            _adjusted_ceilings[pid] = int(p.get("Pot") or 0)
             fv_base, fv_risk = calc_fv(p)
             fv_str = str(fv_base)
             level_label = LEVEL_INT_LABEL.get(int(level), str(level))
@@ -312,7 +315,7 @@ def run(league_dir: Path | None = None) -> None:
     _write_unified_evaluations(
         conn, rows, game_date, role_map, use_custom_scores,
         _career_ab, _career_ip, bat_hist, pit_hist, two_way,
-        cfg, league_dir,
+        cfg, league_dir, _adjusted_ceilings,
     )
 
     conn.commit()
@@ -402,6 +405,7 @@ def _write_unified_evaluations(
     two_way: set,
     cfg,
     league_dir,
+    adjusted_ceilings: dict[int, int] | None = None,
 ) -> None:
     """Compute and write unified evaluations for all rated players.
 
@@ -487,6 +491,10 @@ def _write_unified_evaluations(
             composite = p.get("Ovr") or 0
             ceiling = p.get("Pot") or 0
 
+        # Use PAC-adjusted ceiling when available (from the prospect pipeline)
+        if adjusted_ceilings and pid in adjusted_ceilings:
+            ceiling = adjusted_ceilings[pid]
+
         if not composite or not ceiling:
             continue
 
@@ -510,18 +518,12 @@ def _write_unified_evaluations(
             risk = pf[6]
             # Use prospect_fv's bucket (which may differ from raw assignment)
             bucket = pf[5] or bucket
-            # For scarcity: the prospect pipeline used a PAC-adjusted ceiling.
-            # We don't have that stored, but we can approximate by using
-            # fv_continuous + 3 as the effective ceiling for scarcity lookup
-            # (since calc_fv caps FV at ceiling - 3).
-            ceiling_for_scarcity = min(ceiling, int(fv_continuous) + 5)
         else:
             # MLB player without prospect FV — estimate from composite/ceiling
             fv_continuous = float(min(ceiling - 3, composite + (ceiling - composite) * 0.4))
             fv = round(fv_continuous / 5) * 5
             fv_str = str(fv)
             risk = None
-            ceiling_for_scarcity = ceiling
 
         # Career stats
         pa = career_pa.get(pid, 0)
@@ -569,7 +571,7 @@ def _write_unified_evaluations(
                 age=age,
                 level=level_str,
                 composite=composite,
-                ceiling=ceiling_for_scarcity,
+                ceiling=ceiling,
                 career_pa=pa,
                 career_ip=ip,
                 stat_war=sw,

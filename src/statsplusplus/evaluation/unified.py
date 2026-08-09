@@ -189,6 +189,16 @@ def unified_surplus(
     composite_war = peak_war_from_score(composite, bucket, weights)
     tool_war = _lerp(fv_war, composite_war, sc)
 
+    # Near-maxed prospect blend: when a player has nearly reached their ceiling
+    # (realization > 70%), blend FV-based peak WAR toward composite-based WAR.
+    # This prevents near-maxed average players from projecting as if they have
+    # elite upside remaining.
+    if ceiling > 0 and sc < 0.5:
+        realization = composite / ceiling
+        if realization > 0.7 and composite_war < fv_war:
+            blend_w = max(0.0, (realization - 0.7) / 0.3) ** 2
+            tool_war = tool_war * (1 - blend_w) + composite_war * blend_w
+
     # --- Step 2: Blend WAR projections ---
     if stat_war is not None and sc > 0.0:
         peak_war = (1.0 - sc) * tool_war + sc * stat_war
@@ -199,7 +209,19 @@ def unified_surplus(
     if level.upper() == "MLB":
         years_out = 0.0
     else:
-        lookup = _LEVEL_ALIAS.get(level.lower(), level)
+        # For amateur/draft/low-level players, use composite to estimate
+        # effective level (same logic as prospect_surplus).
+        effective_level = level
+        if level.lower() in ("draft", "dsl", "intl", "college", "hs", "rookie", "usl"):
+            if composite >= 50:
+                effective_level = "AAA"
+            elif composite >= 42:
+                effective_level = "AA"
+            elif composite >= 35:
+                effective_level = "A"
+            else:
+                effective_level = "A-Short"
+        lookup = _LEVEL_ALIAS.get(effective_level.lower(), effective_level)
         years_out = YEARS_TO_MLB.get(lookup.lower(), 3.0)
 
     # --- Step 4: Compute evaluation discounts (fading with stat_confidence) ---

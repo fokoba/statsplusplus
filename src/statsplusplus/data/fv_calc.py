@@ -375,7 +375,7 @@ def _overwrite_legacy_from_unified(conn, game_date: str) -> None:
     except Exception:
         return
 
-    # Overwrite prospect_fv: players with risk label (prospects) or low stat_confidence
+    # Overwrite prospect_fv: minor leaguers with low stat_confidence (true prospects)
     conn.execute("DELETE FROM prospect_fv")
     conn.execute("""
         INSERT INTO prospect_fv (player_id, eval_date, fv, fv_str, level, bucket,
@@ -384,7 +384,7 @@ def _overwrite_legacy_from_unified(conn, game_date: str) -> None:
                surplus, risk, fv_continuous
         FROM player_evaluation
         WHERE eval_date = ?
-        AND (risk IS NOT NULL OR stat_confidence < 0.5)
+        AND stat_confidence < 0.5
         AND level != 'MLB'
     """, (game_date,))
     # Also include rookie-eligible MLB players (low stat_confidence = limited MLB time)

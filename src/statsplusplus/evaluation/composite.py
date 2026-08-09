@@ -34,7 +34,9 @@ from statsplusplus.evaluation.constants import (
 
 OFFENSIVE_TOOL_KEYS: tuple[str, ...] = ("contact", "gap", "power", "eye")
 BASERUNNING_TOOL_KEYS: tuple[str, ...] = ("speed", "steal", "stl_rt")
-PITCHER_TOOL_KEYS: tuple[str, ...] = ("stuff", "movement", "control")
+PITCHER_TOOL_KEYS: tuple[str, ...] = ("stuff", "movement", "control", "hra", "pbabip")
+# Core keys for imbalance/floor penalties (extended ratings excluded)
+PITCHER_CORE_KEYS: tuple[str, ...] = ("stuff", "movement", "control")
 
 
 # ---------------------------------------------------------------------------
@@ -467,11 +469,11 @@ def compute_composite_pitcher(
             raw -= 3 if weak_side <= 25 else 2
 
     # Sub-MLB floor penalty for core tools
-    core_tools = {k: v for k, v in tools.items() if k in PITCHER_TOOL_KEYS}
+    core_tools = {k: v for k, v in tools.items() if k in PITCHER_CORE_KEYS}
     raw -= sub_mlb_floor_penalty(core_tools)
 
     # Tool imbalance penalty for one-dimensional pitchers
-    _core_vals = [v for k, v in tools.items() if k in ('stuff', 'movement', 'control') and v]
+    _core_vals = [v for k, v in tools.items() if k in PITCHER_CORE_KEYS and v]
     if len(_core_vals) >= 2:
         tool_spread = max(_core_vals) - min(_core_vals)
         if tool_spread > 20:

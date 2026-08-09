@@ -11,6 +11,12 @@ Public API:
     compute_offensive_grade(tools, weights) -> int | None
     compute_baserunning_value(tools, weights) -> int | None
     compute_defensive_value(defense, def_weights) -> int | None
+    compute_combined_value(primary, secondary) -> int
+    offensive_grade_raw(tools, weights) -> float | None
+    baserunning_value_raw(tools, weights) -> float | None
+    defensive_value_raw(defense, def_weights) -> float | None
+    tool_transform(val) -> float
+    sub_mlb_floor_penalty(tools) -> float
     stat_to_2080(stat_plus) -> float
     pitcher_stat_to_2080(stat_plus) -> float
 """
@@ -167,7 +173,7 @@ def _apply_pitcher_compensation(tools: dict[str, float | int | None]) -> dict[st
 # Component raw scores (unclamped)
 # ---------------------------------------------------------------------------
 
-def _offensive_grade_raw(
+def offensive_grade_raw(
     tools: dict[str, float | int | None],
     weights: dict[str, float],
 ) -> Optional[float]:
@@ -198,7 +204,7 @@ def _offensive_grade_raw(
     return sum(val * (w / total_weight) for val, w in available)
 
 
-def _baserunning_value_raw(
+def baserunning_value_raw(
     tools: dict[str, float | int | None],
     weights: dict[str, float],
 ) -> Optional[float]:
@@ -220,7 +226,7 @@ def _baserunning_value_raw(
     return sum(val * (w / total_weight) for val, w in available)
 
 
-def _defensive_value_raw(
+def defensive_value_raw(
     defense: dict[str, float | int | None],
     def_weights: dict[str, float],
 ) -> Optional[float]:
@@ -254,7 +260,7 @@ def compute_offensive_grade(
     Uses contact, gap, power, eye with piecewise tool transform and
     calibrated weights. Returns integer on 20-80 scale.
     """
-    raw = _offensive_grade_raw(tools, weights)
+    raw = offensive_grade_raw(tools, weights)
     if raw is None:
         return None
     return max(20, min(80, round(raw)))
@@ -268,7 +274,7 @@ def compute_baserunning_value(
 
     Returns integer on 20-80 scale.
     """
-    raw = _baserunning_value_raw(tools, weights)
+    raw = baserunning_value_raw(tools, weights)
     if raw is None:
         return None
     return max(20, min(80, round(raw)))
@@ -282,7 +288,7 @@ def compute_defensive_value(
 
     Returns integer on 20-80 scale.
     """
-    raw = _defensive_value_raw(defense, def_weights)
+    raw = defensive_value_raw(defense, def_weights)
     if raw is None:
         return None
     return max(20, min(80, round(raw)))
@@ -313,9 +319,9 @@ def compute_composite_hitter(
     Returns:
         Integer composite score in [20, 80].
     """
-    off_raw = _offensive_grade_raw(tools, weights)
-    br_raw = _baserunning_value_raw(tools, weights)
-    def_raw = _defensive_value_raw(defense, def_weights)
+    off_raw = offensive_grade_raw(tools, weights)
+    br_raw = baserunning_value_raw(tools, weights)
+    def_raw = defensive_value_raw(defense, def_weights)
 
     if off_raw is None and br_raw is None and def_raw is None:
         return 20

@@ -1,23 +1,32 @@
 """
-evaluation_engine.py — Custom player evaluation engine.
+evaluation_engine.py — Batch player evaluation pipeline.
 
 Computes Composite_Score, Ceiling_Score, and Tool_Only_Score for every player
 from individual tool ratings, replacing the system's dependency on OOTP's
 OVR/POT ratings.
 
-All computation functions are **pure** — no DB access, no global state, no side
-effects. Database access is confined to the batch entry point (``run()``).
+Pure computation functions (composite, ceiling, stat conversion) are defined
+in ``statsplusplus.evaluation.composite`` and ``statsplusplus.evaluation.ceiling``
+and re-exported here for convenience. This module adds:
 
-Public API (pure computation):
-    compute_composite_hitter(tools, weights, defense, def_weights) -> int
-    compute_composite_pitcher(tools, weights, arsenal, stamina, role) -> int
-    compute_tool_only_score(player_type, tools, weights, ...) -> int
-    compute_composite_mlb(tool_score, stat_seasons, peak_age, player_age) -> int
-    compute_ceiling(potential_tools, weights, composite_score, accuracy, work_ethic, ...) -> int
+- Batch ``run()`` pipeline (DB reads/writes)
+- Tool weight and carrying tool config loading
+- Two-way player detection and scoring
+- Archetype classification, divergence detection
+- Positional median/percentile computation
 
-Configuration:
+Public API (re-exported from evaluation package):
+    compute_composite_hitter, compute_composite_pitcher,
+    compute_tool_only_score, compute_composite_mlb,
+    compute_ceiling, compute_true_ceiling, compute_component_ceilings,
+    compute_offensive_grade, compute_baserunning_value, compute_defensive_value,
+    compute_combined_value, stat_to_2080, pitcher_stat_to_2080
+
+Pipeline-specific:
+    run(league_dir, conn) — batch evaluation with DB I/O
     load_tool_weights(league_dir) -> dict
     validate_tool_weights(weights) -> bool
+    detect_divergence, classify_archetype, identify_carrying_tools
 """
 
 from __future__ import annotations
@@ -413,7 +422,7 @@ def apply_carrying_tool_bonus(
 
     Args:
         base_offensive_grade: The unclamped offensive grade from
-            ``_offensive_grade_raw()``.
+            ``offensive_grade_raw()``.
         tools: Tool ratings dict.
         position: Position bucket.
         config: Carrying tool config dict.
@@ -605,9 +614,9 @@ from statsplusplus.evaluation.composite import (
     compute_combined_value,
     stat_to_2080,
     pitcher_stat_to_2080,
-    _offensive_grade_raw,
-    _baserunning_value_raw,
-    _defensive_value_raw,
+    offensive_grade_raw,
+    baserunning_value_raw,
+    defensive_value_raw,
 )
 from statsplusplus.evaluation.ceiling import (
     compute_ceiling,
@@ -615,11 +624,7 @@ from statsplusplus.evaluation.ceiling import (
     compute_component_ceilings,
 )
 
-# Aliases for internal callers that used underscore-prefixed names
-_tool_transform = tool_transform
-_sub_mlb_floor_penalty = sub_mlb_floor_penalty
-
-# Hitter tool key tuple (legacy references in batch pipeline)
+# Hitter tool key tuple (used in batch pipeline)
 _HITTER_TOOL_KEYS = ("contact", "gap", "power", "eye", "speed", "steal", "stl_rt")
 
 def compute_durability_score(stamina: int | None, role: str) -> int | None:
@@ -654,8 +659,8 @@ def derive_composite_from_components(
     same offense/defense/baserunning shares.
 
     When called with the **raw unclamped** component values (as floats from
-    ``_offensive_grade_raw``, ``_baserunning_value_raw``,
-    ``_defensive_value_raw``), the result is identical to
+    ``offensive_grade_raw``, ``baserunning_value_raw``,
+    ``defensive_value_raw``), the result is identical to
     ``compute_composite_hitter`` for the same inputs — the decomposition is
     lossless.
 
@@ -669,7 +674,7 @@ def derive_composite_from_components(
 
     Args:
         offensive_grade: Offensive component score. Pass the raw float from
-            ``_offensive_grade_raw`` for exact round-trip, or the clamped
+            ``offensive_grade_raw`` for exact round-trip, or the clamped
             int (20-80) for display derivation.
         baserunning_value: Baserunning component score (raw float or clamped
             int), or ``None``.

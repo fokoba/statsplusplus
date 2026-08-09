@@ -73,10 +73,10 @@ class TestToolTransform:
         assert tool_transform(60.0) == 60.0
 
     def test_matches_legacy(self):
-        """Verify identical to legacy _tool_transform."""
-        from statsplusplus.data.evaluation_engine import _tool_transform
+        """Verify eval engine re-exports the same tool_transform."""
+        from statsplusplus.data.evaluation_engine import tool_transform as engine_tool_transform
         for val in [20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80]:
-            assert tool_transform(float(val)) == _tool_transform(float(val)), f"Mismatch at {val}"
+            assert tool_transform(float(val)) == engine_tool_transform(float(val)), f"Mismatch at {val}"
 
 
 # ---------------------------------------------------------------------------
@@ -98,14 +98,14 @@ class TestSubMlbFloorPenalty:
         assert sub_mlb_floor_penalty(tools) == pytest.approx(1.25)
 
     def test_matches_legacy(self):
-        from statsplusplus.data.evaluation_engine import _sub_mlb_floor_penalty
+        from statsplusplus.data.evaluation_engine import sub_mlb_floor_penalty as engine_sub_mlb
         test_cases = [
             {"contact": 50, "power": 60, "eye": 45},
             {"contact": 25, "power": 30, "eye": 50},
             {"contact": 35, "power": None, "eye": 20},
         ]
         for tools in test_cases:
-            assert sub_mlb_floor_penalty(tools) == _sub_mlb_floor_penalty(tools)
+            assert sub_mlb_floor_penalty(tools) == engine_sub_mlb(tools)
 
 
 # ---------------------------------------------------------------------------

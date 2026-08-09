@@ -539,13 +539,32 @@ def _write_unified_evaluations(
             years_ctrl = 6
             ctrl_type = "pre-arb"
         else:
-            # Simplified: check for contract
+            # Check contract
             c_row = conn.execute(
-                "SELECT years, current_year FROM contracts WHERE player_id=?", (pid,)
+                "SELECT years, current_year, salary_0 FROM contracts WHERE player_id=?", (pid,)
             ).fetchone()
             if c_row and c_row[0]:
-                years_ctrl = max(1, c_row[0] - (c_row[1] or 0))
-                ctrl_type = "contract"
+                contract_years_left = max(1, c_row[0] - (c_row[1] or 0))
+                contract_salary = c_row[2] or 0
+                # If it's a 1-year deal at min salary, player is likely pre-arb
+                # Use service time to estimate true control
+                if contract_years_left == 1 and contract_salary <= min_sal * 1.1:
+                    svc = conn.execute(
+                        "SELECT mlb_service_years FROM players WHERE player_id=?", (pid,)
+                    ).fetchone()
+                    svc_years = (svc[0] or 0) if svc else 0
+                    if svc_years < 3:
+                        years_ctrl = max(1, 6 - svc_years)
+                        ctrl_type = "pre-arb"
+                    elif svc_years < 6:
+                        years_ctrl = max(1, 6 - svc_years)
+                        ctrl_type = "arb"
+                    else:
+                        years_ctrl = 1
+                        ctrl_type = "contract"
+                else:
+                    years_ctrl = contract_years_left
+                    ctrl_type = "contract"
             else:
                 years_ctrl = 3  # Default arb-eligible
                 ctrl_type = "arb"

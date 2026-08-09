@@ -580,18 +580,6 @@ def _write_unified_evaluations(
                 fv = min(fv, 50)
                 fv_str = str(fv)
 
-        # Extreme profile guardrail: when OOTP's Pot is well below 50 (game
-        # considers player below-average ceiling) but our model disagrees by 10+
-        # points, cap our FV. This catches one-tool players whose single elite
-        # rating inflates our composite but doesn't translate in-game.
-        ootp_pot = p.get("Pot") or 0  # Raw OOTP Pot (before we overwrite)
-        # Access original Pot from the ratings row (before composite override)
-        _raw_pot = rat["Pot"] if "Pot" in rat.keys() else 0
-        if _raw_pot and _raw_pot < 50 and fv_continuous > _raw_pot + 10:
-            fv_continuous = float(max(_raw_pot, fv_continuous * 0.7))
-            fv = min(fv, round(fv_continuous / 5) * 5)
-            fv_str = str(fv)
-
         # Career stats
         pa = career_pa.get(pid, 0)
         ip = career_ip_totals.get(pid, 0.0)

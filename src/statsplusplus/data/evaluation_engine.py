@@ -1250,6 +1250,28 @@ def compute_composite_pitcher(
     core_tools = {k: v for k, v in tools.items() if k in ('stuff', 'movement', 'control')}
     raw -= _sub_mlb_floor_penalty(core_tools)
 
+    # Tool imbalance penalty: extreme spread between best and worst pitching
+    # tools indicates a one-dimensional pitcher who struggles in-game despite
+    # one elite skill. OOTP's engine penalizes these profiles heavily —
+    # a Stf 80 / Mov 40 / Ctrl 40 pitcher grades as Ovr 42 in-game.
+    #
+    # The penalty scales with both spread AND how far below average the weak
+    # tools are. A pitcher with Stf 70/Mov 55/Ctrl 50 (spread 20, weak tools
+    # near average) gets minimal penalty. A pitcher with Stf 80/Mov 40/Ctrl 40
+    # (spread 40, weak tools well below average) gets heavy penalty.
+    #
+    # Formula: penalty = spread_penalty + weakness_penalty
+    #   spread_penalty: (spread - 20) * 0.20 when spread > 20
+    #   weakness_penalty: sum of (50 - tool) * 0.15 for each tool below 50
+    _core_vals = [v for k, v in tools.items() if k in ('stuff', 'movement', 'control') and v]
+    if len(_core_vals) >= 2:
+        tool_spread = max(_core_vals) - min(_core_vals)
+        if tool_spread > 20:
+            spread_penalty = (tool_spread - 20) * 0.20
+            # Additional penalty for how far below average the weak tools are
+            weakness_penalty = sum(max(0, 50 - v) * 0.15 for v in _core_vals if v < 50)
+            raw -= spread_penalty + weakness_penalty
+
     # Interaction (stuff × movement) disabled — redundant with tool transform.
     # Residual correlation with -FIP after linear model is ~0.006 (no signal).
 

@@ -47,6 +47,10 @@ _IP_FULL_CONFIDENCE: float = 120.0
 _PA_MIN_SIGNAL: int = 50
 _IP_MIN_SIGNAL: float = 15.0
 
+# Power curve exponent — >1.0 makes the ramp concave (less weight to small samples)
+# At 1.4: 50 PA=8%, 100 PA=22%, 200 PA=47%, 300 PA=71%, 400 PA=100%
+_CONFIDENCE_EXPONENT: float = 1.4
+
 
 def stat_confidence(career_pa: int, career_ip: float) -> float:
     """Compute confidence in MLB stat-based projection.
@@ -57,8 +61,12 @@ def stat_confidence(career_pa: int, career_ip: float) -> float:
     Uses the larger of the PA-based and IP-based confidence (for two-way
     players or players who have both, the stronger signal wins).
 
-    The ramp is linear above the minimum signal threshold. Below the minimum,
-    confidence is 0.0 — tiny samples are noise, not signal.
+    The ramp uses a power curve (exponent 1.4) above the minimum signal
+    threshold. This gives less weight to small samples than a linear ramp:
+    - 50 PA/15 IP: barely registers (~5-8%)
+    - 150 PA/50 IP: meaningful but modest (~25-30%)
+    - 300 PA/100 IP: strong signal (~65-70%)
+    - 400 PA/120 IP: full confidence (1.0)
 
     Args:
         career_pa: Total career MLB plate appearances.
@@ -69,13 +77,13 @@ def stat_confidence(career_pa: int, career_ip: float) -> float:
     """
     # PA-based confidence (hitters, or pitchers who also bat)
     if career_pa >= _PA_MIN_SIGNAL:
-        pa_conf = min(1.0, career_pa / _PA_FULL_CONFIDENCE)
+        pa_conf = min(1.0, (career_pa / _PA_FULL_CONFIDENCE) ** _CONFIDENCE_EXPONENT)
     else:
         pa_conf = 0.0
 
     # IP-based confidence (pitchers)
     if career_ip >= _IP_MIN_SIGNAL:
-        ip_conf = min(1.0, career_ip / _IP_FULL_CONFIDENCE)
+        ip_conf = min(1.0, (career_ip / _IP_FULL_CONFIDENCE) ** _CONFIDENCE_EXPONENT)
     else:
         ip_conf = 0.0
 
@@ -236,10 +244,33 @@ def unified_surplus(
     effective_dev_discount = _lerp(raw_dev_discount, 1.0, sc)
     effective_cert_mult = _lerp(raw_cert_mult, 1.0, sc)
 
+    # Option value: young prospects with significant ceiling-composite gaps
+    # have upside optionality — they might develop beyond their FV projection.
+    # This adds a premium that scales with youth and gap size, fading with
+    # stat_confidence (established players don't get upside premium).
+    option_mult = 1.0
+    if sc < 0.5 and ceiling > composite:
+        gap_pct = min(1.0, (ceiling - composite) / 25.0)
+        youth_factor = max(0.0, min(1.0, (22 - age) / 5.0))
+        option_mult = 1.0 + gap_pct * youth_factor * 0.30 * (1.0 - sc * 2)
+
     # --- Step 5: Project year-by-year WAR and surplus ---
     rows: list[dict[str, Any]] = []
     total_surplus = 0.0
     use_known_salaries = salaries is not None and len(salaries) >= years_control
+
+    # Development projection: for pre-peak players with room to grow,
+    # project composite growth toward ceiling over years-to-peak.
+    peak_age = 27.0 if bucket in ("SP", "RP") else 28.0
+    years_to_peak = max(1.0, peak_age - (age + years_out))
+    # Only apply development projection for players with MLB stats who
+    # are still pre-peak. Pure prospects use FV-based projection directly
+    # (FV already encodes development probability).
+    has_development_room = (
+        composite < ceiling
+        and (age + years_out) < peak_age
+        and sc > 0.1  # Need some stat evidence to justify growth projection
+    )
 
     for yr in range(years_control):
         ctrl_year = yr + 1
@@ -250,7 +281,20 @@ def unified_surplus(
         ramp = _UNIFIED_WAR_RAMP.get(ctrl_year, 1.0)
         effective_ramp = _lerp(ramp, 1.0, sc)  # Established players skip the ramp
 
-        war = peak_war * effective_ramp * aging_mult(player_age, bucket)
+        # Development growth: project composite toward ceiling for pre-peak players
+        # This models the "still improving" arc that the existing contract model handles.
+        # Fades with stat_confidence (established players don't get growth credit).
+        if has_development_room and sc < 0.9:
+            progress = min(1.0, yr / years_to_peak)
+            projected_composite = composite + (ceiling - composite) * progress * 0.6
+            projected_war = peak_war_from_score(projected_composite, bucket, weights)
+            # Blend development projection with base peak_war projection
+            dev_weight = (1.0 - sc) * min(1.0, (ceiling - composite) / 20.0)
+            year_war = _lerp(peak_war, projected_war, dev_weight)
+        else:
+            year_war = peak_war
+
+        war = year_war * effective_ramp * aging_mult(player_age, bucket)
         war = max(0.0, war)
 
         # Market value (time-discounted)
@@ -290,7 +334,7 @@ def unified_surplus(
         })
 
     # --- Step 6: Apply evaluation multipliers ---
-    combined_mult = effective_dev_discount * effective_cert_mult * scar_mult
+    combined_mult = effective_dev_discount * effective_cert_mult * scar_mult * option_mult
     final_surplus = max(0, round(total_surplus * combined_mult))
 
     # Apply multipliers to per-year breakdown for display

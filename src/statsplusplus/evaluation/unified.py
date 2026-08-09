@@ -263,13 +263,15 @@ def unified_surplus(
     # project composite growth toward ceiling over years-to-peak.
     peak_age = 27.0 if bucket in ("SP", "RP") else 28.0
     years_to_peak = max(1.0, peak_age - (age + years_out))
-    # Only apply development projection for players with MLB stats who
-    # are still pre-peak. Pure prospects use FV-based projection directly
-    # (FV already encodes development probability).
+    # Only apply development projection for players who are already
+    # producing near their projection level (composite WAR >= 60% of peak WAR).
+    # This prevents the projection from dragging down prospects whose composite
+    # is still low but whose FV correctly encodes their expected outcome.
     has_development_room = (
         composite < ceiling
         and (age + years_out) < peak_age
         and sc > 0.1  # Need some stat evidence to justify growth projection
+        and composite_war >= peak_war * 0.6  # Already producing meaningfully
     )
 
     for yr in range(years_control):

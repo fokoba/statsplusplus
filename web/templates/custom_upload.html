@@ -102,6 +102,7 @@
         <th data-sort="str">Scout</th>
         <th data-sort="str">R5</th>
         <th data-sort="num">Ask</th>
+        <th data-sort="str">Contract</th>
         <th data-sort="str">Personality</th>
         <th data-sort="str">Best Pos</th>
         <th data-sort="num">Grade</th>
@@ -124,6 +125,7 @@
         <td>{{ p.acc }}</td>
         <td>{{ 'Yes' if p.rule5_eligible else '' }}</td>
         <td>{{ p.ask or '-' }}</td>
+        <td>{{ p.contract }}</td>
         <td style="color:{% if p.personality_class == 'pos' %}#4caf50{% elif p.personality_class == 'neg' %}#f44336{% else %}var(--text-dim){% endif %}">{{ p.personality_type or '-' }}</td>
         <td>{{ p.best_position or '' }}</td>
         <td>{{ p.best_position_grade if p.best_position_grade is not none else '' }}</td>

@@ -281,6 +281,30 @@ def _best_position(d):
     return None, None
 
 
+def _current_contract(d):
+    """Current MLB contract display string + raw annual salary for sorting.
+
+    Returns ("MiLC", None) when SLR is blank/"-" (amateurs, minor leaguers,
+    anyone without a signed MLB deal). Otherwise formats using SLR (annual
+    salary) and YL (years remaining): a plain integer YL > 1 means a real
+    negotiated multi-year deal ("6yr $9.5M/yr"); YL of "1 (auto.)" or
+    "1 (arbitr.)" is standard one-year team control, not a multi-year deal,
+    so it's shown as a bare per-year figure instead.
+    """
+    slr_raw = (d.get("SLR") or "").strip()
+    if not slr_raw or slr_raw == "-":
+        return "MiLC", None
+    salary = _num(slr_raw.replace("$", "").replace(" ", ""))
+    if not salary:
+        return "MiLC", None
+    sal_display = f"${salary/1e6:.1f}M" if salary >= 1e6 else f"${salary/1e3:.0f}K"
+    yl_raw = (d.get("YL") or "").strip()
+    yl_num = _num(yl_raw.split()[0]) if yl_raw else None
+    if yl_num and yl_num > 1:
+        return f"{yl_num}yr {sal_display}/yr", salary
+    return f"{sal_display}/yr", salary
+
+
 def evaluate_row(d: dict) -> dict | None:
     """Evaluate one CSV row. Returns None for rows with no usable ID/name."""
     pid = (d.get("ID") or "").strip()
@@ -369,6 +393,13 @@ def evaluate_row(d: dict) -> dict | None:
     # contract-preference field exists anywhere in this export.
     _dem = (d.get("DEM") or "").strip()
     ask = _dem if _dem and _dem != "-" else None
+    # Current contract — verified against a real draft-pool export (1,164
+    # rows): SLR is the current annual salary ("$9 500 000"), "-" for the
+    # ~99% of players (amateurs/minor leaguers) with no MLB deal. YL is
+    # years remaining — a plain integer for a real multi-year contract, or
+    # "1 (auto.)"/"1 (arbitr.)" for standard one-year team-control years
+    # (not a negotiated multi-year deal, so not called out as one below).
+    contract, contract_salary = _current_contract(d)
     if_rng = _num(d.get("IF RNG"))
     of_rng = _num(d.get("OF RNG"))
     best_position, best_position_grade = (None, None) if is_pitcher else _best_position(d)
@@ -393,6 +424,7 @@ def evaluate_row(d: dict) -> dict | None:
         "true_ceiling": true_ceiling, "fv": fv_grade, "risk": risk,
         "acc": acc, "org": org_name, "org_abbr": org_abbr,
         "rule5_eligible": rule5_eligible, "ask": ask,
+        "contract": contract, "contract_salary": contract_salary,
         "if_rng": if_rng, "of_rng": of_rng,
         "best_position": best_position, "best_position_grade": best_position_grade,
         "is_free_agent": is_free_agent, "on_waivers": on_waivers,

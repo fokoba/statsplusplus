@@ -26,14 +26,17 @@ import argparse, json, os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from statsplusplus.config.league_context import get_league_dir, get_active_league_slug
-from statsplusplus.config.league_config import LeagueConfig, dollars_per_war
+from statsplusplus.config.league_config import LeagueConfig, dollars_per_war, league_minimum
 from statsplusplus.data.db import get_connection
-
-from contract_value import contract_value, get_player_info
-from prospect_value import prospect_surplus_with_option, find_player
+from statsplusplus.evaluation.unified import unified_surplus, stat_confidence
+from statsplusplus.evaluation.war import stat_peak_war
+from statsplusplus.evaluation.constants import load_model_weights
 
 league_dir = get_league_dir(get_active_league_slug())
 _cfg = LeagueConfig(base_dir=league_dir)
+_weights = load_model_weights(league_dir)
+_dpw = dollars_per_war(league_dir)
+_min_sal = league_minimum(league_dir)
 
 def _get_conn():
     return get_connection(league_dir)
@@ -76,66 +79,174 @@ def parse_player_list(arg):
 
 def value_player(spec):
     """
-    Given a trade spec entry, return a valuation dict.
-    Detects whether the player is on an MLB contract or a minor league contract.
+    Given a trade spec entry, return a valuation dict using the unified model.
+    Supports overrides for fv, age, level, bucket (for hypothetical scenarios).
     """
-    pid        = spec["player_id"]
-    retention  = spec.get("retention", 0.0)
-    is_prospect = spec.get("is_prospect", False)
+    pid = spec["player_id"]
+    retention = spec.get("retention", 0.0)
 
-    # Try MLB contract first (unless explicitly flagged as prospect)
-    if not is_prospect:
-        result = contract_value(pid, retention_pct=retention)
-        if result:
-            return {"type": "contract", "data": result}
-
-    # Prospect path — pull from DB
-    fv, level, bucket, db_age, fv_plus, fv_continuous = find_player(pid)
-
-    fv_raw  = spec.get("fv") or fv
-    fv_plus = str(fv_raw).endswith("+") if isinstance(fv_raw, str) else fv_plus
-    fv_int  = int(str(fv_raw).rstrip("+")) if fv_raw else None
-    level   = spec.get("level")  or level
-    bucket  = spec.get("bucket") or bucket
-    age     = spec.get("age")    or db_age
-
-    if not all([fv_int, level, bucket, age]):
-        return {"type": "unknown", "player_id": pid,
-                "error": f"Insufficient data for player {pid}. Provide fv/age/level/bucket in trade spec."}
-
-    # Use fv_continuous for surplus when available (pre-rounding, more accurate)
-    # If user overrides fv via spec, use the integer override instead.
-    fv_for_surplus = fv_continuous if (fv_continuous is not None and not spec.get("fv")) else fv_int
-    fv_plus_for_surplus = False if fv_for_surplus != fv_int else fv_plus
-
-    # Look up ovr/pot for certainty multiplier
-    from statsplusplus.data import db as _db
     conn = _get_conn()
-    row = conn.execute("SELECT name, age FROM players WHERE player_id=?", (pid,)).fetchone()
-    name = row["name"] if row else str(pid)
-    rr = conn.execute("SELECT ovr, pot, pot_cf, pot_ss, pot_c, pot_second_b, pot_third_b, "
-                      "composite_score, true_ceiling, ceiling_score "
-                      "FROM ratings WHERE player_id=? ORDER BY snapshot_date DESC LIMIT 1", (pid,)).fetchone()
+
+    # Get player info
+    player = conn.execute(
+        "SELECT name, age, level FROM players WHERE player_id=?", (pid,)
+    ).fetchone()
+    if not player:
+        conn.close()
+        return {"type": "unknown", "player_id": pid, "error": f"Player {pid} not found"}
+    name = player["name"]
+    age = spec.get("age") or player["age"]
+
+    # Get ratings
+    rr = conn.execute(
+        "SELECT ovr, pot, composite_score, true_ceiling, ceiling_score, "
+        "pot_cf, pot_ss, pot_c, pot_second_b, pot_third_b "
+        "FROM ratings WHERE player_id=? ORDER BY snapshot_date DESC LIMIT 1",
+        (pid,)
+    ).fetchone()
+    if not rr:
+        conn.close()
+        return {"type": "unknown", "player_id": pid, "error": f"No ratings for {name}"}
+
+    composite = rr["composite_score"] or rr["ovr"] or 0
+    ceiling = rr["true_ceiling"] or rr["ceiling_score"] or rr["pot"] or 0
+
+    # Get pre-computed FV from player_evaluation (most accurate — includes MiLB context)
+    pe = conn.execute(
+        "SELECT fv, fv_str, fv_continuous, level, bucket, risk, surplus, "
+        "stat_confidence, peak_war, years_control, ctrl_type "
+        "FROM player_evaluation WHERE player_id=? ORDER BY eval_date DESC LIMIT 1",
+        (pid,)
+    ).fetchone()
+
+    # Determine values — use pre-computed if no overrides, recompute if overrides given
+    has_overrides = any(spec.get(k) for k in ("fv", "level", "bucket", "age"))
+
+    if pe and not has_overrides:
+        # Fast path: use pre-computed unified values
+        fv_int = pe["fv"]
+        fv_continuous = pe["fv_continuous"] or float(fv_int)
+        level_str = pe["level"]
+        bucket = pe["bucket"]
+        risk = pe["risk"]
+
+        SENSITIVITY = {"pessimistic": 0.85, "base": 1.00, "optimistic": 1.15}
+        base_surplus = pe["surplus"]
+
+        # Apply retention (reduces salary cost — increases surplus)
+        if retention > 0 and pe["stat_confidence"] and pe["stat_confidence"] >= 0.5:
+            # Retention adds value proportional to remaining salary cost
+            # Rough: retention_pct × annual_salary × years_remaining
+            c = conn.execute("SELECT salary_0, years, current_year FROM contracts WHERE player_id=?", (pid,)).fetchone()
+            if c and c["salary_0"]:
+                remaining_yrs = max(1, (c["years"] or 1) - (c["current_year"] or 0))
+                retention_value = int(retention * c["salary_0"] * remaining_yrs)
+                base_surplus += retention_value
+
+        total_surplus = {s: max(0, round(base_surplus * mult)) for s, mult in SENSITIVITY.items()}
+        years_left = pe["years_control"] or 1
+
+        conn.close()
+
+        val_type = "contract" if (pe["stat_confidence"] or 0) >= 0.75 else "prospect"
+        return {"type": val_type, "data": {
+            "player_id": pid, "name": name, "bucket": bucket,
+            "age": age, "ovr": composite,
+            "fv": fv_int, "fv_display": pe["fv_str"] or str(fv_int),
+            "level": level_str, "risk": risk,
+            "years_left": years_left,
+            "total_surplus": total_surplus,
+            "retention_pct": retention,
+            "flags": [],
+        }}
+
+    # Slow path: recompute with overrides or when pre-computed not available
+    # Resolve bucket
+    from statsplusplus.utils.positions import assign_bucket
+    role_map = {str(k): v for k, v in _cfg.role_map.items()}
+    p = {"_role": role_map.get(str(rr.get("role") if hasattr(rr, "keys") else 0), "position_player"),
+         "Pos": str(player.get("pos") if hasattr(player, "keys") else ""),
+         "Ovr": composite, "Pot": ceiling}
+    p["_is_pitcher"] = (p["Pos"] == "P" or p["_role"] in ("starter", "reliever", "closer"))
+    bucket = spec.get("bucket") or (pe["bucket"] if pe else None) or assign_bucket(p)
+    level_str = spec.get("level") or (pe["level"] if pe else ("MLB" if player["level"] == 1 else "AAA"))
+    fv_continuous = float(spec.get("fv") or (pe["fv_continuous"] if pe else None) or
+                          min(ceiling - 3, composite + (ceiling - composite) * 0.4))
+    fv_int = int(spec.get("fv") or (pe["fv"] if pe else round(fv_continuous / 5) * 5))
+
+    # Career stats for stat_confidence
+    career_pa = conn.execute(
+        "SELECT COALESCE(SUM(ab + COALESCE(bb,0) + COALESCE(hbp,0) + COALESCE(sf,0)), 0) "
+        "FROM mlb_batting_stats WHERE player_id=? AND split_id=1", (pid,)
+    ).fetchone()[0]
+    career_ip = conn.execute(
+        "SELECT COALESCE(SUM(ip), 0) FROM mlb_pitching_stats WHERE player_id=? AND split_id=1", (pid,)
+    ).fetchone()[0]
+
+    # Stat WAR
+    import json as _json
+    state = _json.loads((league_dir / "config" / "state.json").read_text())
+    from contract_value import load_stat_history
+    bat_hist, pit_hist, two_way = load_stat_history(conn, state["game_date"])
+    sw = stat_peak_war(pid, bucket, bat_hist, pit_hist, two_way=two_way)
+
+    # Control estimation
+    career_ab = conn.execute(
+        "SELECT COALESCE(SUM(ab), 0) FROM mlb_batting_stats WHERE player_id=? AND split_id=1", (pid,)
+    ).fetchone()[0]
+    if career_ab < 130 and career_ip < 50:
+        years_ctrl = 6
+    else:
+        c = conn.execute("SELECT years, current_year, salary_0 FROM contracts WHERE player_id=?", (pid,)).fetchone()
+        if c and c[0]:
+            yrs_left = max(1, c[0] - (c[1] or 0))
+            if yrs_left == 1 and (c[2] or 0) <= _min_sal * 1.1:
+                svc = conn.execute("SELECT mlb_service_years FROM players WHERE player_id=?", (pid,)).fetchone()
+                svc_years = (svc[0] or 0) if svc else 0
+                years_ctrl = max(1, 6 - svc_years)
+            else:
+                years_ctrl = yrs_left
+        else:
+            years_ctrl = 3
+
+    # Get salary schedule
+    salaries = None
+    c = conn.execute("SELECT * FROM contracts WHERE player_id=?", (pid,)).fetchone()
+    if c and c["years"]:
+        sals = []
+        for i in range(c["current_year"] or 0, c["years"]):
+            sals.append(c[f"salary_{i}"] or _min_sal)
+        if len(sals) >= years_ctrl:
+            salaries = sals[:years_ctrl]
+        # Apply retention
+        if retention > 0 and salaries:
+            salaries = [max(0, int(s * (1 - retention))) for s in salaries]
+
     conn.close()
-    # Use model scores for certainty/option value and scarcity
-    ovr = (rr["composite_score"] if rr and rr["composite_score"] else None) or (rr["ovr"] if rr else None)
-    pot = (rr["true_ceiling"] or rr["ceiling_score"] if rr else None) or (rr["pot"] if rr else None)
-    _def_keys = {'CF':'pot_cf','SS':'pot_ss','C':'pot_c','2B':'pot_second_b','3B':'pot_third_b'}
-    def_rating = rr[_def_keys[bucket]] if rr and bucket in _def_keys else None
+
+    result = unified_surplus(
+        fv_continuous=fv_continuous, bucket=bucket, age=age, level=level_str,
+        composite=composite, ceiling=ceiling,
+        career_pa=career_pa, career_ip=career_ip, stat_war=sw,
+        years_control=years_ctrl, salaries=salaries,
+        dpw=_dpw, min_sal=_min_sal,
+        perpetual_arb=_cfg.perpetual_arb,
+        weights=_weights,
+    )
 
     SENSITIVITY = {"pessimistic": 0.85, "base": 1.00, "optimistic": 1.15}
-    base_surplus = prospect_surplus_with_option(fv_for_surplus, age, level, bucket,
-                                                 ovr=ovr, pot=pot,
-                                                 fv_plus=fv_plus_for_surplus,
-                                                 def_rating=def_rating)
-    total_surplus = {s: max(0, round(base_surplus * mult)) for s, mult in SENSITIVITY.items()}
+    total_surplus = {s: max(0, round(result["surplus"] * mult)) for s, mult in SENSITIVITY.items()}
 
-    fv_display = f"{fv_int}+" if fv_plus else str(fv_int)
-
-    return {"type": "prospect", "data": {
+    val_type = "contract" if result["stat_confidence"] >= 0.75 else "prospect"
+    return {"type": val_type, "data": {
         "player_id": pid, "name": name, "bucket": bucket,
-        "fv": fv_int, "fv_display": fv_display, "level": level, "age": age,
+        "age": age, "ovr": composite,
+        "fv": fv_int, "fv_display": str(fv_int),
+        "level": level_str, "risk": pe["risk"] if pe else None,
+        "years_left": years_ctrl,
         "total_surplus": total_surplus,
+        "retention_pct": retention,
+        "flags": [],
     }}
 
 # ---------------------------------------------------------------------------

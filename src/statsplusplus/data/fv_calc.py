@@ -518,6 +518,13 @@ def _write_unified_evaluations(
             risk = pf[6]
             # Use prospect_fv's bucket (which may differ from raw assignment)
             bucket = pf[5] or bucket
+            # Infer effective ceiling: PAC may have lowered the ceiling during
+            # the prospect pipeline. We don't have the adjusted value stored,
+            # but we can infer it: calc_fv caps FV at ceiling-3, so the effective
+            # ceiling is approximately fv_continuous + 5 (with some margin).
+            # Clamp between composite+3 and raw ceiling.
+            inferred_ceiling = min(ceiling, max(composite + 3, int(fv_continuous) + 5))
+            ceiling = inferred_ceiling
         else:
             # MLB player without prospect FV — estimate from composite/ceiling
             fv_continuous = float(min(ceiling - 3, composite + (ceiling - composite) * 0.4))

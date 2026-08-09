@@ -248,11 +248,13 @@ def unified_surplus(
     # have upside optionality — they might develop beyond their FV projection.
     # This adds a premium that scales with youth and gap size, fading with
     # stat_confidence (established players don't get upside premium).
+    # Scaled by FV: full premium at FV 55+, reduced at FV 45-50, none below 45.
     option_mult = 1.0
     if sc < 0.5 and ceiling > composite:
+        fv_scale = max(0.0, min(1.0, (fv_continuous - 45) / 10.0))  # 0 at FV≤45, 1 at FV≥55
         gap_pct = min(1.0, (ceiling - composite) / 25.0)
         youth_factor = max(0.0, min(1.0, (22 - age) / 5.0))
-        option_mult = 1.0 + gap_pct * youth_factor * 0.30 * (1.0 - sc * 2)
+        option_mult = 1.0 + gap_pct * youth_factor * 0.30 * fv_scale * (1.0 - sc * 2)
 
     # --- Step 5: Project year-by-year WAR and surplus ---
     rows: list[dict[str, Any]] = []

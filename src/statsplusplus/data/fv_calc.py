@@ -562,7 +562,16 @@ def _write_unified_evaluations(
             fv_continuous = float(min(ceiling - 3, composite + (ceiling - composite) * 0.4))
             fv = round(fv_continuous / 5) * 5
             fv_str = str(fv)
-            risk = None
+            # Estimate risk from composite/ceiling gap and age
+            gap = max(0, ceiling - composite)
+            if gap <= 3:
+                risk = "Low"
+            elif gap <= 8 or age >= 26:
+                risk = "Medium"
+            elif gap <= 15:
+                risk = "High"
+            else:
+                risk = "Extreme"
             # RP FV cap applies here too
             if bucket == "RP":
                 fv_continuous = min(fv_continuous, 50.0)

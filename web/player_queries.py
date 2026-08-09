@@ -1404,7 +1404,7 @@ def get_player(pid):
                     "flags": cv.get("flags", []),
                 }
         elif valuation.get("type") == "prospect":
-            from statsplusplus.evaluation.unified import unified_surplus as _unified_surplus
+            from statsplusplus.evaluation.player_value import compute_player_value as _compute_player_value
             from statsplusplus.evaluation.constants import load_model_weights as _load_mw
             from statsplusplus.config.league_config import dollars_per_war as _dpw_fn, league_minimum as _lm_fn
             from statsplusplus.evaluation.war import stat_peak_war as _spw
@@ -1427,7 +1427,7 @@ def get_player(pid):
                 "SELECT COALESCE(SUM(ip), 0) FROM mlb_pitching_stats WHERE player_id=? AND split_id=1", (pid,)
             ).fetchone()[0]
 
-            _uval = _unified_surplus(
+            _uval = _compute_player_value(
                 fv_continuous=float(fv_for_surplus),
                 bucket=bucket_val,
                 age=age,

@@ -1,6 +1,6 @@
 """Tests for the unified evaluation model.
 
-Covers stat_confidence() and unified_surplus() with cases for:
+Covers stat_confidence() and compute_player_value() with cases for:
 - Pure prospects (0 MLB time)
 - Crossover players (partial MLB time)
 - Established veterans (full MLB career)
@@ -10,9 +10,9 @@ Covers stat_confidence() and unified_surplus() with cases for:
 import pytest
 from unittest.mock import patch
 
-from statsplusplus.evaluation.unified import (
+from statsplusplus.evaluation.player_value import (
     stat_confidence,
-    unified_surplus,
+    compute_player_value,
     _PA_FULL_CONFIDENCE,
     _IP_FULL_CONFIDENCE,
     _PA_MIN_SIGNAL,
@@ -95,7 +95,7 @@ class TestStatConfidence:
 
 
 # ---------------------------------------------------------------------------
-# unified_surplus tests — pure prospect cases
+# compute_player_value tests — pure prospect cases
 # ---------------------------------------------------------------------------
 
 class TestUnifiedSurplusPureProspect:
@@ -123,55 +123,55 @@ class TestUnifiedSurplusPureProspect:
 
     def test_zero_stat_confidence(self):
         """Pure prospect has stat_confidence = 0."""
-        result = unified_surplus(**self._base_args())
+        result = compute_player_value(**self._base_args())
         assert result["stat_confidence"] == 0.0
 
     def test_stat_war_is_none(self):
         """Pure prospect has no stat_war."""
-        result = unified_surplus(**self._base_args())
+        result = compute_player_value(**self._base_args())
         assert result["stat_war"] is None
 
     def test_peak_war_equals_tool_war(self):
         """With no stats, peak_war should equal tool_war."""
-        result = unified_surplus(**self._base_args())
+        result = compute_player_value(**self._base_args())
         assert result["peak_war"] == result["tool_war"]
 
     def test_positive_surplus(self):
         """FV 55 SS prospect should have significant positive surplus."""
-        result = unified_surplus(**self._base_args())
+        result = compute_player_value(**self._base_args())
         assert result["surplus"] > 10_000_000  # At least $10M
 
     def test_higher_fv_higher_surplus(self):
         """FV 60 should produce more surplus than FV 55."""
-        result_55 = unified_surplus(**self._base_args(fv_continuous=55.0))
-        result_60 = unified_surplus(**self._base_args(fv_continuous=60.0))
+        result_55 = compute_player_value(**self._base_args(fv_continuous=55.0))
+        result_60 = compute_player_value(**self._base_args(fv_continuous=60.0))
         assert result_60["surplus"] > result_55["surplus"]
 
     def test_younger_higher_surplus(self):
         """Younger prospect at same FV should have more surplus (more runway)."""
-        result_20 = unified_surplus(**self._base_args(age=20))
-        result_24 = unified_surplus(**self._base_args(age=24))
+        result_20 = compute_player_value(**self._base_args(age=20))
+        result_24 = compute_player_value(**self._base_args(age=24))
         assert result_20["surplus"] > result_24["surplus"]
 
     def test_six_year_breakdown(self):
         """Should produce a 6-year breakdown."""
-        result = unified_surplus(**self._base_args())
+        result = compute_player_value(**self._base_args())
         assert len(result["breakdown"]) == 6
 
     def test_dev_discount_applied(self):
         """Dev discount should be less than 1.0 for a prospect."""
-        result = unified_surplus(**self._base_args())
+        result = compute_player_value(**self._base_args())
         assert result["dev_discount"] < 1.0
 
     def test_certainty_mult_applied(self):
         """Certainty mult should be < 1.0 when composite << ceiling."""
         # Realization = 30/75 = 0.40 → 0.8 + 0.4*0.4 = 0.96 (below 1.0)
-        result = unified_surplus(**self._base_args(composite=30, ceiling=75))
+        result = compute_player_value(**self._base_args(composite=30, ceiling=75))
         assert result["certainty_mult"] < 1.0
 
 
 # ---------------------------------------------------------------------------
-# unified_surplus tests — established MLB cases
+# compute_player_value tests — established MLB cases
 # ---------------------------------------------------------------------------
 
 class TestUnifiedSurplusEstablishedMLB:
@@ -199,47 +199,47 @@ class TestUnifiedSurplusEstablishedMLB:
 
     def test_high_stat_confidence(self):
         """Established player has stat_confidence = 1.0."""
-        result = unified_surplus(**self._base_args())
+        result = compute_player_value(**self._base_args())
         assert result["stat_confidence"] == 1.0
 
     def test_peak_war_equals_stat_war(self):
         """With full stat confidence, peak_war should equal stat_war."""
-        result = unified_surplus(**self._base_args())
+        result = compute_player_value(**self._base_args())
         assert result["peak_war"] == result["stat_war"]
 
     def test_dev_discount_fully_faded(self):
         """Dev discount should be ~1.0 for established player."""
-        result = unified_surplus(**self._base_args())
+        result = compute_player_value(**self._base_args())
         assert result["dev_discount"] >= 0.99
 
     def test_certainty_mult_fully_faded(self):
         """Certainty mult should be ~1.0 for established player."""
-        result = unified_surplus(**self._base_args())
+        result = compute_player_value(**self._base_args())
         assert result["certainty_mult"] >= 0.99
 
     def test_surplus_reflects_contract_cost(self):
         """Higher salary should reduce surplus."""
-        cheap = unified_surplus(**self._base_args(
+        cheap = compute_player_value(**self._base_args(
             salaries=[1_000_000, 2_000_000, 3_000_000]))
-        expensive = unified_surplus(**self._base_args(
+        expensive = compute_player_value(**self._base_args(
             salaries=[15_000_000, 18_000_000, 20_000_000]))
         assert cheap["surplus"] > expensive["surplus"]
 
     def test_overpaid_player_low_surplus(self):
         """A 1.0 WAR player on $15M/yr should have near-zero surplus."""
-        result = unified_surplus(**self._base_args(
+        result = compute_player_value(**self._base_args(
             stat_war=1.0,
             salaries=[15_000_000, 15_000_000, 15_000_000]))
         assert result["surplus"] < 5_000_000
 
     def test_three_year_breakdown(self):
         """Should produce breakdown matching control length."""
-        result = unified_surplus(**self._base_args())
+        result = compute_player_value(**self._base_args())
         assert len(result["breakdown"]) == 3
 
 
 # ---------------------------------------------------------------------------
-# unified_surplus tests — crossover cases
+# compute_player_value tests — crossover cases
 # ---------------------------------------------------------------------------
 
 class TestUnifiedSurplusCrossover:
@@ -267,26 +267,26 @@ class TestUnifiedSurplusCrossover:
 
     def test_partial_stat_confidence(self):
         """150 PA should give partial confidence."""
-        result = unified_surplus(**self._base_args())
+        result = compute_player_value(**self._base_args())
         assert 0.2 < result["stat_confidence"] < 0.6
 
     def test_blended_peak_war(self):
         """Peak WAR should be between tool_war and stat_war."""
-        result = unified_surplus(**self._base_args())
+        result = compute_player_value(**self._base_args())
         lower = min(result["tool_war"], result["stat_war"])
         upper = max(result["tool_war"], result["stat_war"])
         assert lower <= result["peak_war"] <= upper
 
     def test_partial_discount_fading(self):
         """Discounts should be partially faded (between raw and 1.0)."""
-        result = unified_surplus(**self._base_args())
+        result = compute_player_value(**self._base_args())
         # Dev discount should be above the raw prospect value but below 1.0
         # (unless MLB level already gives high raw discount)
         assert result["dev_discount"] < 1.0 or result["stat_confidence"] > 0.9
 
     def test_spring_training_invite(self):
         """Level=MLB with 0 PA should use tools only (no 50% flat discount)."""
-        result = unified_surplus(**self._base_args(
+        result = compute_player_value(**self._base_args(
             career_pa=0, career_ip=0.0, stat_war=None,
             level="MLB"))
         assert result["stat_confidence"] == 0.0
@@ -296,7 +296,7 @@ class TestUnifiedSurplusCrossover:
 
     def test_twenty_pa_noise_suppressed(self):
         """20 PA should give near-zero stat confidence (noise suppressed)."""
-        result = unified_surplus(**self._base_args(
+        result = compute_player_value(**self._base_args(
             career_pa=20, career_ip=0.0, stat_war=5.0))  # Noisy hot start
         assert result["stat_confidence"] == 0.0  # Below minimum threshold
         assert result["peak_war"] == result["tool_war"]  # Stats ignored
@@ -305,7 +305,7 @@ class TestUnifiedSurplusCrossover:
         """Surplus should change smoothly as PA increases (no cliffs)."""
         surpluses = []
         for pa in [0, 50, 100, 150, 200, 300, 400, 500]:
-            result = unified_surplus(**self._base_args(
+            result = compute_player_value(**self._base_args(
                 career_pa=pa, stat_war=3.0))
             surpluses.append(result["surplus"])
 
@@ -320,7 +320,7 @@ class TestUnifiedSurplusCrossover:
 
 
 # ---------------------------------------------------------------------------
-# unified_surplus tests — edge cases
+# compute_player_value tests — edge cases
 # ---------------------------------------------------------------------------
 
 class TestUnifiedSurplusEdgeCases:
@@ -328,7 +328,7 @@ class TestUnifiedSurplusEdgeCases:
 
     def test_low_fv_low_surplus(self):
         """FV 35 player should have very low surplus."""
-        result = unified_surplus(
+        result = compute_player_value(
             fv_continuous=35.0, bucket="1B", age=22, level="A",
             composite=35, ceiling=45,
             career_pa=0, career_ip=0.0, stat_war=None,
@@ -339,7 +339,7 @@ class TestUnifiedSurplusEdgeCases:
 
     def test_elite_prospect(self):
         """FV 65 SS prospect should have very high surplus."""
-        result = unified_surplus(
+        result = compute_player_value(
             fv_continuous=65.0, bucket="SS", age=19, level="A",
             composite=50, ceiling=70,
             career_pa=0, career_ip=0.0, stat_war=None,
@@ -350,7 +350,7 @@ class TestUnifiedSurplusEdgeCases:
 
     def test_pitcher_uses_ip_confidence(self):
         """Pitcher with 80 IP should get IP-based confidence."""
-        result = unified_surplus(
+        result = compute_player_value(
             fv_continuous=55.0, bucket="SP", age=24, level="MLB",
             composite=52, ceiling=60,
             career_pa=5, career_ip=80.0, stat_war=2.0,
@@ -362,14 +362,14 @@ class TestUnifiedSurplusEdgeCases:
 
     def test_rp_lower_surplus_than_sp(self):
         """RP at same FV should have lower surplus than SP."""
-        sp = unified_surplus(
+        sp = compute_player_value(
             fv_continuous=55.0, bucket="SP", age=22, level="AA",
             composite=48, ceiling=60,
             career_pa=0, career_ip=0.0, stat_war=None,
             years_control=6, salaries=[840_000] * 6,
             dpw=7_000_000, min_sal=840_000,
         )
-        rp = unified_surplus(
+        rp = compute_player_value(
             fv_continuous=55.0, bucket="RP", age=22, level="AA",
             composite=48, ceiling=60,
             career_pa=0, career_ip=0.0, stat_war=None,
@@ -380,7 +380,7 @@ class TestUnifiedSurplusEdgeCases:
 
     def test_zero_years_control(self):
         """Player with 0 years control should have 0 surplus."""
-        result = unified_surplus(
+        result = compute_player_value(
             fv_continuous=60.0, bucket="CF", age=32, level="MLB",
             composite=62, ceiling=63,
             career_pa=3000, career_ip=0.0, stat_war=3.5,
@@ -392,7 +392,7 @@ class TestUnifiedSurplusEdgeCases:
 
     def test_surplus_yr1_matches_first_year(self):
         """surplus_yr1 should equal the first year's surplus in breakdown."""
-        result = unified_surplus(
+        result = compute_player_value(
             fv_continuous=55.0, bucket="SS", age=22, level="AAA",
             composite=48, ceiling=60,
             career_pa=0, career_ip=0.0, stat_war=None,

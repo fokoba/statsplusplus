@@ -122,7 +122,7 @@ def run(league_dir: Path | None = None) -> None:
         except (json.JSONDecodeError, OSError):
             pass
 
-    # Pre-load stat history for unified evaluation
+    # Pre-load stat history for player value computation
     bat_hist, pit_hist, two_way = load_stat_history(conn, game_date)
 
     # Career service for rookie eligibility (130 AB / 50 IP)
@@ -164,7 +164,7 @@ def run(league_dir: Path | None = None) -> None:
         _comp_war_tables = _mw.get("COMPOSITE_TO_WAR", _mw.get("OVR_TO_WAR", {}))
 
     prospect_rows: list[tuple] = []
-    _adjusted_ceilings: dict[int, int] = {}  # pid → PAC-adjusted ceiling for unified eval
+    _adjusted_ceilings: dict[int, int] = {}  # pid → PAC-adjusted ceiling
 
     for rat in rows:
         p = dict(rat)
@@ -212,7 +212,7 @@ def run(league_dir: Path | None = None) -> None:
             continue
 
         if int(level) == 1:
-            # Rookie-eligible: compute FV grade for the unified pipeline
+            # Rookie-eligible: compute FV grade
             # Rookie-eligible: compute FV if low service time
             if _career_ab.get(pid, 0) < 130 and _career_ip.get(pid, 0) < 50:
                 p["_norm_age"] = LEVEL_NORM_AGE["aaa"]
@@ -258,7 +258,7 @@ def run(league_dir: Path | None = None) -> None:
                 level_label, bucket, 0, fv_risk, fv_continuous
             ))
 
-    # Write FV grades to prospect_fv (surplus placeholder = 0, overwritten below)
+    # Write FV grades to prospect_fv temporarily (read back by player value computation)
     conn.execute("DELETE FROM prospect_fv")
     _pf_cols = {r[1] for r in conn.execute("PRAGMA table_info(prospect_fv)").fetchall()}
     if "risk" not in _pf_cols:
@@ -267,7 +267,7 @@ def run(league_dir: Path | None = None) -> None:
         conn.execute("ALTER TABLE prospect_fv ADD COLUMN fv_continuous REAL")
     conn.executemany("INSERT INTO prospect_fv VALUES (?,?,?,?,?,?,?,?,?)", prospect_rows)
 
-    # Ensure player_surplus table exists for unified pipeline to populate
+    # Ensure player_surplus table exists (populated by player value computation below)
     conn.execute("DROP TABLE IF EXISTS player_surplus")
     conn.execute("""CREATE TABLE player_surplus (
         player_id INTEGER, eval_date TEXT, name TEXT, bucket TEXT,
@@ -276,14 +276,14 @@ def run(league_dir: Path | None = None) -> None:
         team_id INTEGER, parent_team_id INTEGER,
         PRIMARY KEY (player_id, eval_date))""")
 
-    # --- Unified evaluation (single source of truth for all surplus) ---
-    _write_unified_evaluations(
+    # --- Compute player values (surplus) for all rated players ---
+    _compute_and_store_player_values(
         conn, rows, game_date, role_map, use_custom_scores,
         _career_ab, _career_ip, bat_hist, pit_hist, two_way,
         cfg, league_dir, _adjusted_ceilings,
     )
 
-    # --- Populate legacy tables from unified model ---
+    # --- Populate legacy tables from player_evaluation ---
     _overwrite_legacy_from_unified(conn, game_date)
 
     conn.commit()
@@ -361,21 +361,21 @@ def _check_fv_tier_discrepancy(p: dict, fv_base: int, fv_risk: str) -> None:
 
 
 def _overwrite_legacy_from_unified(conn, game_date: str) -> None:
-    """Overwrite prospect_fv and player_surplus with unified model values.
+    """Populate prospect_fv and player_surplus from player_evaluation.
 
-    Maps player_evaluation data back into the legacy table schemas so all
-    existing consumers get unified model values without code changes.
+    These legacy tables maintain backward compatibility with all existing
+    web queries and CLI tools that read from them.
     """
     try:
         count = conn.execute(
             "SELECT COUNT(*) FROM player_evaluation WHERE eval_date=?", (game_date,)
         ).fetchone()[0]
         if count == 0:
-            return  # Unified eval didn't run — keep legacy values
+            return
     except Exception:
         return
 
-    # Overwrite prospect_fv: minor leaguers with low stat_confidence (true prospects)
+    # prospect_fv: players still developing (low stat_confidence)
     conn.execute("DELETE FROM prospect_fv")
     conn.execute("""
         INSERT INTO prospect_fv (player_id, eval_date, fv, fv_str, level, bucket,
@@ -385,22 +385,9 @@ def _overwrite_legacy_from_unified(conn, game_date: str) -> None:
         FROM player_evaluation
         WHERE eval_date = ?
         AND stat_confidence < 0.5
-        AND level != 'MLB'
-    """, (game_date,))
-    # Also include rookie-eligible MLB players (low stat_confidence = limited MLB time)
-    conn.execute("""
-        INSERT OR IGNORE INTO prospect_fv (player_id, eval_date, fv, fv_str, level, bucket,
-                                            prospect_surplus, risk, fv_continuous)
-        SELECT player_id, eval_date, fv, fv_str, level, bucket,
-               surplus, risk, fv_continuous
-        FROM player_evaluation
-        WHERE eval_date = ?
-        AND risk IS NOT NULL
-        AND level = 'MLB'
-        AND stat_confidence < 0.5
     """, (game_date,))
 
-    # Overwrite player_surplus: all MLB-level players
+    # player_surplus: all MLB-level players
     conn.execute("DELETE FROM player_surplus")
     conn.execute("""
         INSERT INTO player_surplus (player_id, eval_date, name, bucket, age, ovr,
@@ -416,10 +403,10 @@ def _overwrite_legacy_from_unified(conn, game_date: str) -> None:
 
     pf_count = conn.execute("SELECT COUNT(*) FROM prospect_fv").fetchone()[0]
     ps_count = conn.execute("SELECT COUNT(*) FROM player_surplus").fetchone()[0]
-    logger.info(f"legacy overwrite: {pf_count} prospect_fv, {ps_count} player_surplus (from unified)")
+    logger.info(f"legacy tables: {pf_count} prospect_fv, {ps_count} player_surplus")
 
 
-def _write_unified_evaluations(
+def _compute_and_store_player_values(
     conn,
     rows: list,
     game_date: str,
@@ -434,12 +421,12 @@ def _write_unified_evaluations(
     league_dir,
     adjusted_ceilings: dict[int, int] | None = None,
 ) -> None:
-    """Compute and write unified evaluations for all rated players.
+    """Compute surplus values for all rated players and store in player_evaluation.
 
-    Phase 2 dual-write: populates player_evaluation table alongside the
-    existing prospect_fv and player_surplus tables. Non-fatal on failure.
+    Iterates all players with ratings, computes their trade surplus value using
+    the player_value model, and writes results to the player_evaluation table.
     """
-    from statsplusplus.evaluation.unified import unified_surplus
+    from statsplusplus.evaluation.player_value import compute_player_value
     from statsplusplus.evaluation.war import stat_peak_war
     from statsplusplus.evaluation.constants import load_model_weights
     from statsplusplus.config.league_config import dollars_per_war, league_minimum
@@ -640,7 +627,7 @@ def _write_unified_evaluations(
                     salaries = sals[:years_ctrl]
 
         try:
-            result = unified_surplus(
+            result = compute_player_value(
                 fv_continuous=fv_continuous,
                 bucket=bucket,
                 age=age,

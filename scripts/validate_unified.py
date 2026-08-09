@@ -23,7 +23,7 @@ from statsplusplus.config.league_context import get_league_dir
 from statsplusplus.config.league_config import LeagueConfig, dollars_per_war, league_minimum
 from statsplusplus.data.db import get_connection
 from statsplusplus.evaluation.constants import load_model_weights
-from statsplusplus.evaluation.unified import unified_surplus, stat_confidence
+from statsplusplus.evaluation.player_value import compute_player_value, stat_confidence
 from statsplusplus.evaluation.war import stat_peak_war
 from statsplusplus.evaluation.surplus import peak_war_from_fv
 
@@ -166,7 +166,7 @@ def run(league_slug: str | None = None, verbose: bool = False):
             years_ctrl = 6  # Rookie-eligible
 
         try:
-            unified = unified_surplus(
+            unified = compute_player_value(
                 fv_continuous=fv_continuous,
                 bucket=bucket,
                 age=age,

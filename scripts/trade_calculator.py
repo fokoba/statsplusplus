@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from statsplusplus.config.league_context import get_league_dir, get_active_league_slug
 from statsplusplus.config.league_config import LeagueConfig, dollars_per_war, league_minimum
 from statsplusplus.data.db import get_connection
-from statsplusplus.evaluation.unified import unified_surplus, stat_confidence
+from statsplusplus.evaluation.player_value import compute_player_value, stat_confidence
 from statsplusplus.evaluation.war import stat_peak_war
 from statsplusplus.evaluation.constants import load_model_weights
 
@@ -225,7 +225,7 @@ def value_player(spec):
 
     conn.close()
 
-    result = unified_surplus(
+    result = compute_player_value(
         fv_continuous=fv_continuous, bucket=bucket, age=age, level=level_str,
         composite=composite, ceiling=ceiling,
         career_pa=career_pa, career_ip=career_ip, stat_war=sw,

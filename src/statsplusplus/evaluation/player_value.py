@@ -1,15 +1,14 @@
-"""Unified player evaluation — single surplus model for all players.
+"""Player value computation — surplus model for all players.
 
-Replaces the dual-model approach (prospect_surplus + contract_value) with a
-single function that smoothly transitions from tool-based projection to stat-based
-evidence as MLB track record accumulates.
+Computes dollar surplus value from tool ratings, stat history, and contract
+context. Smoothly transitions from tool-based projection (prospects) to
+stat-based evidence (established MLB players) as track record accumulates.
 
 Design reference: docs/unified_evaluation_design.md
-Implementation plan: docs/unified_evaluation_implementation.md
 
 Public API:
     stat_confidence(career_pa, career_ip) -> float
-    unified_surplus(fv_continuous, bucket, age, level, ...) -> dict
+    compute_player_value(fv_continuous, bucket, age, level, ...) -> dict
 """
 
 from __future__ import annotations
@@ -123,7 +122,7 @@ _LEVEL_ALIAS: dict[str, str] = {
 # Unified surplus calculation
 # ---------------------------------------------------------------------------
 
-def unified_surplus(
+def compute_player_value(
     # Tool-based inputs
     fv_continuous: float,
     bucket: str,

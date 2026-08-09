@@ -266,8 +266,7 @@ def run(league_dir: Path | None = None) -> None:
         pid_r, _, fv_r, fv_str_r, level_r, bucket_r, _, risk_r, fv_cont_r = row
         _fv_lookup[pid_r] = (pid_r, fv_r, fv_str_r, fv_cont_r, level_r, bucket_r, risk_r)
 
-    # Ensure legacy tables exist (schemas needed for final population)
-    conn.execute("DELETE FROM prospect_fv")
+    # Ensure legacy table schemas are up to date (for DBs from prior versions)
     _pf_cols = {r[1] for r in conn.execute("PRAGMA table_info(prospect_fv)").fetchall()}
     if "risk" not in _pf_cols:
         conn.execute("ALTER TABLE prospect_fv ADD COLUMN risk TEXT")

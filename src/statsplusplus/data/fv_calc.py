@@ -380,7 +380,7 @@ def _overwrite_legacy_from_unified(conn, game_date: str) -> None:
     except Exception:
         return
 
-    # prospect_fv: players still developing (low stat_confidence)
+    # prospect_fv: players with a computed FV grade and low stat_confidence
     conn.execute("DELETE FROM prospect_fv")
     conn.execute("""
         INSERT INTO prospect_fv (player_id, eval_date, fv, fv_str, level, bucket,
@@ -390,6 +390,7 @@ def _overwrite_legacy_from_unified(conn, game_date: str) -> None:
         FROM player_evaluation
         WHERE eval_date = ?
         AND stat_confidence < 0.5
+        AND fv IS NOT NULL
     """, (game_date,))
 
     # player_surplus: all MLB-level players
@@ -544,25 +545,12 @@ def _compute_and_store_player_values(
                 fv = min(fv, 50)
                 fv_str = str(fv)
         else:
-            # MLB player without prospect FV — estimate from composite/ceiling
-            fv_continuous = float(min(ceiling - 3, composite + (ceiling - composite) * 0.4))
-            fv = round(fv_continuous / 5) * 5
-            fv_str = str(fv)
-            # Estimate risk from composite/ceiling gap and age
-            gap = max(0, ceiling - composite)
-            if gap <= 3:
-                risk = "Low"
-            elif gap <= 8 or age >= 26:
-                risk = "Medium"
-            elif gap <= 15:
-                risk = "High"
-            else:
-                risk = "Extreme"
-            # RP FV cap applies here too
-            if bucket == "RP":
-                fv_continuous = min(fv_continuous, 50.0)
-                fv = min(fv, 50)
-                fv_str = str(fv)
+            # Established player without prospect FV — no FV grade needed.
+            # Surplus is driven by stat_war at high stat_confidence.
+            fv_continuous = 0.0
+            fv = None
+            fv_str = None
+            risk = None
 
         # Career stats
         pa = career_pa.get(pid, 0)

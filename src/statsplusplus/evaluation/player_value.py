@@ -206,11 +206,11 @@ def compute_player_value(
             blend_w = max(0.0, (realization - 0.7) / 0.3) ** 2
             tool_war = tool_war * (1 - blend_w) + composite_war * blend_w
 
-    # RP cap: the FV system caps RP grades at 50 because RP production is
-    # volatile and replaceable. The composite blend can push tool_war above
-    # the FV-based projection for high-composite RPs — cap it to prevent
-    # RP overvaluation in surplus calculations.
-    if bucket == "RP":
+    # RP cap: for prospect RPs (low stat_confidence), cap tool_war at the
+    # FV-based maximum. This prevents the composite blend from inflating
+    # RP projections beyond what the FV grade system intends.
+    # Established RPs (high sc) are driven by stat_war, so no cap needed.
+    if bucket == "RP" and sc < 0.75 and fv_continuous > 0:
         tool_war = min(tool_war, peak_war_from_fv(min(fv_continuous, 50.0), bucket, weights))
 
     # --- Step 2: Blend WAR projections ---

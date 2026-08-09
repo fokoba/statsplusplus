@@ -542,6 +542,14 @@ def _write_unified_evaluations(
             risk = pf[6]
             # Use prospect_fv's bucket (which may differ from raw assignment)
             bucket = pf[5] or bucket
+            # RP FV cap: fv_continuous for RPs may be the uncapped SP-based value
+            # (fv_calc computes SP-based FV for surplus interpolation). Cap it here
+            # to prevent RPs from appearing with inflated FV in rankings.
+            # Real baseball caps RP prospect FV at 50 (elite closer ceiling).
+            if bucket == "RP":
+                fv_continuous = min(fv_continuous, 50.0)
+                fv = min(fv, 50)
+                fv_str = str(fv)
             # Infer effective ceiling: PAC may have lowered the ceiling during
             # the prospect pipeline. We don't have the adjusted value stored,
             # but we can infer it: calc_fv caps FV at ceiling-3, so the effective
@@ -555,6 +563,11 @@ def _write_unified_evaluations(
             fv = round(fv_continuous / 5) * 5
             fv_str = str(fv)
             risk = None
+            # RP FV cap applies here too
+            if bucket == "RP":
+                fv_continuous = min(fv_continuous, 50.0)
+                fv = min(fv, 50)
+                fv_str = str(fv)
 
         # Career stats
         pa = career_pa.get(pid, 0)

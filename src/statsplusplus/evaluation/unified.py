@@ -207,12 +207,12 @@ def unified_surplus(
             blend_w = max(0.0, (realization - 0.7) / 0.3) ** 2
             tool_war = tool_war * (1 - blend_w) + composite_war * blend_w
 
-    # RP cap: the FV system caps RP grades at 55 because RP production is
+    # RP cap: the FV system caps RP grades at 50 because RP production is
     # volatile and replaceable. The composite blend can push tool_war above
     # the FV-based projection for high-composite RPs — cap it to prevent
     # RP overvaluation in surplus calculations.
     if bucket == "RP":
-        tool_war = min(tool_war, peak_war_from_fv(min(fv_continuous, 55.0), bucket, weights))
+        tool_war = min(tool_war, peak_war_from_fv(min(fv_continuous, 50.0), bucket, weights))
 
     # --- Step 2: Blend WAR projections ---
     if stat_war is not None and sc > 0.0:

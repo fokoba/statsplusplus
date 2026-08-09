@@ -213,7 +213,8 @@ def run(league_dir: Path | None = None) -> None:
 
         if int(level) == 1:
             # Rookie-eligible: compute FV grade for the unified pipeline
-            if age <= 24 and _career_ab.get(pid, 0) < 130 and _career_ip.get(pid, 0) < 50:
+            # Rookie-eligible: compute FV if low service time
+            if _career_ab.get(pid, 0) < 130 and _career_ip.get(pid, 0) < 50:
                 p["_norm_age"] = LEVEL_NORM_AGE["aaa"]
                 p["_level"] = "aaa"
                 _apply_milb_context(p, conn, pid, _milb_averages, _milb_discounts, _milb_norm_ages, load_milb_stat_seasons)
@@ -231,7 +232,8 @@ def run(league_dir: Path | None = None) -> None:
                     pid, game_date, fv_base, fv_str,
                     "MLB", bucket, 0, fv_risk, fv_continuous
                 ))
-        elif age <= 24:
+        else:
+            # Minor leaguer — compute FV if below rookie threshold
             if _career_ab.get(pid, 0) >= 130 or _career_ip.get(pid, 0) >= 50:
                 continue
             level_key = LEVEL_INT_KEY.get(int(level))

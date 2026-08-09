@@ -69,7 +69,7 @@ class TestInitSchema:
             "batting_stats", "pitching_stats", "fielding_stats",
             "team_batting_stats", "team_pitching_stats",
             "games", "ratings_history", "trade_block", "standings",
-            "prospect_fv", "player_surplus", "org_reports",
+            "player_evaluation", "org_reports",
         }
         assert expected_tables.issubset(tables)
         conn.close()

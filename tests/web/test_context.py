@@ -57,8 +57,12 @@ def league_dir(tmp_path):
         "VALUES (1, 'Test Player', 25, 44, 44, '1', 6, 0)"
     )
     conn.execute(
-        "INSERT INTO player_surplus (player_id, eval_date, name, bucket, age, ovr, fv, fv_str, surplus, surplus_yr1, level, team_id, parent_team_id) "
-        "VALUES (1, '2033-07-15', 'Test Player', 'SS', 25, 55, 55, '55', 10000000, 5000000, 'MLB', 44, 44)"
+        "INSERT INTO player_evaluation (player_id, eval_date, name, bucket, age, level, "
+        "team_id, parent_team_id, composite, ceiling, fv, fv_str, surplus, surplus_yr1, "
+        "stat_confidence, peak_war, years_control, ctrl_type) "
+        "VALUES (1, '2033-07-15', 'Test Player', 'SS', 25, 'MLB', "
+        "44, 44, 55, 60, 55, '55', 10000000, 5000000, "
+        "1.0, 3.0, 3, 'contract')"
     )
     conn.execute(
         "INSERT INTO batting_stats (player_id, year, team_id, split_id, ab, h, pa) "

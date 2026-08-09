@@ -267,18 +267,17 @@ def run(league_dir: Path | None = None) -> None:
         _fv_lookup[pid_r] = (pid_r, fv_r, fv_str_r, fv_cont_r, level_r, bucket_r, risk_r)
 
     # Ensure legacy table schemas are up to date (for DBs from prior versions)
-    _pf_cols = {r[1] for r in conn.execute("PRAGMA table_info(prospect_fv)").fetchall()}
-    if "risk" not in _pf_cols:
-        conn.execute("ALTER TABLE prospect_fv ADD COLUMN risk TEXT")
-    if "fv_continuous" not in _pf_cols:
-        conn.execute("ALTER TABLE prospect_fv ADD COLUMN fv_continuous REAL")
-    conn.execute("DROP TABLE IF EXISTS player_surplus")
-    conn.execute("""CREATE TABLE player_surplus (
-        player_id INTEGER, eval_date TEXT, name TEXT, bucket TEXT,
-        age INTEGER, ovr INTEGER, fv INTEGER, fv_str TEXT,
-        surplus INTEGER, surplus_yr1 INTEGER, level TEXT,
-        team_id INTEGER, parent_team_id INTEGER,
-        PRIMARY KEY (player_id, eval_date))""")
+    # On first run after upgrade, these will be tables; _create_legacy_views
+    # will DROP them and replace with views.
+    try:
+        _pf_cols = {r[1] for r in conn.execute("PRAGMA table_info(prospect_fv)").fetchall()}
+        if _pf_cols:  # It's a table, not a view — add columns if missing
+            if "risk" not in _pf_cols:
+                conn.execute("ALTER TABLE prospect_fv ADD COLUMN risk TEXT")
+            if "fv_continuous" not in _pf_cols:
+                conn.execute("ALTER TABLE prospect_fv ADD COLUMN fv_continuous REAL")
+    except Exception:
+        pass
 
     # --- Compute player values (surplus) for all rated players ---
     _compute_and_store_player_values(
@@ -288,7 +287,7 @@ def run(league_dir: Path | None = None) -> None:
     )
 
     # --- Populate legacy tables from player_evaluation ---
-    _overwrite_legacy_from_unified(conn, game_date)
+    _create_legacy_views(conn, game_date)
 
     conn.commit()
     conn.close()
@@ -364,11 +363,11 @@ def _check_fv_tier_discrepancy(p: dict, fv_base: int, fv_risk: str) -> None:
         )
 
 
-def _overwrite_legacy_from_unified(conn, game_date: str) -> None:
-    """Populate prospect_fv and player_surplus from player_evaluation.
+def _create_legacy_views(conn, game_date: str) -> None:
+    """Create prospect_fv and player_surplus as views on player_evaluation.
 
-    These legacy tables maintain backward compatibility with all existing
-    web queries and CLI tools that read from them.
+    These views provide backward compatibility with all existing web queries
+    and CLI tools that reference the legacy table names and column names.
     """
     try:
         count = conn.execute(
@@ -379,36 +378,36 @@ def _overwrite_legacy_from_unified(conn, game_date: str) -> None:
     except Exception:
         return
 
-    # prospect_fv: players with a computed FV grade and low stat_confidence
-    conn.execute("DELETE FROM prospect_fv")
-    conn.execute("""
-        INSERT INTO prospect_fv (player_id, eval_date, fv, fv_str, level, bucket,
-                                  prospect_surplus, risk, fv_continuous)
-        SELECT player_id, eval_date, fv, fv_str, level, bucket,
-               surplus, risk, fv_continuous
-        FROM player_evaluation
-        WHERE eval_date = ?
-        AND stat_confidence < 0.5
-        AND fv IS NOT NULL
-    """, (game_date,))
+    # Drop old views or tables (handles both upgrade and re-run scenarios)
+    # SQLite requires matching DROP type, so check what exists first.
+    for name in ("prospect_fv", "player_surplus"):
+        obj_type = conn.execute(
+            "SELECT type FROM sqlite_master WHERE name=?", (name,)
+        ).fetchone()
+        if obj_type:
+            conn.execute(f"DROP {obj_type[0].upper()} IF EXISTS {name}")
 
-    # player_surplus: all MLB-level players
-    conn.execute("DELETE FROM player_surplus")
     conn.execute("""
-        INSERT INTO player_surplus (player_id, eval_date, name, bucket, age, ovr,
-                                     fv, fv_str, surplus, surplus_yr1, level,
-                                     team_id, parent_team_id)
-        SELECT player_id, eval_date, name, bucket, age, composite,
-               fv, fv_str, surplus, surplus_yr1, level,
-               team_id, parent_team_id
+        CREATE VIEW prospect_fv AS
+        SELECT player_id, eval_date, fv, fv_str, level, bucket,
+               surplus AS prospect_surplus, risk, fv_continuous
         FROM player_evaluation
-        WHERE eval_date = ?
-        AND level = 'MLB'
-    """, (game_date,))
+        WHERE stat_confidence < 0.5
+        AND fv IS NOT NULL
+    """)
+
+    conn.execute("""
+        CREATE VIEW player_surplus AS
+        SELECT player_id, eval_date, name, bucket, age,
+               composite AS ovr, fv, fv_str, surplus, surplus_yr1,
+               level, team_id, parent_team_id
+        FROM player_evaluation
+        WHERE level = 'MLB'
+    """)
 
     pf_count = conn.execute("SELECT COUNT(*) FROM prospect_fv").fetchone()[0]
     ps_count = conn.execute("SELECT COUNT(*) FROM player_surplus").fetchone()[0]
-    logger.info(f"legacy tables: {pf_count} prospect_fv, {ps_count} player_surplus")
+    logger.info(f"legacy views: {pf_count} prospect_fv, {ps_count} player_surplus")
 
 
 def _compute_and_store_player_values(

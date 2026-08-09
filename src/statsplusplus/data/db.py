@@ -291,35 +291,20 @@ CREATE TABLE IF NOT EXISTS standings (
     fetched_date TEXT
 );
 
-CREATE TABLE IF NOT EXISTS prospect_fv (
-    player_id       INTEGER,
-    eval_date       TEXT,
-    fv              INTEGER,
-    fv_str          TEXT,
-    level           TEXT,
-    bucket          TEXT,
-    prospect_surplus INTEGER,
-    risk            TEXT,
-    fv_continuous   REAL,
-    PRIMARY KEY (player_id, eval_date)
-);
+-- prospect_fv and player_surplus are views on player_evaluation.
+-- They provide backward compatibility with existing queries.
+CREATE VIEW IF NOT EXISTS prospect_fv AS
+    SELECT player_id, eval_date, fv, fv_str, level, bucket,
+           surplus AS prospect_surplus, risk, fv_continuous
+    FROM player_evaluation
+    WHERE stat_confidence < 0.5 AND fv IS NOT NULL;
 
-CREATE TABLE IF NOT EXISTS player_surplus (
-    player_id      INTEGER,
-    eval_date      TEXT,
-    name           TEXT,
-    bucket         TEXT,
-    age            INTEGER,
-    ovr            INTEGER,
-    fv             INTEGER,
-    fv_str         TEXT,
-    surplus        INTEGER,
-    surplus_yr1    INTEGER,
-    level          TEXT,
-    team_id        INTEGER,
-    parent_team_id INTEGER,
-    PRIMARY KEY (player_id, eval_date)
-);
+CREATE VIEW IF NOT EXISTS player_surplus AS
+    SELECT player_id, eval_date, name, bucket, age,
+           composite AS ovr, fv, fv_str, surplus, surplus_yr1,
+           level, team_id, parent_team_id
+    FROM player_evaluation
+    WHERE level = 'MLB';
 
 CREATE TABLE IF NOT EXISTS org_reports (
     team_id     INTEGER,
@@ -440,16 +425,16 @@ def _migrate_contracts(conn: sqlite3.Connection) -> None:
 
 def _migrate_misc(conn: sqlite3.Connection) -> None:
     """Miscellaneous column additions across tables."""
-    # player_surplus.surplus_yr1
+    # player_surplus.surplus_yr1 (skip if it's now a view)
     ps_cols = {r[1] for r in conn.execute("PRAGMA table_info(player_surplus)").fetchall()}
-    if "surplus_yr1" not in ps_cols:
+    if ps_cols and "surplus_yr1" not in ps_cols:
         conn.execute("ALTER TABLE player_surplus ADD COLUMN surplus_yr1 INTEGER")
 
-    # prospect_fv.fv_continuous and risk
+    # prospect_fv.fv_continuous and risk (skip if it's now a view)
     pf_cols = {r[1] for r in conn.execute("PRAGMA table_info(prospect_fv)").fetchall()}
-    if "fv_continuous" not in pf_cols:
+    if pf_cols and "fv_continuous" not in pf_cols:
         conn.execute("ALTER TABLE prospect_fv ADD COLUMN fv_continuous REAL")
-    if "risk" not in pf_cols:
+    if pf_cols and "risk" not in pf_cols:
         conn.execute("ALTER TABLE prospect_fv ADD COLUMN risk TEXT")
 
     # ratings.true_ceiling

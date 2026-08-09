@@ -493,7 +493,7 @@ def _write_unified_evaluations(
         tool_war REAL, stat_war REAL, stat_confidence REAL, peak_war REAL,
         surplus INTEGER, surplus_yr1 INTEGER, years_control INTEGER, ctrl_type TEXT,
         PRIMARY KEY (player_id, eval_date))""")
-    conn.execute("DELETE FROM player_evaluation WHERE eval_date = ?", (game_date,))
+    conn.execute("DELETE FROM player_evaluation")
 
     eval_rows: list[tuple] = []
     errors = 0

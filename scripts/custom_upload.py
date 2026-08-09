@@ -52,6 +52,15 @@ _LEVEL_KEY_BY_ABBR = {
     "A-Short": "a-short", "ROOK": "a-short", "USL": "usl", "DSL": "dsl",
 }
 
+# OOTP's "Type" column — personality archetype (distinct from the
+# WE/INT/Lead/Loy/Greed trait ratings). Verified against a real export
+# (1,164 rows): Normal, Sparkplug, Unmotivated, Humble, Selfish,
+# Outspoken, Captain, Prankster, Disruptive, Fan Fav. Positive/negative
+# split is this app's own judgment call (not an OOTP-provided flag) —
+# flag if any of these read wrong.
+_PERSONALITY_TYPE_POSITIVE = {"Fan Fav", "Sparkplug", "Captain", "Humble", "Prankster"}
+_PERSONALITY_TYPE_NEGATIVE = {"Unmotivated", "Selfish", "Outspoken", "Disruptive"}
+
 
 def _dedupe_header(header: list[str]) -> list[str]:
     """OOTP's export repeats several column names (TM, ORG, LG, Lev, B, T,
@@ -291,6 +300,13 @@ def evaluate_row(d: dict) -> dict | None:
     acc = _ACC_MAP.get((d.get("SctAcc") or "").strip(), "A")
     wrk_ethic = (d.get("WE") or "N").strip()
     intel = (d.get("INT") or "N").strip()
+    personality_type = (d.get("Type") or "").strip()
+    if personality_type in _PERSONALITY_TYPE_POSITIVE:
+        personality_class = "pos"
+    elif personality_type in _PERSONALITY_TYPE_NEGATIVE:
+        personality_class = "neg"
+    else:
+        personality_class = "neutral"
     level_abbr = (d.get("Lev__1") or "MLB").strip().upper()
     level_key = _LEVEL_KEY_BY_ABBR.get(level_abbr, "mlb")
 
@@ -381,6 +397,7 @@ def evaluate_row(d: dict) -> dict | None:
         "best_position": best_position, "best_position_grade": best_position_grade,
         "is_free_agent": is_free_agent, "on_waivers": on_waivers,
         "platoon_gap": platoon_gap, "platoon_strong_side": platoon_strong_side,
+        "personality_type": personality_type, "personality_class": personality_class,
     }
 
 

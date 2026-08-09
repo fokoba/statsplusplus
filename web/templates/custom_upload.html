@@ -78,6 +78,10 @@
       <input type="checkbox" id="cu-vsleft-filter" onchange="cuFilterResults()">
       Significantly stronger vs LHP/LHB
     </label>
+    <label style="font-size:13px" title="Dims (doesn't hide) players with a negative personality type: Unmotivated, Selfish, Outspoken, Disruptive.">
+      <input type="checkbox" id="cu-negpers-filter" onchange="cuFilterResults()">
+      Dim negative personalities
+    </label>
     <button class="btn btn-sm" onclick="exportTableCSV('custom-upload-table', 'custom_upload_results.csv')">⬇ CSV</button>
   </div>
   {% endif %}
@@ -98,6 +102,7 @@
         <th data-sort="str">Scout</th>
         <th data-sort="str">R5</th>
         <th data-sort="num">Ask</th>
+        <th data-sort="str">Personality</th>
         <th data-sort="str">Best Pos</th>
         <th data-sort="num">Grade</th>
         <th data-sort="str">Platoon</th>
@@ -105,7 +110,7 @@
     </thead>
     <tbody>
       {% for p in results %}
-      <tr class="cu-row" data-pid="{{ p.pid }}" data-pos="{{ p.bucket }}" data-org="{{ p.org }}" data-type="{{ 'pitcher' if p.is_pitcher else 'hitter' }}" data-r5="{{ 'yes' if p.rule5_eligible else 'no' }}" data-fa="{{ 'yes' if p.is_free_agent else 'no' }}" data-waivers="{{ 'yes' if p.on_waivers else 'no' }}" data-platoon="{{ p.platoon_strong_side or '' }}">
+      <tr class="cu-row" data-pid="{{ p.pid }}" data-pos="{{ p.bucket }}" data-org="{{ p.org }}" data-type="{{ 'pitcher' if p.is_pitcher else 'hitter' }}" data-r5="{{ 'yes' if p.rule5_eligible else 'no' }}" data-fa="{{ 'yes' if p.is_free_agent else 'no' }}" data-waivers="{{ 'yes' if p.on_waivers else 'no' }}" data-platoon="{{ p.platoon_strong_side or '' }}" data-pers="{{ p.personality_class }}">
         <td><input type="checkbox" class="cu-checkbox" data-pid="{{ p.pid }}"></td>
         <td class="left cu-name">{{ p.name }}</td>
         <td>{{ p.bucket }}</td>
@@ -119,6 +124,7 @@
         <td>{{ p.acc }}</td>
         <td>{{ 'Yes' if p.rule5_eligible else '' }}</td>
         <td>{{ p.ask or '-' }}</td>
+        <td style="color:{% if p.personality_class == 'pos' %}#4caf50{% elif p.personality_class == 'neg' %}#f44336{% else %}var(--text-dim){% endif %}">{{ p.personality_type or '-' }}</td>
         <td>{{ p.best_position or '' }}</td>
         <td>{{ p.best_position_grade if p.best_position_grade is not none else '' }}</td>
         <td>{{ p.platoon_strong_side or '' }}</td>
@@ -140,6 +146,7 @@ function cuFilterResults() {
   var waiversOnly = document.getElementById('cu-waiver-filter').checked;
   var vsRightOnly = document.getElementById('cu-vsright-filter').checked;
   var vsLeftOnly = document.getElementById('cu-vsleft-filter').checked;
+  var dimNegPers = document.getElementById('cu-negpers-filter').checked;
   var rows = document.querySelectorAll('#custom-upload-table tbody tr');
   var shown = 0;
   rows.forEach(function(tr) {
@@ -154,6 +161,7 @@ function cuFilterResults() {
       && (!vsLeftOnly || platoon === 'vs LHP' || platoon === 'vs LHB');
     tr.style.display = match ? '' : 'none';
     if (match) shown++;
+    tr.classList.toggle('cu-dimmed', dimNegPers && tr.dataset.pers === 'neg');
   });
   var parts = [];
   if (pos) parts.push(pos);
@@ -164,6 +172,7 @@ function cuFilterResults() {
   if (waiversOnly) parts.push('Waivers');
   if (vsRightOnly) parts.push('vs RHP/RHB');
   if (vsLeftOnly) parts.push('vs LHP/LHB');
+  if (dimNegPers) parts.push('negative personalities dimmed');
   var countEl = document.getElementById('cu-count');
   if (countEl) countEl.textContent = '(' + shown + ' shown' + (parts.length ? ' — ' + parts.join(', ') : '') + ')';
 }
@@ -172,6 +181,7 @@ function cuFilterResults() {
 <style>
 .cu-row.cu-marked .cu-name { color: var(--text-dim); text-decoration: line-through; }
 .cu-row.cu-marked td { opacity: 0.5; }
+.cu-row.cu-dimmed { opacity: 0.4; }
 </style>
 
 <script>

@@ -29,6 +29,10 @@ from statsplusplus.utils.positions import (
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# Re-export career_outcome_probs and ceiling_fv from the package
+# (canonical implementation lives in statsplusplus.evaluation.outcomes)
+from statsplusplus.evaluation.outcomes import career_outcome_probs, ceiling_fv as _ceiling_fv
+
 # Resolve league context
 _league_dir = get_league_dir(get_active_league_slug())
 _cfg = LeagueConfig(base_dir=_league_dir)

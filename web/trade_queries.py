@@ -5,8 +5,9 @@ import os, sys
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, "scripts"))
 from statsplusplus.utils.positions import display_pos as _display_pos
+from statsplusplus.evaluation.outcomes import career_outcome_probs
 from contract_value import contract_value
-from prospect_value import prospect_surplus_with_option, find_player, career_outcome_probs
+from prospect_value import prospect_surplus_with_option, find_player
 from web_league_context import get_db, get_cfg, team_abbr_map, level_map, year
 
 SENSITIVITY = {"pessimistic": 0.85, "base": 1.00, "optimistic": 1.15}

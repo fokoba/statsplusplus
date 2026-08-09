@@ -186,8 +186,9 @@ def value_player(spec):
     # Stat WAR
     import json as _json
     state = _json.loads((league_dir / "config" / "state.json").read_text())
-    from contract_value import load_stat_history
-    bat_hist, pit_hist, two_way = load_stat_history(conn, state["game_date"])
+    from statsplusplus.evaluation.war import load_stat_history as _lsh
+    bat_hist, pit_hist, two_way = _lsh(conn, state["game_date"],
+                                        dh_rule=_cfg.settings.get("dh_rule", "Universal DH"))
     sw = stat_peak_war(pid, bucket, bat_hist, pit_hist, two_way=two_way)
 
     # Control estimation

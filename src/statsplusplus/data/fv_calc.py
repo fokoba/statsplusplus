@@ -90,8 +90,6 @@ def run(league_dir: Path | None = None) -> None:
         return _lsh_fn(conn, game_date, dh_rule=cfg.settings.get("dh_rule", "Universal DH"))
     dollars_per_war = lambda: _dpw_fn(league_dir)
     league_minimum = lambda: _lm_fn(league_dir)
-    from prospect_value import prospect_surplus_with_option as _prospect_surplus_opt
-    from contract_value import contract_value as _contract_value
     from statsplusplus.evaluation.composite import compute_combined_value
     from statsplusplus.evaluation.fv import (
         compute_performance_adjusted_ceiling,
@@ -124,9 +122,8 @@ def run(league_dir: Path | None = None) -> None:
         except (json.JSONDecodeError, OSError):
             pass
 
-    # Pre-load stat history for batch contract_value calls
+    # Pre-load stat history for unified evaluation
     bat_hist, pit_hist, two_way = load_stat_history(conn, game_date)
-    _cv_hist = (bat_hist, pit_hist, two_way)
 
     # Career service for rookie eligibility (130 AB / 50 IP)
     _career_ab = dict(conn.execute(
@@ -167,7 +164,6 @@ def run(league_dir: Path | None = None) -> None:
         _comp_war_tables = _mw.get("COMPOSITE_TO_WAR", _mw.get("OVR_TO_WAR", {}))
 
     prospect_rows: list[tuple] = []
-    surplus_rows: list[tuple] = []
     _adjusted_ceilings: dict[int, int] = {}  # pid → PAC-adjusted ceiling for unified eval
 
     for rat in rows:
@@ -211,30 +207,12 @@ def run(league_dir: Path | None = None) -> None:
         p["_bucket"] = bucket
         p["_mlb_median"] = 50
 
-        # Defensive potential for scarcity
-        _DEF_KEY = {'CF': 'PotCF', 'SS': 'PotSS', 'C': 'PotC', '2B': 'Pot2B', '3B': 'Pot3B'}
-        def_rating = p.get(_DEF_KEY.get(bucket)) or 0
-
         # Skip foreign/independent league players
         if str(level) in ("7", "8"):
             continue
 
         if int(level) == 1:
-            ovr = int(p.get("Ovr") or 0)
-            surplus = 0
-            surplus_yr1 = 0
-            cv = _contract_value(pid, _conn=conn, _hist=_cv_hist)
-            if cv:
-                surplus = cv["total_surplus"].get("base", 0)
-                bd = cv.get("breakdown")
-                if bd:
-                    surplus_yr1 = round(bd[0].get("surplus", 0))
-            surplus_rows.append((
-                pid, game_date, p["Name"], bucket, age,
-                ovr, ovr, str(ovr), surplus, surplus_yr1,
-                "MLB", p["team_id"], p["parent_team_id"]
-            ))
-            # Rookie-eligible
+            # Rookie-eligible: compute FV grade for the unified pipeline
             if age <= 24 and _career_ab.get(pid, 0) < 130 and _career_ip.get(pid, 0) < 50:
                 p["_norm_age"] = LEVEL_NORM_AGE["aaa"]
                 p["_level"] = "aaa"
@@ -249,17 +227,9 @@ def run(league_dir: Path | None = None) -> None:
                 else:
                     raw_fv = fv_base
                 fv_continuous = p.get("_fv_continuous", raw_fv)
-                p_surplus = _prospect_surplus_opt(
-                    fv_continuous, age, "MLB", bucket,
-                    ovr=p.get("Ovr"), pot=p.get("Pot"), def_rating=def_rating,
-                    offensive_grade=p.get("offensive_grade"),
-                    offensive_ceiling=p.get("offensive_ceiling"),
-                    defensive_value=p.get("defensive_value"),
-                    durability_score=p.get("durability_score"),
-                )
                 prospect_rows.append((
                     pid, game_date, fv_base, fv_str,
-                    "MLB", bucket, p_surplus, fv_risk, fv_continuous
+                    "MLB", bucket, 0, fv_risk, fv_continuous
                 ))
         elif age <= 24:
             if _career_ab.get(pid, 0) >= 130 or _career_ip.get(pid, 0) >= 50:
@@ -281,27 +251,21 @@ def run(league_dir: Path | None = None) -> None:
             else:
                 raw_fv = fv_base
             fv_continuous = p.get("_fv_continuous", raw_fv)
-            surplus = _prospect_surplus_opt(
-                fv_continuous, age, level_label, bucket,
-                ovr=p.get("Ovr"), pot=p.get("Pot"), def_rating=def_rating,
-                offensive_grade=p.get("offensive_grade"),
-                offensive_ceiling=p.get("offensive_ceiling"),
-                defensive_value=p.get("defensive_value"),
-                durability_score=p.get("durability_score"),
-            )
             prospect_rows.append((
                 pid, game_date, fv_base, fv_str,
-                level_label, bucket, surplus, fv_risk, fv_continuous
+                level_label, bucket, 0, fv_risk, fv_continuous
             ))
 
-    # Write results — first write legacy tables from old pipeline for fallback,
-    # then overwrite with unified model values after unified eval runs.
+    # Write FV grades to prospect_fv (surplus placeholder = 0, overwritten below)
     conn.execute("DELETE FROM prospect_fv")
     _pf_cols = {r[1] for r in conn.execute("PRAGMA table_info(prospect_fv)").fetchall()}
     if "risk" not in _pf_cols:
         conn.execute("ALTER TABLE prospect_fv ADD COLUMN risk TEXT")
     if "fv_continuous" not in _pf_cols:
         conn.execute("ALTER TABLE prospect_fv ADD COLUMN fv_continuous REAL")
+    conn.executemany("INSERT INTO prospect_fv VALUES (?,?,?,?,?,?,?,?,?)", prospect_rows)
+
+    # Ensure player_surplus table exists for unified pipeline to populate
     conn.execute("DROP TABLE IF EXISTS player_surplus")
     conn.execute("""CREATE TABLE player_surplus (
         player_id INTEGER, eval_date TEXT, name TEXT, bucket TEXT,
@@ -309,25 +273,21 @@ def run(league_dir: Path | None = None) -> None:
         surplus INTEGER, surplus_yr1 INTEGER, level TEXT,
         team_id INTEGER, parent_team_id INTEGER,
         PRIMARY KEY (player_id, eval_date))""")
-    conn.executemany("INSERT INTO prospect_fv VALUES (?,?,?,?,?,?,?,?,?)", prospect_rows)
-    conn.executemany("INSERT INTO player_surplus VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", surplus_rows)
 
-    # --- Unified evaluation ---
+    # --- Unified evaluation (single source of truth for all surplus) ---
     _write_unified_evaluations(
         conn, rows, game_date, role_map, use_custom_scores,
         _career_ab, _career_ip, bat_hist, pit_hist, two_way,
         cfg, league_dir, _adjusted_ceilings,
     )
 
-    # --- Overwrite legacy tables with unified model values ---
-    # This makes the unified model the source of truth for ALL consumers
-    # without requiring any consumer code changes.
+    # --- Populate legacy tables from unified model ---
     _overwrite_legacy_from_unified(conn, game_date)
 
     conn.commit()
     conn.close()
 
-    print(f"fv_calc: {len(prospect_rows)} prospects, {len(surplus_rows)} MLB players — eval_date {game_date}")
+    print(f"fv_calc: {len(prospect_rows)} prospects evaluated — eval_date {game_date}")
 
 
 def _apply_milb_context(

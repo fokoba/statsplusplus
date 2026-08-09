@@ -294,7 +294,8 @@ def run(league_dir: Path | None = None) -> None:
                 level_label, bucket, surplus, fv_risk, fv_continuous
             ))
 
-    # Write results (existing tables — kept for backward compat during Phase 2)
+    # Write results — first write legacy tables from old pipeline for fallback,
+    # then overwrite with unified model values after unified eval runs.
     conn.execute("DELETE FROM prospect_fv")
     _pf_cols = {r[1] for r in conn.execute("PRAGMA table_info(prospect_fv)").fetchall()}
     if "risk" not in _pf_cols:
@@ -311,12 +312,17 @@ def run(league_dir: Path | None = None) -> None:
     conn.executemany("INSERT INTO prospect_fv VALUES (?,?,?,?,?,?,?,?,?)", prospect_rows)
     conn.executemany("INSERT INTO player_surplus VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", surplus_rows)
 
-    # --- Unified evaluation (Phase 2 dual-write) ---
+    # --- Unified evaluation ---
     _write_unified_evaluations(
         conn, rows, game_date, role_map, use_custom_scores,
         _career_ab, _career_ip, bat_hist, pit_hist, two_way,
         cfg, league_dir, _adjusted_ceilings,
     )
+
+    # --- Overwrite legacy tables with unified model values ---
+    # This makes the unified model the source of truth for ALL consumers
+    # without requiring any consumer code changes.
+    _overwrite_legacy_from_unified(conn, game_date)
 
     conn.commit()
     conn.close()
@@ -390,6 +396,64 @@ def _check_fv_tier_discrepancy(p: dict, fv_base: int, fv_risk: str) -> None:
             "raw-tool-based=%d (defensive_value=%s)",
             p.get("ID", "?"), fv_base, fv_old, p["_defensive_value"],
         )
+
+
+def _overwrite_legacy_from_unified(conn, game_date: str) -> None:
+    """Overwrite prospect_fv and player_surplus with unified model values.
+
+    Maps player_evaluation data back into the legacy table schemas so all
+    existing consumers get unified model values without code changes.
+    """
+    try:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM player_evaluation WHERE eval_date=?", (game_date,)
+        ).fetchone()[0]
+        if count == 0:
+            return  # Unified eval didn't run — keep legacy values
+    except Exception:
+        return
+
+    # Overwrite prospect_fv: players with risk label (prospects) or low stat_confidence
+    conn.execute("DELETE FROM prospect_fv")
+    conn.execute("""
+        INSERT INTO prospect_fv (player_id, eval_date, fv, fv_str, level, bucket,
+                                  prospect_surplus, risk, fv_continuous)
+        SELECT player_id, eval_date, fv, fv_str, level, bucket,
+               surplus, risk, fv_continuous
+        FROM player_evaluation
+        WHERE eval_date = ?
+        AND (risk IS NOT NULL OR stat_confidence < 0.5)
+        AND level != 'MLB'
+    """, (game_date,))
+    # Also include rookie-eligible MLB players (same as before)
+    conn.execute("""
+        INSERT OR IGNORE INTO prospect_fv (player_id, eval_date, fv, fv_str, level, bucket,
+                                            prospect_surplus, risk, fv_continuous)
+        SELECT player_id, eval_date, fv, fv_str, level, bucket,
+               surplus, risk, fv_continuous
+        FROM player_evaluation
+        WHERE eval_date = ?
+        AND risk IS NOT NULL
+        AND level = 'MLB'
+    """, (game_date,))
+
+    # Overwrite player_surplus: all MLB-level players
+    conn.execute("DELETE FROM player_surplus")
+    conn.execute("""
+        INSERT INTO player_surplus (player_id, eval_date, name, bucket, age, ovr,
+                                     fv, fv_str, surplus, surplus_yr1, level,
+                                     team_id, parent_team_id)
+        SELECT player_id, eval_date, name, bucket, age, composite,
+               fv, fv_str, surplus, surplus_yr1, level,
+               team_id, parent_team_id
+        FROM player_evaluation
+        WHERE eval_date = ?
+        AND level = 'MLB'
+    """, (game_date,))
+
+    pf_count = conn.execute("SELECT COUNT(*) FROM prospect_fv").fetchone()[0]
+    ps_count = conn.execute("SELECT COUNT(*) FROM player_surplus").fetchone()[0]
+    logger.info(f"legacy overwrite: {pf_count} prospect_fv, {ps_count} player_surplus (from unified)")
 
 
 def _write_unified_evaluations(

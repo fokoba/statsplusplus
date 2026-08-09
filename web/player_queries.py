@@ -695,21 +695,54 @@ def get_player(pid):
             })
         fielding_career.sort(key=lambda x: -x["g"])
 
-    # Surplus / FV
-    ed = conn.execute("SELECT MAX(eval_date) FROM player_surplus").fetchone()[0]
+    # Surplus / FV — unified evaluation table (single source of truth)
+    unified_row = None
+    try:
+        ed = conn.execute("SELECT MAX(eval_date) FROM player_evaluation").fetchone()[0]
+        if ed:
+            unified_row = conn.execute(
+                "SELECT bucket, fv, fv_str, fv_continuous, risk, surplus, surplus_yr1, "
+                "level, composite, ceiling, stat_confidence, peak_war, tool_war, stat_war "
+                "FROM player_evaluation WHERE player_id=? AND eval_date=?",
+                (pid, ed)).fetchone()
+    except Exception:
+        ed = None
+
+    # Fallback to legacy tables if unified not available
+    if not unified_row:
+        ed = conn.execute("SELECT MAX(eval_date) FROM player_surplus").fetchone()[0]
     surplus_row = conn.execute(
         "SELECT bucket, ovr, surplus, fv_str, surplus_yr1 FROM player_surplus WHERE player_id=? AND eval_date=?",
-        (pid, ed)).fetchone()
+        (pid, ed)).fetchone() if not unified_row else None
     prospect_row = conn.execute(
         "SELECT bucket, fv, fv_str, prospect_surplus, level, risk, fv_continuous FROM prospect_fv WHERE player_id=? AND eval_date=?",
-        (pid, ed)).fetchone()
+        (pid, ed)).fetchone() if not unified_row else None
 
     valuation = {}
-    # For rookie-eligible MLB players (in both tables), prefer prospect surplus —
-    # the contract model only sees the current 1-year pre-arb deal and drastically
-    # undervalues years of remaining team control.
-    if prospect_row and surplus_row:
-        # Player is in both: use prospect valuation (more complete for pre-arb players)
+    if unified_row:
+        valuation["bucket"] = _display_pos(unified_row["bucket"])
+        valuation["fv"] = unified_row["fv"]
+        valuation["fv_str"] = unified_row["fv_str"]
+        valuation["fv_continuous"] = unified_row["fv_continuous"]
+        valuation["risk"] = unified_row["risk"]
+        valuation["surplus"] = round(unified_row["surplus"] / 1e6, 1) if unified_row["surplus"] else 0
+        valuation["ovr"] = unified_row["composite"]
+        valuation["pot"] = unified_row["ceiling"]
+        valuation["level"] = unified_row["level"]
+        valuation["stat_confidence"] = unified_row["stat_confidence"]
+        valuation["peak_war"] = unified_row["peak_war"]
+        # Classify type by stat_confidence for display purposes
+        sc = unified_row["stat_confidence"] or 0
+        if sc >= 0.75:
+            valuation["type"] = "MLB"
+        elif unified_row["risk"]:
+            valuation["type"] = "prospect"
+        else:
+            valuation["type"] = "MLB"
+        _def_keys = {'CF':'pot_cf','SS':'pot_ss','C':'pot_c','2B':'pot_second_b','3B':'pot_third_b'}
+        valuation["def_rating"] = rd.get(_def_keys.get(unified_row["bucket"], "")) or 0 if rd else 0
+    # Legacy fallback: for rookie-eligible MLB players (in both tables), prefer prospect surplus
+    elif prospect_row and surplus_row:
         valuation["bucket"] = _display_pos(prospect_row[0])
         valuation["fv"] = prospect_row[1]
         valuation["fv_str"] = prospect_row[2]
@@ -2085,15 +2118,28 @@ def get_player_popup(pid):
                      "slg": round(s[3], 3) if s[3] else None,
                      "hr": s[4], "war": round(s[5], 1) if s[5] else 0, "sb": s[6]}
 
-    # Surplus
-    ed = conn.execute("SELECT MAX(eval_date) FROM player_surplus").fetchone()[0]
-    sur = conn.execute(
-        "SELECT surplus, surplus_yr1, bucket FROM player_surplus WHERE player_id=? AND eval_date=?", (pid, ed)
-    ).fetchone()
-    # Prospect FV
-    fv_row = conn.execute(
-        "SELECT fv, fv_str, level, bucket FROM prospect_fv WHERE player_id=? AND eval_date=?", (pid, ed)
-    ).fetchone()
+    # Surplus — prefer unified table, fallback to legacy
+    _ue = None
+    try:
+        ed = conn.execute("SELECT MAX(eval_date) FROM player_evaluation").fetchone()[0]
+        if ed:
+            _ue = conn.execute(
+                "SELECT surplus, surplus_yr1, bucket, fv, fv_str, level FROM player_evaluation WHERE player_id=? AND eval_date=?",
+                (pid, ed)).fetchone()
+    except Exception:
+        ed = None
+    if _ue:
+        sur = _ue  # Has surplus, surplus_yr1, bucket
+        fv_row = _ue  # Has fv, fv_str, level, bucket
+    else:
+        ed = conn.execute("SELECT MAX(eval_date) FROM player_surplus").fetchone()[0]
+        sur = conn.execute(
+            "SELECT surplus, surplus_yr1, bucket FROM player_surplus WHERE player_id=? AND eval_date=?", (pid, ed)
+        ).fetchone()
+        # Prospect FV
+        fv_row = conn.execute(
+            "SELECT fv, fv_str, level, bucket FROM prospect_fv WHERE player_id=? AND eval_date=?", (pid, ed)
+        ).fetchone()
 
     # PAP from actual production
     _pap = None

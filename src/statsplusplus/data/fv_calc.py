@@ -258,16 +258,21 @@ def run(league_dir: Path | None = None) -> None:
                 level_label, bucket, 0, fv_risk, fv_continuous
             ))
 
-    # Write FV grades to prospect_fv temporarily (read back by player value computation)
+    # Build FV lookup dict in memory (used by player value computation)
+    # Format matches what _compute_and_store_player_values expects:
+    # {pid: (player_id, fv, fv_str, fv_continuous, level, bucket, risk)}
+    _fv_lookup: dict[int, tuple] = {}
+    for row in prospect_rows:
+        pid_r, _, fv_r, fv_str_r, level_r, bucket_r, _, risk_r, fv_cont_r = row
+        _fv_lookup[pid_r] = (pid_r, fv_r, fv_str_r, fv_cont_r, level_r, bucket_r, risk_r)
+
+    # Ensure legacy tables exist (schemas needed for final population)
     conn.execute("DELETE FROM prospect_fv")
     _pf_cols = {r[1] for r in conn.execute("PRAGMA table_info(prospect_fv)").fetchall()}
     if "risk" not in _pf_cols:
         conn.execute("ALTER TABLE prospect_fv ADD COLUMN risk TEXT")
     if "fv_continuous" not in _pf_cols:
         conn.execute("ALTER TABLE prospect_fv ADD COLUMN fv_continuous REAL")
-    conn.executemany("INSERT INTO prospect_fv VALUES (?,?,?,?,?,?,?,?,?)", prospect_rows)
-
-    # Ensure player_surplus table exists (populated by player value computation below)
     conn.execute("DROP TABLE IF EXISTS player_surplus")
     conn.execute("""CREATE TABLE player_surplus (
         player_id INTEGER, eval_date TEXT, name TEXT, bucket TEXT,
@@ -280,7 +285,7 @@ def run(league_dir: Path | None = None) -> None:
     _compute_and_store_player_values(
         conn, rows, game_date, role_map, use_custom_scores,
         _career_ab, _career_ip, bat_hist, pit_hist, two_way,
-        cfg, league_dir, _adjusted_ceilings,
+        cfg, league_dir, _adjusted_ceilings, _fv_lookup,
     )
 
     # --- Populate legacy tables from player_evaluation ---
@@ -420,11 +425,16 @@ def _compute_and_store_player_values(
     cfg,
     league_dir,
     adjusted_ceilings: dict[int, int] | None = None,
+    prospect_fv_data: dict[int, tuple] | None = None,
 ) -> None:
     """Compute surplus values for all rated players and store in player_evaluation.
 
     Iterates all players with ratings, computes their trade surplus value using
     the player_value model, and writes results to the player_evaluation table.
+
+    Args:
+        prospect_fv_data: Pre-computed FV grades from the FV loop, keyed by player_id.
+            Format: {pid: (pid, fv, fv_str, fv_continuous, level, bucket, risk)}
     """
     from statsplusplus.evaluation.player_value import compute_player_value
     from statsplusplus.evaluation.war import stat_peak_war
@@ -463,16 +473,9 @@ def _compute_and_store_player_values(
     except Exception:
         pass
 
-    # Load prospect FV data (just written above) for FV continuous values
-    prospect_fv_data: dict[int, tuple] = {}
-    try:
-        for r in conn.execute(
-            "SELECT player_id, fv, fv_str, fv_continuous, level, bucket, risk "
-            "FROM prospect_fv WHERE eval_date = ?", (game_date,)
-        ).fetchall():
-            prospect_fv_data[r[0]] = r
-    except Exception:
-        pass
+    # Use provided FV lookup (or empty dict if not available)
+    if prospect_fv_data is None:
+        prospect_fv_data = {}
 
     # Ensure table exists
     conn.execute("""CREATE TABLE IF NOT EXISTS player_evaluation (

@@ -543,13 +543,6 @@ def _compute_and_store_player_values(
                 fv_continuous = min(fv_continuous, 50.0)
                 fv = min(fv, 50)
                 fv_str = str(fv)
-            # Infer effective ceiling: PAC may have lowered the ceiling during
-            # the prospect pipeline. We don't have the adjusted value stored,
-            # but we can infer it: calc_fv caps FV at ceiling-3, so the effective
-            # ceiling is approximately fv_continuous + 5 (with some margin).
-            # Clamp between composite+3 and raw ceiling.
-            inferred_ceiling = min(ceiling, max(composite + 3, int(fv_continuous) + 5))
-            ceiling = inferred_ceiling
         else:
             # MLB player without prospect FV — estimate from composite/ceiling
             fv_continuous = float(min(ceiling - 3, composite + (ceiling - composite) * 0.4))

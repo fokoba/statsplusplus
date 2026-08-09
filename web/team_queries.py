@@ -729,7 +729,6 @@ def get_payroll_summary(team_id):
     """.format(_CONTRACT_ORG_SQL=_CONTRACT_ORG_SQL), (team_id, *_contract_org_params(team_id))).fetchall()
 
     # Project salaries for 1yr contract players using arb model (no non-tender gate)
-    from contract_value import _resolve
     from statsplusplus.evaluation.arb import estimate_control as _estimate_control_raw
     from statsplusplus.config.league_config import league_minimum as _lm_fn; from statsplusplus.evaluation.war import aging_mult
     _lmin = league_minimum()
@@ -746,10 +745,12 @@ def get_payroll_summary(team_id):
             continue
         pid, sal = r[0], r[4]
         try:
-            res = _resolve(cv_conn, str(pid))
-            if not res:
+            _pe = cv_conn.execute(
+                "SELECT age, composite, ceiling, bucket FROM player_evaluation WHERE player_id=? ORDER BY eval_date DESC LIMIT 1",
+                (pid,)).fetchone()
+            if not _pe:
                 continue
-            _, _, age, ovr, pot, bucket = res
+            age, ovr, pot, bucket = _pe["age"], _pe["composite"], _pe["ceiling"], _pe["bucket"]
             est = _estimate_control(cv_conn, pid, age, sal)
             ctrl, _, pre_arb = est
             if not ctrl or ctrl <= 1:
@@ -1432,13 +1433,16 @@ def get_depth_chart(team_id):
         roster_availability, LEVEL_DISCOUNT, DEFAULT_TEAM_PA, DEFAULT_TEAM_IP,
     )
     from statsplusplus.evaluation.war import stat_peak_war, load_stat_history
-    from contract_value import contract_value as _cv
+    from statsplusplus.evaluation.player_value import compute_player_value as _cpv_depth
+    from statsplusplus.evaluation.constants import load_model_weights as _lmw_depth
     from statsplusplus.evaluation.arb import estimate_control as _ec_raw
     _lmin2 = league_minimum()
     _perp2 = get_cfg().perpetual_arb
+    _ld_depth = get_cfg().league_dir
+    _weights_depth = _lmw_depth(_ld_depth)
+    _dpw_depth = _lmin2  # Will get actual dpw below
     def _estimate_control(conn, pid, age, sal, bucket=None):
         return _ec_raw(conn, pid, age, sal, min_sal=_lmin2, perpetual_arb=_perp2, bucket=bucket)
-    from prospect_value import prospect_surplus as _pv
 
     state = _get_state()
     year = state.get("stats_year", state["year"])
@@ -1567,10 +1571,20 @@ def get_depth_chart(team_id):
     war_curves = {}  # {player_id: {year: war}}
     hist = (bat_hist, pit_hist)
     for p in all_players:
-        cv = _cv(p["player_id"], _conn=conn, _hist=hist)
-        if cv and cv.get("breakdown"):
+        # Get pre-computed WAR projection from player_evaluation breakdown
+        try:
+            _pe_row = conn.execute(
+                "SELECT peak_war, years_control FROM player_evaluation WHERE player_id=? ORDER BY eval_date DESC LIMIT 1",
+                (p["player_id"],)).fetchone()
+        except Exception:
+            _pe_row = None
+        if _pe_row and _pe_row["peak_war"]:
+            from statsplusplus.evaluation.war import aging_mult as _am_depth
+            _pw = _pe_row["peak_war"]
+            _yrs = _pe_row["years_control"] or 3
             war_curves[p["player_id"]] = {
-                b["year"]: round(b["war_base"], 2) for b in cv["breakdown"]
+                year + i: round(_pw * _am_depth(p["age"] + i, p.get("bucket", "COF")), 2)
+                for i in range(_yrs)
             }
 
     # ── Query org prospects ─────────────────────────────────────────────
@@ -1649,15 +1663,24 @@ def get_depth_chart(team_id):
     # ── Pre-compute prospect WAR curves ─────────────────────────────────
     for p in all_players:
         if p.get("fv") and p["level"] != "MLB":
-            pv = _pv(p["fv"], p["age"], p["level"], p["bucket"],
-                     ovr=p["ovr"], pot=p["pot"])
-            if pv and pv.get("breakdown"):
-                eta = pv["years_to_mlb"]
+            try:
+                _pe_p = conn.execute(
+                    "SELECT peak_war, years_control FROM player_evaluation WHERE player_id=? ORDER BY eval_date DESC LIMIT 1",
+                    (p["player_id"],)).fetchone()
+            except Exception:
+                _pe_p = None
+            if _pe_p and _pe_p["peak_war"]:
+                from statsplusplus.evaluation.war import aging_mult as _am_depth2
+                from statsplusplus.utils.positions import YEARS_TO_MLB as _ytm
+                _ytm_val = _ytm.get(p["level"].lower(), 2.0) if p["level"] else 2.0
+                eta = _ytm_val
+                _pw_p = _pe_p["peak_war"]
                 curve = {}
-                for b in pv["breakdown"]:
-                    cal_year = year + eta + (b["control_year"] - 1)
+                for i in range(_pe_p["years_control"] or 6):
+                    cal_year = year + eta + i
                     # Map to integer year (round down — partial years count)
-                    curve[int(cal_year)] = round(b["war"], 2)
+                    war_yr = round(_pw_p * _am_depth2(p["age"] + eta + i, p.get("bucket", "COF")), 2)
+                    curve[int(cal_year)] = war_yr
                 war_curves[p["player_id"]] = curve
 
     # ── Roster availability across 3 years ──────────────────────────────

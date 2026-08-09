@@ -6,8 +6,7 @@ BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, "scripts"))
 from statsplusplus.utils.positions import display_pos as _display_pos
 from statsplusplus.evaluation.outcomes import career_outcome_probs
-from contract_value import contract_value
-from prospect_value import prospect_surplus_with_option, find_player
+from statsplusplus.evaluation.player_value import compute_player_value
 from web_league_context import get_db, get_cfg, team_abbr_map, level_map, year
 
 SENSITIVITY = {"pessimistic": 0.85, "base": 1.00, "optimistic": 1.15}
@@ -140,10 +139,11 @@ def get_trade_value(player_id, retention_pct=0.0):
         _dk = {'CF': 'pot_cf', 'SS': 'pot_ss', 'C': 'pot_c', '2B': 'pot_second_b', '3B': 'pot_third_b'}
         def_rating = rr[_dk[bucket]] if rr and bucket in _dk else None
 
-        base = prospect_surplus_with_option(fv_for_surplus, age, level, bucket,
-                                            ovr=ovr, pot=pot, fv_plus=fv_plus_for_surplus,
-                                            def_rating=def_rating)
-        surplus = {s: max(0, round(base * m)) for s, m in SENSITIVITY.items()}
+        base = conn.execute(
+            "SELECT surplus FROM player_evaluation WHERE player_id=? ORDER BY eval_date DESC LIMIT 1",
+            (player_id,)).fetchone()
+        base_surplus = base["surplus"] if base else 0
+        surplus = {s: max(0, round(base_surplus * m)) for s, m in SENSITIVITY.items()}
 
         outcome = career_outcome_probs(fv, age, level, bucket,
                                        ovr=ovr, pot=pot, def_rating=def_rating)
@@ -164,26 +164,35 @@ def get_trade_value(player_id, retention_pct=0.0):
             },
         }
 
-    # MLB contract path
-    result = contract_value(player_id, retention_pct=retention_pct)
-    if not result:
+    # MLB contract path — read from player_evaluation
+    pe = conn.execute(
+        "SELECT * FROM player_evaluation WHERE player_id=? ORDER BY eval_date DESC LIMIT 1",
+        (player_id,)).fetchone()
+    if not pe:
         return None
 
-    d = result
     tid_row = conn.execute("SELECT team_id, pos FROM players WHERE player_id=?",
                            (player_id,)).fetchone()
     team = _tam.get(tid_row["team_id"], "?") if tid_row else "?"
     rr = conn.execute("SELECT pot FROM latest_ratings WHERE player_id=?",
                       (player_id,)).fetchone()
 
+    base_surplus = pe["surplus"] or 0
+    # Apply retention if specified
+    if retention_pct > 0:
+        _c = conn.execute("SELECT salary_0, years, current_year FROM contracts WHERE player_id=?", (player_id,)).fetchone()
+        if _c and _c["salary_0"]:
+            remaining_yrs = max(1, (_c["years"] or 1) - (_c["current_year"] or 0))
+            base_surplus += int(retention_pct * _c["salary_0"] * remaining_yrs)
+
     return {
-        "player_id": player_id, "name": d["name"], "type": "contract",
-        "team": team, "age": d["age"],
-        "pos": _display_pos(d["bucket"], tid_row["pos"] if tid_row else 0),
-        "ovr": d["ovr"], "pot": rr["pot"] if rr else None,
-        "years_left": d["years_left"],
-        "flags": d["flags"],
+        "player_id": player_id, "name": pe["name"], "type": "contract",
+        "team": team, "age": pe["age"],
+        "pos": _display_pos(pe["bucket"], tid_row["pos"] if tid_row else 0),
+        "ovr": pe["composite"], "pot": rr["pot"] if rr else None,
+        "years_left": pe["years_control"],
+        "flags": [],
         "retention_pct": retention_pct,
-        "surplus": d["total_surplus"],
-        "breakdown": d["breakdown"],
+        "surplus": {s: max(0, round(base_surplus * m)) for s, m in SENSITIVITY.items()},
+        "breakdown": None,
     }

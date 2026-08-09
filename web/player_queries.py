@@ -1391,17 +1391,55 @@ def get_player(pid):
     outcome_probs = None
     try:
         if valuation.get("type") == "MLB":
-            import contract_value as _cv
-            cv = _cv.contract_value(pid)
-            if cv and cv.get("breakdown"):
+            from statsplusplus.evaluation.player_value import compute_player_value as _cpv_mlb
+            from statsplusplus.evaluation.constants import load_model_weights as _load_mw_mlb
+            from statsplusplus.config.league_config import dollars_per_war as _dpw_mlb, league_minimum as _lm_mlb
+            from statsplusplus.evaluation.war import stat_peak_war as _spw_mlb
+
+            _ld = get_cfg().league_dir
+            _mw = _load_mw_mlb(_ld)
+            _dpw = _dpw_mlb(_ld)
+            _lm = _lm_mlb(_ld)
+            _cpa = conn.execute(
+                "SELECT COALESCE(SUM(ab + COALESCE(bb,0) + COALESCE(hbp,0) + COALESCE(sf,0)), 0) "
+                "FROM mlb_batting_stats WHERE player_id=? AND split_id=1", (pid,)).fetchone()[0]
+            _cip = conn.execute(
+                "SELECT COALESCE(SUM(ip), 0) FROM mlb_pitching_stats WHERE player_id=? AND split_id=1", (pid,)).fetchone()[0]
+
+            # Get years control and salary from player_evaluation
+            _pe = conn.execute(
+                "SELECT years_control, peak_war FROM player_evaluation WHERE player_id=? ORDER BY eval_date DESC LIMIT 1", (pid,)
+            ).fetchone()
+            _yrs = _pe["years_control"] if _pe else 3
+            # Get salary schedule from contract
+            _c = conn.execute("SELECT * FROM contracts WHERE player_id=?", (pid,)).fetchone()
+            _sals = None
+            if _c and _c["years"]:
+                _sals = []
+                for i in range(_c["current_year"] or 0, _c["years"]):
+                    _sals.append(_c[f"salary_{i}"] or _lm)
+                if len(_sals) < _yrs:
+                    _sals = None
+
+            _cv_result = _cpv_mlb(
+                fv_continuous=0.0, bucket=valuation.get("bucket", ""),
+                age=age, level="MLB",
+                composite=valuation.get("ovr") or 50, ceiling=valuation.get("pot") or 50,
+                career_pa=int(_cpa), career_ip=float(_cip), stat_war=_pe["peak_war"] if _pe else None,
+                years_control=_yrs, salaries=_sals[:_yrs] if _sals else None,
+                dpw=_dpw, min_sal=_lm, weights=_mw,
+            )
+            if _cv_result and _cv_result.get("breakdown"):
+                game_year = int(get_cfg().year)
                 surplus_detail = {
-                    "rows": [{"year": b["year"], "age": b["age"], "war": round(b["war_base"], 1),
+                    "rows": [{"year": game_year + b["control_year"] - 1, "age": b["player_age"],
+                              "war": round(b["war"], 1),
                               "value": b["market_value"],
-                              "salary": b["salary_net"],
+                              "salary": b["salary"],
                               "surplus": b["surplus"]}
-                             for b in cv["breakdown"]],
-                    "total": {k: v for k, v in cv["total_surplus"].items()},
-                    "flags": cv.get("flags", []),
+                             for b in _cv_result["breakdown"]],
+                    "total": {"base": _cv_result["surplus"]},
+                    "flags": [],
                 }
         elif valuation.get("type") == "prospect":
             from statsplusplus.evaluation.player_value import compute_player_value as _compute_player_value
@@ -1472,7 +1510,7 @@ def get_player(pid):
                 def_rating=_dr, **_comp_kw)
         # MLB player who is also rookie-eligible (in prospect_fv)
         if valuation.get("type") == "MLB" and prospect_row and outcome_probs is None:
-            import prospect_value as _pv
+            from statsplusplus.evaluation.outcomes import career_outcome_probs as _career_outcome_probs_pkg
             _fv = prospect_row[1]
             _bucket = _display_pos(prospect_row[0])
             _level = prospect_row[4]
@@ -1480,7 +1518,7 @@ def get_player(pid):
                             offensive_ceiling=eval_data.get("offensive_ceiling"),
                             defensive_value=eval_data.get("defensive_value"),
                             durability_score=eval_data.get("durability_score"))
-            outcome_probs = _pv.career_outcome_probs(
+            outcome_probs = _career_outcome_probs_pkg(
                 _fv, age, _level, _bucket,
                 ovr=ratings["ovr"] if ratings else None,
                 pot=ratings["pot"] if ratings else None,
@@ -1493,7 +1531,7 @@ def get_player(pid):
         # true amateurs/draft-eligible players (who never had a real level).
         if not valuation and outcome_probs is None and level_str != 'MLB':
             try:
-                import prospect_value as _pv
+                from statsplusplus.evaluation.outcomes import career_outcome_probs as _career_outcome_probs_pkg
                 from statsplusplus.utils.positions import assign_bucket, LEVEL_NORM_AGE; from statsplusplus.evaluation.fv import calc_fv_from_dict as calc_fv
                 from statsplusplus.data.fv_calc import RATINGS_SQL, LEVEL_INT_KEY
                 _conn2 = get_db()
@@ -1526,7 +1564,7 @@ def get_player(pid):
                         "ovr": _p["Ovr"], "pot": _p["Pot"],
                         "surplus": 0, "level": _lvl_key,
                     }
-                    outcome_probs = _pv.career_outcome_probs(
+                    outcome_probs = _career_outcome_probs_pkg(
                         _fv, age, _lvl_key, _bucket, ovr=_p["Ovr"], pot=_p["Pot"], def_rating=_dr)
                     pv = _pv.prospect_surplus(_fv_continuous, age, _lvl_key, _bucket,
                                               ovr=_p["Ovr"], pot=_p["Pot"], def_rating=_dr)

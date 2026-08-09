@@ -620,8 +620,8 @@ def get_prospect_comps(pid):
         tiers.append((label, target))
 
     # Get outcome probabilities for the tier WAR targets
-    import prospect_value as _pv
-    outcome = _pv.career_outcome_probs(fv, age, level, bucket,
+    from statsplusplus.evaluation.outcomes import career_outcome_probs as _career_outcome_probs_pkg; from statsplusplus.evaluation.outcomes import ceiling_fv as _ceiling_fv_pkg
+    outcome = _career_outcome_probs_pkg(fv, age, level, bucket,
                                         ovr=pf[21], pot=pf[22])
     # Extract p75/p50/p25 WAR from the tier distribution
     total_area = sum(t["prob"] for t in outcome["tiers"])
@@ -1028,7 +1028,7 @@ def get_draft_pool():
 
         # Career outcome summary for range indicator
         try:
-            import prospect_value as _pv
+            from statsplusplus.evaluation.outcomes import career_outcome_probs as _career_outcome_probs_pkg; from statsplusplus.evaluation.outcomes import ceiling_fv as _ceiling_fv_pkg
             # Use composite_score as fallback when OVR is unavailable
             _ovr = n(p["Ovr"]) or p.get("composite_score") or 0
             _pot = n(p["Pot"]) or p.get("true_ceiling") or p.get("ceiling_score") or 0
@@ -1037,7 +1037,7 @@ def get_draft_pool():
             elif _ovr >= 35: _oc_level = 'aa'
             elif _ovr >= 28: _oc_level = 'a'
             else: _oc_level = 'a-short'
-            oc = _pv.career_outcome_probs(
+            oc = _career_outcome_probs_pkg(
                 fv_base, p["Age"], _oc_level, bucket,
                 ovr=_ovr, pot=_pot)
             if oc:
@@ -1045,19 +1045,22 @@ def get_draft_pool():
                     "thresholds": oc.get("thresholds", {}),
                     "likely": oc.get("likely_range", [0, 0]),
                 }
-            surplus_val = pf_surplus if pf_surplus else _pv.prospect_surplus_with_option(
-                fv_base, p["Age"], _oc_level, bucket,
-                ovr=_ovr, pot=_pot)
+            surplus_val = pf_surplus or 0
             entry["surplus"] = round(surplus_val / 1e6, 3) if surplus_val else 0
             # Raw (ceiling scenario) surplus — what the player is worth if they
             # fully develop to their ceiling with no time/risk discount.
-            # Uses ceiling FV to represent the best-case outcome.
-            _ceil_fv = _pv._ceiling_fv(_pot) if _pot else fv_base
-            _raw_result = _pv.prospect_surplus(_ceil_fv, p["Age"], _oc_level, bucket,
-                                               ovr=_ovr, pot=_pot)
+            _ceil_fv = _ceiling_fv_pkg(_pot) if _pot else fv_base
+            from statsplusplus.evaluation.player_value import compute_player_value as _cpv_raw
+            from statsplusplus.evaluation.constants import load_model_weights as _lmw_raw
+            from statsplusplus.config.league_config import league_minimum as _lmin_raw
+            _ld_raw = get_cfg().league_dir
+            _raw_result = _cpv_raw(
+                fv_continuous=float(_ceil_fv), bucket=bucket, age=p["Age"],
+                level=_oc_level, composite=_ovr, ceiling=_pot or _ovr,
+                dpw=dollars_per_war(_ld_raw), min_sal=_lmin_raw(_ld_raw),
+                weights=_lmw_raw(_ld_raw))
             if _raw_result and _raw_result.get("breakdown"):
-                _dpw = _pv.dollars_per_war()
-                raw_total = sum(b["war"] * _dpw - b["salary"] for b in _raw_result["breakdown"])
+                raw_total = sum(b["market_value"] - b["salary"] for b in _raw_result["breakdown"])
                 entry["raw_surplus"] = max(entry["surplus"], round(max(0, raw_total) / 1e6, 3))
             else:
                 entry["raw_surplus"] = entry["surplus"]

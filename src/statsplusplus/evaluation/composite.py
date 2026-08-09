@@ -361,6 +361,15 @@ def compute_composite_hitter(
     hitting_tools = {k: v for k, v in tools.items() if k in OFFENSIVE_TOOL_KEYS}
     raw -= sub_mlb_floor_penalty(hitting_tools)
 
+    # Tool imbalance penalty for one-tool hitters
+    _hit_vals = [v for v in hitting_tools.values() if v]
+    if len(_hit_vals) >= 3:
+        tool_spread = max(_hit_vals) - min(_hit_vals)
+        if tool_spread > 25:
+            spread_penalty = (tool_spread - 25) * 0.15
+            weakness_penalty = sum(max(0, 45 - v) * 0.12 for v in _hit_vals if v < 45)
+            raw -= spread_penalty + weakness_penalty
+
     return max(20, min(80, round(raw)))
 
 
@@ -460,6 +469,15 @@ def compute_composite_pitcher(
     # Sub-MLB floor penalty for core tools
     core_tools = {k: v for k, v in tools.items() if k in PITCHER_TOOL_KEYS}
     raw -= sub_mlb_floor_penalty(core_tools)
+
+    # Tool imbalance penalty for one-dimensional pitchers
+    _core_vals = [v for k, v in tools.items() if k in ('stuff', 'movement', 'control') and v]
+    if len(_core_vals) >= 2:
+        tool_spread = max(_core_vals) - min(_core_vals)
+        if tool_spread > 20:
+            spread_penalty = (tool_spread - 20) * 0.20
+            weakness_penalty = sum(max(0, 50 - v) * 0.15 for v in _core_vals if v < 50)
+            raw -= spread_penalty + weakness_penalty
 
     return max(20, min(80, round(raw)))
 

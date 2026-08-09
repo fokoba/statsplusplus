@@ -2246,8 +2246,8 @@ class TestCompositeDecompositionRoundTrip:
         # Step 5: Assert near-equality — the decomposition is lossless for
         # the weighted-average portion, but the sub-MLB floor penalty applied
         # in compute_composite_hitter is not captured by the decomposition.
-        # Allow tolerance of up to the maximum floor penalty.
-        assert abs(recomposed - composite) <= 16, (
+        # Allow tolerance of up to the maximum floor penalty + imbalance penalty.
+        assert abs(recomposed - composite) <= 22, (
             f"Round-trip mismatch for bucket={bucket}: "
             f"composite={composite}, recomposed={recomposed}, "
             f"off_raw={off_raw}, br_raw={br_raw}, def_raw={def_raw}, "

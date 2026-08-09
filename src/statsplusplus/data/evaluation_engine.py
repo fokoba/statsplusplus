@@ -869,6 +869,17 @@ def compute_composite_hitter(
     hitting_tools = {k: v for k, v in tools.items() if k in ("contact", "gap", "power", "eye")}
     raw -= _sub_mlb_floor_penalty(hitting_tools)
 
+    # Tool imbalance penalty: one-tool hitters (e.g., elite gap/power but
+    # below-average everything else) underperform their tool-weighted composite.
+    # Same logic as the pitcher imbalance penalty.
+    _hit_vals = [v for v in hitting_tools.values() if v]
+    if len(_hit_vals) >= 3:
+        tool_spread = max(_hit_vals) - min(_hit_vals)
+        if tool_spread > 25:
+            spread_penalty = (tool_spread - 25) * 0.15
+            weakness_penalty = sum(max(0, 45 - v) * 0.12 for v in _hit_vals if v < 45)
+            raw -= spread_penalty + weakness_penalty
+
     return max(20, min(80, round(raw)))
 
 

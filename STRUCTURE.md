@@ -91,6 +91,7 @@ statsplusplus/
 │   └── client.py
 │
 └── docs/                       # Documentation
+    ├── evaluation_model_findings.md  # Model accuracy, user guide, empirical findings
 ```
 
 ## Architecture Layers

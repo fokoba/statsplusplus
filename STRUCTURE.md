@@ -60,6 +60,7 @@ statsplusplus/
 │   ├── projections.py              # OPS+/ERA/WAR projection models
 │   ├── benchmark.py                # Evaluation accuracy benchmark
 │   ├── comp_validate.py            # Comp-based FV validation
+│   ├── model_regression.py         # Model accuracy testing + parameter calibration
 │   └── draft_settings.py           # Draft board settings management
 │
 ├── web/                        # Flask web application

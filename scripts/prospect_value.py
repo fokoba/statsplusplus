@@ -52,6 +52,36 @@ def dollars_per_war():
 def league_minimum():
     return _league_minimum_pkg(_league_dir)
 
+
+def _ensure_league_context(league_dir=None):
+    """Refresh module-level league context if it doesn't match league_dir.
+
+    Same stale-caching hazard as contract_value.py's _ensure_league_context:
+    this module resolves its league context once at import time, which is
+    fine for the CLI (one process, one league) but wrong for the Flask web
+    server, which stays alive across requests for different active leagues
+    (multi-league support, session-scoped active league). Without this,
+    every prospect surplus computed after the first request uses whichever
+    league happened to be active when this module was first imported —
+    wrong $/WAR, wrong minimum salary, wrong perpetual-arb flag, wrong
+    calibrated FV-to-WAR tables.
+    """
+    global _league_dir, _cfg, _weights, ARB_PCT
+    global FV_TO_PEAK_WAR, FV_TO_PEAK_WAR_SP, FV_TO_PEAK_WAR_RP, FV_TO_PEAK_WAR_BY_POS
+    global SCARCITY_MULT, YEARS_TO_MLB
+    target = league_dir or get_league_dir(get_active_league_slug())
+    if target != _league_dir or league_dir is not None:
+        _league_dir = target
+        _cfg = LeagueConfig(base_dir=_league_dir)
+        _weights = load_model_weights(_league_dir)
+        ARB_PCT = _weights.arb_pct
+        FV_TO_PEAK_WAR = _weights.fv_to_peak_war
+        FV_TO_PEAK_WAR_SP = _weights.fv_to_peak_war_sp
+        FV_TO_PEAK_WAR_RP = _weights.fv_to_peak_war_rp
+        FV_TO_PEAK_WAR_BY_POS = _weights.fv_to_peak_war_by_pos
+        SCARCITY_MULT = _weights.scarcity_mult
+        YEARS_TO_MLB = _weights.years_to_mlb
+
 # ---------------------------------------------------------------------------
 # Core calculation
 # ---------------------------------------------------------------------------
@@ -525,19 +555,24 @@ def _ceiling_fv(pot):
 def prospect_surplus_with_option(fv, age, level, bucket, ovr=None, pot=None,
                                   fv_plus=False, positional_adjust=False, def_rating=None,
                                   offensive_grade=None, offensive_ceiling=None,
-                                  defensive_value=None, durability_score=None):
+                                  defensive_value=None, durability_score=None,
+                                  league_dir=None):
     """Compute surplus including option value from upside scenarios.
     Returns the higher of base surplus and probability-weighted blended surplus.
-    
+
     Upside probabilities scale with two factors:
     - Youth: younger players have more development time (+5% per year under 20)
     - Pot-FV gap: wider gap = more development runway = higher upside probability
       (a Pot 80 / FV 50 player has much more upside than Pot 52 / FV 50)
-    
+
     Component scores (offensive_grade, defensive_value, etc.) adjust scenario
     probabilities: defense-heavy profiles have higher floors, offense-heavy
     profiles have higher ceilings, balanced profiles have tighter distributions.
+
+    league_dir: explicit league to compute against (required for callers
+    inside the long-running web server — see _ensure_league_context).
     """
+    _ensure_league_context(league_dir)
     base = prospect_surplus(fv, age, level, bucket, positional_adjust=positional_adjust,
                             fv_plus=fv_plus, ovr=ovr, pot=pot, def_rating=def_rating)
     base_val = base["total_surplus"]

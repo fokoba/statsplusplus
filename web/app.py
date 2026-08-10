@@ -437,7 +437,7 @@ def custom_upload():
             error = "Choose a CSV file to upload."
         else:
             try:
-                results = _cu.evaluate_csv(f.read())
+                results = _cu.evaluate_csv(f.read(), league_dir=_get_cfg().league_dir)
                 results = [r for r in results if "error" not in r]
                 if under_24_only:
                     results = [r for r in results if r.get("age") is not None and r["age"] <= 24]

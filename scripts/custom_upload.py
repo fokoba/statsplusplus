@@ -31,6 +31,7 @@ from statsplusplus.evaluation.fv import calc_fv_from_dict as calc_fv
 from statsplusplus.evaluation.constants import DEFENSIVE_WEIGHTS
 from statsplusplus.utils.positions import LEVEL_NORM_AGE, PITCH_FIELDS, display_pos
 from statsplusplus.data.db import get_conn
+from prospect_value import prospect_surplus_with_option
 
 # Same exclusion set as web/team_queries.py's get_free_agent_candidates —
 # NPB-drafted players aren't actually signable even when marked a free agent.
@@ -305,7 +306,7 @@ def _current_contract(d):
     return f"{sal_display}/yr", salary
 
 
-def evaluate_row(d: dict) -> dict | None:
+def evaluate_row(d: dict, league_dir=None) -> dict | None:
     """Evaluate one CSV row. Returns None for rows with no usable ID/name."""
     pid = (d.get("ID") or "").strip()
     if not pid:
@@ -385,6 +386,15 @@ def evaluate_row(d: dict) -> dict | None:
     }
     fv_grade, risk = calc_fv(fv_input, scale="20-80")
 
+    try:
+        surplus = prospect_surplus_with_option(
+            fv_grade, age or norm_age, level_abbr, role,
+            ovr=composite, pot=true_ceiling, offensive_ceiling=offensive_ceiling,
+            league_dir=league_dir,
+        )
+    except Exception:
+        surplus = None
+
     rule5_eligible = (d.get("R5") or "").strip().lower() == "yes"
     # Annual salary demand ("$9.0m" etc.) — verified against a real free
     # agent export: DEM is set for ~22% of free agents (the rest show "-",
@@ -425,6 +435,7 @@ def evaluate_row(d: dict) -> dict | None:
         "acc": acc, "org": org_name, "org_abbr": org_abbr,
         "rule5_eligible": rule5_eligible, "ask": ask,
         "contract": contract, "contract_salary": contract_salary,
+        "surplus": surplus,
         "if_rng": if_rng, "of_rng": of_rng,
         "best_position": best_position, "best_position_grade": best_position_grade,
         "is_free_agent": is_free_agent, "on_waivers": on_waivers,
@@ -466,12 +477,12 @@ def _db_free_agent_status(pids: list[str]) -> dict[str, bool]:
     return status
 
 
-def evaluate_csv(file_bytes: bytes) -> list[dict]:
+def evaluate_csv(file_bytes: bytes, league_dir=None) -> list[dict]:
     rows = parse_rows(file_bytes)
     parsed = []
     for d in rows:
         try:
-            r = evaluate_row(d)
+            r = evaluate_row(d, league_dir=league_dir)
         except Exception as e:
             r = {"pid": d.get("ID", "?"), "name": d.get("Name", "?"), "error": str(e)}
         if r:

@@ -321,6 +321,42 @@ class ModelWeights:
                 self._years_to_mlb = dict(_default)
         return self._years_to_mlb
 
+    @property
+    def aging_curve_hitter(self) -> dict[int, float]:
+        """League-specific hitter aging curve. Calibrated or default."""
+        raw = self.raw.get("AGING_CURVE_HITTER")
+        if raw and isinstance(raw, dict):
+            return {int(k): v for k, v in raw.items()}
+        return dict(AGING_HITTER)
+
+    @property
+    def aging_curve_pitcher(self) -> dict[int, float]:
+        """League-specific pitcher aging curve. Calibrated or default."""
+        raw = self.raw.get("AGING_CURVE_PITCHER")
+        if raw and isinstance(raw, dict):
+            return {int(k): v for k, v in raw.items()}
+        return dict(AGING_PITCHER)
+
+    def get_param(self, key: str, default: float) -> float:
+        """Get a tuning parameter: league-calibrated if available, else default.
+
+        Tuning parameters are stored in model_weights.json under a
+        "MODEL_PARAMS" dict. This provides a single override path for all
+        parameters that may vary by league (aging, imbalance rates, stat
+        confidence curve, etc.).
+
+        Args:
+            key: Parameter name (matches the constant name in constants.py).
+            default: Fallback value if not calibrated for this league.
+
+        Returns:
+            Float parameter value.
+        """
+        params = self.raw.get("MODEL_PARAMS")
+        if params and isinstance(params, dict) and key in params:
+            return float(params[key])
+        return default
+
 
 def load_model_weights(league_dir: Path) -> ModelWeights:
     """Load calibrated model weights from a league's config directory.

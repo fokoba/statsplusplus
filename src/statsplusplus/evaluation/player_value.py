@@ -218,9 +218,11 @@ def compute_player_value(
     # This prevents near-maxed average players from projecting as if they have
     # elite upside remaining.
     if ceiling > 0 and sc < 0.5:
+        _nm_threshold = weights.get_param("NEAR_MAXED_REALIZATION_THRESHOLD", NEAR_MAXED_REALIZATION_THRESHOLD) if weights else NEAR_MAXED_REALIZATION_THRESHOLD
+        _nm_denom = weights.get_param("NEAR_MAXED_DENOMINATOR", NEAR_MAXED_DENOMINATOR) if weights else NEAR_MAXED_DENOMINATOR
         realization = composite / ceiling
-        if realization > NEAR_MAXED_REALIZATION_THRESHOLD and composite_war < fv_war:
-            blend_w = max(0.0, (realization - NEAR_MAXED_REALIZATION_THRESHOLD) / NEAR_MAXED_DENOMINATOR) ** 2
+        if realization > _nm_threshold and composite_war < fv_war:
+            blend_w = max(0.0, (realization - _nm_threshold) / _nm_denom) ** 2
             tool_war = tool_war * (1 - blend_w) + composite_war * blend_w
 
     # RP cap: for prospect RPs (low stat_confidence), cap tool_war at the
@@ -274,10 +276,17 @@ def compute_player_value(
     # Scaled by FV: full premium at FV 55+, reduced at FV 45-50, none below 45.
     option_mult = 1.0
     if sc < 0.5 and ceiling > composite:
-        fv_scale = max(0.0, min(1.0, (fv_continuous - OPTION_VALUE_FV_FLOOR) / (OPTION_VALUE_FV_FULL - OPTION_VALUE_FV_FLOOR)))
-        gap_pct = min(1.0, (ceiling - composite) / OPTION_VALUE_GAP_DIVISOR)
-        youth_factor = max(0.0, min(1.0, (OPTION_VALUE_YOUTH_PIVOT - age) / OPTION_VALUE_YOUTH_RANGE))
-        option_mult = 1.0 + gap_pct * youth_factor * OPTION_VALUE_MULTIPLIER * fv_scale * (1.0 - sc * 2)
+        _ov_fv_floor = weights.get_param("OPTION_VALUE_FV_FLOOR", OPTION_VALUE_FV_FLOOR) if weights else OPTION_VALUE_FV_FLOOR
+        _ov_fv_full = weights.get_param("OPTION_VALUE_FV_FULL", OPTION_VALUE_FV_FULL) if weights else OPTION_VALUE_FV_FULL
+        _ov_gap_div = weights.get_param("OPTION_VALUE_GAP_DIVISOR", OPTION_VALUE_GAP_DIVISOR) if weights else OPTION_VALUE_GAP_DIVISOR
+        _ov_youth_pivot = int(weights.get_param("OPTION_VALUE_YOUTH_PIVOT", OPTION_VALUE_YOUTH_PIVOT)) if weights else OPTION_VALUE_YOUTH_PIVOT
+        _ov_youth_range = weights.get_param("OPTION_VALUE_YOUTH_RANGE", OPTION_VALUE_YOUTH_RANGE) if weights else OPTION_VALUE_YOUTH_RANGE
+        _ov_mult = weights.get_param("OPTION_VALUE_MULTIPLIER", OPTION_VALUE_MULTIPLIER) if weights else OPTION_VALUE_MULTIPLIER
+
+        fv_scale = max(0.0, min(1.0, (fv_continuous - _ov_fv_floor) / (_ov_fv_full - _ov_fv_floor)))
+        gap_pct = min(1.0, (ceiling - composite) / _ov_gap_div)
+        youth_factor = max(0.0, min(1.0, (_ov_youth_pivot - age) / _ov_youth_range))
+        option_mult = 1.0 + gap_pct * youth_factor * _ov_mult * fv_scale * (1.0 - sc * 2)
 
     # --- Step 5: Project year-by-year WAR and surplus ---
     rows: list[dict[str, Any]] = []
@@ -370,7 +379,11 @@ def compute_player_value(
     # types with pre-arb control trade for top-10 prospect packages.
     # Scale: 0.35 for replacement-level RPs, rising to 0.65 for elite (2.5+ WAR).
     if bucket == "RP":
-        rp_discount = RP_DISCOUNT_BASE + RP_DISCOUNT_RANGE * min(1.0, max(0.0, (peak_war - RP_DISCOUNT_WAR_FLOOR) / (RP_DISCOUNT_WAR_CEILING - RP_DISCOUNT_WAR_FLOOR)))
+        _rp_base = weights.get_param("RP_DISCOUNT_BASE", RP_DISCOUNT_BASE) if weights else RP_DISCOUNT_BASE
+        _rp_range = weights.get_param("RP_DISCOUNT_RANGE", RP_DISCOUNT_RANGE) if weights else RP_DISCOUNT_RANGE
+        _rp_war_floor = weights.get_param("RP_DISCOUNT_WAR_FLOOR", RP_DISCOUNT_WAR_FLOOR) if weights else RP_DISCOUNT_WAR_FLOOR
+        _rp_war_ceil = weights.get_param("RP_DISCOUNT_WAR_CEILING", RP_DISCOUNT_WAR_CEILING) if weights else RP_DISCOUNT_WAR_CEILING
+        rp_discount = _rp_base + _rp_range * min(1.0, max(0.0, (peak_war - _rp_war_floor) / (_rp_war_ceil - _rp_war_floor)))
         combined_mult *= rp_discount
 
     final_surplus = max(0, round(total_surplus * combined_mult))

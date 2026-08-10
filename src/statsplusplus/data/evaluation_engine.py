@@ -2283,6 +2283,7 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
                         tool_only_score, mlb_stat_2080_values,
                         peak_age=peak_age, player_age=player_age,
                         is_pitcher=is_pitcher,
+                        bucket=bucket,
                     )
 
         # Step 2: MiLB stat blending (additive for all players with MiLB data)

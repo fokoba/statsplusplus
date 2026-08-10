@@ -377,6 +377,14 @@ def compute_composite_hitter(
     hitting_tools = {k: v for k, v in tools.items() if k in OFFENSIVE_TOOL_KEYS}
     raw -= sub_mlb_floor_penalty(hitting_tools)
 
+    # Speed × contact synergy: fast players with good contact produce more
+    # value than the linear sum suggests (infield hits, extra bases, pressure).
+    # Additive bonus when both speed and contact exceed thresholds.
+    spd = float(tools.get("speed") or 0)
+    if spd > 45 and cnt > 50:
+        synergy = 0.10 * (spd - 45) * (cnt / 60.0)
+        raw += synergy
+
     # Tool imbalance penalty for one-tool hitters
     _hit_vals = [v for v in hitting_tools.values() if v]
     if len(_hit_vals) >= 3:
@@ -538,6 +546,7 @@ def compute_composite_mlb(
     peak_age: int = 28,
     player_age: int = 28,
     is_pitcher: bool = False,
+    bucket: str = "",
 ) -> int:
     """Blend tool-based score with stat performance for MLB players.
 
@@ -547,6 +556,8 @@ def compute_composite_mlb(
         peak_age: Expected peak age for position.
         player_age: Player's current age.
         is_pitcher: Whether the player is a pitcher.
+        bucket: Positional bucket (SS, CF get reduced blend because OPS+
+            doesn't capture their defensive WAR contribution).
 
     Returns:
         Integer composite score in [20, 80].
@@ -568,6 +579,13 @@ def compute_composite_mlb(
     # Blend weight based on seasons available
     seasons_available = min(len(stat_seasons), 3)
     blend_weight = {1: 0.20, 2: 0.35, 3: 0.60}[seasons_available]
+
+    # Defense-first position adjustment: OPS+ doesn't capture defensive WAR,
+    # so stat blending at these positions pulls the composite away from the
+    # defensive value that actually drives their production. Reduce blend.
+    _DEFENSE_POSITIONS = {"SS": 0.50, "CF": 0.50, "2B": 0.75, "C": 0.75}
+    if bucket in _DEFENSE_POSITIONS:
+        blend_weight *= _DEFENSE_POSITIONS[bucket]
 
     # Young player adjustment
     if player_age < peak_age and tool_score > stat_signal:

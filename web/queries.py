@@ -15,7 +15,8 @@ BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, "scripts"))
 from statsplusplus.utils.positions import display_pos as _display_pos
 from statsplusplus.config.ratings import norm as _norm_raw, norm_floor as _norm_floor_raw
-from web_league_context import get_db, get_cfg, team_abbr_map, team_names_map, pos_order, year, mlb_team_ids, level_map
+from web_league_context import (get_db, get_cfg, team_abbr_map, team_names_map, pos_order, year, mlb_team_ids, level_map,
+                                 money_divisor as _money_divisor)
 from statsplusplus.utils.positions import ROLE_MAP
 
 # Wrap norm functions to use the request-scoped scale
@@ -134,7 +135,7 @@ def get_top_prospects(n=100):
              "fv": r[3], "fv_str": r[4],
              "bucket": _display_pos(r[5], r[8]), "level": r[6],
              "pos_order": _po.get(_display_pos(r[5], r[8]), 99),
-             "surplus": round(r[7] / 1e6, 1) if r[7] else 0,
+             "surplus": round(r[7] / _money_divisor(), 1) if r[7] else 0,
              "pid": r[9],
              "eta": _calc_eta(r[6], r[13], r[14]),
              "height": fmt_ht(r[10]),
@@ -311,7 +312,7 @@ def get_all_prospects():
              "fv": r[3], "fv_str": r[4],
              "bucket": _display_pos(r[5], r[8]), "level": r[6],
              "pos_order": _po.get(_display_pos(r[5], r[8]), 99),
-             "surplus": round(r[7] / 1e6, 1) if r[7] else 0,
+             "surplus": round(r[7] / _money_divisor(), 1) if r[7] else 0,
              "pid": r[9],
              "eta": _calc_eta(r[6], r[13], r[14]),
              "height": fmt_ht(r[10]),
@@ -351,6 +352,9 @@ def get_prospect_summary(pid):
         "pid": pid, "name": name, "age": age, "bucket": bucket, "level": level,
         "team": TEAM_ABBR.get(tid, "FA"), "team_name": TEAM_NAMES.get(tid, ""),
         "fv": fv, "fv_str": fv_str,
+        # NOTE: stays in raw millions (not money_divisor-scaled) — this feeds
+        # the JS renderPanel()/fmtSurplus(), which already does its own
+        # per-value adaptive M/K formatting assuming millions-scale input.
         "surplus": round(surplus / 1e6, 1) if surplus else 0,
         "eta": _calc_eta(level, ovr_val, pot_val),
         "ovr": ovr_val, "pot": pot_val,
@@ -1049,6 +1053,9 @@ def get_draft_pool():
             surplus_val = pf_surplus if pf_surplus else _pv.prospect_surplus_with_option(
                 fv_base, p["Age"], _oc_level, bucket,
                 ovr=_ovr, pot=_pot)
+            # NOTE: stays in raw millions — feeds the draft board's JS
+            # fmtSurplus(), which already does its own per-value adaptive
+            # M/K formatting assuming millions-scale input.
             entry["surplus"] = round(surplus_val / 1e6, 3) if surplus_val else 0
             # Raw (ceiling scenario) surplus — what the player is worth if they
             # fully develop to their ceiling with no time/risk discount.
@@ -1327,7 +1334,7 @@ def get_positional_rankings():
                     "team": teams.get(org_id, "?"),
                     "fv": r["fv"], "fv_str": r["fv_str"], "risk": r["risk"],
                     "ceiling": r["true_ceiling"],
-                    "surplus": round(r["prospect_surplus"] / 1e6, 1) if r["prospect_surplus"] else 0,
+                    "surplus": round(r["prospect_surplus"] / _money_divisor(), 1) if r["prospect_surplus"] else 0,
                     "rank": len(group["prospects"]) + 1,
                 })
 

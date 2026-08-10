@@ -22,7 +22,8 @@ from statsplusplus.evaluation.surplus import calc_pap
 from statsplusplus.config.league_config import dollars_per_war as _dpw_pkg
 from statsplusplus.utils.positions import ROLE_MAP
 from percentiles import get_hitter_percentiles, get_pitcher_percentiles, get_fielding_percentiles, available_pctile_years, available_pctile_levels, get_percentile_history, get_percentile_history_all_levels, get_fielding_percentile_history
-from web_league_context import get_db, get_cfg, team_abbr_map, team_names_map, level_map, pos_map
+from web_league_context import (get_db, get_cfg, team_abbr_map, team_names_map, level_map, pos_map,
+                                 money_divisor as _money_divisor)
 
 def _norm(val):
     return _norm_raw(val, get_cfg().ratings_scale)
@@ -713,7 +714,7 @@ def get_player(pid):
         valuation["bucket"] = _display_pos(prospect_row[0])
         valuation["fv"] = prospect_row[1]
         valuation["fv_str"] = prospect_row[2]
-        valuation["surplus"] = round(prospect_row[3] / 1e6, 1) if prospect_row[3] else 0
+        valuation["surplus"] = round(prospect_row[3] / _money_divisor(), 1) if prospect_row[3] else 0
         valuation["type"] = "prospect"
         valuation["level"] = prospect_row[4]
         valuation["risk"] = prospect_row[5]
@@ -725,14 +726,14 @@ def get_player(pid):
     elif surplus_row:
         valuation["bucket"] = _display_pos(surplus_row[0])
         valuation["ovr"] = surplus_row[1]
-        valuation["surplus"] = round(surplus_row[2] / 1e6, 1) if surplus_row[2] else 0
+        valuation["surplus"] = round(surplus_row[2] / _money_divisor(), 1) if surplus_row[2] else 0
         valuation["fv_str"] = surplus_row[3]
         valuation["type"] = "MLB"
     elif prospect_row:
         valuation["bucket"] = _display_pos(prospect_row[0])
         valuation["fv"] = prospect_row[1]
         valuation["fv_str"] = prospect_row[2]
-        valuation["surplus"] = round(prospect_row[3] / 1e6, 1) if prospect_row[3] else 0
+        valuation["surplus"] = round(prospect_row[3] / _money_divisor(), 1) if prospect_row[3] else 0
         valuation["type"] = "prospect"
         valuation["level"] = prospect_row[4]
         valuation["risk"] = prospect_row[5]
@@ -1394,7 +1395,7 @@ def get_player(pid):
             # Fall back to live calculation for on-the-fly evaluations.
             stored_surplus = valuation.get("surplus")
             if stored_surplus and stored_surplus != 0:
-                authoritative_total = round(stored_surplus * 1e6)
+                authoritative_total = round(stored_surplus * _money_divisor())
             else:
                 authoritative_total = opt_total
             if pv and pv.get("breakdown"):
@@ -1492,7 +1493,7 @@ def get_player(pid):
                         scar = pv.get("scarcity_mult", 1.0)
                         raw_total = sum(b["market_value"] - b["salary"] for b in pv["breakdown"])
                         eta_yr = int(get_cfg().year + pv["years_to_mlb"])
-                        valuation["surplus"] = round(opt_total / 1e6, 1)
+                        valuation["surplus"] = round(opt_total / _money_divisor(), 1)
                         surplus_detail = {
                             "rows": [{"year": eta_yr + b['control_year'] - 1, "age": b["player_age"],
                                       "war": round(b["war"], 1),
@@ -2175,7 +2176,7 @@ def get_player_popup(pid):
         "bats": r["bats"] if r else None, "throws": r["throws"] if r else None,
         "stats": stats, "bat_stats": bat_stats, "ratings": ratings,
         "is_two_way": bat_stats is not None,
-        "surplus": round(sur["surplus"] / 1e6, 1) if sur and sur["surplus"] else None,
+        "surplus": round(sur["surplus"] / _money_divisor(), 1) if sur and sur["surplus"] else None,
         "pap": _pap,
         "bucket": (sur["bucket"] if sur else fv_row["bucket"] if fv_row else None),
         "fv": fv_row["fv_str"] if fv_row else None,

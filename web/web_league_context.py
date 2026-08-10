@@ -130,6 +130,26 @@ def my_team_id():
     return get_cfg().my_team_id
 
 
+# Dollar-value display scale, adapted to the league's actual dollar era.
+# A modern-salary league's $/WAR is in the millions, so rounding surplus to
+# one decimal of $M reads fine ("$0.4M"). A vintage/low-salary league's
+# $/WAR can be in the tens of thousands — the same $0.1M rounding collapses
+# almost every real player's surplus to "$0.0M", making the whole column
+# look empty. Detect via dollars_per_war (the figure surplus is directly
+# computed from) and switch to a $K scale below the threshold. Shared by
+# team_queries.py, player_queries.py, and the Trade tab (league.html,
+# via money_unit/money_divisor injected into its JS).
+_MONEY_SCALE_THRESHOLD = 1_000_000
+
+def money_unit():
+    from statsplusplus.config.league_config import dollars_per_war as _dpw
+    dpw = _dpw(get_cfg().league_dir)
+    return "K" if dpw and dpw < _MONEY_SCALE_THRESHOLD else "M"
+
+def money_divisor():
+    return 1_000.0 if money_unit() == "K" else 1_000_000.0
+
+
 def has_extended_ratings():
     """Check if the ratings table has extended columns (babip, hra, pbabip, prone)."""
     if has_request_context() and hasattr(g, "_has_ext_ratings"):

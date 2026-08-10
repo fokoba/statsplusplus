@@ -110,8 +110,8 @@
               <td>{{ r.l10 }}</td>
               <td class="{{ 'streak-w' if r.streak.startswith('W') else 'streak-l' if r.streak.startswith('L') else '' }}">{{ r.streak }}</td>
               <td>{{ "%+.2f"|format(r.rdpg) }}</td>
-              <td>${{ r.mlb_surplus }}M</td>
-              <td>${{ r.farm_surplus }}M</td>
+              <td>${{ r.mlb_surplus }}{{ money_unit }}</td>
+              <td>${{ r.farm_surplus }}{{ money_unit }}</td>
             </tr>
             {% endfor %}
           </tbody>
@@ -316,7 +316,7 @@
     <div>
       <h3>Prospects — {{ group.label }}</h3>
       <table class="pointed sortable">
-        <thead><tr><th>#</th><th class="left">Name</th><th>Age</th><th>Org</th><th>FV</th><th>Risk</th><th>Ceil</th><th>$M</th></tr></thead>
+        <thead><tr><th>#</th><th class="left">Name</th><th>Age</th><th>Org</th><th>FV</th><th>Risk</th><th>Ceil</th><th>${{ money_unit }}</th></tr></thead>
         <tbody>
         {% for p in group.prospects %}
         <tr{% if p.team == my_abbr %} class="highlight"{% endif %}><td>{{ p.rank }}</td><td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td><td>{{ p.age }}</td><td>{{ p.team }}</td><td>{{ p.fv_str }}</td><td><span class="risk-{{ p.risk|lower if p.risk else '' }}">{{ p.risk[:1] if p.risk else '' }}</span></td><td>{{ p.ceiling or '-' }}</td><td>{{ p.surplus }}</td></tr>
@@ -603,6 +603,8 @@
 </div>
 
 <script>
+const MONEY_UNIT = {{ money_unit|tojson }};
+
 /* ── Standings Tabs ── */
 function showStandingsTab(tab) {
   document.getElementById('standings-expanded').style.display = tab === 'expanded' ? '' : 'none';
@@ -724,7 +726,7 @@ function renderProspects(list, maxRows, singleTeam) {
     c += `<td class="ht-cell">${p.height}</td><td>${p.bats}/${p.throws}</td>`;
     c += `<td>${fvBadge(p.fv, p.fv_str, p.risk)}</td>`;
     c += `<td>${p.composite_score || '—'}</td>`;
-    c += `<td class="surplus-cell"><span class="surplus-track"><span class="surplus-bar" style="width:${surpPct}%"></span><span class="surplus-val">$${p.surplus}M</span></span></td>`;
+    c += `<td class="surplus-cell"><span class="surplus-track"><span class="surplus-bar" style="width:${surpPct}%"></span><span class="surplus-val">$${p.surplus}${MONEY_UNIT}</span></span></td>`;
     return `<tr${hl}>${c}</tr>`;
   }).join('');
 }
@@ -949,7 +951,8 @@ function rebuildOrgDropdowns() {
   });
 }
 
-function fmtM(n) { return (n >= 0 ? '+$' : '-$') + (Math.abs(n)/1e6).toFixed(1) + 'M'; }
+const MONEY_DIVISOR = {{ money_divisor|tojson }};
+function fmtM(n) { return (n >= 0 ? '+$' : '-$') + (Math.abs(n)/MONEY_DIVISOR).toFixed(1) + MONEY_UNIT; }
 function surplusClass(n) { return n >= 0 ? 'surplus-pos' : 'surplus-neg'; }
 
 function fvBadgeClass(fv) {

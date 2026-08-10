@@ -11,11 +11,11 @@
   </div>
   <div class="summary-item kpi-accent">
     <span class="label">MLB Surplus</span>
-    <span class="value {{ 'pos' if summary.mlb_surplus > 0 else 'neg' if summary.mlb_surplus < 0 else '' }}">${{ summary.mlb_surplus }}M</span>
+    <span class="value {{ 'pos' if summary.mlb_surplus > 0 else 'neg' if summary.mlb_surplus < 0 else '' }}">${{ summary.mlb_surplus }}{{ money_unit }}</span>
   </div>
   <div class="summary-item kpi-accent">
     <span class="label">Farm Surplus</span>
-    <span class="value {{ 'pos' if summary.farm_surplus > 0 else 'neg' if summary.farm_surplus < 0 else '' }}">${{ summary.farm_surplus }}M</span>
+    <span class="value {{ 'pos' if summary.farm_surplus > 0 else 'neg' if summary.farm_surplus < 0 else '' }}">${{ summary.farm_surplus }}{{ money_unit }}</span>
   </div>
   <div class="summary-item">
     <span class="label">FV 50+</span>
@@ -565,7 +565,7 @@
           <td>{{ m.age }}</td>
           <td><span class="ovr-color" data-g="{{ m.ovr }}">{{ m.ovr }}</span></td>
           <td>{{ m.war }}</td>
-          <td class="{{ 'pos' if m.surplus > 0 else 'neg' if m.surplus < 0 else '' }}">${{ m.surplus }}M</td>
+          <td class="{{ 'pos' if m.surplus > 0 else 'neg' if m.surplus < 0 else '' }}">${{ m.surplus }}{{ money_unit }}</td>
           {% else %}
           <td class="left text-dim">—</td><td></td><td></td><td></td><td></td>
           {% endif %}
@@ -582,7 +582,7 @@
             {%- set lv = p.level -%}
             <span class="lvl-badge {% if lv == 'AAA' %}lvl-aaa{% elif lv == 'AA' %}lvl-aa{% elif lv in ('A','A-Short') %}lvl-a{% else %}lvl-low{% endif %}">{{ lv }}</span>
           </td>
-          <td class="pos">${{ p.surplus }}M</td>
+          <td class="pos">${{ p.surplus }}{{ money_unit }}</td>
           {% else %}
           <td class="left col-sep text-dim">—</td><td class="left text-dim">—</td><td></td><td></td><td></td><td></td>
           {% endif %}
@@ -615,7 +615,7 @@
           <td><span class="ovr-color" data-g="{{ p.ovr }}">{{ p.ovr }}</span></td>
           <td>{{ p.age }}</td>
           <td>{{ p.yrs_left }}yr</td>
-          <td class="pos">${{ p.surplus }}M</td>
+          <td class="pos">${{ p.surplus }}{{ money_unit }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -646,7 +646,7 @@
             <td>{{ loop.index }}</td>
             <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
             <td>{{ p.pos }}</td>
-            <td class="{{ 'pos' if p.surplus > 0 else 'neg' if p.surplus < 0 else '' }}">${{ p.surplus }}M</td>
+            <td class="{{ 'pos' if p.surplus > 0 else 'neg' if p.surplus < 0 else '' }}">${{ p.surplus }}{{ money_unit }}</td>
             <td>
               {%- set lv = p.level -%}
               <span class="lvl-badge {% if lv == 'MLB' %}lvl-mlb{% elif lv == 'AAA' %}lvl-aaa{% elif lv == 'AA' %}lvl-aa{% elif lv in ('A','A-Short') %}lvl-a{% else %}lvl-low{% endif %}">{{ lv }}</span>
@@ -773,7 +773,7 @@
             <td>{{ c.salary|money }}</td>
             <td>{{ c.years_left }}</td>
             <td>{{ c.total_left|money }}</td>
-            <td class="{{ 'pos' if c.surplus > 0 else 'neg' if c.surplus < 0 else '' }}">${{ c.surplus }}M</td>
+            <td class="{{ 'pos' if c.surplus > 0 else 'neg' if c.surplus < 0 else '' }}">${{ c.surplus }}{{ money_unit }}</td>
             <td class="left">
               {%- if c.ntc %}<span class="opt-badge opt-ntc">NTC</span>{% endif %}
               {%- if c.to %}<span class="opt-badge opt-to">TO</span>{% endif %}
@@ -803,7 +803,7 @@
             <td>{{ p.ovr }}</td>
             <td>{{ p.salary|money }}</td>
             <td>{{ p.yrs_left }}</td>
-            <td class="{{ 'pos' if p.surplus > 0 else 'neg' if p.surplus < 0 else '' }}">${{ p.surplus }}M</td>
+            <td class="{{ 'pos' if p.surplus > 0 else 'neg' if p.surplus < 0 else '' }}">${{ p.surplus }}{{ money_unit }}</td>
           </tr>
           {% endfor %}
         </tbody>
@@ -874,7 +874,7 @@
             <td>{{ p.age }}</td>
             <td class="left">{{ p.fv_str }}{% if p.risk %} <span style="font-size:10px;color:{% if p.risk == 'Low' %}#4caf50{% elif p.risk == 'Medium' %}#ffc107{% elif p.risk == 'High' %}#ff9800{% else %}#f44336{% endif %}">{{ p.risk[0] }}</span>{% endif %}</td>
             <td class="left">{{ p.level }}</td>
-            <td>${{ p.surplus }}M</td>
+            <td>${{ p.surplus }}{{ money_unit }}</td>
           </tr>
           {% endfor %}
         </tbody>
@@ -884,8 +884,8 @@
     <div class="panel">
       <h2>Farm Depth</h2>
       <div class="farm-depth-summary">
-        <span>Total: ${{ farm_depth.total_surplus }}M</span>
-        <span>Lg Avg: ${{ farm_depth.lg_avg }}M</span>
+        <span>Total: ${{ farm_depth.total_surplus }}{{ money_unit }}</span>
+        <span>Lg Avg: ${{ farm_depth.lg_avg }}{{ money_unit }}</span>
         <span>Rank: {{ farm_depth.lg_rank }}/{{ farm_depth.lg_n }}</span>
       </div>
       <div class="columns team-stats-pair">
@@ -895,7 +895,7 @@
             <thead><tr><th>Pos</th><th>Count</th><th>Surplus</th></tr></thead>
             <tbody>
               {% for b in farm_depth.buckets %}
-              <tr><td>{{ b.bucket }}</td><td>{{ b.count }}</td><td>${{ b.surplus }}M</td></tr>
+              <tr><td>{{ b.bucket }}</td><td>{{ b.count }}</td><td>${{ b.surplus }}{{ money_unit }}</td></tr>
               {% endfor %}
             </tbody>
           </table>

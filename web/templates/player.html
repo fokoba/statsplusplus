@@ -575,7 +575,7 @@
   {% endif %}
   <div class="summary-item" title="Projected on-field value minus salary cost over remaining team control. Positive = player worth more than they cost.">
     <span class="label">Surplus</span>
-    <span class="value {% if p.valuation.surplus > 0 %}pos{% elif p.valuation.surplus < 0 %}neg{% endif %}">${{ p.valuation.surplus }}M</span>
+    <span class="value {% if p.valuation.surplus > 0 %}pos{% elif p.valuation.surplus < 0 %}neg{% endif %}">${{ p.valuation.surplus }}{{ money_unit }}</span>
   </div>
   {% if p.pap is not none %}
   <div class="summary-item" title="Payroll Adjusted Performance">

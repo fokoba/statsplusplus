@@ -16,7 +16,8 @@ from statsplusplus.utils.positions import ROLE_MAP
 from statsplusplus.evaluation.constants import DEFAULT_MINIMUM_SALARY
 from web_league_context import (get_db, get_cfg, team_abbr_map, team_names_map,
                                  level_map, pos_map, pos_order, pyth_exp, my_team_id,
-                                 mlb_team_ids, league_averages as _load_la)
+                                 mlb_team_ids, league_averages as _load_la,
+                                 money_unit as _money_unit, money_divisor as _money_divisor)
 
 # Local wrappers using request-scoped league_dir
 def _dollars_per_war():
@@ -118,8 +119,8 @@ def get_summary(team_id=None):
 
     return {
         "game_date": state["game_date"], "year": state["year"], "phase": phase,
-        "mlb_surplus": round(mlb_surplus / 1e6, 1),
-        "farm_surplus": round(farm_surplus / 1e6, 1),
+        "mlb_surplus": round(mlb_surplus / _money_divisor(), 1),
+        "farm_surplus": round(farm_surplus / _money_divisor(), 1),
         "fv50_count": fv50,
     }
 
@@ -209,8 +210,8 @@ def get_power_rankings():
             "rdpg": rdpg[t],
             "l10": f"{l10w}-{l10l}" if has_games else "-",
             "streak": streak_map.get(t, "-"),
-            "mlb_surplus": round(surplus_map.get(t, 0) / 1e6, 1),
-            "farm_surplus": round(farm_map.get(t, 0) / 1e6, 1),
+            "mlb_surplus": round(surplus_map.get(t, 0) / _money_divisor(), 1),
+            "farm_surplus": round(farm_map.get(t, 0) / _money_divisor(), 1),
             "score": round(score * 100, 1),
             "is_mine": r["is_mine"],
         })
@@ -362,7 +363,7 @@ def get_roster(team_id=None):
     for pid, name, age, pos, role, ovr, surplus, bucket, comp_score in players:
         _display_ovr = comp_score if comp_score is not None else (ovr or 0)
         base = {"pid": pid, "name": name, "age": age, "ovr": _display_ovr,
-                "surplus": round(surplus / 1e6, 1) if surplus else 0}
+                "surplus": round(surplus / _money_divisor(), 1) if surplus else 0}
         if role in (11, 12, 13):
             s = pit.get(pid, (None, None, None, None))
             role_str = ROLE_MAP.get(role, "P")
@@ -483,7 +484,7 @@ def get_roster_hitters(team_id=None):
             "pid": pid, "name": p["name"], "age": p["age"],
             "ovr": _display_ovr, "pos": pos,
             "pos_order": pos_order().get(pos, 99),
-            "surplus": round(p["surplus_yr1"] / 1e6, 1) if p["surplus_yr1"] else 0,
+            "surplus": round(p["surplus_yr1"] / _money_divisor(), 1) if p["surplus_yr1"] else 0,
             "pap": calc_pap(war, salaries.get(pid, 0), team_g, dpw),
             "is_two_way": pid in twp_pids,
             "status": "DL" if (p["is_on_dl"] or p["is_on_dl60"]) else
@@ -579,7 +580,7 @@ def get_roster_pitchers(team_id=None):
             "pid": pid, "name": p["name"], "age": p["age"],
             "ovr": _display_ovr, "role": role_str,
             "role_order": pos_order().get(role_str, 99),
-            "surplus": round(p["surplus_yr1"] / 1e6, 1) if p["surplus_yr1"] else 0,
+            "surplus": round(p["surplus_yr1"] / _money_divisor(), 1) if p["surplus_yr1"] else 0,
             "pap": calc_pap(war, salaries.get(pid, 0), team_g, dpw),
             "is_two_way": pid in twp_pids,
             "status": "DL" if (p["is_on_dl"] or p["is_on_dl60"]) else
@@ -1030,7 +1031,7 @@ def get_farm(team_id=None):
              "fv": r[3], "fv_str": r[4],
              "bucket": _display_pos(r[5], r[8]),
              "pos_order": pos_order().get(_display_pos(r[5], r[8]), 99),
-             "surplus": round(r[6] / 1e6, 1) if r[6] else 0,
+             "surplus": round(r[6] / _money_divisor(), 1) if r[6] else 0,
              "pid": r[7],
              "composite_score": r[9], "ceiling_score": r[10],
              "risk": r[11]}
@@ -1114,7 +1115,7 @@ def get_contracts(team_id):
             "pid": pid, "name": name,
             "salary": cur_sal, "years_left": yrs_left, "total_left": total_left,
             "ntc": ntc, "to": to, "po": po,
-            "surplus": round(surplus / 1e6, 1) if surplus else 0,
+            "surplus": round(surplus / _money_divisor(), 1) if surplus else 0,
             "is_major": is_major,
         })
 
@@ -1266,7 +1267,7 @@ def get_upcoming_fa(team_id):
             "pid": pid, "name": name, "age": age,
             "pos": _display_pos(bucket) if bucket else "?",
             "yrs_left": yrs_left, "salary": sal,
-            "surplus": round(surplus / 1e6, 1) if surplus else 0,
+            "surplus": round(surplus / _money_divisor(), 1) if surplus else 0,
             "ovr": ovr or 0,
         })
     out.sort(key=lambda x: (-x["ovr"], x["yrs_left"]))
@@ -1295,7 +1296,7 @@ def get_surplus_leaders(team_id):
             continue
         combined.append({"pid": pid, "name": name,
                          "pos": _display_pos(bucket) if bucket else "?",
-                         "surplus": round(surplus / 1e6, 1), "src": src})
+                         "surplus": round(surplus / _money_divisor(), 1), "src": src})
     combined.sort(key=lambda x: -x["surplus"])
     return combined[:15]
 
@@ -1618,7 +1619,7 @@ def get_farm_depth(team_id):
     lg_avg = sum(lg_vals) / len(lg_vals) if lg_vals else 0
     lg_rank = next((i + 1 for i, v in enumerate(lg_vals) if v <= team_surplus), len(lg_vals))
 
-    buckets = [{"bucket": _display_pos(b), "count": c, "surplus": round(s / 1e6, 1)}
+    buckets = [{"bucket": _display_pos(b), "count": c, "surplus": round(s / _money_divisor(), 1)}
                for b, c, s in sorted(by_bucket, key=lambda x: -x[2])]
 
     level_order = {"AAA": 1, "AA": 2, "A": 3, "A-Short": 4, "Rookie": 5, "Intl": 6}
@@ -1627,8 +1628,8 @@ def get_farm_depth(team_id):
 
     return {
         "buckets": buckets, "levels": levels,
-        "total_surplus": round(team_surplus / 1e6, 1),
-        "lg_avg": round(lg_avg / 1e6, 1),
+        "total_surplus": round(team_surplus / _money_divisor(), 1),
+        "lg_avg": round(lg_avg / _money_divisor(), 1),
         "lg_rank": lg_rank, "lg_n": len(lg_vals),
     }
 
@@ -1764,7 +1765,7 @@ def get_draft_org_depth(team_id):
         # Collapse COF/LF/RF into LF/RF display key
         key = "LF/RF" if bucket in ("COF", "LF", "RF") else ("CF" if bucket == "CF" else _display_pos(bucket))
         if key in result:
-            result[key]["mlb"] += (r[1] or 0) / 1e6
+            result[key]["mlb"] += (r[1] or 0) / _money_divisor()
 
     # Farm: positive prospect_surplus by bucket
     for r in conn.execute("""
@@ -1779,7 +1780,7 @@ def get_draft_org_depth(team_id):
             continue
         key = "LF/RF" if bucket in ("COF", "LF", "RF") else ("CF" if bucket == "CF" else _display_pos(bucket))
         if key in result:
-            result[key]["farm"] += (r[1] or 0) / 1e6
+            result[key]["farm"] += (r[1] or 0) / _money_divisor()
 
     # Compute league average per position for relative thresholds.
     # Use the request-scoped mlb_team_ids() (web_league_context), not the raw
@@ -1800,7 +1801,7 @@ def get_draft_org_depth(team_id):
             continue
         key = "LF/RF" if bucket in ("COF", "LF", "RF") else ("CF" if bucket == "CF" else _display_pos(bucket))
         if key in league_avg:
-            league_avg[key] += (r[1] or 0) / 1e6 / num_teams
+            league_avg[key] += (r[1] or 0) / _money_divisor() / num_teams
 
     for r in conn.execute("""
         SELECT pf.bucket, SUM(pf.prospect_surplus)
@@ -1813,7 +1814,7 @@ def get_draft_org_depth(team_id):
             continue
         key = "LF/RF" if bucket in ("COF", "LF", "RF") else ("CF" if bucket == "CF" else _display_pos(bucket))
         if key in league_avg:
-            league_avg[key] += (r[1] or 0) / 1e6 / num_teams
+            league_avg[key] += (r[1] or 0) / _money_divisor() / num_teams
 
     # Round and add total with league-relative indicator
     out = {}
@@ -2295,7 +2296,7 @@ def get_org_overview(team_id):
         w = r[war_key]
         return {"pid": r["player_id"], "name": r["name"], "ovr": r["ovr"] or 0,
                 "war": round(w, 1) if w else 0, "age": r["age"],
-                "surplus": round(r["surplus"] / 1e6, 1) if r["surplus"] else 0}
+                "surplus": round(r["surplus"] / _money_divisor(), 1) if r["surplus"] else 0}
 
     # ── Position depth: MLB starters per position ──
     mlb_by_pos = defaultdict(list)  # pos_label -> [entries] sorted by WAR
@@ -2373,7 +2374,7 @@ def get_org_overview(team_id):
             "pid": r["player_id"], "name": r["name"],
             "fv": r["fv"], "fv_str": r["fv_str"],
             "level": r["level"], "age": r["age"], "bucket": bucket,
-            "surplus": round(r["prospect_surplus"] / 1e6, 1) if r["prospect_surplus"] else 0,
+            "surplus": round(r["prospect_surplus"] / _money_divisor(), 1) if r["prospect_surplus"] else 0,
         })
 
     # Build position depth rows
@@ -2467,7 +2468,7 @@ def get_org_overview(team_id):
         retention.append({
             "pid": r["player_id"], "name": r["name"], "age": r["age"],
             "pos": pos, "ovr": r["ovr"] or 0,
-            "surplus": round(surplus / 1e6, 1), "yrs_left": total_ctrl,
+            "surplus": round(surplus / _money_divisor(), 1), "yrs_left": total_ctrl,
         })
     retention.sort(key=lambda x: -x["surplus"])
 
@@ -2488,13 +2489,13 @@ def get_org_overview(team_id):
             continue
         pos = _display_pos(r["bucket"]) if r["bucket"] else ROLE_MAP.get(r["role"], "?")
         all_surplus.append({"pid": r["player_id"], "name": r["name"], "pos": pos,
-                            "surplus": round(r["surplus"] / 1e6, 1), "level": "MLB"})
+                            "surplus": round(r["surplus"] / _money_divisor(), 1), "level": "MLB"})
     for r in farm_surp:
         if not r["prospect_surplus"]:
             continue
         pos = _display_pos(r["bucket"]) if r["bucket"] else ROLE_MAP.get(r["role"], "?")
         all_surplus.append({"pid": r["player_id"], "name": r["name"], "pos": pos,
-                            "surplus": round(r["prospect_surplus"] / 1e6, 1), "level": r["level"]})
+                            "surplus": round(r["prospect_surplus"] / _money_divisor(), 1), "level": r["level"]})
     all_surplus.sort(key=lambda x: -x["surplus"])
 
     return {
@@ -2676,7 +2677,7 @@ def get_minor_league_roster(team_id):
             "pos": display_p, "bt": bt,
             "composite": composite, "ceiling": ceiling,
             "fv": fv, "fv_str": fv_str, "risk": risk,
-            "surplus": round(prospect_surplus / 1e6, 1) if prospect_surplus else None,
+            "surplus": round(prospect_surplus / _money_divisor(), 1) if prospect_surplus else None,
         }
 
         if is_pitcher:
@@ -2818,7 +2819,7 @@ def get_org_minor_league_roster(parent_team_id):
             "level": level_name, "level_num": int(level) if level else 99,
             "composite": composite, "ceiling": ceiling,
             "fv": fv, "fv_str": fv_str, "risk": risk,
-            "surplus": round(prospect_surplus / 1e6, 1) if prospect_surplus else None,
+            "surplus": round(prospect_surplus / _money_divisor(), 1) if prospect_surplus else None,
             "on_40man": bool(on_40man),
         }
 
@@ -2954,7 +2955,7 @@ def get_minor_league_notables(team_id):
             "ovr": ovr, "pot": pot,
             "composite": composite, "ceiling": ceiling,
             "fv": fv, "fv_str": fv_str, "risk": risk,
-            "surplus": round(prospect_surplus / 1e6, 1) if prospect_surplus else None,
+            "surplus": round(prospect_surplus / _money_divisor(), 1) if prospect_surplus else None,
             "tools": tools, "tags": tags,
             "young_by": age_norm - age if age and age < age_norm else 0,
             "eta": _eta_map.get(str(team_level), 3.5),

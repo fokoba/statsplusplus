@@ -448,6 +448,8 @@ def api_draft_sim():
                       "pos": r["bucket"], "fv": r["fv"],
                       "fv_str": r["fv_str"], "pot": r["pot"],
                       "ceiling": r["true_ceiling"],
+                      # Stays in raw millions — feeds the draft-sim JS's
+                      # fmtSurplus(), which already adapts M/K per value.
                       "surplus": round(r["prospect_surplus"] / 1e6, 1),
                       "risk": r["risk"]}
                      for rd, slot, r in our_picks]

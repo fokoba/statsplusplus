@@ -124,6 +124,13 @@ def _inject_globals():
             if d.is_dir() and (d / "config" / "league_settings.json").exists():
                 ls = _json.loads((d / "config" / "league_settings.json").read_text())
                 league_list.append({"slug": d.name, "name": ls.get("league", d.name)})
+    money_unit, money_divisor = "M", 1_000_000.0
+    if getattr(g, "league_ready", False):
+        try:
+            from web_league_context import money_unit as _mu, money_divisor as _md
+            money_unit, money_divisor = _mu(), _md()
+        except Exception:
+            pass
     return {
         "statsplus_base": f"https://statsplus.net/{slug}",
         "all_teams": sorted(cfg.team_names_map.items(), key=lambda x: x[1]) if getattr(g, "league_ready", False) else [],
@@ -131,6 +138,8 @@ def _inject_globals():
         "league_list": league_list,
         "active_league_slug": g.league_slug if hasattr(g, "league_slug") else "",
         "league_ready": getattr(g, "league_ready", False),
+        "money_unit": money_unit,
+        "money_divisor": money_divisor,
     }
 
 

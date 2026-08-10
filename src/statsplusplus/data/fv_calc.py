@@ -259,8 +259,33 @@ def run(league_dir: Path | None = None) -> None:
                     pid, game_date, fv_base, fv_str,
                     "MLB", bucket, p_surplus, fv_risk, fv_continuous
                 ))
-        elif age <= 24:
+        else:
+            # No age cap here — the career_ab/career_ip check right below is
+            # the real "hasn't proven himself at the MLB level yet" signal.
+            # An age<=24 gate on top of it left minor leaguers over 24 with
+            # no row in either prospect_fv or player_surplus at all (not
+            # just a smaller number — nothing computed), even when they're
+            # legitimately unproven org depth still worth valuing (e.g. a
+            # 25-27yo who's simply never gotten a real MLB look).
             if _career_ab.get(pid, 0) >= 130 or _career_ip.get(pid, 0) >= 50:
+                # Proven at the MLB level but not currently on the active
+                # roster (optioned/secondary) — still has a real contract,
+                # so value him the same way a level==1 player would be
+                # rather than dropping him from both tables entirely.
+                ovr = int(p.get("Ovr") or 0)
+                surplus = 0
+                surplus_yr1 = 0
+                cv = _contract_value(pid, _conn=conn, _hist=_cv_hist)
+                if cv:
+                    surplus = cv["total_surplus"].get("base", 0)
+                    bd = cv.get("breakdown")
+                    if bd:
+                        surplus_yr1 = round(bd[0].get("surplus", 0))
+                surplus_rows.append((
+                    pid, game_date, p["Name"], bucket, age,
+                    ovr, ovr, str(ovr), surplus, surplus_yr1,
+                    "MLB", p["team_id"], p["parent_team_id"]
+                ))
                 continue
             level_key = LEVEL_INT_KEY.get(int(level))
             if not level_key:

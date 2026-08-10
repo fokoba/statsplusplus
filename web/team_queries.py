@@ -2635,10 +2635,12 @@ def get_minor_league_roster(team_id):
                r.c, r.ss, r.second_b, r.third_b, r.first_b, r.lf, r.cf, r.rf,
                r.fst, r.snk, r.crv, r.sld, r.chg, r.splt, r.cutt,
                r.cir_chg, r.scr, r.frk, r.kncrv, r.knbl,
-               pf.fv, pf.fv_str, pf.risk, pf.prospect_surplus, pf.bucket
+               pf.fv, pf.fv_str, pf.risk, pf.prospect_surplus, pf.bucket,
+               ps.surplus
         FROM players p
         LEFT JOIN latest_ratings r ON p.player_id = r.player_id
         LEFT JOIN prospect_fv pf ON p.player_id = pf.player_id
+        LEFT JOIN player_surplus ps ON p.player_id = ps.player_id
         WHERE p.team_id = ?
         ORDER BY COALESCE(r.composite_score, r.ovr, 0) DESC
     """, (team_id,)).fetchall()
@@ -2663,6 +2665,7 @@ def get_minor_league_roster(team_id):
         c, ss, second_b, third_b, first_b, lf, cf, rf = r[29:37]
         pitches_raw = r[37:49]  # fst, snk, crv, sld, chg, splt, cutt, cir_chg, scr, frk, kncrv, knbl
         fv, fv_str, risk, prospect_surplus, bucket = r[49:54]
+        mlb_surplus = r[54]
 
         ceiling = true_ceil or ceil_score
         is_pitcher = role in (11, 12, 13)
@@ -2687,7 +2690,8 @@ def get_minor_league_roster(team_id):
             "pos": display_p, "bt": bt,
             "composite": composite, "ceiling": ceiling,
             "fv": fv, "fv_str": fv_str, "risk": risk,
-            "surplus": round(prospect_surplus / _money_divisor(), 1) if prospect_surplus else None,
+            "surplus": round((prospect_surplus if prospect_surplus is not None else mlb_surplus) / _money_divisor(), 1)
+                       if (prospect_surplus is not None or mlb_surplus is not None) else None,
         }
 
         if is_pitcher:
@@ -2764,10 +2768,12 @@ def get_org_minor_league_roster(parent_team_id):
                r.c, r.ss, r.second_b, r.third_b, r.first_b, r.lf, r.cf, r.rf,
                r.fst, r.snk, r.crv, r.sld, r.chg, r.splt, r.cutt,
                r.cir_chg, r.scr, r.frk, r.kncrv, r.knbl,
-               pf.fv, pf.fv_str, pf.risk, pf.prospect_surplus, pf.bucket
+               pf.fv, pf.fv_str, pf.risk, pf.prospect_surplus, pf.bucket,
+               ps.surplus
         FROM players p
         LEFT JOIN latest_ratings r ON p.player_id = r.player_id
         LEFT JOIN prospect_fv pf ON p.player_id = pf.player_id
+        LEFT JOIN player_surplus ps ON p.player_id = ps.player_id
         WHERE p.team_id IN ({placeholders})
         ORDER BY p.level, COALESCE(r.composite_score, r.ovr, 0) DESC
     """, aff_ids).fetchall()
@@ -2802,6 +2808,7 @@ def get_org_minor_league_roster(parent_team_id):
         c, ss, second_b, third_b, first_b, lf, cf, rf = r[29:37]
         pitches_raw = r[37:49]
         fv, fv_str, risk, prospect_surplus, bucket = r[49:54]
+        mlb_surplus = r[54]
 
         ceiling = true_ceil or ceil_score
         is_pitcher = role in (11, 12, 13)
@@ -2829,7 +2836,8 @@ def get_org_minor_league_roster(parent_team_id):
             "level": level_name, "level_num": int(level) if level else 99,
             "composite": composite, "ceiling": ceiling,
             "fv": fv, "fv_str": fv_str, "risk": risk,
-            "surplus": round(prospect_surplus / _money_divisor(), 1) if prospect_surplus else None,
+            "surplus": round((prospect_surplus if prospect_surplus is not None else mlb_surplus) / _money_divisor(), 1)
+                       if (prospect_surplus is not None or mlb_surplus is not None) else None,
             "on_40man": bool(on_40man),
         }
 

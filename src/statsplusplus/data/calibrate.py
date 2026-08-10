@@ -378,9 +378,10 @@ def _calibrate_tool_weights(conn, game_year, role_map):
         # Normalize each component's coefficients, then blend with defaults
         # proportional to R² (low R² → trust defaults more).
         if hitting_raw is not None:
-            hitting_norm = normalize_coefficients(hitting_raw, min_weight=0.18)
-            # Blend with defaults: final = R² × calibrated + (1-R²) × default
-            best_r2 = max(max(abs(v) for v in hitting_raw.values()), 0.0)
+            hitting_norm = normalize_coefficients(hitting_raw, min_weight=0.08)
+            # Blend with defaults: higher best correlation = trust regression more
+            best_corr = max(abs(v) for v in hitting_raw.values())
+            blend_factor = min(0.85, best_corr ** 0.5)
             default_w = DEFAULT_TOOL_WEIGHTS["hitter"].get(bucket, {})
             default_hitting = {}
             for k in ("contact", "gap", "power", "eye"):
@@ -389,7 +390,7 @@ def _calibrate_tool_weights(conn, game_year, role_map):
             if dt > 0:
                 default_hitting = {k: v / dt for k, v in default_hitting.items()}
             hitting_norm = {
-                k: best_r2 * hitting_norm.get(k, 0) + (1 - best_r2) * default_hitting.get(k, 0)
+                k: blend_factor * hitting_norm.get(k, 0) + (1 - blend_factor) * default_hitting.get(k, 0)
                 for k in set(hitting_norm) | set(default_hitting)
             }
             # Re-normalize after blending

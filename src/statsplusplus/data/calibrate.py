@@ -292,7 +292,7 @@ def _calibrate_tool_weights(conn, game_year, role_map):
                r.pot_splt, r.pot_cutt, r.pot_cir_chg, r.pot_scr, r.pot_frk,
                r.pot_kncrv, r.pot_knbl,
                p.age, p.pos, p.role,
-               ps.ip, ps.k, ps.bb, ps.hra, ps.hp, ps.gs
+               ps.ip, ps.k, ps.bb, ps.hra, ps.hp, ps.gs, ps.war
         FROM latest_ratings r
         JOIN players p ON r.player_id = p.player_id
         JOIN mlb_pitching_stats ps ON ps.player_id = p.player_id
@@ -350,7 +350,7 @@ def _calibrate_tool_weights(conn, game_year, role_map):
         if pbabip_rating and pbabip_rating > 20:
             tool_dict["pbabip"] = pbabip_rating
         pitching_data[bucket][0].append(tool_dict)
-        pitching_data[bucket][1].append(-fip)
+        pitching_data[bucket][1].append(float(r["war"] if r["war"] is not None else -fip))
 
     # ---------------------------------------------------------------
     # Run regressions and build weight profiles

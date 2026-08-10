@@ -642,24 +642,26 @@ def get_cut_candidates(team_id=None):
     conn.row_factory = None
     tid = team_id or my_team_id()
     ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
+    ed_surplus = _get_eval_date()
 
     rows = conn.execute("""
         SELECT p.player_id, p.name, p.age, p.level, p.pos, p.role, p.team_id,
                r.int_, r.wrk_ethic, r.acc, r.composite_score, r.ceiling_score,
-               r.true_ceiling, pf.fv, pf.fv_str, pf.bucket, t.name
+               r.true_ceiling, pf.fv, pf.fv_str, pf.bucket, t.name, ps.surplus
         FROM players p
         LEFT JOIN latest_ratings r ON p.player_id = r.player_id
         LEFT JOIN prospect_fv pf ON pf.player_id = p.player_id AND pf.eval_date = ?
         LEFT JOIN teams t ON t.team_id = p.team_id
+        LEFT JOIN player_surplus ps ON ps.player_id = p.player_id AND ps.eval_date = ?
         WHERE p.parent_team_id = ? AND p.level != '1' AND p.level NOT IN ('7', '8')
-    """, (ed, tid)).fetchall()
+    """, (ed, ed_surplus, tid)).fetchall()
 
     # Org-relative potential floor: bottom 20% of this org's own age <= 24
     # players (by potential ceiling), computed before any filtering below.
     _u24_potentials = sorted(
         (true_ceil if true_ceil is not None else ceil_score)
         for (_p, _n, age, _l, _pos, _r, _at, _i, _we, _ac, _c, ceil_score,
-             true_ceil, _fv, _fs, _pb, _an) in rows
+             true_ceil, _fv, _fs, _pb, _an, _su) in rows
         if age is not None and age <= 24
         and (true_ceil is not None or ceil_score is not None)
     )
@@ -669,7 +671,7 @@ def get_cut_candidates(team_id=None):
     confirmed, needs_scouting = [], []
     for r in rows:
         (pid, name, age, level, pos, role, aff_tid, intel, wrk_ethic, acc,
-         comp, ceil_score, true_ceil, fv, fv_str, pf_bucket, aff_name) = r
+         comp, ceil_score, true_ceil, fv, fv_str, pf_bucket, aff_name, surplus_raw) = r
 
         # Prefer the evaluation engine's own bucket (handles COF/SP/RP/CL
         # correctly); fall back to raw position/role for players with no
@@ -710,6 +712,7 @@ def get_cut_candidates(team_id=None):
             "team_name": aff_name or team_names_map().get(aff_tid, str(aff_tid)),
             "composite_score": comp, "potential": potential,
             "fv_str": fv_str, "acc": acc, "reasons": reasons,
+            "surplus": round(surplus_raw / _money_divisor(), 1) if surplus_raw else None,
             "_is_bottom_20": is_bottom_20,
             "_is_personality": wrk_ethic == "L" or intel == "L",
         }
@@ -809,24 +812,27 @@ def get_waiver_candidates(team_id=None):
     conn.row_factory = None
     tid = team_id or my_team_id()
     ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
+    ed_surplus = _get_eval_date()
     weak_positions = _weak_positions_for_org(tid)
 
     rows = conn.execute("""
         SELECT p.player_id, p.name, p.age, p.level, p.pos, p.role, p.team_id,
                r.int_, r.wrk_ethic, r.lead, r.loy, r.greed, r.acc,
                r.composite_score, r.ceiling_score, r.true_ceiling,
-               pf.fv, pf.fv_str, pf.bucket, t.name
+               pf.fv, pf.fv_str, pf.bucket, t.name, ps.surplus
         FROM players p
         LEFT JOIN latest_ratings r ON p.player_id = r.player_id
         LEFT JOIN prospect_fv pf ON pf.player_id = p.player_id AND pf.eval_date = ?
         LEFT JOIN teams t ON t.team_id = p.team_id
+        LEFT JOIN player_surplus ps ON ps.player_id = p.player_id AND ps.eval_date = ?
         WHERE p.is_on_waivers = 1 AND p.team_id != ?
-    """, (ed, tid)).fetchall()
+    """, (ed, ed_surplus, tid)).fetchall()
 
     out = []
     for r in rows:
         (pid, name, age, level, pos, role, cur_tid, intel, wrk_ethic, lead, loy,
-         greed, acc, comp, ceil_score, true_ceil, fv, fv_str, pf_bucket, cur_name) = r
+         greed, acc, comp, ceil_score, true_ceil, fv, fv_str, pf_bucket, cur_name,
+         surplus_raw) = r
         bucket = _bucket_for_display(pf_bucket, role, pos)
         potential = true_ceil if true_ceil is not None else ceil_score
         buffs, concerns = _personality_notes(intel, wrk_ethic, lead, loy, greed)
@@ -838,6 +844,7 @@ def get_waiver_candidates(team_id=None):
             "composite_score": comp, "potential": potential, "fv_str": fv_str,
             "acc": acc, "buffs": buffs, "concerns": concerns,
             "fit": _fit_position(bucket, weak_positions),
+            "surplus": round(surplus_raw / _money_divisor(), 1) if surplus_raw else None,
         })
     out.sort(key=lambda e: -(e["composite_score"] or 0))
     return out
@@ -899,6 +906,7 @@ def get_free_agent_candidates(team_id=None):
     conn.row_factory = None
     tid = team_id or my_team_id()
     ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
+    ed_surplus = _get_eval_date()
     weak_positions = _weak_positions_for_org(tid)
 
     _nippon_qs = ",".join("?" * len(_NIPPON_TEAM_IDS))
@@ -930,19 +938,20 @@ def get_free_agent_candidates(team_id=None):
         SELECT p.player_id, p.name, p.age, p.level, p.pos, p.role,
                r.int_, r.wrk_ethic, r.lead, r.loy, r.greed, r.acc,
                r.composite_score, r.ceiling_score, r.true_ceiling,
-               pf.fv, pf.fv_str, pf.bucket
+               pf.fv, pf.fv_str, pf.bucket, ps.surplus
         FROM players p
         LEFT JOIN latest_ratings r ON p.player_id = r.player_id
         LEFT JOIN prospect_fv pf ON pf.player_id = p.player_id AND pf.eval_date = ?
+        LEFT JOIN player_surplus ps ON ps.player_id = p.player_id AND ps.eval_date = ?
         WHERE {_signable_where}
               AND r.composite_score IS NOT NULL
-    """, (ed, *_NIPPON_TEAM_IDS)).fetchall()
+    """, (ed, ed_surplus, *_NIPPON_TEAM_IDS)).fetchall()
 
     hitters, pitchers = [], []
     intl_hitters, intl_pitchers = [], []
     for r in rows:
         (pid, name, age, level, pos, role, intel, wrk_ethic, lead, loy, greed,
-         acc, comp, ceil_score, true_ceil, fv, fv_str, pf_bucket) = r
+         acc, comp, ceil_score, true_ceil, fv, fv_str, pf_bucket, surplus_raw) = r
         bucket = _bucket_for_display(pf_bucket, role, pos)
         potential = true_ceil if true_ceil is not None else ceil_score
         buffs, concerns = _personality_notes(intel, wrk_ethic, lead, loy, greed)
@@ -952,6 +961,7 @@ def get_free_agent_candidates(team_id=None):
             "bucket": bucket, "composite_score": comp, "potential": potential,
             "fv": fv, "fv_str": fv_str, "acc": acc, "buffs": buffs, "concerns": concerns,
             "fit": _fit_position(bucket, weak_positions),
+            "surplus": round(surplus_raw / _money_divisor(), 1) if surplus_raw else None,
         }
         is_pitcher = role in ROLE_MAP
         if age is not None and age <= _INTL_FA_AGE_MAX:

@@ -981,6 +981,7 @@
         <th data-sort="num">Pot</th>
         <th data-sort="str">FV</th>
         <th data-sort="str">Scout</th>
+        <th data-sort="num">Surplus</th>
         <th class="left">Reasons</th>
       </tr>
     </thead>
@@ -997,6 +998,7 @@
         <td><span class="ovr-color" data-g="{{ p.potential }}">{{ p.potential if p.potential is not none else '-' }}</span></td>
         <td>{{ p.fv_str or '-' }}</td>
         <td>{{ p.acc or '-' }}</td>
+        <td class="{{ 'pos' if p.surplus and p.surplus > 0 else 'neg' if p.surplus and p.surplus < 0 else '' }}">{{ '$' + p.surplus|string + money_unit if p.surplus is not none else '-' }}</td>
         <td class="left" style="font-size:12px; color:var(--text-dim)">{{ p.reasons|join(", ") }}</td>
       </tr>
       {% endfor %}
@@ -1036,6 +1038,7 @@
         <th data-sort="str">FV</th>
         <th data-sort="str">Scout</th>
         <th data-sort="str">Fits At</th>
+        <th data-sort="num">Surplus</th>
         <th class="left">Personality</th>
       </tr>
     </thead>
@@ -1053,6 +1056,7 @@
         <td>{{ p.fv_str or '-' }}</td>
         <td>{{ p.acc or '-' }}</td>
         <td>{{ p.fit or '-' }}</td>
+        <td class="{{ 'pos' if p.surplus and p.surplus > 0 else 'neg' if p.surplus and p.surplus < 0 else '' }}">{{ '$' + p.surplus|string + money_unit if p.surplus is not none else '-' }}</td>
         <td class="left" style="font-size:12px">
           {%- if p.buffs %}<span style="color:#4caf50">{{ p.buffs|join(", ") }}</span>{% endif -%}
           {%- if p.buffs and p.concerns %}<br>{% endif -%}

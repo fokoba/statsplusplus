@@ -116,10 +116,10 @@ DEFAULT_TOOL_WEIGHTS: dict[str, Any] = {
         # Speed excluded from hitting regression: contributes via baserunning only.
         # Defense shares derived from WAR regression (see recombination section).
         "C":   {"contact": 0.30, "gap": 0.16, "power": 0.24, "eye": 0.16, "speed": 0.02, "steal": 0.01, "stl_rt": 0.01, "defense": 0.15},
-        "SS":  {"contact": 0.30, "gap": 0.18, "power": 0.22, "eye": 0.16, "speed": 0.03, "steal": 0.02, "stl_rt": 0.01, "defense": 0.05},
-        "2B":  {"contact": 0.30, "gap": 0.18, "power": 0.22, "eye": 0.16, "speed": 0.03, "steal": 0.02, "stl_rt": 0.01, "defense": 0.05},
-        "3B":  {"contact": 0.28, "gap": 0.16, "power": 0.26, "eye": 0.16, "speed": 0.04, "steal": 0.02, "stl_rt": 0.01, "defense": 0.00},
-        "CF":  {"contact": 0.26, "gap": 0.16, "power": 0.20, "eye": 0.16, "speed": 0.04, "steal": 0.03, "stl_rt": 0.02, "defense": 0.10},
+        "SS":  {"contact": 0.278, "gap": 0.166, "power": 0.203, "eye": 0.148, "speed": 0.028, "steal": 0.018, "stl_rt": 0.009, "defense": 0.15},
+        "2B":  {"contact": 0.278, "gap": 0.166, "power": 0.203, "eye": 0.148, "speed": 0.028, "steal": 0.018, "stl_rt": 0.009, "defense": 0.15},
+        "3B":  {"contact": 0.270, "gap": 0.155, "power": 0.252, "eye": 0.155, "speed": 0.039, "steal": 0.019, "stl_rt": 0.010, "defense": 0.10},
+        "CF":  {"contact": 0.255, "gap": 0.156, "power": 0.195, "eye": 0.156, "speed": 0.039, "steal": 0.029, "stl_rt": 0.020, "defense": 0.15},
         "COF": {"contact": 0.29, "gap": 0.18, "power": 0.28, "eye": 0.17, "speed": 0.02, "steal": 0.01, "stl_rt": 0.01, "defense": 0.00},
         "1B":  {"contact": 0.30, "gap": 0.18, "power": 0.32, "eye": 0.19, "speed": 0.02, "steal": 0.00, "stl_rt": 0.00, "defense": 0.00},
     },
@@ -134,10 +134,10 @@ DEFAULT_TOOL_WEIGHTS: dict[str, Any] = {
         # than the original design spec assumed — WAR already includes positional
         # adjustment, so the composite doesn't need to separately reward defense.
         "C":   {"offense": 0.80, "defense": 0.15, "baserunning": 0.05},
-        "SS":  {"offense": 0.90, "defense": 0.05, "baserunning": 0.05},
-        "2B":  {"offense": 0.90, "defense": 0.05, "baserunning": 0.05},
-        "3B":  {"offense": 0.90, "defense": 0.00, "baserunning": 0.10},
-        "CF":  {"offense": 0.80, "defense": 0.10, "baserunning": 0.10},
+        "SS":  {"offense": 0.80, "defense": 0.15, "baserunning": 0.05},
+        "2B":  {"offense": 0.80, "defense": 0.15, "baserunning": 0.05},
+        "3B":  {"offense": 0.80, "defense": 0.10, "baserunning": 0.10},
+        "CF":  {"offense": 0.75, "defense": 0.15, "baserunning": 0.10},
         "COF": {"offense": 0.95, "defense": 0.00, "baserunning": 0.05},
         "1B":  {"offense": 0.95, "defense": 0.00, "baserunning": 0.05},
     },

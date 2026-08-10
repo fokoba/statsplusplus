@@ -507,6 +507,213 @@ def test_stat_blend(conn: sqlite3.Connection, scale: str, league_dir: Path) -> d
     }
 
 
+
+# ---------------------------------------------------------------------------
+# Calibration: derive league-specific parameters from data
+# ---------------------------------------------------------------------------
+
+def calibrate_aging_curves(conn: sqlite3.Connection, min_pa: int = 300, min_ip: float = 80.0) -> dict:
+    """Derive league-specific aging curves from multi-year WAR data.
+
+    Uses median WAR per age (more robust to outliers than mean) with
+    a minimum sample size per age bucket. Smooths the curve with a
+    3-age rolling window to reduce noise.
+
+    Returns dict with AGING_CURVE_HITTER and AGING_CURVE_PITCHER.
+    """
+    conn.row_factory = sqlite3.Row
+
+    hitter_sql = """
+        SELECT p.age, b.war FROM mlb_batting_stats b
+        JOIN players p ON b.player_id = p.player_id
+        WHERE b.pa >= ? AND p.role NOT IN (11, 12, 13)
+    """
+    pitcher_sql = """
+        SELECT p.age, ps.war FROM mlb_pitching_stats ps
+        JOIN players p ON ps.player_id = p.player_id
+        WHERE ps.ip >= ? AND p.role IN (11, 12, 13)
+    """
+
+    def derive_curve(sql: str, param, peak_range: tuple[int, int], min_n: int = 20) -> dict[int, float]:
+        by_age: dict[int, list[float]] = defaultdict(list)
+        for row in conn.execute(sql, (param,)):
+            by_age[int(row["age"])].append(float(row["war"]))
+
+        # Find peak as max mean WAR in the expected peak range (require min_n)
+        candidates = {
+            age: mean(wars)
+            for age, wars in by_age.items()
+            if peak_range[0] <= age <= peak_range[1] and len(wars) >= min_n
+        }
+        if not candidates:
+            return {}
+
+        peak_age = max(candidates, key=candidates.get)
+        peak_war = candidates[peak_age]
+        if peak_war <= 0:
+            return {}
+
+        # Compute mean WAR per age with enough data
+        raw_mults: dict[int, float] = {}
+        for age in range(22, 42):
+            if len(by_age[age]) >= min_n:
+                raw_mults[age] = mean(by_age[age]) / peak_war
+
+        # 3-age rolling average for smoothing noise
+        sorted_ages = sorted(a for a in raw_mults if a >= peak_age)
+        smoothed: dict[int, float] = {}
+        for i, age in enumerate(sorted_ages):
+            window = [raw_mults[a] for a in sorted_ages[max(0, i-1):i+2] if a in raw_mults]
+            smoothed[age] = sum(window) / len(window)
+
+        # Build the final curve: cap at 1.0, enforce monotonic non-increasing
+        result: dict[int, float] = {peak_age: 1.0}
+        prev = 1.0
+        for age in range(peak_age + 1, 42):
+            if age in smoothed:
+                val = min(prev, smoothed[age])  # monotonic non-increasing
+            else:
+                # Extrapolate from last known point with gentle decline
+                val = max(0.10, prev - 0.02)
+            val = max(0.10, min(1.0, val))
+            result[age] = round(val, 3)
+            prev = val
+
+        return result
+
+    hitter_curve = derive_curve(hitter_sql, min_pa, peak_range=(26, 29))
+    pitcher_curve = derive_curve(pitcher_sql, min_ip, peak_range=(25, 29))
+
+    conn.row_factory = None
+    return {
+        "AGING_CURVE_HITTER": hitter_curve,
+        "AGING_CURVE_PITCHER": pitcher_curve,
+    }
+
+
+def calibrate_imbalance_thresholds(conn: sqlite3.Connection, scale: str, league_dir: Path) -> dict:
+    """Derive optimal imbalance penalty thresholds from WAR residuals.
+
+    Finds the spread threshold where penalized players' WAR starts
+    diverging from non-penalized players at similar composite levels.
+    """
+    rows = load_mlb_player_seasons(conn, min_pa=250, min_ip=60.0)
+    if not rows:
+        return {}
+
+    # For pitchers: test different spread thresholds
+    pitcher_data: list[tuple[float, float, float]] = []  # (spread, composite, war)
+    for row in rows:
+        if row["type"] != "pitcher":
+            continue
+        war = row.get("war")
+        composite = row.get("composite_score") or row.get("tool_only_score")
+        if war is None or composite is None:
+            continue
+        tools = [row.get(k) for k in ("stf", "mov", "ctrl")]
+        tools = [_norm(t, scale) for t in tools if t is not None]
+        if len(tools) < 2:
+            continue
+        spread = max(tools) - min(tools)
+        pitcher_data.append((spread, float(composite), float(war)))
+
+    # For hitters
+    hitter_data: list[tuple[float, float, float]] = []
+    for row in rows:
+        if row["type"] != "hitter":
+            continue
+        war = row.get("war")
+        composite = row.get("composite_score") or row.get("tool_only_score")
+        if war is None or composite is None:
+            continue
+        tools = [row.get(k) for k in ("cntct", "gap", "pow", "eye")]
+        tools = [_norm(t, scale) for t in tools if t is not None]
+        if len(tools) < 3:
+            continue
+        spread = max(tools) - min(tools)
+        hitter_data.append((spread, float(composite), float(war)))
+
+    def find_optimal_threshold(data: list[tuple[float, float, float]], test_range: range) -> dict:
+        """Find spread threshold that best separates over/underperformers."""
+        best_threshold = 20
+        best_separation = 0.0
+
+        for threshold in test_range:
+            penalized = [(c, w) for s, c, w in data if s > threshold]
+            clean = [(c, w) for s, c, w in data if s <= threshold]
+            if len(penalized) < 20 or len(clean) < 20:
+                continue
+
+            # WAR per composite point for each group
+            pen_ratio = mean([w for _, w in penalized]) / max(1, mean([c for c, _ in penalized]))
+            clean_ratio = mean([w for _, w in clean]) / max(1, mean([c for c, _ in clean]))
+            separation = clean_ratio - pen_ratio
+
+            if separation > best_separation:
+                best_separation = separation
+                best_threshold = threshold
+
+        return {
+            "threshold": best_threshold,
+            "separation": round(best_separation, 4),
+            "n_above": len([1 for s, _, _ in data if s > best_threshold]),
+            "n_below": len([1 for s, _, _ in data if s <= best_threshold]),
+        }
+
+    pitcher_result = find_optimal_threshold(pitcher_data, range(15, 40))
+    hitter_result = find_optimal_threshold(hitter_data, range(15, 40))
+
+    return {
+        "pitcher_spread_threshold": pitcher_result,
+        "hitter_spread_threshold": hitter_result,
+    }
+
+
+def run_calibration(conn: sqlite3.Connection, scale: str, league_dir: Path, dry_run: bool = False) -> dict:
+    """Run full parameter calibration and optionally write to model_weights.json."""
+    print("Calibrating aging curves...")
+    aging = calibrate_aging_curves(conn)
+
+    print("Calibrating imbalance thresholds...")
+    imbalance = calibrate_imbalance_thresholds(conn, scale, league_dir)
+
+    # Build MODEL_PARAMS dict
+    model_params: dict[str, Any] = {}
+
+    if imbalance.get("pitcher_spread_threshold", {}).get("threshold"):
+        model_params["PITCHER_IMBALANCE_SPREAD_THRESHOLD"] = imbalance["pitcher_spread_threshold"]["threshold"]
+    if imbalance.get("hitter_spread_threshold", {}).get("threshold"):
+        model_params["HITTER_IMBALANCE_SPREAD_THRESHOLD"] = imbalance["hitter_spread_threshold"]["threshold"]
+
+    result = {
+        "aging_curves": aging,
+        "imbalance": imbalance,
+        "model_params": model_params,
+    }
+
+    if not dry_run:
+        # Write to model_weights.json
+        mw_path = league_dir / "config" / "model_weights.json"
+        if mw_path.exists():
+            with open(mw_path) as f:
+                existing = json.load(f)
+        else:
+            existing = {}
+
+        if aging.get("AGING_CURVE_HITTER"):
+            existing["AGING_CURVE_HITTER"] = aging["AGING_CURVE_HITTER"]
+        if aging.get("AGING_CURVE_PITCHER"):
+            existing["AGING_CURVE_PITCHER"] = aging["AGING_CURVE_PITCHER"]
+        if model_params:
+            existing.setdefault("MODEL_PARAMS", {}).update(model_params)
+
+        with open(mw_path, "w") as f:
+            json.dump(existing, f, indent=2)
+        print(f"\nWritten to {mw_path}")
+
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Output formatting
 # ---------------------------------------------------------------------------
@@ -548,6 +755,10 @@ def main():
     parser.add_argument("--test", default="all",
                        choices=["composite", "imbalance", "aging", "stat_blend", "all"],
                        help="Which test to run")
+    parser.add_argument("--calibrate", action="store_true",
+                       help="Derive league-specific parameters and write to model_weights.json")
+    parser.add_argument("--dry-run", action="store_true",
+                       help="With --calibrate: show results without writing")
     args = parser.parse_args()
 
     if args.league:
@@ -561,6 +772,12 @@ def main():
     print(f"Model Regression Testing — {league_dir.name}")
     print(f"Ratings scale: {scale}")
     print(f"{'=' * 60}")
+
+    if args.calibrate:
+        result = run_calibration(conn, scale, league_dir, dry_run=args.dry_run)
+        print_section("Calibration Results", result)
+        conn.close()
+        return
 
     tests = {
         "composite": ("Composite Score vs Actual WAR", test_composite_vs_war),

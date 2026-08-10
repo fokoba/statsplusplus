@@ -88,20 +88,30 @@ def peak_war_from_score(
     return _interp_table(OVR_TO_WAR_DEFAULT, int(score), col)
 
 
-def aging_mult(age: int | float, bucket: str) -> float:
+def aging_mult(age: int | float, bucket: str, weights: Optional[Any] = None) -> float:
     """Aging curve multiplier on peak WAR.
 
     Interpolates between defined age points. Returns 1.0 for ages at or
     below peak, declines thereafter.
 
+    When `weights` (a ModelWeights instance) is provided, uses league-
+    calibrated aging curves if available. Otherwise falls back to defaults.
+
     Args:
         age: Player's current age.
         bucket: Positional bucket (pitcher aging is steeper).
+        weights: Optional ModelWeights with league-calibrated curves.
 
     Returns:
         Multiplier in [0, 1.0].
     """
-    table = AGING_PITCHER if bucket in ("SP", "RP") else AGING_HITTER
+    if weights is not None and hasattr(weights, "aging_curve_hitter"):
+        if bucket in ("SP", "RP"):
+            table = weights.aging_curve_pitcher
+        else:
+            table = weights.aging_curve_hitter
+    else:
+        table = AGING_PITCHER if bucket in ("SP", "RP") else AGING_HITTER
     ages = sorted(table)
     if age <= ages[0]:
         return 1.0

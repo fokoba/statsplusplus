@@ -330,7 +330,7 @@ def compute_player_value(
         else:
             year_war = peak_war
 
-        war = year_war * effective_ramp * aging_mult(player_age, bucket)
+        war = year_war * effective_ramp * aging_mult(player_age, bucket, weights)
         war = max(0.0, war)
 
         # Market value (time-discounted)

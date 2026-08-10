@@ -985,7 +985,12 @@ def refresh_league(year, game_date=None):
     _upsert_ratings(conn, other_ratings, snapshot_date, keep_history=False)
     _snapshot_ratings_history(conn, all_ratings, snapshot_date)
     # Prune old ratings snapshots — history table handles archival
-    conn.execute("DELETE FROM ratings WHERE snapshot_date != ?", (snapshot_date,))
+    # Safety: don't prune if the new batch is suspiciously small (API glitch)
+    if len(all_ratings) >= 50:
+        conn.execute("DELETE FROM ratings WHERE snapshot_date != ?", (snapshot_date,))
+    else:
+        log.warning("ratings: only %d rows received — skipping prune to preserve existing data",
+                    len(all_ratings))
 
     # Fix intl complex players: API reports level=1 but league_id is negative
     intl_ids = [r["ID"] for r in all_ratings if (r.get("League") or 0) < 0]

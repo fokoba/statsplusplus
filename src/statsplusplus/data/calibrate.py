@@ -128,28 +128,35 @@ def _calibrate_tool_weights(conn, game_year, role_map):
     min_sample_hitter = 80
     min_sample_pitcher = 60
 
-    # Adaptive age range: start with peak stability (27-32), widen for smaller leagues
+    # Peak-age players (27-32) have stable ratings year-over-year, so we can
+    # safely use multiple years of data without stale-rating contamination.
+    # Default to 2 years for robust sample size. Widen age range for small leagues.
     age_lo, age_hi = 27, 32
-    n_hitters_1yr = conn.execute(
+    year_lo = year_hi - 1  # 2 years by default
+
+    n_hitters = conn.execute(
         "SELECT COUNT(*) FROM mlb_batting_stats b JOIN players p ON b.player_id=p.player_id "
-        "WHERE b.pa>=300 AND b.split_id=1 AND b.year=? AND p.role NOT IN (11,12,13) AND p.age BETWEEN ? AND ?",
-        (year_hi, age_lo, age_hi)).fetchone()[0]
-    if n_hitters_1yr < min_sample_hitter:
-        age_lo, age_hi = 25, 34
-        n_hitters_1yr = conn.execute(
-            "SELECT COUNT(*) FROM mlb_batting_stats b JOIN players p ON b.player_id=p.player_id "
-            "WHERE b.pa>=300 AND b.split_id=1 AND b.year=? AND p.role NOT IN (11,12,13) AND p.age BETWEEN ? AND ?",
-            (year_hi, age_lo, age_hi)).fetchone()[0]
-
-    n_pitchers_1yr = conn.execute(
+        "WHERE b.pa>=300 AND b.split_id=1 AND b.year>=? AND b.year<=? AND p.role NOT IN (11,12,13) AND p.age BETWEEN ? AND ?",
+        (year_lo, year_hi, age_lo, age_hi)).fetchone()[0]
+    n_pitchers = conn.execute(
         "SELECT COUNT(*) FROM mlb_pitching_stats ps JOIN players p ON ps.player_id=p.player_id "
-        "WHERE ps.ip>=80 AND ps.split_id=1 AND ps.year=? AND p.role IN (11,12,13) AND p.age BETWEEN ? AND ?",
-        (year_hi, age_lo, age_hi)).fetchone()[0]
+        "WHERE ps.ip>=80 AND ps.split_id=1 AND ps.year>=? AND ps.year<=? AND p.role IN (11,12,13) AND p.age BETWEEN ? AND ?",
+        (year_lo, year_hi, age_lo, age_hi)).fetchone()[0]
 
-    use_2yr = n_hitters_1yr < min_sample_hitter or n_pitchers_1yr < min_sample_pitcher
-    year_lo = year_hi - 1 if use_2yr else year_hi
-    print(f"Tool weight calibration: years {year_lo}-{year_hi} (2yr={use_2yr}, "
-          f"hitters={n_hitters_1yr}, pitchers={n_pitchers_1yr}, ages {age_lo}-{age_hi}")
+    # If still insufficient, widen age range to 25-34
+    if n_hitters < min_sample_hitter or n_pitchers < min_sample_pitcher:
+        age_lo, age_hi = 25, 34
+        n_hitters = conn.execute(
+            "SELECT COUNT(*) FROM mlb_batting_stats b JOIN players p ON b.player_id=p.player_id "
+            "WHERE b.pa>=300 AND b.split_id=1 AND b.year>=? AND b.year<=? AND p.role NOT IN (11,12,13) AND p.age BETWEEN ? AND ?",
+            (year_lo, year_hi, age_lo, age_hi)).fetchone()[0]
+        n_pitchers = conn.execute(
+            "SELECT COUNT(*) FROM mlb_pitching_stats ps JOIN players p ON ps.player_id=p.player_id "
+            "WHERE ps.ip>=80 AND ps.split_id=1 AND ps.year>=? AND ps.year<=? AND p.role IN (11,12,13) AND p.age BETWEEN ? AND ?",
+            (year_lo, year_hi, age_lo, age_hi)).fetchone()[0]
+
+    print(f"Tool weight calibration: years {year_lo}-{year_hi}, "
+          f"hitters={n_hitters}, pitchers={n_pitchers}, ages {age_lo}-{age_hi}")
 
     # -------------------------------------------------------------------
     # Hitter offensive tool weights (pooled across positions, age 27-32)

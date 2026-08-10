@@ -163,7 +163,7 @@ def _calibrate_tool_weights(conn, game_year, role_map):
     # -------------------------------------------------------------------
     hitter_rows = conn.execute("""
         SELECT r.cntct, r.gap, r.pow, r.eye, r.speed, r.steal,
-               r.babip,
+               r.babip, r.ks,
                r.ifr, r.ife, r.ifa, r.tdp, r.ofr, r.ofe, r.ofa,
                r.c_frm, r.c_blk, r.c_arm,
                p.pos, p.role, p.age, b.war
@@ -175,12 +175,11 @@ def _calibrate_tool_weights(conn, game_year, role_map):
           AND b.year >= ? AND b.year <= ?
     """, (age_lo, age_hi, year_lo, year_hi)).fetchall()
 
-    # Build offensive tool vectors using the high-level contact rating.
-    # Note: BABIP is a better WAR predictor in isolation (r=0.42 vs cntct r=0.35),
-    # but swapping it in produces noisier individual composites because BABIP
-    # ratings have higher player-to-player variance that the tool_transform and
-    # compensation logic amplifies. The composite contact rating is a more stable
-    # input despite being a slightly weaker aggregate predictor.
+    # Build offensive tool vectors using the composite contact rating.
+    # Testing showed that decomposing contact into babip+avoidk produces
+    # noisier individual composites despite babip being a better aggregate
+    # predictor. OOTP's contact rating is already an optimally-weighted
+    # combination of its components for in-game performance prediction.
     off_tool_ratings = []
     off_targets = []
     for r in hitter_rows:

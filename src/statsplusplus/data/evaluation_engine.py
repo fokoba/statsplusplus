@@ -1853,6 +1853,16 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
     def _norm(val): return _norm_pkg(val, _scale)
     def _norm_display(val): return _norm_display_pkg(val, _scale)
 
+    # Apply league-calibrated model parameters to composite module constants
+    import statsplusplus.evaluation.constants as _constants
+    from statsplusplus.evaluation.constants import load_model_weights as _load_mw
+    _mw = _load_mw(league_dir)
+    import statsplusplus.evaluation.composite as _comp_mod
+    _comp_mod.HITTER_IMBALANCE_SPREAD_THRESHOLD = int(_mw.get_param(
+        "HITTER_IMBALANCE_SPREAD_THRESHOLD", _constants.HITTER_IMBALANCE_SPREAD_THRESHOLD))
+    _comp_mod.PITCHER_IMBALANCE_SPREAD_THRESHOLD = int(_mw.get_param(
+        "PITCHER_IMBALANCE_SPREAD_THRESHOLD", _constants.PITCHER_IMBALANCE_SPREAD_THRESHOLD))
+
     # -- Load tool weights --
     weights = load_tool_weights(league_dir)
     hitter_weights = weights.get("hitter", DEFAULT_TOOL_WEIGHTS["hitter"])

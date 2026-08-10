@@ -763,7 +763,9 @@
         <thead>
           <tr>
             <th data-sort="str" class="left">Name</th><th data-sort="num">Salary</th><th data-sort="num">Yrs</th>
-            <th data-sort="num">Total</th><th data-sort="num">Surplus</th><th data-sort="str" class="left">Flags</th>
+            <th data-sort="num">Total</th><th data-sort="num">Surplus</th>
+            <th data-sort="num" title="Best single projected year at expected grade — quality independent of remaining runway">Peak Yr Surplus</th>
+            <th data-sort="str" class="left">Flags</th>
           </tr>
         </thead>
         <tbody>
@@ -774,6 +776,7 @@
             <td>{{ c.years_left }}</td>
             <td>{{ c.total_left|money }}</td>
             <td class="{{ 'pos' if c.surplus > 0 else 'neg' if c.surplus < 0 else '' }}">${{ c.surplus }}{{ money_unit }}</td>
+            <td class="{{ 'pos' if c.peak_surplus and c.peak_surplus > 0 else 'neg' if c.peak_surplus and c.peak_surplus < 0 else '' }}">{{ '$' + c.peak_surplus|string + money_unit if c.peak_surplus is not none else '-' }}</td>
             <td class="left">
               {%- if c.ntc %}<span class="opt-badge opt-ntc">NTC</span>{% endif %}
               {%- if c.to %}<span class="opt-badge opt-to">TO</span>{% endif %}

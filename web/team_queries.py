@@ -1134,7 +1134,7 @@ def get_contracts(team_id):
                c.salary_5, c.salary_6, c.salary_7, c.salary_8, c.salary_9,
                c.salary_10, c.salary_11, c.salary_12, c.salary_13, c.salary_14,
                c.no_trade, c.last_year_team_option, c.last_year_player_option,
-               ps.surplus, c.is_major
+               ps.surplus, c.is_major, ps.fv, ps.age, ps.bucket
         FROM contracts c
         JOIN players p ON c.player_id = p.player_id
         LEFT JOIN player_surplus ps ON c.player_id = ps.player_id AND ps.eval_date = ?
@@ -1150,6 +1150,7 @@ def get_contracts(team_id):
         salaries = [r[4 + i] for i in range(15)]
         ntc, to, po = r[19], r[20], r[21]
         surplus, is_major = r[22], r[23]
+        ps_fv, ps_age, ps_bucket = r[24], r[25], r[26]
         cur_sal = salaries[cur_yr] if cur_yr < len(salaries) else salaries[0]
         yrs_left = max(years - cur_yr, 1)
         total_left = sum(salaries[cur_yr:years]) if cur_yr < years else cur_sal
@@ -1159,6 +1160,12 @@ def get_contracts(team_id):
             "ntc": ntc, "to": to, "po": po,
             "surplus": round(surplus / _money_divisor(), 1) if surplus else 0,
             "is_major": is_major,
+            # For an established MLB player, "FV" and current Ovr are the
+            # same number in this table (fv_calc.py stores ovr twice) — an
+            # already-proven veteran's true talent IS his FV, there's no
+            # separate development ceiling to project toward. That's the
+            # right input for a forward-looking peak-year projection.
+            "peak_surplus": _peak_surplus(ps_fv, ps_age, "MLB", ps_bucket, ovr=ps_fv),
         })
 
     display = [c for c in out if c["is_major"] and (c["salary"] > DEFAULT_MINIMUM_SALARY or c["years_left"] > 1)]

@@ -1,7 +1,7 @@
 {
-  "last_posted_commit": "d19ce77",
-  "last_posted_date": "2026-08-07",
-  "last_posted_title": "Complete Architecture Overhaul \u2014 All Shims Eliminated",
+  "last_posted_commit": "0982969",
+  "last_posted_date": "2026-08-10",
+  "last_posted_title": "Player Evaluation Model \u2014 Data-Driven Calibration",
   "history": [
     {
       "date": "2026-07-22",
@@ -72,6 +72,11 @@
       "date": "2026-08-07",
       "commit": "d19ce77",
       "title": "Complete Architecture Overhaul \u2014 All Shims Eliminated"
+    },
+    {
+      "date": "2026-08-10",
+      "commit": "0982969",
+      "title": "Player Evaluation Model \u2014 Data-Driven Calibration"
     }
   ]
 }

@@ -438,15 +438,19 @@ def _calibrate_tool_weights(conn, game_year, role_map):
         pitching_raw = derive_tool_weights(tool_ratings, targets, min_n=MIN_REGRESSION_N)
 
         if pitching_raw is not None:
-            # Use minimum weight floor for pitchers to prevent degenerate
-            # single-variable solutions (e.g. RP movement=0.99).
-            # Floor of 0.15 ensures stuff/movement/control each get at least 15%.
-            pitching_norm = normalize_coefficients(pitching_raw, min_weight=0.15)
-            # Blend with defaults proportional to R²
-            best_r2 = max(max(abs(v) for v in pitching_raw.values()), 0.0)
+            # Use minimum weight floor for pitchers. Lower floor (0.08) allows
+            # calibration to reflect leagues where some tools have compressed
+            # distributions and genuinely don't differentiate players (e.g. VMLB
+            # stuff/control SD=5 vs movement SD=5 but movement r=0.50).
+            pitching_norm = normalize_coefficients(pitching_raw, min_weight=0.08)
+            # Blend with defaults proportional to sample confidence.
+            # Use the actual model R² (correlation of best predictor) squared
+            # as the blend factor — higher correlation = trust regression more.
+            best_corr = max(abs(v) for v in pitching_raw.values())
+            blend_factor = min(0.85, best_corr ** 0.5)  # sqrt for gentler scaling
             default_p = DEFAULT_TOOL_WEIGHTS["pitcher"].get(role, {})
             pitching_norm = {
-                k: best_r2 * pitching_norm.get(k, 0) + (1 - best_r2) * default_p.get(k, 0)
+                k: blend_factor * pitching_norm.get(k, 0) + (1 - blend_factor) * default_p.get(k, 0)
                 for k in set(pitching_norm) | set(default_p)
             }
             pt = sum(pitching_norm.values())

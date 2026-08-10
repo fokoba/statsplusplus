@@ -241,7 +241,24 @@ def prospect_surplus(fv, age, level, bucket, positional_adjust=False, fv_plus=Fa
     total_surplus = 0.0
     dev_discount  = _age_adjusted_discount(level, age, ovr=ovr)
 
-    for yr in range(6):
+    # Standard leagues control a player for 6 years (3 pre-arb + 3 arb) before
+    # free agency, so a 6-year window is the right horizon. Perpetual-arb
+    # leagues like PPL auto-renew every player's contract as a 1-year deal
+    # indefinitely (25 years of team control granted per team) — there's no
+    # free-agency exit, so truncating at 6 years cuts off a young prospect's
+    # entire prime before the projection ever reaches it, while a near-ready
+    # prospect's 6-year window happens to land right on his peak years. That
+    # mismatch systematically overvalues "close but modest" prospects relative
+    # to "far but high-ceiling" ones. Extend the horizon far enough to cover a
+    # full career arc into decline; PROSPECT_DISCOUNT_RATE (5%/yr) already
+    # tapers the value of distant years, so this doesn't need a hard cutoff.
+    try:
+        _is_perpetual_horizon = _cfg.perpetual_arb
+    except Exception:
+        _is_perpetual_horizon = False
+    _control_years = 20 if _is_perpetual_horizon else 6
+
+    for yr in range(_control_years):
         ctrl_year  = yr + 1
         player_age = debut_age + yr
         discount   = (1 - PROSPECT_DISCOUNT_RATE) ** (years_out + yr)

@@ -18,12 +18,19 @@ _DPW = 7_000_000
 _LG_MIN = 800_000
 
 
-def _stub():
-    """Return a context manager that stubs financial functions."""
+class _FakeCfg:
+    def __init__(self, perpetual_arb):
+        self.perpetual_arb = perpetual_arb
+
+
+def _stub(perpetual_arb=False):
+    """Return a context manager that stubs financial functions and the
+    perpetual-arb league flag (which controls the projection horizon)."""
     return patch.multiple(
         "prospect_value",
         dollars_per_war=lambda: _DPW,
         league_minimum=lambda: _LG_MIN,
+        _cfg=_FakeCfg(perpetual_arb),
     )
 
 
@@ -34,11 +41,21 @@ def _stub():
 def test_surplus_sp_aa():
     """FV 55 SP in AA should produce consistent surplus."""
     from prospect_value import prospect_surplus
-    with _stub():
+    with _stub(perpetual_arb=False):
         result = prospect_surplus(55, 21, 'AA', 'SP', fv_plus=False, ovr=55, pot=70)
     assert result['total_surplus'] > 0
-    # Structural: 6 control years in breakdown
+    # Standard (non-perpetual-arb) leagues: 6-year rookie-control window.
     assert len(result['breakdown']) == 6
+
+
+def test_surplus_horizon_perpetual_arb():
+    """Perpetual-arb leagues (PPL) project a full career horizon (20 years),
+    not the standard 6-year rookie-control window, since contracts auto-renew
+    indefinitely with no free-agency exit."""
+    from prospect_value import prospect_surplus
+    with _stub(perpetual_arb=True):
+        result = prospect_surplus(55, 21, 'AA', 'SP', fv_plus=False, ovr=55, pot=70)
+    assert len(result['breakdown']) == 20
 
 
 def test_surplus_ss_a():

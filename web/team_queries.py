@@ -966,11 +966,12 @@ def get_free_agent_candidates(team_id=None):
                r.int_, r.wrk_ethic, r.lead, r.loy, r.greed, r.acc,
                r.composite_score, r.ceiling_score, r.true_ceiling,
                pf.fv, pf.fv_str, pf.bucket, ps.surplus, pf.prospect_surplus,
-               pf.fv_continuous
+               pf.fv_continuous, fap.ask_raw
         FROM players p
         LEFT JOIN latest_ratings r ON p.player_id = r.player_id
         LEFT JOIN prospect_fv pf ON pf.player_id = p.player_id AND pf.eval_date = ?
         LEFT JOIN player_surplus ps ON ps.player_id = p.player_id AND ps.eval_date = ?
+        LEFT JOIN fa_asking_prices fap ON fap.player_id = p.player_id
         WHERE {_signable_where}
               AND r.composite_score IS NOT NULL
     """, (ed, ed_surplus, *_NIPPON_TEAM_IDS)).fetchall()
@@ -980,7 +981,7 @@ def get_free_agent_candidates(team_id=None):
     for r in rows:
         (pid, name, age, level, pos, role, intel, wrk_ethic, lead, loy, greed,
          acc, comp, ceil_score, true_ceil, fv, fv_str, pf_bucket, surplus_raw,
-         prospect_surplus_raw, fv_continuous) = r
+         prospect_surplus_raw, fv_continuous, ask_raw) = r
         bucket = _bucket_for_display(pf_bucket, role, pos)
         potential = true_ceil if true_ceil is not None else ceil_score
         buffs, concerns = _personality_notes(intel, wrk_ethic, lead, loy, greed)
@@ -994,6 +995,7 @@ def get_free_agent_candidates(team_id=None):
             "surplus": round((surplus_raw if surplus_raw is not None else prospect_surplus_raw) / _money_divisor(), 1)
                        if (surplus_raw is not None or prospect_surplus_raw is not None) else None,
             "peak_surplus": _peak_surplus(fv_continuous, age, level_disp, pf_bucket, ovr=comp, pot=potential),
+            "ask": ask_raw or "MiLC",
         }
         is_pitcher = role in ROLE_MAP
         if age is not None and age <= _INTL_FA_AGE_MAX:

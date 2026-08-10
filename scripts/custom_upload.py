@@ -485,6 +485,37 @@ def _db_free_agent_status(pids: list[str]) -> dict[str, bool]:
     return status
 
 
+def import_fa_asking_prices(file_bytes: bytes, league_dir=None) -> int:
+    """Import salary demands from an uploaded OOTP "All Free Agents" export
+    (the DEM column, e.g. "$9.0m") into fa_asking_prices, keyed by player_id.
+
+    The live statsplus.net sync has no asking-price field at all, so this
+    manual-upload table is the only way the app can show a free agent's
+    current ask. Returns the number of rows with a real (non "-") demand.
+    """
+    import datetime
+    rows = parse_rows(file_bytes)
+    conn = get_conn(league_dir)
+    now = datetime.datetime.now().isoformat()
+    count = 0
+    for d in rows:
+        pid = (d.get("ID") or "").strip()
+        if not pid:
+            continue
+        dem = (d.get("DEM") or "").strip()
+        if not dem or dem == "-":
+            continue
+        conn.execute(
+            "INSERT INTO fa_asking_prices (player_id, ask_raw, uploaded_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(player_id) DO UPDATE SET ask_raw=excluded.ask_raw, uploaded_at=excluded.uploaded_at",
+            (int(pid), dem, now),
+        )
+        count += 1
+    conn.commit()
+    conn.close()
+    return count
+
+
 def evaluate_csv(file_bytes: bytes, league_dir=None) -> list[dict]:
     rows = parse_rows(file_bytes)
     parsed = []

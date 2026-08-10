@@ -334,6 +334,15 @@ CREATE TABLE IF NOT EXISTS org_reports (
     PRIMARY KEY (team_id, report_date)
 );
 
+-- Free agent salary demands ("asking price"), imported from a manually
+-- uploaded OOTP "All Free Agents" export — the live statsplus.net sync has
+-- no such field at all, so this is the only source for it.
+CREATE TABLE IF NOT EXISTS fa_asking_prices (
+    player_id   INTEGER PRIMARY KEY,
+    ask_raw     TEXT,
+    uploaded_at TEXT
+);
+
 CREATE VIEW IF NOT EXISTS mlb_batting_stats AS
     SELECT * FROM batting_stats WHERE league_id IS NULL;
 

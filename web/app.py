@@ -450,5 +450,18 @@ def custom_upload():
                            breadcrumbs=[{"label": "Custom Upload", "url": "/custom-upload"}])
 
 
+@app.route("/team/<int:tid>/upload-fa-asks", methods=["POST"])
+def upload_fa_asks(tid):
+    import custom_upload as _cu
+    f = request.files.get("fa_csv_file")
+    if not f or not f.filename:
+        return redirect(f"/team/{tid}?fa_ask_error=1#tab-adds")
+    try:
+        count = _cu.import_fa_asking_prices(f.read(), league_dir=_get_cfg().league_dir)
+        return redirect(f"/team/{tid}?fa_ask_count={count}#tab-adds")
+    except Exception:
+        return redirect(f"/team/{tid}?fa_ask_error=1#tab-adds")
+
+
 if __name__ == "__main__":
     app.run(debug=True, port=5001)

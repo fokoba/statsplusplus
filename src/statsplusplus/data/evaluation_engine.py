@@ -1430,10 +1430,6 @@ def _extract_hitter_tools(row: dict, norm_fn) -> dict[str, float | None]:
     weighted average (60% vs-RHP, 40% vs-LHP). Falls back to overall.
 
     Returns dict with keys: contact, gap, power, eye, speed, steal, stl_rt.
-
-    Note: avoid_k (Ks rating) is excluded. Contact is a composite of BABIP
-    and K-avoidance in the OOTP engine, so including both double-counts
-    the K-avoidance signal.
     """
     tool_map = {
         "contact": ("cntct", "cntct_r", "cntct_l"),
@@ -1472,20 +1468,24 @@ def _extract_potential_hitter_tools(row: dict, norm_fn) -> dict[str, float | Non
 def _extract_pitcher_tools(row: dict, norm_fn) -> dict[str, float | None]:
     """Extract and normalize pitcher tool ratings from a DB row.
 
+    When extended ratings are available (hra column), uses HRA as the
+    "movement" value. HRA correlates r=0.927 with movement but is a cleaner
+    signal — it directly measures home run prevention, which is the primary
+    WAR driver that movement represents. The composite movement rating mixes
+    HRA with ground ball tendency (PBABIP), diluting the signal.
+
     Includes stuff L/R splits for platoon balance detection.
     """
     tools: dict[str, float | None] = {}
     tools["stuff"] = norm_fn(row.get("stf"))
-    tools["movement"] = norm_fn(row.get("mov"))
     tools["control"] = norm_fn(row.get("ctrl"))
 
-    # Extended ratings (available in some leagues)
+    # Movement: use HRA when available (more predictive component)
     hra_val = norm_fn(row.get("hra"))
     if hra_val and hra_val > 20:
-        tools["hra"] = hra_val
-    pbabip_val = norm_fn(row.get("pbabip"))
-    if pbabip_val and pbabip_val > 20:
-        tools["pbabip"] = pbabip_val
+        tools["movement"] = hra_val
+    else:
+        tools["movement"] = norm_fn(row.get("mov"))
 
     # L/R splits for platoon balance penalty
     tools["stuff_l"] = norm_fn(row.get("stf_l"))

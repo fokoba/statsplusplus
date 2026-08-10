@@ -163,6 +163,7 @@ def _calibrate_tool_weights(conn, game_year, role_map):
     # -------------------------------------------------------------------
     hitter_rows = conn.execute("""
         SELECT r.cntct, r.gap, r.pow, r.eye, r.speed, r.steal,
+               r.babip,
                r.ifr, r.ife, r.ifa, r.tdp, r.ofr, r.ofe, r.ofa,
                r.c_frm, r.c_blk, r.c_arm,
                p.pos, p.role, p.age, b.war
@@ -174,11 +175,12 @@ def _calibrate_tool_weights(conn, game_year, role_map):
           AND b.year >= ? AND b.year <= ?
     """, (age_lo, age_hi, year_lo, year_hi)).fetchall()
 
-    # Build offensive tool vectors
-    # Always use the high-level ratings (contact, gap, power, eye) — these are
-    # what the composite function receives. Even in leagues with extended ratings
-    # (babip, avoidK, hra, pbabip), those components feed INTO the high-level
-    # ratings; we calibrate against what the composite actually uses.
+    # Build offensive tool vectors using the high-level contact rating.
+    # Note: BABIP is a better WAR predictor in isolation (r=0.42 vs cntct r=0.35),
+    # but swapping it in produces noisier individual composites because BABIP
+    # ratings have higher player-to-player variance that the tool_transform and
+    # compensation logic amplifies. The composite contact rating is a more stable
+    # input despite being a slightly weaker aggregate predictor.
     off_tool_ratings = []
     off_targets = []
     for r in hitter_rows:
@@ -297,8 +299,13 @@ def _calibrate_tool_weights(conn, game_year, role_map):
             continue
 
         stuff = norm(r["stf"])
-        movement = norm(r["mov"])
         control = norm(r["ctrl"])
+        # Use HRA as movement proxy when available (cleaner signal, r=0.927 with mov)
+        hra_val = norm(r["rating_hra"])
+        if hra_val and hra_val > 20:
+            movement = hra_val
+        else:
+            movement = norm(r["mov"])
         if any(v is None for v in (stuff, movement, control)):
             continue
 

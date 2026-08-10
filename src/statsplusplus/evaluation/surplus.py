@@ -345,7 +345,7 @@ def calc_pap(
     salary: int | float,
     team_games: int | None,
     dpw: int | float,
-    pap_scale: float = 25_000_000,
+    pap_scale: float | None = None,
 ) -> float | None:
     """Compute Payroll-Adjusted Performance score (1-10 scale).
 
@@ -357,7 +357,12 @@ def calc_pap(
         salary: Player's salary in dollars.
         team_games: Games played by the team (for annualization).
         dpw: Dollars per WAR for this league.
-        pap_scale: Scaling factor for the tanh curve (default $25M).
+        pap_scale: Scaling factor for the tanh curve. Defaults to
+            dpw scaled by the same ratio as the original fixed $25M/$9M
+            (roughly 2.78x dpw) — a vintage/low-salary league's dpw can be
+            in the tens of thousands, and a fixed $25M scale swamps every
+            real surplus figure to ~0, tanh(~0) ~= 0, collapsing PAP to
+            5.0 for every player regardless of actual performance.
 
     Returns:
         PAP score rounded to 2 decimal places, or None if inputs invalid.
@@ -366,6 +371,8 @@ def calc_pap(
 
     if war is None or team_games is None or team_games < 5:
         return None
+    if pap_scale is None:
+        pap_scale = (dpw or 9_000_000) * (25_000_000 / 9_000_000)
     annualized = war * (162 / team_games)
     surplus = annualized * dpw - salary
     return round(5 + 5 * tanh(surplus / pap_scale), 2)

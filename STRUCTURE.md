@@ -14,8 +14,10 @@ statsplusplus/
 │   │   ├── composite.py               # Composite scores, tool transforms, defensive scoring
 │   │   ├── ceiling.py                  # Ceiling computation
 │   │   ├── fv.py                       # FV grades, risk labels, PAC, positional access
+│   │   ├── player_value.py            # Player surplus model (stat_confidence gradient)
+│   │   ├── outcomes.py                # Career outcome probability distributions
 │   │   ├── war.py                      # WAR projection, aging curves, stat history
-│   │   ├── surplus.py                  # Prospect/contract surplus, PAP
+│   │   ├── surplus.py                  # Prospect/contract surplus helpers, scarcity
 │   │   ├── arb.py                      # Arb salary, service time, team control
 │   │   ├── carrying_tools.py           # Carrying tool bonus
 │   │   └── constants.py                # All model constants, weight loaders
@@ -58,6 +60,7 @@ statsplusplus/
 │   ├── projections.py              # OPS+/ERA/WAR projection models
 │   ├── benchmark.py                # Evaluation accuracy benchmark
 │   ├── comp_validate.py            # Comp-based FV validation
+│   ├── model_regression.py         # Model accuracy testing + parameter calibration
 │   └── draft_settings.py           # Draft board settings management
 │
 ├── web/                        # Flask web application
@@ -158,12 +161,15 @@ Or legacy: `python3 scripts/standings.py --actual`
 | `games` | refresh | Game results with scores |
 | `standings` | refresh | Real W-L-GB from StatsPlus API |
 | `trade_block` | refresh | Players confirmed available |
-| `prospect_fv` | fv_calc | FV grades + risk labels for prospects |
-| `player_surplus` | fv_calc | Surplus value for MLB players |
+| `player_evaluation` | fv_calc | Unified player value (surplus, WAR projection, FV) |
+| `prospect_fv` | fv_calc | View on player_evaluation (prospects only) |
+| `player_surplus` | fv_calc | View on player_evaluation (MLB only) |
 
 | View | Description |
 |---|---|
 | `latest_ratings` | Most recent snapshot only |
+| `prospect_fv` | player_evaluation filtered to prospects (sc < 0.5, age ≤ 25) |
+| `player_surplus` | player_evaluation filtered to MLB level |
 | `mlb_batting_stats` | Batting filtered to MLB (league_id IS NULL) |
 | `mlb_pitching_stats` | Pitching filtered to MLB |
 | `mlb_fielding_stats` | Fielding filtered to MLB |

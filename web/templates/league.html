@@ -869,10 +869,9 @@ function renderPanel(d) {
 
   html += `<div class="panel-grades">
     <div class="panel-grade-row">
-      <span class="panel-grade-label">${d.composite_score && d.composite_score !== d.ovr ? 'OVR' : 'Comp'}</span><span class="panel-grade-val">${d.ovr || '—'}</span>
-      <span class="panel-grade-label">${d.true_ceiling && d.true_ceiling !== d.pot ? 'POT' : 'Ceil'}</span><span class="panel-grade-val">${d.pot || '—'}</span>
+      <span class="panel-grade-label">Comp</span><span class="panel-grade-val">${d.composite_score || d.ovr || '—'}</span>
+      <span class="panel-grade-label">Ceil</span><span class="panel-grade-val">${d.true_ceiling || d.ceiling_score || d.pot || '—'}</span>
     </div>
-    ${d.composite_score && d.composite_score !== d.ovr ? '<div class="panel-grade-row"><span class="panel-grade-label">Comp</span><span class="panel-grade-val">' + d.composite_score + '</span><span class="panel-grade-label">Ceil</span><span class="panel-grade-val">' + (d.true_ceiling || d.ceiling_score || '—') + '</span></div>' : ''}
     <div class="panel-grade-row">
       <span class="panel-grade-label">FV</span><span class="panel-grade-val ${fvClass(d.fv)}">${d.fv_str}</span>
       <span class="panel-grade-label">ETA</span><span class="panel-grade-val">${d.eta}</span>

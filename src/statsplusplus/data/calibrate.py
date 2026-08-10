@@ -292,7 +292,7 @@ def _calibrate_tool_weights(conn, game_year, role_map):
                r.pot_splt, r.pot_cutt, r.pot_cir_chg, r.pot_scr, r.pot_frk,
                r.pot_kncrv, r.pot_knbl,
                p.age, p.pos, p.role,
-               ps.ip, ps.k, ps.bb, ps.hra, ps.hp, ps.gs
+               ps.ip, ps.k, ps.bb, ps.hra, ps.hp, ps.gs, ps.war
         FROM latest_ratings r
         JOIN players p ON r.player_id = p.player_id
         JOIN mlb_pitching_stats ps ON ps.player_id = p.player_id
@@ -350,7 +350,7 @@ def _calibrate_tool_weights(conn, game_year, role_map):
         if pbabip_rating and pbabip_rating > 20:
             tool_dict["pbabip"] = pbabip_rating
         pitching_data[bucket][0].append(tool_dict)
-        pitching_data[bucket][1].append(-fip)
+        pitching_data[bucket][1].append(float(r["war"] if r["war"] is not None else -fip))
 
     # ---------------------------------------------------------------
     # Run regressions and build weight profiles
@@ -378,9 +378,10 @@ def _calibrate_tool_weights(conn, game_year, role_map):
         # Normalize each component's coefficients, then blend with defaults
         # proportional to R² (low R² → trust defaults more).
         if hitting_raw is not None:
-            hitting_norm = normalize_coefficients(hitting_raw, min_weight=0.18)
-            # Blend with defaults: final = R² × calibrated + (1-R²) × default
-            best_r2 = max(max(abs(v) for v in hitting_raw.values()), 0.0)
+            hitting_norm = normalize_coefficients(hitting_raw, min_weight=0.08)
+            # Blend with defaults: higher best correlation = trust regression more
+            best_corr = max(abs(v) for v in hitting_raw.values())
+            blend_factor = min(0.85, best_corr ** 0.5)
             default_w = DEFAULT_TOOL_WEIGHTS["hitter"].get(bucket, {})
             default_hitting = {}
             for k in ("contact", "gap", "power", "eye"):
@@ -389,7 +390,7 @@ def _calibrate_tool_weights(conn, game_year, role_map):
             if dt > 0:
                 default_hitting = {k: v / dt for k, v in default_hitting.items()}
             hitting_norm = {
-                k: best_r2 * hitting_norm.get(k, 0) + (1 - best_r2) * default_hitting.get(k, 0)
+                k: blend_factor * hitting_norm.get(k, 0) + (1 - blend_factor) * default_hitting.get(k, 0)
                 for k in set(hitting_norm) | set(default_hitting)
             }
             # Re-normalize after blending
@@ -438,15 +439,19 @@ def _calibrate_tool_weights(conn, game_year, role_map):
         pitching_raw = derive_tool_weights(tool_ratings, targets, min_n=MIN_REGRESSION_N)
 
         if pitching_raw is not None:
-            # Use minimum weight floor for pitchers to prevent degenerate
-            # single-variable solutions (e.g. RP movement=0.99).
-            # Floor of 0.15 ensures stuff/movement/control each get at least 15%.
-            pitching_norm = normalize_coefficients(pitching_raw, min_weight=0.15)
-            # Blend with defaults proportional to R²
-            best_r2 = max(max(abs(v) for v in pitching_raw.values()), 0.0)
+            # Use minimum weight floor for pitchers. Lower floor (0.08) allows
+            # calibration to reflect leagues where some tools have compressed
+            # distributions and genuinely don't differentiate players (e.g. VMLB
+            # stuff/control SD=5 vs movement SD=5 but movement r=0.50).
+            pitching_norm = normalize_coefficients(pitching_raw, min_weight=0.08)
+            # Blend with defaults proportional to sample confidence.
+            # Use the actual model R² (correlation of best predictor) squared
+            # as the blend factor — higher correlation = trust regression more.
+            best_corr = max(abs(v) for v in pitching_raw.values())
+            blend_factor = min(0.85, best_corr ** 0.5)  # sqrt for gentler scaling
             default_p = DEFAULT_TOOL_WEIGHTS["pitcher"].get(role, {})
             pitching_norm = {
-                k: best_r2 * pitching_norm.get(k, 0) + (1 - best_r2) * default_p.get(k, 0)
+                k: blend_factor * pitching_norm.get(k, 0) + (1 - blend_factor) * default_p.get(k, 0)
                 for k in set(pitching_norm) | set(default_p)
             }
             pt = sum(pitching_norm.values())

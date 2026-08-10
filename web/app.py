@@ -12,7 +12,7 @@ from flask import Flask, render_template, redirect, request, g, session
 import werkzeug.exceptions
 import queries
 from statsplusplus.config.league_config import LeagueConfig
-from statsplusplus.config.league_context import get_league_dir, get_active_league_slug
+from statsplusplus.config.league_context import get_league_dir, get_active_league_slug, APP_CONFIG_PATH
 from statsplusplus.utils.logging import get_logger
 
 log = get_logger("web")

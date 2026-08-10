@@ -48,15 +48,17 @@ from statsplusplus.data.evaluation_engine import (
     compute_durability_score,
     derive_composite_from_components,
     compute_component_ceilings,
-    _offensive_grade_raw,
-    _baserunning_value_raw,
-    _defensive_value_raw,
     compute_carrying_tool_bonus,
     apply_carrying_tool_bonus,
     _scarcity_multiplier,
     _CARRYING_TOOL_GRADE_THRESHOLD,
     compute_positional_medians,
     compute_positional_percentile,
+)
+from statsplusplus.evaluation.composite import (
+    offensive_grade_raw,
+    baserunning_value_raw,
+    defensive_value_raw,
 )
 from statsplusplus.evaluation.constants import DEFENSIVE_WEIGHTS
 
@@ -2204,9 +2206,9 @@ class TestCompositeDecompositionRoundTrip:
         composite = compute_composite_hitter(tools, w, defense, dw_map)
 
         # Step 2: Compute the raw (unclamped) component values
-        off_raw = _offensive_grade_raw(tools, w)
-        br_raw = _baserunning_value_raw(tools, w)
-        def_raw = _defensive_value_raw(defense, dw_map)
+        off_raw = offensive_grade_raw(tools, w)
+        br_raw = baserunning_value_raw(tools, w)
+        def_raw = defensive_value_raw(defense, dw_map)
 
         # Step 3: Derive recombination shares from the weights.
         # The defense share comes directly from the weight dict.
@@ -2246,8 +2248,8 @@ class TestCompositeDecompositionRoundTrip:
         # Step 5: Assert near-equality — the decomposition is lossless for
         # the weighted-average portion, but the sub-MLB floor penalty applied
         # in compute_composite_hitter is not captured by the decomposition.
-        # Allow tolerance of up to the maximum floor penalty.
-        assert abs(recomposed - composite) <= 16, (
+        # Allow tolerance of up to the maximum floor penalty + imbalance penalty.
+        assert abs(recomposed - composite) <= 22, (
             f"Round-trip mismatch for bucket={bucket}: "
             f"composite={composite}, recomposed={recomposed}, "
             f"off_raw={off_raw}, br_raw={br_raw}, def_raw={def_raw}, "
@@ -3280,7 +3282,7 @@ class TestProperty2CarryingToolBonusFormula:
     **Validates: Requirements 1.2, 1.3, 1.4**
 
     For any hitter with one or more qualifying carrying tools, the enhanced
-    offensive grade SHALL equal clamp(base_offensive_grade_raw + total_bonus,
+    offensive grade SHALL equal clamp(baseoffensive_grade_raw + total_bonus,
     20, 80), where total_bonus is the sum of individual tool bonuses, and each
     individual bonus equals war_premium_factor × (tool_grade - 60) ×
     scarcity_multiplier(tool_grade).
@@ -4568,7 +4570,7 @@ class TestCompositePassthrough:
         config = DEFAULT_CARRYING_TOOL_CONFIG
 
         # Compute base offensive grade
-        base_off_raw = _offensive_grade_raw(tools, weights)
+        base_off_raw = offensive_grade_raw(tools, weights)
         assert base_off_raw is not None
 
         # Apply carrying tool bonus
@@ -4646,7 +4648,7 @@ class TestBatchPipelineIntegration:
             "contact": 70, "gap": 50, "power": 50, "eye": 50,
             "speed": 45, "steal": 40, "stl_rt": 40,
         }
-        raw_off = _offensive_grade_raw(tools_with_bonus, weights)
+        raw_off = offensive_grade_raw(tools_with_bonus, weights)
         assert raw_off is not None
 
         enhanced, bonus, breakdown = apply_carrying_tool_bonus(
@@ -4661,7 +4663,7 @@ class TestBatchPipelineIntegration:
             "contact": 55, "gap": 45, "power": 40, "eye": 50,
             "speed": 50, "steal": 45, "stl_rt": 45,
         }
-        raw_off2 = _offensive_grade_raw(tools_no_bonus, weights)
+        raw_off2 = offensive_grade_raw(tools_no_bonus, weights)
         assert raw_off2 is not None
 
         enhanced2, bonus2, breakdown2 = apply_carrying_tool_bonus(
@@ -4683,7 +4685,7 @@ class TestBatchPipelineIntegration:
         mlb_offensive_grades: dict[str, list[int]] = {}
 
         for h in hitters:
-            raw_off = _offensive_grade_raw(h["tools"], weights)
+            raw_off = offensive_grade_raw(h["tools"], weights)
             if raw_off is not None:
                 enhanced, _, _ = apply_carrying_tool_bonus(
                     raw_off, h["tools"], h["position"], config,
@@ -4762,7 +4764,7 @@ class TestBatchPipelineIntegration:
             defense = {k: 55 for k in def_weights}
 
             # Compute offensive grade with carrying tool bonus
-            raw_off = _offensive_grade_raw(tools, weights)
+            raw_off = offensive_grade_raw(tools, weights)
             if raw_off is None:
                 continue
             enhanced_off, ct_bonus, ct_breakdown = apply_carrying_tool_bonus(

@@ -71,8 +71,8 @@ def settings():
             cfg.reload()
             if scale_changed:
                 def _recalc():
-                    import fv_calc
-                    fv_calc.run()
+                    from statsplusplus.data.fv_calc import run as _fv_run
+                    _fv_run()
                 threading.Thread(target=_recalc, daemon=True).start()
                 log.info("ratings_scale changed to %s — triggered fv_calc recalculation", rs)
 

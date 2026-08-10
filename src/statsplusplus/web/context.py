@@ -62,9 +62,7 @@ def get_cfg() -> Any:
     # Fallback for non-request contexts
     from statsplusplus.config.league_context import get_league_dir
     # Import legacy LeagueConfig for now — will be replaced in later migration
-    import sys
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent / "scripts"))
-    from league_config import LeagueConfig
+    from statsplusplus.config.league_config import LeagueConfig
     return LeagueConfig()
 
 

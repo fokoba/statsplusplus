@@ -4,6 +4,36 @@ Completed and deferred work items, organized by session. Moved from `task_list.m
 
 ---
 
+## Session 79 (2026-08-10)
+
+### Evaluation Model — Consolidation & Calibration
+
+- **Composite function consolidation** — `compute_composite_hitter`, `compute_composite_pitcher`, and all shared helper functions (tool_transform, floor penalty, compensation, ceiling, stat conversion) now have a single canonical implementation in `evaluation/composite.py` and `evaluation/ceiling.py`. `data/evaluation_engine.py` imports from the package instead of maintaining identical copies. Removed ~1,043 lines of duplicated code. Fixed a bug where the package version was missing HRA/PBABIP support in `PITCHER_TOOL_KEYS`.
+
+- **Model parameter extraction** — All hardcoded tuning parameters (imbalance penalties, stat confidence curve, option value, RP discount, near-maxed blend) extracted to `evaluation/constants.py` with descriptive names. Consumers reference named constants instead of magic numbers.
+
+- **Per-league parameter overrides** — New `ModelWeights.get_param(key, default)` accessor reads league-calibrated values from `model_weights.json` under a `MODEL_PARAMS` dict. Player value model, aging curves, and imbalance thresholds all support per-league override. Falls back to constants.py defaults when no calibration exists.
+
+- **Regression testing framework** — New `scripts/model_regression.py` validates model predictions against actual WAR production. Tests: composite accuracy (R²), imbalance penalty validation, aging curve fit, stat blending improvement. Supports `--calibrate` mode to derive league-specific parameters and write to `model_weights.json`.
+
+- **Longitudinal aging curve calibration** — Aging curves now derived by tracking the same players across ages (avoids survivorship bias). The old cross-sectional approach showed artificially flat aging because only good players survive to older ages. Written per-league to `model_weights.json`. `aging_mult()` accepts optional `ModelWeights` for league-specific curves.
+
+- **Imbalance penalty validation** — R² comparison with/without penalty. Key finding: hitter imbalance penalty is counter-productive in EMLB (contact/power-dominant imbalanced hitters outperform their composite) but helpful in VMLB. Pitcher penalty has marginal value in both leagues. Thresholds now calibrated per-league.
+
+- **Defense weight recalibration** — Residual analysis identified infield defense (IFR r=+0.362, IFE r=+0.276) as the largest factor our composite was missing. Increased SS/2B defense from 0.05→0.15, 3B from 0.00→0.10. EMLB hitter R² improved 0.606→0.643.
+
+- **Speed × contact synergy** — Additive bonus when both speed (>45) and contact (>50) are high. Data showed r=+0.176 interaction with WAR residual — fast players with good contact produce more value than linear addition suggests (infield hits, pressure).
+
+- **Position-specific stat blend reduction** — OPS+ stat blending was hurting prediction at defense-first positions (SS tool_only R²=0.796 vs blended R²=0.747). Now reduces blend weight for SS/CF (×0.50) and 2B/C (×0.75).
+
+- **Final accuracy**: EMLB hitter composite R² = 0.680 (was 0.606, OVR = 0.723). Closed 63% of the gap to OOTP's own OVR rating. EMLB pitcher composite R² = 0.531 (beats OVR's 0.436).
+
+### Code Quality
+
+- **Private function cleanup** — Renamed `_offensive_grade_raw` → `offensive_grade_raw` (and similar) since they're part of the public API. Removed all backward-compat aliases from `evaluation_engine.py`. Tests updated to import from canonical sources.
+
+---
+
 ## Session 75 (2026-08-06)
 
 ### Features

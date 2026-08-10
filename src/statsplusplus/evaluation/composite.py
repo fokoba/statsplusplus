@@ -11,6 +11,12 @@ Public API:
     compute_offensive_grade(tools, weights) -> int | None
     compute_baserunning_value(tools, weights) -> int | None
     compute_defensive_value(defense, def_weights) -> int | None
+    compute_combined_value(primary, secondary) -> int
+    offensive_grade_raw(tools, weights) -> float | None
+    baserunning_value_raw(tools, weights) -> float | None
+    defensive_value_raw(defense, def_weights) -> float | None
+    tool_transform(val) -> float
+    sub_mlb_floor_penalty(tools) -> float
     stat_to_2080(stat_plus) -> float
     pitcher_stat_to_2080(stat_plus) -> float
 """
@@ -26,6 +32,14 @@ from statsplusplus.evaluation.constants import (
     TOOL_TRANSFORM_HIGH_BONUS,
     MLB_TOOL_FLOOR,
     FLOOR_PENALTY_RATE,
+    HITTER_IMBALANCE_SPREAD_THRESHOLD,
+    HITTER_IMBALANCE_SPREAD_RATE,
+    HITTER_IMBALANCE_WEAKNESS_THRESHOLD,
+    HITTER_IMBALANCE_WEAKNESS_RATE,
+    PITCHER_IMBALANCE_SPREAD_THRESHOLD,
+    PITCHER_IMBALANCE_SPREAD_RATE,
+    PITCHER_IMBALANCE_WEAKNESS_THRESHOLD,
+    PITCHER_IMBALANCE_WEAKNESS_RATE,
 )
 
 # ---------------------------------------------------------------------------
@@ -34,7 +48,9 @@ from statsplusplus.evaluation.constants import (
 
 OFFENSIVE_TOOL_KEYS: tuple[str, ...] = ("contact", "gap", "power", "eye")
 BASERUNNING_TOOL_KEYS: tuple[str, ...] = ("speed", "steal", "stl_rt")
-PITCHER_TOOL_KEYS: tuple[str, ...] = ("stuff", "movement", "control")
+PITCHER_TOOL_KEYS: tuple[str, ...] = ("stuff", "movement", "control", "hra", "pbabip")
+# Core keys for imbalance/floor penalties (extended ratings excluded)
+PITCHER_CORE_KEYS: tuple[str, ...] = ("stuff", "movement", "control")
 
 
 # ---------------------------------------------------------------------------
@@ -165,7 +181,7 @@ def _apply_pitcher_compensation(tools: dict[str, float | int | None]) -> dict[st
 # Component raw scores (unclamped)
 # ---------------------------------------------------------------------------
 
-def _offensive_grade_raw(
+def offensive_grade_raw(
     tools: dict[str, float | int | None],
     weights: dict[str, float],
 ) -> Optional[float]:
@@ -196,7 +212,7 @@ def _offensive_grade_raw(
     return sum(val * (w / total_weight) for val, w in available)
 
 
-def _baserunning_value_raw(
+def baserunning_value_raw(
     tools: dict[str, float | int | None],
     weights: dict[str, float],
 ) -> Optional[float]:
@@ -218,7 +234,7 @@ def _baserunning_value_raw(
     return sum(val * (w / total_weight) for val, w in available)
 
 
-def _defensive_value_raw(
+def defensive_value_raw(
     defense: dict[str, float | int | None],
     def_weights: dict[str, float],
 ) -> Optional[float]:
@@ -252,7 +268,7 @@ def compute_offensive_grade(
     Uses contact, gap, power, eye with piecewise tool transform and
     calibrated weights. Returns integer on 20-80 scale.
     """
-    raw = _offensive_grade_raw(tools, weights)
+    raw = offensive_grade_raw(tools, weights)
     if raw is None:
         return None
     return max(20, min(80, round(raw)))
@@ -266,7 +282,7 @@ def compute_baserunning_value(
 
     Returns integer on 20-80 scale.
     """
-    raw = _baserunning_value_raw(tools, weights)
+    raw = baserunning_value_raw(tools, weights)
     if raw is None:
         return None
     return max(20, min(80, round(raw)))
@@ -280,7 +296,7 @@ def compute_defensive_value(
 
     Returns integer on 20-80 scale.
     """
-    raw = _defensive_value_raw(defense, def_weights)
+    raw = defensive_value_raw(defense, def_weights)
     if raw is None:
         return None
     return max(20, min(80, round(raw)))
@@ -311,9 +327,9 @@ def compute_composite_hitter(
     Returns:
         Integer composite score in [20, 80].
     """
-    off_raw = _offensive_grade_raw(tools, weights)
-    br_raw = _baserunning_value_raw(tools, weights)
-    def_raw = _defensive_value_raw(defense, def_weights)
+    off_raw = offensive_grade_raw(tools, weights)
+    br_raw = baserunning_value_raw(tools, weights)
+    def_raw = defensive_value_raw(defense, def_weights)
 
     if off_raw is None and br_raw is None and def_raw is None:
         return 20
@@ -360,6 +376,26 @@ def compute_composite_hitter(
     # Sub-MLB floor penalty (offensive tools only)
     hitting_tools = {k: v for k, v in tools.items() if k in OFFENSIVE_TOOL_KEYS}
     raw -= sub_mlb_floor_penalty(hitting_tools)
+
+    # Speed × contact synergy: fast players with good contact produce more
+    # value than the linear sum suggests (infield hits, extra bases, pressure).
+    # Additive bonus when both speed and contact exceed thresholds.
+    spd = float(tools.get("speed") or 0)
+    if spd > 45 and cnt > 50:
+        synergy = 0.10 * (spd - 45) * (cnt / 60.0)
+        raw += synergy
+
+    # Tool imbalance penalty for one-tool hitters
+    _hit_vals = [v for v in hitting_tools.values() if v]
+    if len(_hit_vals) >= 3:
+        tool_spread = max(_hit_vals) - min(_hit_vals)
+        if tool_spread > HITTER_IMBALANCE_SPREAD_THRESHOLD:
+            spread_penalty = (tool_spread - HITTER_IMBALANCE_SPREAD_THRESHOLD) * HITTER_IMBALANCE_SPREAD_RATE
+            weakness_penalty = sum(
+                max(0, HITTER_IMBALANCE_WEAKNESS_THRESHOLD - v) * HITTER_IMBALANCE_WEAKNESS_RATE
+                for v in _hit_vals if v < HITTER_IMBALANCE_WEAKNESS_THRESHOLD
+            )
+            raw -= spread_penalty + weakness_penalty
 
     return max(20, min(80, round(raw)))
 
@@ -458,8 +494,20 @@ def compute_composite_pitcher(
             raw -= 3 if weak_side <= 25 else 2
 
     # Sub-MLB floor penalty for core tools
-    core_tools = {k: v for k, v in tools.items() if k in PITCHER_TOOL_KEYS}
+    core_tools = {k: v for k, v in tools.items() if k in PITCHER_CORE_KEYS}
     raw -= sub_mlb_floor_penalty(core_tools)
+
+    # Tool imbalance penalty for one-dimensional pitchers
+    _core_vals = [v for k, v in tools.items() if k in PITCHER_CORE_KEYS and v]
+    if len(_core_vals) >= 2:
+        tool_spread = max(_core_vals) - min(_core_vals)
+        if tool_spread > PITCHER_IMBALANCE_SPREAD_THRESHOLD:
+            spread_penalty = (tool_spread - PITCHER_IMBALANCE_SPREAD_THRESHOLD) * PITCHER_IMBALANCE_SPREAD_RATE
+            weakness_penalty = sum(
+                max(0, PITCHER_IMBALANCE_WEAKNESS_THRESHOLD - v) * PITCHER_IMBALANCE_WEAKNESS_RATE
+                for v in _core_vals if v < PITCHER_IMBALANCE_WEAKNESS_THRESHOLD
+            )
+            raw -= spread_penalty + weakness_penalty
 
     return max(20, min(80, round(raw)))
 
@@ -498,6 +546,7 @@ def compute_composite_mlb(
     peak_age: int = 28,
     player_age: int = 28,
     is_pitcher: bool = False,
+    bucket: str = "",
 ) -> int:
     """Blend tool-based score with stat performance for MLB players.
 
@@ -507,6 +556,8 @@ def compute_composite_mlb(
         peak_age: Expected peak age for position.
         player_age: Player's current age.
         is_pitcher: Whether the player is a pitcher.
+        bucket: Positional bucket (SS, CF get reduced blend because OPS+
+            doesn't capture their defensive WAR contribution).
 
     Returns:
         Integer composite score in [20, 80].
@@ -528,6 +579,13 @@ def compute_composite_mlb(
     # Blend weight based on seasons available
     seasons_available = min(len(stat_seasons), 3)
     blend_weight = {1: 0.20, 2: 0.35, 3: 0.60}[seasons_available]
+
+    # Defense-first position adjustment: OPS+ doesn't capture defensive WAR,
+    # so stat blending at these positions pulls the composite away from the
+    # defensive value that actually drives their production. Reduce blend.
+    _DEFENSE_POSITIONS = {"SS": 0.50, "CF": 0.50, "2B": 0.75, "C": 0.75}
+    if bucket in _DEFENSE_POSITIONS:
+        blend_weight *= _DEFENSE_POSITIONS[bucket]
 
     # Young player adjustment
     if player_age < peak_age and tool_score > stat_signal:

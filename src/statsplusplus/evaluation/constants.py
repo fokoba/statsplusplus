@@ -140,6 +140,55 @@ MLB_TOOL_FLOOR: int = 35
 FLOOR_PENALTY_RATE: float = 0.25
 
 # ---------------------------------------------------------------------------
+# Composite imbalance penalty parameters
+# ---------------------------------------------------------------------------
+
+# Hitter: penalizes one-tool profiles (e.g., elite power + poor everything else)
+HITTER_IMBALANCE_SPREAD_THRESHOLD: int = 25
+HITTER_IMBALANCE_SPREAD_RATE: float = 0.15
+HITTER_IMBALANCE_WEAKNESS_THRESHOLD: int = 45
+HITTER_IMBALANCE_WEAKNESS_RATE: float = 0.12
+
+# Pitcher: penalizes one-dimensional pitchers (e.g., elite stuff + poor control)
+PITCHER_IMBALANCE_SPREAD_THRESHOLD: int = 20
+PITCHER_IMBALANCE_SPREAD_RATE: float = 0.20
+PITCHER_IMBALANCE_WEAKNESS_THRESHOLD: int = 50
+PITCHER_IMBALANCE_WEAKNESS_RATE: float = 0.15
+
+# ---------------------------------------------------------------------------
+# Stat confidence curve parameters
+# ---------------------------------------------------------------------------
+
+STAT_CONFIDENCE_PA_FULL: float = 400.0
+STAT_CONFIDENCE_IP_FULL: float = 120.0
+STAT_CONFIDENCE_PA_MIN: int = 50
+STAT_CONFIDENCE_IP_MIN: float = 15.0
+STAT_CONFIDENCE_EXPONENT: float = 1.4
+
+# ---------------------------------------------------------------------------
+# Player value model parameters
+# ---------------------------------------------------------------------------
+
+# Near-maxed prospect blend: fades FV-based projection when a player has
+# nearly reached their ceiling (prevents inflation for average established players)
+NEAR_MAXED_REALIZATION_THRESHOLD: float = 0.7
+NEAR_MAXED_DENOMINATOR: float = 0.3
+
+# Option value: premium for young, high-ceiling prospects with unrealized upside
+OPTION_VALUE_FV_FLOOR: float = 45.0      # No option value below this FV
+OPTION_VALUE_FV_FULL: float = 55.0       # Full option value above this FV
+OPTION_VALUE_GAP_DIVISOR: float = 25.0   # Normalizes ceiling-composite gap
+OPTION_VALUE_YOUTH_PIVOT: int = 22       # Age at which youth factor starts fading
+OPTION_VALUE_YOUTH_RANGE: float = 5.0    # Age range over which youth fades
+OPTION_VALUE_MULTIPLIER: float = 0.30    # Max upside premium (30%)
+
+# RP surplus discount: reliever production is volatile and replaceable
+RP_DISCOUNT_BASE: float = 0.35          # Discount for replacement-level RPs
+RP_DISCOUNT_RANGE: float = 0.30         # Additional discount for elite RPs
+RP_DISCOUNT_WAR_FLOOR: float = 0.5      # WAR below which base discount applies
+RP_DISCOUNT_WAR_CEILING: float = 2.5    # WAR above which max discount applies
+
+# ---------------------------------------------------------------------------
 # Calibrated model weights container
 # ---------------------------------------------------------------------------
 
@@ -271,6 +320,42 @@ class ModelWeights:
             else:
                 self._years_to_mlb = dict(_default)
         return self._years_to_mlb
+
+    @property
+    def aging_curve_hitter(self) -> dict[int, float]:
+        """League-specific hitter aging curve. Calibrated or default."""
+        raw = self.raw.get("AGING_CURVE_HITTER")
+        if raw and isinstance(raw, dict):
+            return {int(k): v for k, v in raw.items()}
+        return dict(AGING_HITTER)
+
+    @property
+    def aging_curve_pitcher(self) -> dict[int, float]:
+        """League-specific pitcher aging curve. Calibrated or default."""
+        raw = self.raw.get("AGING_CURVE_PITCHER")
+        if raw and isinstance(raw, dict):
+            return {int(k): v for k, v in raw.items()}
+        return dict(AGING_PITCHER)
+
+    def get_param(self, key: str, default: float) -> float:
+        """Get a tuning parameter: league-calibrated if available, else default.
+
+        Tuning parameters are stored in model_weights.json under a
+        "MODEL_PARAMS" dict. This provides a single override path for all
+        parameters that may vary by league (aging, imbalance rates, stat
+        confidence curve, etc.).
+
+        Args:
+            key: Parameter name (matches the constant name in constants.py).
+            default: Fallback value if not calibrated for this league.
+
+        Returns:
+            Float parameter value.
+        """
+        params = self.raw.get("MODEL_PARAMS")
+        if params and isinstance(params, dict) and key in params:
+            return float(params[key])
+        return default
 
 
 def load_model_weights(league_dir: Path) -> ModelWeights:

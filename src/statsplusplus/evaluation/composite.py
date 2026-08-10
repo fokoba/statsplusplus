@@ -32,6 +32,14 @@ from statsplusplus.evaluation.constants import (
     TOOL_TRANSFORM_HIGH_BONUS,
     MLB_TOOL_FLOOR,
     FLOOR_PENALTY_RATE,
+    HITTER_IMBALANCE_SPREAD_THRESHOLD,
+    HITTER_IMBALANCE_SPREAD_RATE,
+    HITTER_IMBALANCE_WEAKNESS_THRESHOLD,
+    HITTER_IMBALANCE_WEAKNESS_RATE,
+    PITCHER_IMBALANCE_SPREAD_THRESHOLD,
+    PITCHER_IMBALANCE_SPREAD_RATE,
+    PITCHER_IMBALANCE_WEAKNESS_THRESHOLD,
+    PITCHER_IMBALANCE_WEAKNESS_RATE,
 )
 
 # ---------------------------------------------------------------------------
@@ -373,9 +381,12 @@ def compute_composite_hitter(
     _hit_vals = [v for v in hitting_tools.values() if v]
     if len(_hit_vals) >= 3:
         tool_spread = max(_hit_vals) - min(_hit_vals)
-        if tool_spread > 25:
-            spread_penalty = (tool_spread - 25) * 0.15
-            weakness_penalty = sum(max(0, 45 - v) * 0.12 for v in _hit_vals if v < 45)
+        if tool_spread > HITTER_IMBALANCE_SPREAD_THRESHOLD:
+            spread_penalty = (tool_spread - HITTER_IMBALANCE_SPREAD_THRESHOLD) * HITTER_IMBALANCE_SPREAD_RATE
+            weakness_penalty = sum(
+                max(0, HITTER_IMBALANCE_WEAKNESS_THRESHOLD - v) * HITTER_IMBALANCE_WEAKNESS_RATE
+                for v in _hit_vals if v < HITTER_IMBALANCE_WEAKNESS_THRESHOLD
+            )
             raw -= spread_penalty + weakness_penalty
 
     return max(20, min(80, round(raw)))
@@ -482,9 +493,12 @@ def compute_composite_pitcher(
     _core_vals = [v for k, v in tools.items() if k in PITCHER_CORE_KEYS and v]
     if len(_core_vals) >= 2:
         tool_spread = max(_core_vals) - min(_core_vals)
-        if tool_spread > 20:
-            spread_penalty = (tool_spread - 20) * 0.20
-            weakness_penalty = sum(max(0, 50 - v) * 0.15 for v in _core_vals if v < 50)
+        if tool_spread > PITCHER_IMBALANCE_SPREAD_THRESHOLD:
+            spread_penalty = (tool_spread - PITCHER_IMBALANCE_SPREAD_THRESHOLD) * PITCHER_IMBALANCE_SPREAD_RATE
+            weakness_penalty = sum(
+                max(0, PITCHER_IMBALANCE_WEAKNESS_THRESHOLD - v) * PITCHER_IMBALANCE_WEAKNESS_RATE
+                for v in _core_vals if v < PITCHER_IMBALANCE_WEAKNESS_THRESHOLD
+            )
             raw -= spread_penalty + weakness_penalty
 
     return max(20, min(80, round(raw)))

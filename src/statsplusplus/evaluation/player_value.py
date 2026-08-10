@@ -18,6 +18,23 @@ from typing import Any, Optional
 from statsplusplus.evaluation.arb import arb_salary, arb_salary_perpetual
 from statsplusplus.evaluation.constants import (
     PROSPECT_DISCOUNT_RATE,
+    STAT_CONFIDENCE_PA_FULL,
+    STAT_CONFIDENCE_IP_FULL,
+    STAT_CONFIDENCE_PA_MIN,
+    STAT_CONFIDENCE_IP_MIN,
+    STAT_CONFIDENCE_EXPONENT,
+    NEAR_MAXED_REALIZATION_THRESHOLD,
+    NEAR_MAXED_DENOMINATOR,
+    OPTION_VALUE_FV_FLOOR,
+    OPTION_VALUE_FV_FULL,
+    OPTION_VALUE_GAP_DIVISOR,
+    OPTION_VALUE_YOUTH_PIVOT,
+    OPTION_VALUE_YOUTH_RANGE,
+    OPTION_VALUE_MULTIPLIER,
+    RP_DISCOUNT_BASE,
+    RP_DISCOUNT_RANGE,
+    RP_DISCOUNT_WAR_FLOOR,
+    RP_DISCOUNT_WAR_CEILING,
     ModelWeights,
 )
 from statsplusplus.evaluation.surplus import (
@@ -39,16 +56,16 @@ from statsplusplus.utils.positions import (
 # ---------------------------------------------------------------------------
 
 # Thresholds for full confidence (stat projection fully trusted)
-_PA_FULL_CONFIDENCE: float = 400.0
-_IP_FULL_CONFIDENCE: float = 120.0
+_PA_FULL_CONFIDENCE: float = STAT_CONFIDENCE_PA_FULL
+_IP_FULL_CONFIDENCE: float = STAT_CONFIDENCE_IP_FULL
 
 # Minimum PA/IP to register any stat signal at all
-_PA_MIN_SIGNAL: int = 50
-_IP_MIN_SIGNAL: float = 15.0
+_PA_MIN_SIGNAL: int = STAT_CONFIDENCE_PA_MIN
+_IP_MIN_SIGNAL: float = STAT_CONFIDENCE_IP_MIN
 
 # Power curve exponent — >1.0 makes the ramp concave (less weight to small samples)
 # At 1.4: 50 PA=8%, 100 PA=22%, 200 PA=47%, 300 PA=71%, 400 PA=100%
-_CONFIDENCE_EXPONENT: float = 1.4
+_CONFIDENCE_EXPONENT: float = STAT_CONFIDENCE_EXPONENT
 
 
 def stat_confidence(career_pa: int, career_ip: float) -> float:
@@ -202,8 +219,8 @@ def compute_player_value(
     # elite upside remaining.
     if ceiling > 0 and sc < 0.5:
         realization = composite / ceiling
-        if realization > 0.7 and composite_war < fv_war:
-            blend_w = max(0.0, (realization - 0.7) / 0.3) ** 2
+        if realization > NEAR_MAXED_REALIZATION_THRESHOLD and composite_war < fv_war:
+            blend_w = max(0.0, (realization - NEAR_MAXED_REALIZATION_THRESHOLD) / NEAR_MAXED_DENOMINATOR) ** 2
             tool_war = tool_war * (1 - blend_w) + composite_war * blend_w
 
     # RP cap: for prospect RPs (low stat_confidence), cap tool_war at the
@@ -257,10 +274,10 @@ def compute_player_value(
     # Scaled by FV: full premium at FV 55+, reduced at FV 45-50, none below 45.
     option_mult = 1.0
     if sc < 0.5 and ceiling > composite:
-        fv_scale = max(0.0, min(1.0, (fv_continuous - 45) / 10.0))  # 0 at FV≤45, 1 at FV≥55
-        gap_pct = min(1.0, (ceiling - composite) / 25.0)
-        youth_factor = max(0.0, min(1.0, (22 - age) / 5.0))
-        option_mult = 1.0 + gap_pct * youth_factor * 0.30 * fv_scale * (1.0 - sc * 2)
+        fv_scale = max(0.0, min(1.0, (fv_continuous - OPTION_VALUE_FV_FLOOR) / (OPTION_VALUE_FV_FULL - OPTION_VALUE_FV_FLOOR)))
+        gap_pct = min(1.0, (ceiling - composite) / OPTION_VALUE_GAP_DIVISOR)
+        youth_factor = max(0.0, min(1.0, (OPTION_VALUE_YOUTH_PIVOT - age) / OPTION_VALUE_YOUTH_RANGE))
+        option_mult = 1.0 + gap_pct * youth_factor * OPTION_VALUE_MULTIPLIER * fv_scale * (1.0 - sc * 2)
 
     # --- Step 5: Project year-by-year WAR and surplus ---
     rows: list[dict[str, Any]] = []
@@ -353,7 +370,7 @@ def compute_player_value(
     # types with pre-arb control trade for top-10 prospect packages.
     # Scale: 0.35 for replacement-level RPs, rising to 0.65 for elite (2.5+ WAR).
     if bucket == "RP":
-        rp_discount = 0.35 + 0.30 * min(1.0, max(0.0, (peak_war - 0.5) / 2.0))
+        rp_discount = RP_DISCOUNT_BASE + RP_DISCOUNT_RANGE * min(1.0, max(0.0, (peak_war - RP_DISCOUNT_WAR_FLOOR) / (RP_DISCOUNT_WAR_CEILING - RP_DISCOUNT_WAR_FLOOR)))
         combined_mult *= rp_discount
 
     final_surplus = max(0, round(total_surplus * combined_mult))

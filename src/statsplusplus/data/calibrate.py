@@ -159,16 +159,20 @@ def _calibrate_tool_weights(conn, game_year, role_map):
     """, (year_lo, year_hi)).fetchall()
 
     # Build offensive tool vectors
+    # Always use the high-level ratings (contact, gap, power, eye) — these are
+    # what the composite function receives. Even in leagues with extended ratings
+    # (babip, avoidK, hra, pbabip), those components feed INTO the high-level
+    # ratings; we calibrate against what the composite actually uses.
     off_tool_ratings = []
     off_targets = []
     for r in hitter_rows:
-        stf = norm(r["cntct"])
+        contact = norm(r["cntct"])
         gap = norm(r["gap"])
         power = norm(r["pow"])
         eye = norm(r["eye"])
-        if any(v is None for v in (stf, gap, power, eye)):
+        if any(v is None for v in (contact, gap, power, eye)):
             continue
-        off_tool_ratings.append({"contact": stf, "gap": gap, "power": power, "eye": eye})
+        off_tool_ratings.append({"contact": contact, "gap": gap, "power": power, "eye": eye})
         off_targets.append(float(r["war"]))
 
     # Baserunning
@@ -264,6 +268,13 @@ def _calibrate_tool_weights(conn, game_year, role_map):
     pitch_cols = ["fst", "snk", "crv", "sld", "chg", "splt", "cutt",
                   "cir_chg", "scr", "frk", "kncrv", "knbl"]
 
+    # Detect extended pitcher ratings
+    # Note: we do NOT include hra/pbabip as separate features in the regression.
+    # Movement is a composite of hra + ground ball tendency. Including both
+    # movement and hra creates multicollinearity (r=0.927). The composite
+    # function always receives 'movement' as input, so we calibrate against it.
+    # Extended ratings only matter if we later decompose the composite function.
+
     for r in pitcher_rows:
         bucket = _bucket_player(r, role_map)
         if bucket not in PITCHER_BUCKETS:
@@ -280,14 +291,6 @@ def _calibrate_tool_weights(conn, game_year, role_map):
         arsenal_quality = sum(1 for pr in pitch_ratings if pr is not None and pr >= 45)
 
         tool_dict = {"stuff": stuff, "movement": movement, "control": control, "arsenal": arsenal_quality}
-
-        # Extended ratings when available
-        hra_rating = norm(r["rating_hra"])
-        pbabip_rating = norm(r["rating_pbabip"])
-        if hra_rating and hra_rating > 20:
-            tool_dict["hra"] = hra_rating
-        if pbabip_rating and pbabip_rating > 20:
-            tool_dict["pbabip"] = pbabip_rating
 
         pitching_data[bucket][0].append(tool_dict)
         pitching_data[bucket][1].append(float(r["war"]))

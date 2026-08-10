@@ -113,6 +113,7 @@
         <th data-sort="num">Spd</th>
         <th data-sort="num">Def</th>
         <th data-sort="num">Surplus</th>
+        <th data-sort="num" title="Best single projected year at expected grade — quality independent of remaining runway">Peak Yr</th>
         <th data-sort="str">Promo</th>
       </tr>
     </thead>
@@ -132,7 +133,8 @@
         <td>{% if p.eye %}<span class="ovr-color" data-g="{{ p.eye }}">{{ p.eye }}</span>{% if p.pot_eye and p.pot_eye != p.eye %}/<span class="ovr-color" data-g="{{ p.pot_eye }}">{{ p.pot_eye }}</span>{% endif %}{% else %}—{% endif %}</td>
         <td>{% if p.spd %}<span class="ovr-color" data-g="{{ p.spd }}">{{ p.spd }}</span>{% else %}—{% endif %}</td>
         <td>{% if p.def %}<span class="ovr-color" data-g="{{ p.def }}">{{ p.def }}</span>{% else %}—{% endif %}</td>
-        <td>{% if p.surplus is not none and p.surplus > 0 %}${{ p.surplus }}M{% else %}—{% endif %}</td>
+        <td>{% if p.surplus is not none and p.surplus > 0 %}${{ p.surplus }}{{ money_unit }}{% else %}—{% endif %}</td>
+        <td>{% if p.peak_surplus is not none and p.peak_surplus > 0 %}${{ p.peak_surplus }}{{ money_unit }}{% else %}—{% endif %}</td>
         <td>{% if p.promo and p.promo.tier in ('ready', 'knocking') %}<span class="promo-badge promo-{{ p.promo.tier }}" title="{{ p.promo.reasons|join('; ') }}">{{ p.promo.label }}</span>{% elif p.demotion %}<span class="promo-badge promo-{{ p.demotion.tier }}" title="{{ p.demotion.reasons|join('; ') }}">{{ p.demotion.label }}</span>{% elif p.promo and p.promo.tier == 'developing' %}<span style="color:var(--text-dim);font-size:10px">—</span>{% else %}{% endif %}</td>
       </tr>
       {% endfor %}
@@ -156,6 +158,7 @@
         <th data-sort="num">Stm</th>
         <th data-sort="num">Pit</th>
         <th data-sort="num">Surplus</th>
+        <th data-sort="num" title="Best single projected year at expected grade — quality independent of remaining runway">Peak Yr</th>
         <th data-sort="str">Promo</th>
       </tr>
     </thead>
@@ -174,7 +177,8 @@
         <td>{% if p.ctrl %}<span class="ovr-color" data-g="{{ p.ctrl }}">{{ p.ctrl }}</span>{% if p.pot_ctrl and p.pot_ctrl != p.ctrl %}/<span class="ovr-color" data-g="{{ p.pot_ctrl }}">{{ p.pot_ctrl }}</span>{% endif %}{% else %}—{% endif %}</td>
         <td>{% if p.stm %}<span class="ovr-color" data-g="{{ p.stm }}">{{ p.stm }}</span>{% else %}—{% endif %}</td>
         <td>{{ p.pitches or '—' }}</td>
-        <td>{% if p.surplus is not none and p.surplus > 0 %}${{ p.surplus }}M{% else %}—{% endif %}</td>
+        <td>{% if p.surplus is not none and p.surplus > 0 %}${{ p.surplus }}{{ money_unit }}{% else %}—{% endif %}</td>
+        <td>{% if p.peak_surplus is not none and p.peak_surplus > 0 %}${{ p.peak_surplus }}{{ money_unit }}{% else %}—{% endif %}</td>
         <td>{% if p.promo and p.promo.tier in ('ready', 'knocking') %}<span class="promo-badge promo-{{ p.promo.tier }}" title="{{ p.promo.reasons|join('; ') }}">{{ p.promo.label }}</span>{% elif p.demotion %}<span class="promo-badge promo-{{ p.demotion.tier }}" title="{{ p.demotion.reasons|join('; ') }}">{{ p.demotion.label }}</span>{% elif p.promo and p.promo.tier == 'developing' %}<span style="color:var(--text-dim);font-size:10px">—</span>{% else %}{% endif %}</td>
       </tr>
       {% endfor %}

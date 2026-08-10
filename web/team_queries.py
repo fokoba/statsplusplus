@@ -86,6 +86,24 @@ def _get_eval_date():
     return ed
 
 
+def _peak_surplus(fv_continuous, age, level, bucket, ovr=None, pot=None):
+    """Best single expected-grade projected year of surplus (money-scaled),
+    or None when there isn't enough data (no prospect_fv row for this
+    player). Quality signal independent of runway length — see
+    peak_year_surplus() in scripts/prospect_value.py for why this is a
+    better "how good is this prospect" comparison than total surplus.
+    """
+    if fv_continuous is None or age is None or not level or not bucket:
+        return None
+    try:
+        from prospect_value import peak_year_surplus as _pys
+        result = _pys(fv_continuous, age, level, bucket, ovr=ovr, pot=pot,
+                      league_dir=get_cfg().league_dir)
+        return round(result["surplus"] / _money_divisor(), 1)
+    except Exception:
+        return None
+
+
 def get_summary(team_id=None):
     state = _get_state()
     conn = get_db()
@@ -648,7 +666,7 @@ def get_cut_candidates(team_id=None):
         SELECT p.player_id, p.name, p.age, p.level, p.pos, p.role, p.team_id,
                r.int_, r.wrk_ethic, r.acc, r.composite_score, r.ceiling_score,
                r.true_ceiling, pf.fv, pf.fv_str, pf.bucket, t.name, ps.surplus,
-               pf.prospect_surplus
+               pf.prospect_surplus, pf.fv_continuous
         FROM players p
         LEFT JOIN latest_ratings r ON p.player_id = r.player_id
         LEFT JOIN prospect_fv pf ON pf.player_id = p.player_id AND pf.eval_date = ?
@@ -662,7 +680,7 @@ def get_cut_candidates(team_id=None):
     _u24_potentials = sorted(
         (true_ceil if true_ceil is not None else ceil_score)
         for (_p, _n, age, _l, _pos, _r, _at, _i, _we, _ac, _c, ceil_score,
-             true_ceil, _fv, _fs, _pb, _an, _su, _psu) in rows
+             true_ceil, _fv, _fs, _pb, _an, _su, _psu, _fvc) in rows
         if age is not None and age <= 24
         and (true_ceil is not None or ceil_score is not None)
     )
@@ -673,7 +691,7 @@ def get_cut_candidates(team_id=None):
     for r in rows:
         (pid, name, age, level, pos, role, aff_tid, intel, wrk_ethic, acc,
          comp, ceil_score, true_ceil, fv, fv_str, pf_bucket, aff_name, surplus_raw,
-         prospect_surplus_raw) = r
+         prospect_surplus_raw, fv_continuous) = r
 
         # Prefer the evaluation engine's own bucket (handles COF/SP/RP/CL
         # correctly); fall back to raw position/role for players with no
@@ -716,6 +734,8 @@ def get_cut_candidates(team_id=None):
             "fv_str": fv_str, "acc": acc, "reasons": reasons,
             "surplus": round((surplus_raw if surplus_raw is not None else prospect_surplus_raw) / _money_divisor(), 1)
                        if (surplus_raw is not None or prospect_surplus_raw is not None) else None,
+            "peak_surplus": _peak_surplus(fv_continuous, age, level_map().get(str(level), str(level)),
+                                          pf_bucket, ovr=comp, pot=potential),
             "_is_bottom_20": is_bottom_20,
             "_is_personality": wrk_ethic == "L" or intel == "L",
         }
@@ -822,7 +842,8 @@ def get_waiver_candidates(team_id=None):
         SELECT p.player_id, p.name, p.age, p.level, p.pos, p.role, p.team_id,
                r.int_, r.wrk_ethic, r.lead, r.loy, r.greed, r.acc,
                r.composite_score, r.ceiling_score, r.true_ceiling,
-               pf.fv, pf.fv_str, pf.bucket, t.name, ps.surplus, pf.prospect_surplus
+               pf.fv, pf.fv_str, pf.bucket, t.name, ps.surplus, pf.prospect_surplus,
+               pf.fv_continuous
         FROM players p
         LEFT JOIN latest_ratings r ON p.player_id = r.player_id
         LEFT JOIN prospect_fv pf ON pf.player_id = p.player_id AND pf.eval_date = ?
@@ -835,13 +856,14 @@ def get_waiver_candidates(team_id=None):
     for r in rows:
         (pid, name, age, level, pos, role, cur_tid, intel, wrk_ethic, lead, loy,
          greed, acc, comp, ceil_score, true_ceil, fv, fv_str, pf_bucket, cur_name,
-         surplus_raw, prospect_surplus_raw) = r
+         surplus_raw, prospect_surplus_raw, fv_continuous) = r
         bucket = _bucket_for_display(pf_bucket, role, pos)
         potential = true_ceil if true_ceil is not None else ceil_score
         buffs, concerns = _personality_notes(intel, wrk_ethic, lead, loy, greed)
+        level_disp = level_map().get(str(level)) or ("FA" if str(level)=="0" else str(level))
         out.append({
             "pid": pid, "name": name, "age": age,
-            "level": (level_map().get(str(level)) or ("FA" if str(level)=="0" else str(level))),
+            "level": level_disp,
             "bucket": bucket,
             "cur_team_id": cur_tid, "cur_team_name": cur_name or str(cur_tid),
             "composite_score": comp, "potential": potential, "fv_str": fv_str,
@@ -849,6 +871,7 @@ def get_waiver_candidates(team_id=None):
             "fit": _fit_position(bucket, weak_positions),
             "surplus": round((surplus_raw if surplus_raw is not None else prospect_surplus_raw) / _money_divisor(), 1)
                        if (surplus_raw is not None or prospect_surplus_raw is not None) else None,
+            "peak_surplus": _peak_surplus(fv_continuous, age, level_disp, pf_bucket, ovr=comp, pot=potential),
         })
     out.sort(key=lambda e: -(e["composite_score"] or 0))
     return out
@@ -942,7 +965,8 @@ def get_free_agent_candidates(team_id=None):
         SELECT p.player_id, p.name, p.age, p.level, p.pos, p.role,
                r.int_, r.wrk_ethic, r.lead, r.loy, r.greed, r.acc,
                r.composite_score, r.ceiling_score, r.true_ceiling,
-               pf.fv, pf.fv_str, pf.bucket, ps.surplus, pf.prospect_surplus
+               pf.fv, pf.fv_str, pf.bucket, ps.surplus, pf.prospect_surplus,
+               pf.fv_continuous
         FROM players p
         LEFT JOIN latest_ratings r ON p.player_id = r.player_id
         LEFT JOIN prospect_fv pf ON pf.player_id = p.player_id AND pf.eval_date = ?
@@ -956,18 +980,20 @@ def get_free_agent_candidates(team_id=None):
     for r in rows:
         (pid, name, age, level, pos, role, intel, wrk_ethic, lead, loy, greed,
          acc, comp, ceil_score, true_ceil, fv, fv_str, pf_bucket, surplus_raw,
-         prospect_surplus_raw) = r
+         prospect_surplus_raw, fv_continuous) = r
         bucket = _bucket_for_display(pf_bucket, role, pos)
         potential = true_ceil if true_ceil is not None else ceil_score
         buffs, concerns = _personality_notes(intel, wrk_ethic, lead, loy, greed)
+        level_disp = level_map().get(str(level)) or ("FA" if str(level)=="0" else str(level))
         entry = {
             "pid": pid, "name": name, "age": age,
-            "level": (level_map().get(str(level)) or ("FA" if str(level)=="0" else str(level))),
+            "level": level_disp,
             "bucket": bucket, "composite_score": comp, "potential": potential,
             "fv": fv, "fv_str": fv_str, "acc": acc, "buffs": buffs, "concerns": concerns,
             "fit": _fit_position(bucket, weak_positions),
             "surplus": round((surplus_raw if surplus_raw is not None else prospect_surplus_raw) / _money_divisor(), 1)
                        if (surplus_raw is not None or prospect_surplus_raw is not None) else None,
+            "peak_surplus": _peak_surplus(fv_continuous, age, level_disp, pf_bucket, ovr=comp, pot=potential),
         }
         is_pitcher = role in ROLE_MAP
         if age is not None and age <= _INTL_FA_AGE_MAX:
@@ -2642,7 +2668,7 @@ def get_minor_league_roster(team_id):
                r.fst, r.snk, r.crv, r.sld, r.chg, r.splt, r.cutt,
                r.cir_chg, r.scr, r.frk, r.kncrv, r.knbl,
                pf.fv, pf.fv_str, pf.risk, pf.prospect_surplus, pf.bucket,
-               ps.surplus
+               ps.surplus, pf.fv_continuous
         FROM players p
         LEFT JOIN latest_ratings r ON p.player_id = r.player_id
         LEFT JOIN prospect_fv pf ON p.player_id = pf.player_id
@@ -2672,9 +2698,11 @@ def get_minor_league_roster(team_id):
         pitches_raw = r[37:49]  # fst, snk, crv, sld, chg, splt, cutt, cir_chg, scr, frk, kncrv, knbl
         fv, fv_str, risk, prospect_surplus, bucket = r[49:54]
         mlb_surplus = r[54]
+        fv_continuous = r[55]
 
         ceiling = true_ceil or ceil_score
         is_pitcher = role in (11, 12, 13)
+        potential = true_ceil if true_ceil is not None else ceil_score
 
         # Handedness display
         bt = ""
@@ -2698,6 +2726,8 @@ def get_minor_league_roster(team_id):
             "fv": fv, "fv_str": fv_str, "risk": risk,
             "surplus": round((prospect_surplus if prospect_surplus is not None else mlb_surplus) / _money_divisor(), 1)
                        if (prospect_surplus is not None or mlb_surplus is not None) else None,
+            "peak_surplus": _peak_surplus(fv_continuous, age, level_map().get(str(level), str(level)),
+                                          bucket, ovr=composite, pot=potential),
         }
 
         if is_pitcher:
@@ -2775,7 +2805,7 @@ def get_org_minor_league_roster(parent_team_id):
                r.fst, r.snk, r.crv, r.sld, r.chg, r.splt, r.cutt,
                r.cir_chg, r.scr, r.frk, r.kncrv, r.knbl,
                pf.fv, pf.fv_str, pf.risk, pf.prospect_surplus, pf.bucket,
-               ps.surplus
+               ps.surplus, pf.fv_continuous
         FROM players p
         LEFT JOIN latest_ratings r ON p.player_id = r.player_id
         LEFT JOIN prospect_fv pf ON p.player_id = pf.player_id
@@ -2815,11 +2845,13 @@ def get_org_minor_league_roster(parent_team_id):
         pitches_raw = r[37:49]
         fv, fv_str, risk, prospect_surplus, bucket = r[49:54]
         mlb_surplus = r[54]
+        fv_continuous = r[55]
 
         ceiling = true_ceil or ceil_score
         is_pitcher = role in (11, 12, 13)
         level_name = lmap.get(str(level), str(level))
         on_40man = pid in forty_man_pids
+        potential = true_ceil if true_ceil is not None else ceil_score
 
         # Handedness display
         bt = ""
@@ -2844,6 +2876,7 @@ def get_org_minor_league_roster(parent_team_id):
             "fv": fv, "fv_str": fv_str, "risk": risk,
             "surplus": round((prospect_surplus if prospect_surplus is not None else mlb_surplus) / _money_divisor(), 1)
                        if (prospect_surplus is not None or mlb_surplus is not None) else None,
+            "peak_surplus": _peak_surplus(fv_continuous, age, level_name, bucket, ovr=composite, pot=potential),
             "on_40man": bool(on_40man),
         }
 

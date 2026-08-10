@@ -363,6 +363,33 @@ def prospect_surplus(fv, age, level, bucket, positional_adjust=False, fv_plus=Fa
             "total_surplus": base_surplus, "breakdown": rows}
 
 
+def peak_year_surplus(fv, age, level, bucket, positional_adjust=False, fv_plus=False,
+                       ovr=None, pot=None, def_rating=None, league_dir=None):
+    """Best single projected year of surplus, at the player's expected
+    (scouted) grade — not a "what if he hits his ceiling" scenario.
+
+    Quality signal, not a value/upside signal: total_surplus rewards a
+    player for however many years of team control the projection window
+    covers, so two prospects with identical talent but different debut
+    timing (and thus different amounts of remaining runway) get very
+    different totals. Peak-year isolates "how good is his best expected
+    season" independent of runway length — a fairer way to compare
+    prospects at different ages/levels than the cumulative total.
+
+    Typically lands around age 27-28 (the aging-curve peak for both
+    hitters and pitchers), shifted later for prospects who are further
+    from debuting.
+
+    league_dir: explicit league to compute against (required for callers
+    inside the long-running web server — see _ensure_league_context).
+    """
+    _ensure_league_context(league_dir)
+    result = prospect_surplus(fv, age, level, bucket, positional_adjust=positional_adjust,
+                              fv_plus=fv_plus, ovr=ovr, pot=pot, def_rating=def_rating)
+    best = max(result["breakdown"], key=lambda r: r["surplus"])
+    return {"surplus": best["surplus"], "age": best["player_age"]}
+
+
 _PREMIUM_DEF_POSITIONS = {"SS", "C", "CF"}
 
 

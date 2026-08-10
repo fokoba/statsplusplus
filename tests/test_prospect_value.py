@@ -86,6 +86,42 @@ def test_surplus_cof_ashort():
 # prospect_surplus_with_option() — option value >= base
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# peak_year_surplus() — best single expected-grade year
+# ---------------------------------------------------------------------------
+
+def test_peak_year_surplus_matches_best_breakdown_row():
+    """Peak-year surplus should equal the max single-year surplus in the
+    base (expected-grade) breakdown, not a ceiling-scenario recomputation."""
+    from prospect_value import prospect_surplus, peak_year_surplus
+    with _stub():
+        base = prospect_surplus(55, 21, 'AA', 'SP', fv_plus=False, ovr=55, pot=70)
+        peak = peak_year_surplus(55, 21, 'AA', 'SP', fv_plus=False, ovr=55, pot=70)
+    expected_best = max(base['breakdown'], key=lambda r: r['surplus'])
+    assert peak['surplus'] == expected_best['surplus']
+    assert peak['age'] == expected_best['player_age']
+    assert peak['surplus'] > 0
+
+
+def test_peak_year_surplus_independent_of_runway_length():
+    """Two prospects with identical talent but different remaining runway
+    (perpetual-arb vs standard 6-year horizon) should have very different
+    total_surplus but similar peak-year surplus, since peak-year isolates
+    quality from how many years of team control the projection covers."""
+    from prospect_value import prospect_surplus, peak_year_surplus
+    with _stub(perpetual_arb=False):
+        short_total = prospect_surplus(55, 21, 'AA', 'SP', ovr=55, pot=70)['total_surplus']
+        short_peak = peak_year_surplus(55, 21, 'AA', 'SP', ovr=55, pot=70)['surplus']
+    with _stub(perpetual_arb=True):
+        long_total = prospect_surplus(55, 21, 'AA', 'SP', ovr=55, pot=70)['total_surplus']
+        long_peak = peak_year_surplus(55, 21, 'AA', 'SP', ovr=55, pot=70)['surplus']
+    assert long_total > short_total  # more controlled years -> higher cumulative total
+    # Same best single year regardless of horizon length — small variance is
+    # expected since perpetual-arb leagues use a different salary model
+    # (career-WAR-based) even within the years both horizons share.
+    assert abs(short_peak - long_peak) / short_peak < 0.01
+
+
 def test_option_value_sp():
     """Option value should exceed base surplus (option adds upside)."""
     from prospect_value import prospect_surplus, prospect_surplus_with_option

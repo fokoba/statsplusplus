@@ -31,7 +31,7 @@ from statsplusplus.evaluation.fv import calc_fv_from_dict as calc_fv
 from statsplusplus.evaluation.constants import DEFENSIVE_WEIGHTS
 from statsplusplus.utils.positions import LEVEL_NORM_AGE, PITCH_FIELDS, display_pos
 from statsplusplus.data.db import get_conn
-from prospect_value import prospect_surplus_with_option
+from prospect_value import prospect_surplus_with_option, peak_year_surplus
 
 # Same exclusion set as web/team_queries.py's get_free_agent_candidates —
 # NPB-drafted players aren't actually signable even when marked a free agent.
@@ -394,6 +394,14 @@ def evaluate_row(d: dict, league_dir=None) -> dict | None:
         )
     except Exception:
         surplus = None
+    try:
+        peak = peak_year_surplus(
+            fv_grade, age or norm_age, level_abbr, role,
+            ovr=composite, pot=true_ceiling, league_dir=league_dir,
+        )
+        peak_surplus, peak_age = peak["surplus"], peak["age"]
+    except Exception:
+        peak_surplus, peak_age = None, None
 
     rule5_eligible = (d.get("R5") or "").strip().lower() == "yes"
     # Annual salary demand ("$9.0m" etc.) — verified against a real free
@@ -435,7 +443,7 @@ def evaluate_row(d: dict, league_dir=None) -> dict | None:
         "acc": acc, "org": org_name, "org_abbr": org_abbr,
         "rule5_eligible": rule5_eligible, "ask": ask,
         "contract": contract, "contract_salary": contract_salary,
-        "surplus": surplus,
+        "surplus": surplus, "peak_surplus": peak_surplus, "peak_age": peak_age,
         "if_rng": if_rng, "of_rng": of_rng,
         "best_position": best_position, "best_position_grade": best_position_grade,
         "is_free_agent": is_free_agent, "on_waivers": on_waivers,

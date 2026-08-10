@@ -104,6 +104,7 @@
         <th data-sort="num">Ask</th>
         <th data-sort="str">Contract</th>
         <th data-sort="num">Surplus</th>
+        <th data-sort="num" title="Best single projected year at his expected grade — quality independent of remaining runway">Peak Yr Surplus</th>
         <th data-sort="str">Personality</th>
         <th data-sort="str">Best Pos</th>
         <th data-sort="num">Grade</th>
@@ -128,6 +129,7 @@
         <td>{{ p.ask or '-' }}</td>
         <td>{{ p.contract }}</td>
         <td class="{{ 'pos' if p.surplus and p.surplus > 0 else 'neg' if p.surplus and p.surplus < 0 else '' }}">{{ '$' + (p.surplus / money_divisor)|round(1)|string + money_unit if p.surplus is not none else '-' }}</td>
+        <td class="{{ 'pos' if p.peak_surplus and p.peak_surplus > 0 else 'neg' if p.peak_surplus and p.peak_surplus < 0 else '' }}" title="{{ 'Age ' + p.peak_age|string if p.peak_age is not none else '' }}">{{ '$' + (p.peak_surplus / money_divisor)|round(1)|string + money_unit if p.peak_surplus is not none else '-' }}</td>
         <td style="color:{% if p.personality_class == 'pos' %}#4caf50{% elif p.personality_class == 'neg' %}#f44336{% else %}var(--text-dim){% endif %}">{{ p.personality_type or '-' }}</td>
         <td>{{ p.best_position or '' }}</td>
         <td>{{ p.best_position_grade if p.best_position_grade is not none else '' }}</td>

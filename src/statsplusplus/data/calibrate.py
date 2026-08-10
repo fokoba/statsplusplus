@@ -128,19 +128,28 @@ def _calibrate_tool_weights(conn, game_year, role_map):
     min_sample_hitter = 80
     min_sample_pitcher = 60
 
+    # Adaptive age range: start with peak stability (27-32), widen for smaller leagues
+    age_lo, age_hi = 27, 32
     n_hitters_1yr = conn.execute(
         "SELECT COUNT(*) FROM mlb_batting_stats b JOIN players p ON b.player_id=p.player_id "
-        "WHERE b.pa>=300 AND b.split_id=1 AND b.year=? AND p.role NOT IN (11,12,13) AND p.age BETWEEN 27 AND 32",
-        (year_hi,)).fetchone()[0]
+        "WHERE b.pa>=300 AND b.split_id=1 AND b.year=? AND p.role NOT IN (11,12,13) AND p.age BETWEEN ? AND ?",
+        (year_hi, age_lo, age_hi)).fetchone()[0]
+    if n_hitters_1yr < min_sample_hitter:
+        age_lo, age_hi = 25, 34
+        n_hitters_1yr = conn.execute(
+            "SELECT COUNT(*) FROM mlb_batting_stats b JOIN players p ON b.player_id=p.player_id "
+            "WHERE b.pa>=300 AND b.split_id=1 AND b.year=? AND p.role NOT IN (11,12,13) AND p.age BETWEEN ? AND ?",
+            (year_hi, age_lo, age_hi)).fetchone()[0]
+
     n_pitchers_1yr = conn.execute(
         "SELECT COUNT(*) FROM mlb_pitching_stats ps JOIN players p ON ps.player_id=p.player_id "
-        "WHERE ps.ip>=80 AND ps.split_id=1 AND ps.year=? AND p.role IN (11,12,13) AND p.age BETWEEN 27 AND 32",
-        (year_hi,)).fetchone()[0]
+        "WHERE ps.ip>=80 AND ps.split_id=1 AND ps.year=? AND p.role IN (11,12,13) AND p.age BETWEEN ? AND ?",
+        (year_hi, age_lo, age_hi)).fetchone()[0]
 
     use_2yr = n_hitters_1yr < min_sample_hitter or n_pitchers_1yr < min_sample_pitcher
     year_lo = year_hi - 1 if use_2yr else year_hi
-    print("Tool weight calibration: years %d-%d (2yr=%s, hitters=%d, pitchers=%d)",
-             year_lo, year_hi, use_2yr, n_hitters_1yr, n_pitchers_1yr)
+    print(f"Tool weight calibration: years {year_lo}-{year_hi} (2yr={use_2yr}, "
+          f"hitters={n_hitters_1yr}, pitchers={n_pitchers_1yr}, ages {age_lo}-{age_hi}")
 
     # -------------------------------------------------------------------
     # Hitter offensive tool weights (pooled across positions, age 27-32)
@@ -154,9 +163,9 @@ def _calibrate_tool_weights(conn, game_year, role_map):
         JOIN players p ON r.player_id = p.player_id
         JOIN mlb_batting_stats b ON b.player_id = p.player_id AND b.split_id = 1
         WHERE b.pa >= 300 AND p.role NOT IN (11, 12, 13)
-          AND p.age BETWEEN 27 AND 32
+          AND p.age BETWEEN ? AND ?
           AND b.year >= ? AND b.year <= ?
-    """, (year_lo, year_hi)).fetchall()
+    """, (age_lo, age_hi, year_lo, year_hi)).fetchall()
 
     # Build offensive tool vectors
     # Always use the high-level ratings (contact, gap, power, eye) — these are
@@ -256,11 +265,11 @@ def _calibrate_tool_weights(conn, game_year, role_map):
         FROM latest_ratings r
         JOIN players p ON r.player_id = p.player_id
         JOIN mlb_pitching_stats ps ON ps.player_id = p.player_id AND ps.split_id = 1
-        WHERE p.level = 1 AND p.age BETWEEN 27 AND 32
+        WHERE p.level = 1 AND p.age BETWEEN ? AND ?
           AND ps.year >= ? AND ps.year <= ?
           AND ((p.role IN (12,13) AND ps.ip >= 20 AND ps.gs <= 3)
                OR (COALESCE(p.role,0) NOT IN (12,13) AND ps.ip >= 50))
-    """, (year_lo, year_hi)).fetchall()
+    """, (age_lo, age_hi, year_lo, year_hi)).fetchall()
 
     PITCHER_BUCKETS = ("SP", "RP")
     pitching_data = {role: ([], []) for role in PITCHER_BUCKETS}

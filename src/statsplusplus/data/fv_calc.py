@@ -28,6 +28,7 @@ LEVEL_INT_LABEL = {0: "Draft", 1: "MLB", 2: "AAA", 3: "AA", 4: "A", 5: "A-Short"
 RATINGS_SQL = """
     SELECT r.player_id AS ID,
            p.name AS Name, p.age AS Age, p.team_id, p.parent_team_id, p.level, p.pos, p.role,
+           p.free_agent AS FreeAgent, p.draft_eligible AS DraftEligible,
            r.ovr AS Ovr, r.pot AS Pot,
            r.composite_score, r.ceiling_score, r.secondary_composite,
            r.cntct AS Cntct, r.gap AS Gap, r.pow AS Pow, r.eye AS Eye, r.ks AS Ks,
@@ -295,7 +296,22 @@ def run(league_dir: Path | None = None) -> None:
             _apply_milb_context(p, conn, pid, _milb_averages, _milb_discounts, _milb_norm_ages, load_milb_stat_seasons)
             fv_base, fv_risk = calc_fv(p)
             fv_str = str(fv_base)
-            level_label = LEVEL_INT_LABEL.get(int(level), str(level))
+            # level=0 free agents are already-proven, immediately signable
+            # professionals — not amateur draft prospects, even though they
+            # share the same level code (every level=0 row in this data is
+            # free_agent=1, including genuine draft-pool amateurs, so
+            # free_agent alone doesn't separate them). Route only the real,
+            # signable pool through prospect_value's "FA" treatment
+            # (immediate debut, no development discount) instead of "Draft"
+            # (years away, ovr-based effective level) — using the exact same
+            # free_agent=1 AND draft_eligible!=1 test get_free_agent_candidates()
+            # uses to decide who appears in the Free Agent Adds box at all,
+            # so the stored total Surplus and the live Peak Yr Surplus for
+            # the same free agent agree on how many years away he is.
+            if int(level) == 0 and p.get("FreeAgent") and not p.get("DraftEligible"):
+                level_label = "FA"
+            else:
+                level_label = LEVEL_INT_LABEL.get(int(level), str(level))
             if bucket == "RP":
                 p["_bucket"] = "SP"
                 raw_fv, _ = calc_fv(p)

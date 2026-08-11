@@ -112,7 +112,7 @@ def get_top_prospects(n=100):
         FROM prospect_fv pf
         JOIN players p ON pf.player_id=p.player_id
         LEFT JOIN latest_ratings r ON pf.player_id=r.player_id
-        WHERE pf.eval_date=?
+        WHERE pf.eval_date=? AND p.age <= 25
     """, (ed,)).fetchall()
 
     rows = [r for r in rows if r[2] in mlb_tids]
@@ -289,7 +289,7 @@ def get_all_prospects():
         FROM prospect_fv pf
         JOIN players p ON pf.player_id=p.player_id
         LEFT JOIN latest_ratings r ON pf.player_id=r.player_id
-        WHERE pf.eval_date=? AND pf.fv >= 40
+        WHERE pf.eval_date=? AND pf.fv >= 40 AND p.age <= 25
     """, (ed,)).fetchall()
 
     rows = [r for r in rows if r[2] in mlb_tids]
@@ -1256,7 +1256,7 @@ def get_positional_rankings():
         FROM prospect_fv pf
         JOIN players p ON pf.player_id = p.player_id
         JOIN latest_ratings r ON r.player_id = p.player_id
-        WHERE pf.fv >= 40
+        WHERE pf.fv >= 40 AND p.age <= 25
         ORDER BY pf.fv DESC, pf.prospect_surplus DESC
     """).fetchall()
 

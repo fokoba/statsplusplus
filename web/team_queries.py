@@ -1062,6 +1062,7 @@ def get_farm(team_id=None):
         JOIN players p ON pf.player_id=p.player_id
         LEFT JOIN latest_ratings r ON pf.player_id=r.player_id
         WHERE pf.eval_date=? AND (p.parent_team_id=? OR (p.team_id=? AND p.level='1'))
+              AND p.age <= 25
         ORDER BY pf.fv DESC, p.age ASC
     """, (ed, tid, tid)).fetchall()
 
@@ -1647,6 +1648,7 @@ def get_farm_depth(team_id):
         SELECT pf.bucket, COUNT(*), COALESCE(SUM(pf.prospect_surplus), 0)
         FROM prospect_fv pf JOIN players p ON pf.player_id = p.player_id
         WHERE pf.eval_date=? AND (p.parent_team_id=? OR (p.team_id=? AND p.level='1')) AND pf.fv >= 40
+              AND p.age <= 25
         GROUP BY pf.bucket
     """, (ed, team_id, team_id)).fetchall()
 
@@ -1654,6 +1656,7 @@ def get_farm_depth(team_id):
         SELECT pf.level, COUNT(*)
         FROM prospect_fv pf JOIN players p ON pf.player_id = p.player_id
         WHERE pf.eval_date=? AND (p.parent_team_id=? OR (p.team_id=? AND p.level='1')) AND pf.fv >= 40
+              AND p.age <= 25
         GROUP BY pf.level
     """, (ed, team_id, team_id)).fetchall()
 
@@ -1661,7 +1664,7 @@ def get_farm_depth(team_id):
     lg = conn.execute("""
         SELECT COALESCE(NULLIF(p.parent_team_id,0), p.team_id), SUM(pf.prospect_surplus)
         FROM prospect_fv pf JOIN players p ON pf.player_id = p.player_id
-        WHERE pf.eval_date=?
+        WHERE pf.eval_date=? AND p.age <= 25
         GROUP BY COALESCE(NULLIF(p.parent_team_id,0), p.team_id)
     """, (ed,)).fetchall()
 

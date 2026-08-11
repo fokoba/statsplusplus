@@ -974,7 +974,7 @@
   <table id="{{ table_id }}">
     <thead>
       <tr>
-        <th>Cut</th>
+        <th><input type="checkbox" class="select-all-cb" title="Select/deselect all"></th>
         <th data-sort="str" class="left">Name</th>
         <th data-sort="str">Pos</th>
         <th data-sort="num">Age</th>
@@ -1032,7 +1032,7 @@
   <table id="{{ table_id }}">
     <thead>
       <tr>
-        <th></th>
+        <th><input type="checkbox" class="select-all-cb" title="Select/deselect all"></th>
         <th data-sort="str" class="left">Name</th>
         <th data-sort="str">Pos</th>
         <th data-sort="num">Age</th>
@@ -1233,6 +1233,45 @@
       }
       saveMarks(marks);
     });
+  });
+})();
+</script>
+
+<script>
+/* ── Cut/Add Candidates: per-table select-all/deselect-all header checkbox ── */
+(function() {
+  document.querySelectorAll('.select-all-cb').forEach(function(selectAll) {
+    var table = selectAll.closest('table');
+    if (!table) return;
+    var rowCheckboxes = table.querySelectorAll('tbody input[type="checkbox"]');
+
+    function syncHeaderState() {
+      var total = rowCheckboxes.length;
+      var checked = table.querySelectorAll('tbody input[type="checkbox"]:checked').length;
+      selectAll.checked = total > 0 && checked === total;
+      selectAll.indeterminate = checked > 0 && checked < total;
+    }
+
+    selectAll.addEventListener('change', function() {
+      // Snapshot the target state — syncHeaderState() below mutates
+      // selectAll.checked mid-loop as each row's change event fires, so
+      // re-reading selectAll.checked live inside the loop would corrupt
+      // the loop's own condition after the first row.
+      var shouldCheck = selectAll.checked;
+      rowCheckboxes.forEach(function(cb) {
+        if (cb.checked !== shouldCheck) {
+          cb.checked = shouldCheck;
+          cb.dispatchEvent(new Event('change'));
+        }
+      });
+      selectAll.checked = shouldCheck;
+      selectAll.indeterminate = false;
+    });
+
+    rowCheckboxes.forEach(function(cb) {
+      cb.addEventListener('change', syncHeaderState);
+    });
+    syncHeaderState();
   });
 })();
 </script>

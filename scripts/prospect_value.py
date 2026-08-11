@@ -135,15 +135,19 @@ def _age_adjusted_discount(level, age, ovr=None):
         else:
             effective_level = "A-Short"
 
-    # Normalize level key for lookup (DEVELOPMENT_DISCOUNT uses title case)
+    # Normalize level key for lookup (DEVELOPMENT_DISCOUNT uses title case).
+    # "fa" -> "MLB": a free agent is an already-proven, immediately signable
+    # professional, not a developing prospect — without this, "FA" isn't a
+    # recognized key here and silently falls back to a generic 0.45 discount
+    # (treating an available veteran as if he still carried real bust risk).
     _LEVEL_ALIAS = {
         "aaa": "AAA", "aa": "AA", "a": "A", "a-short": "A-Short",
         "usl": "USL", "dsl": "DSL", "intl": "Intl", "mlb": "MLB",
-        "draft": "DSL", "rookie": "USL",
+        "draft": "DSL", "rookie": "USL", "fa": "MLB",
     }
     lookup_level = _LEVEL_ALIAS.get(effective_level.lower(), effective_level)
     base = DEVELOPMENT_DISCOUNT.get(lookup_level, 0.45)
-    norm_key = effective_level.lower().replace(" ", "-")
+    norm_key = lookup_level.lower().replace(" ", "-")
     # "Rookie" level label maps to USL in the norm age table
     if norm_key == "rookie":
         norm_key = "usl"
@@ -242,10 +246,14 @@ def prospect_surplus(fv, age, level, bucket, positional_adjust=False, fv_plus=Fa
             effective_level = "A"
         else:
             effective_level = "A-Short"
-    # Normalize case for lookup
+    # Normalize case for lookup. "fa" -> "MLB": a free agent is immediately
+    # signable and playable now, not years away from debuting like a
+    # developing prospect — without this, "FA" isn't recognized here and
+    # silently falls back to the 3.5yr default (same distance as a mid-level
+    # A-ball prospect), pushing his whole projection years into the future.
     _YTM_ALIAS = {
         "aaa": "AAA", "aa": "AA", "a": "A", "a-short": "A-Short",
-        "usl": "USL", "dsl": "DSL", "intl": "Intl", "mlb": "MLB",
+        "usl": "USL", "dsl": "DSL", "intl": "Intl", "mlb": "MLB", "fa": "MLB",
     }
     ytm_key = _YTM_ALIAS.get(effective_level.lower(), effective_level)
     years_out = YEARS_TO_MLB.get(ytm_key, 3.5)

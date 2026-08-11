@@ -238,14 +238,23 @@ def _defense_for_bucket(d, bucket, scale):
     return {}, {}
 
 
+def _extended_pitcher_tool(v, scale):
+    """hra/pbabip are real calibrated-weight tool grades in some leagues
+    (e.g. ppl: 0.07-0.15 weight, not the near-zero default) but blank/0 in
+    others — normalizing a blank input would land exactly on the 20-80
+    floor and get treated as a genuine (terrible) rating instead of "no
+    data". Matches evaluation_engine.py's own `if val and val > 20` guard.
+    """
+    val = _num_scaled(v, scale)
+    return val if val and val > 20 else None
+
+
 def _pitcher_tools(d, scale):
-    # hra/pbabip aren't 20-80 tool grades (rate stats) and always carry zero
-    # weight in DEFAULT_TOOL_WEIGHTS/calibrated weights anyway — left as
-    # plain parsed values, not scale-normalized.
     return {
         "stuff": _num_scaled(d.get("STU"), scale), "movement": _num_scaled(d.get("MOV"), scale),
-        "control": _num_scaled(_dup(d, "CON"), scale), "hra": _num(d.get("HRR")),
-        "pbabip": _num(d.get("PBABIP")),
+        "control": _num_scaled(_dup(d, "CON"), scale),
+        "hra": _extended_pitcher_tool(d.get("HRR"), scale),
+        "pbabip": _extended_pitcher_tool(d.get("PBABIP"), scale),
         "stuff_l": _num_scaled(d.get("STU vL"), scale), "stuff_r": _num_scaled(d.get("STU vR"), scale),
     }
 
@@ -253,8 +262,9 @@ def _pitcher_tools(d, scale):
 def _pitcher_potential_tools(d, scale):
     return {
         "stuff": _num_scaled(d.get("STU P"), scale), "movement": _num_scaled(d.get("MOV P"), scale),
-        "control": _num_scaled(_dup(d, "CON P"), scale), "hra": _num(d.get("HRR P")),
-        "pbabip": _num(d.get("PBABIP P")),
+        "control": _num_scaled(_dup(d, "CON P"), scale),
+        "hra": _extended_pitcher_tool(d.get("HRR P"), scale),
+        "pbabip": _extended_pitcher_tool(d.get("PBABIP P"), scale),
     }
 
 

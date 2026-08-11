@@ -112,11 +112,9 @@ def load_level(level_key, game_date=None):
     # Load cached FV from prospect_fv for today's game_date if available
     cached_fv = {}
     if game_date:
-        conn = _db.get_conn()
         rows = conn.execute(
             "SELECT player_id, fv, fv_str, prospect_surplus FROM prospect_fv WHERE eval_date=?", (game_date,)
         ).fetchall()
-        conn.close()
         cached_fv = {r[0]: (r[1], r[2], r[3]) for r in rows}
 
     players = []

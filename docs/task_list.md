@@ -4,6 +4,17 @@ Open work items. Completed items are in `docs/changelog.md`.
 
 ---
 
+## Bugs — CLI Scripts
+
+Discovered during full script verification pass.
+
+- [x] **`trade_calculator.py` crashes on ALL MLB players** — `value_player()` line 128: `fv_continuous = pe["fv_continuous"] or float(fv_int)`. MLB players have `fv=None` and `fv_continuous=0.0` (falsy). The `or` branch tries `float(None)` → TypeError. **Fixed:** Check `fv_continuous` truthiness separately from `fv_int is not None`. **Done Session 79.**
+- [x] **`trade_calculator.py` JSON format `--trade` broken** — The `{"my_team_send": [{"name": "..."}]}` input format crashes with `KeyError: 'player_id'` because the parser expects a `player_id` key in each spec dict. **Fixed:** `evaluate_trade()` now resolves `{"name": "..."}` entries via `resolve_player()` before calling `value_player()`. **Done Session 79.**
+- [x] **`prospect_value.py --player <id>` broken** — `find_player()` calls `db.get_conn()` which doesn't exist. **Fixed:** Uses `get_connection(get_league_dir())` from proper imports. **Done Session 79.**
+- [x] **`farm_analysis.py` broken** — Line 115 references `_db.get_conn()` but `_db` is never imported. **Fixed:** Uses the existing `conn` variable already open in the function scope. **Done Session 79.**
+
+---
+
 ## Code Quality
 
 - [x] **Additional ratings scales** — Support 1-20 scale (maps to 20-80 via linear `20 + (raw-1)/19 * 60`). Auto-detection: max rating ≤20 → 1-20, >80 → 1-100, else 20-80. Added to settings and onboarding dropdowns. **Done Session 57.**

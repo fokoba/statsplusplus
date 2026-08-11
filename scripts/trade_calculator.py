@@ -125,7 +125,7 @@ def value_player(spec):
     if pe and not has_overrides:
         # Fast path: use pre-computed unified values
         fv_int = pe["fv"]
-        fv_continuous = pe["fv_continuous"] or float(fv_int)
+        fv_continuous = pe["fv_continuous"] if pe["fv_continuous"] else (float(fv_int) if fv_int is not None else 0.0)
         level_str = pe["level"]
         bucket = pe["bucket"]
         risk = pe["risk"]
@@ -258,6 +258,18 @@ def evaluate_trade(trade_spec):
     # Support both new keys and legacy "angels_send"/"angels_receive"
     my_send    = trade_spec.get("my_team_send") or trade_spec.get("angels_send", [])
     my_receive = trade_spec.get("my_team_receive") or trade_spec.get("angels_receive", [])
+
+    # Resolve names to player_ids if needed (--trade JSON format may use {"name": "..."})
+    def _resolve(specs):
+        resolved = []
+        for s in specs:
+            if "player_id" not in s and "name" in s:
+                s = {**s, **resolve_player(s["name"])}
+            resolved.append(s)
+        return resolved
+
+    my_send = _resolve(my_send)
+    my_receive = _resolve(my_receive)
 
     send_valuations    = [value_player(s) for s in my_send]
     receive_valuations = [value_player(s) for s in my_receive]

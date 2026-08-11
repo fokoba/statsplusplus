@@ -117,7 +117,7 @@ def get_summary(team_id=None):
         "SELECT COALESCE(SUM(prospect_surplus),0) FROM prospect_fv pf JOIN players p ON pf.player_id=p.player_id WHERE pf.eval_date=? AND (p.parent_team_id=? OR (p.team_id=? AND p.level='1'))",
         (ed, tid, tid)).fetchone()[0]
     fv50 = conn.execute(
-        "SELECT COUNT(*) FROM prospect_fv pf JOIN players p ON pf.player_id=p.player_id WHERE pf.eval_date=? AND (p.parent_team_id=? OR (p.team_id=? AND p.level='1')) AND pf.fv>=50",
+        "SELECT COUNT(*) FROM prospect_fv pf JOIN players p ON pf.player_id=p.player_id WHERE pf.eval_date=? AND (p.parent_team_id=? OR (p.team_id=? AND p.level='1')) AND pf.fv>=50 AND p.age<=25",
         (ed, tid, tid)).fetchone()[0]
     # Determine season phase from game date
     gd = state["game_date"]

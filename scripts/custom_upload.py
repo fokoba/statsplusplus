@@ -26,7 +26,7 @@ from statsplusplus.evaluation.composite import (
     compute_composite_hitter, compute_composite_pitcher,
 )
 from statsplusplus.evaluation.ceiling import compute_ceiling, compute_true_ceiling
-from statsplusplus.data.evaluation_engine import DEFAULT_TOOL_WEIGHTS
+from statsplusplus.data.evaluation_engine import DEFAULT_TOOL_WEIGHTS, load_tool_weights
 from statsplusplus.evaluation.fv import calc_fv_from_dict as calc_fv
 from statsplusplus.evaluation.constants import DEFENSIVE_WEIGHTS
 from statsplusplus.utils.positions import LEVEL_NORM_AGE, PITCH_FIELDS, display_pos
@@ -79,6 +79,26 @@ def _dedupe_header(header: list[str]) -> list[str]:
     return out
 
 
+def _dup(d, base):
+    """Look up the *second* occurrence of a column name that's duplicated in
+    OOTP's export.
+
+    Different OOTP export presets disambiguate duplicate column names
+    differently: some exports (e.g. "Organization > Minor Leagues") repeat
+    the header verbatim, so _dedupe_header() suffixes the second occurrence
+    "__1" (double underscore); others (e.g. "All Free Agents") already come
+    with OOTP's own "_1" (single underscore) suffix baked in, so
+    _dedupe_header() never touches it — the raw header already has both
+    "CON" and "CON_1" as distinct strings. Code that only checked "__1"
+    silently read None for every "_1"-style export (confirmed against a
+    real "All Free Agents" export: pitcher control, org, and level all came
+    back empty, which is exactly what happened for Devin Freshwater — his
+    weak control tool got silently dropped from the composite instead of
+    dragging it down, inflating his score).
+    """
+    return d.get(f"{base}_1") if d.get(f"{base}_1") is not None else d.get(f"{base}__1")
+
+
 def _num(v):
     """'-' and '' mean "not applicable" in this export; everything else
     is an int rating on the league's normalized scale."""
@@ -96,6 +116,27 @@ def _num(v):
             return None
 
 
+def _num_scaled(v, scale):
+    """Parse a raw tool rating and normalize it to the 20-80 canonical scale
+    compute_composite_hitter/pitcher and compute_ceiling/compute_true_ceiling
+    expect.
+
+    _num() alone just parses the string — it never converts scale. Every
+    tool-extraction function below used to feed raw values straight through,
+    silently treating a 1-100-scale league's ratings as if they were already
+    20-80 (e.g. this league's Stuff/Movement/Control/Stamina columns go to
+    100, confirmed against a real export, while Ovr/Pot cap at 80 — OOTP
+    exports these on genuinely different scales even within the same
+    league). Matches the normalization evaluation_engine.py already applies
+    to the same ratings via statsplusplus.config.ratings.norm_continuous().
+    """
+    raw = _num(v)
+    if raw is None:
+        return None
+    from statsplusplus.config.ratings import norm_continuous
+    return norm_continuous(raw, scale)
+
+
 def parse_rows(file_bytes: bytes) -> list[dict]:
     """Parse the raw CSV bytes into deduped-header dict rows."""
     text = file_bytes.decode("utf-8-sig")
@@ -108,12 +149,12 @@ def parse_rows(file_bytes: bytes) -> list[dict]:
 # Per-row extraction
 # ---------------------------------------------------------------------------
 
-def _hitter_tools(d):
+def _hitter_tools(d, scale):
     return {
-        "contact": _num(d.get("CON")), "gap": _num(d.get("GAP")),
-        "power": _num(d.get("POW")), "eye": _num(d.get("EYE")),
-        "speed": _num(d.get("SPE")), "steal": _num(d.get("STE")),
-        "stl_rt": _num(d.get("SR")),
+        "contact": _num_scaled(d.get("CON"), scale), "gap": _num_scaled(d.get("GAP"), scale),
+        "power": _num_scaled(d.get("POW"), scale), "eye": _num_scaled(d.get("EYE"), scale),
+        "speed": _num_scaled(d.get("SPE"), scale), "steal": _num_scaled(d.get("STE"), scale),
+        "stl_rt": _num_scaled(d.get("SR"), scale),
     }
 
 
@@ -156,38 +197,38 @@ def _platoon_split(d, is_pitcher):
     return max_gap, strong_side
 
 
-def _hitter_potential_tools(d):
+def _hitter_potential_tools(d, scale):
     return {
-        "contact": _num(d.get("CON P")), "gap": _num(d.get("GAP P")),
-        "power": _num(d.get("POW P")), "eye": _num(d.get("EYE P")),
+        "contact": _num_scaled(d.get("CON P"), scale), "gap": _num_scaled(d.get("GAP P"), scale),
+        "power": _num_scaled(d.get("POW P"), scale), "eye": _num_scaled(d.get("EYE P"), scale),
         # No separate potential column for these — same as current, matching
         # _extract_potential_hitter_tools() in evaluation_engine.py.
-        "speed": _num(d.get("SPE")), "steal": _num(d.get("STE")),
-        "stl_rt": _num(d.get("SR")),
+        "speed": _num_scaled(d.get("SPE"), scale), "steal": _num_scaled(d.get("STE"), scale),
+        "stl_rt": _num_scaled(d.get("SR"), scale),
     }
 
 
-def _defense_for_bucket(d, bucket):
+def _defense_for_bucket(d, bucket, scale):
     """Raw defensive component ratings + weights for this bucket.
 
     COF (corner outfield) takes the max of LF/RF weighted values, matching
     defensive_score()'s existing COF handling in player_utils.py.
     """
     if bucket == "C":
-        defense = {"CFrm": _num(d.get("C FRM")), "CBlk": _num(d.get("C ABI")),
-                   "CArm": _num(d.get("C ARM"))}
+        defense = {"CFrm": _num_scaled(d.get("C FRM"), scale), "CBlk": _num_scaled(d.get("C ABI"), scale),
+                   "CArm": _num_scaled(d.get("C ARM"), scale)}
         return defense, DEFENSIVE_WEIGHTS["C"]
     if bucket in ("SS", "2B", "3B"):
-        defense = {"IFR": _num(d.get("IF RNG")), "IFE": _num(d.get("IF ERR")),
-                   "IFA": _num(d.get("IF ARM")), "TDP": _num(d.get("TDP"))}
+        defense = {"IFR": _num_scaled(d.get("IF RNG"), scale), "IFE": _num_scaled(d.get("IF ERR"), scale),
+                   "IFA": _num_scaled(d.get("IF ARM"), scale), "TDP": _num_scaled(d.get("TDP"), scale)}
         return defense, DEFENSIVE_WEIGHTS[bucket]
     if bucket == "CF":
-        defense = {"OFR": _num(d.get("OF RNG")), "OFE": _num(d.get("OF ERR")),
-                   "OFA": _num(d.get("OF ARM"))}
+        defense = {"OFR": _num_scaled(d.get("OF RNG"), scale), "OFE": _num_scaled(d.get("OF ERR"), scale),
+                   "OFA": _num_scaled(d.get("OF ARM"), scale)}
         return defense, DEFENSIVE_WEIGHTS["CF"]
     if bucket == "COF":
-        defense = {"OFR": _num(d.get("OF RNG")), "OFE": _num(d.get("OF ERR")),
-                   "OFA": _num(d.get("OF ARM"))}
+        defense = {"OFR": _num_scaled(d.get("OF RNG"), scale), "OFE": _num_scaled(d.get("OF ERR"), scale),
+                   "OFA": _num_scaled(d.get("OF ARM"), scale)}
         # Pick whichever corner's weight profile grades higher — same
         # max(lf, rf) approach as defensive_score() for COF.
         def _score(weights):
@@ -197,27 +238,30 @@ def _defense_for_bucket(d, bucket):
     return {}, {}
 
 
-def _pitcher_tools(d):
+def _pitcher_tools(d, scale):
+    # hra/pbabip aren't 20-80 tool grades (rate stats) and always carry zero
+    # weight in DEFAULT_TOOL_WEIGHTS/calibrated weights anyway — left as
+    # plain parsed values, not scale-normalized.
     return {
-        "stuff": _num(d.get("STU")), "movement": _num(d.get("MOV")),
-        "control": _num(d.get("CON__1")), "hra": _num(d.get("HRR")),
+        "stuff": _num_scaled(d.get("STU"), scale), "movement": _num_scaled(d.get("MOV"), scale),
+        "control": _num_scaled(_dup(d, "CON"), scale), "hra": _num(d.get("HRR")),
         "pbabip": _num(d.get("PBABIP")),
-        "stuff_l": _num(d.get("STU vL")), "stuff_r": _num(d.get("STU vR")),
+        "stuff_l": _num_scaled(d.get("STU vL"), scale), "stuff_r": _num_scaled(d.get("STU vR"), scale),
     }
 
 
-def _pitcher_potential_tools(d):
+def _pitcher_potential_tools(d, scale):
     return {
-        "stuff": _num(d.get("STU P")), "movement": _num(d.get("MOV P")),
-        "control": _num(d.get("CON P__1")), "hra": _num(d.get("HRR P")),
+        "stuff": _num_scaled(d.get("STU P"), scale), "movement": _num_scaled(d.get("MOV P"), scale),
+        "control": _num_scaled(_dup(d, "CON P"), scale), "hra": _num(d.get("HRR P")),
         "pbabip": _num(d.get("PBABIP P")),
     }
 
 
-def _arsenal(d):
+def _arsenal(d, scale):
     out = {}
     for col, field in _PITCH_COL_MAP.items():
-        v = _num(d.get(col))
+        v = _num_scaled(d.get(col), scale)
         if v is not None:
             out[field] = v
     return out
@@ -317,11 +361,28 @@ def evaluate_row(d: dict, league_dir=None) -> dict | None:
     # own name/city/abbreviation instead) — use ORG for team grouping so
     # minor leaguers bucket under their real MLB parent, not their affiliate.
     org_name = (d.get("ORG") or "").strip()
-    org_abbr = (d.get("ORG__1") or "").strip()
+    org_abbr = (_dup(d, "ORG") or "").strip()
     age = _num(d.get("Age"))
     role_str = (d.get("RL") or "").strip().upper()
     is_pitcher = role_str in ("SP", "RP", "CL")
-    stamina = _num(d.get("STM")) or 50
+    # Resolve this league's actual ratings display scale — Stuff/Movement/
+    # Control/Stamina and every other tool rating below need converting to
+    # the 20-80 canonical scale compute_composite_*/compute_ceiling expect;
+    # some leagues (e.g. emlb) export these on 1-100 even though Ovr/Pot
+    # stay on 20-80, so this can't be hardcoded.
+    scale = "1-100"
+    tool_weights = DEFAULT_TOOL_WEIGHTS
+    if league_dir is not None:
+        try:
+            from statsplusplus.config.league_config import LeagueConfig
+            scale = LeagueConfig(base_dir=league_dir).ratings_scale
+        except Exception:
+            pass
+        try:
+            tool_weights = load_tool_weights(league_dir)
+        except Exception:
+            pass
+    stamina = _num_scaled(d.get("STM"), scale) or 50
     acc = _ACC_MAP.get((d.get("SctAcc") or "").strip(), "A")
     wrk_ethic = (d.get("WE") or "N").strip()
     intel = (d.get("INT") or "N").strip()
@@ -332,22 +393,22 @@ def evaluate_row(d: dict, league_dir=None) -> dict | None:
         personality_class = "neg"
     else:
         personality_class = "neutral"
-    level_abbr = (d.get("Lev__1") or "MLB").strip().upper()
+    level_abbr = (_dup(d, "Lev") or "MLB").strip().upper()
     level_key = _LEVEL_KEY_BY_ABBR.get(level_abbr, "mlb")
 
     bucket = _bucket_for_assign(d, is_pitcher, role_str, stamina)
 
     if is_pitcher:
         role = "RP" if role_str in ("RP", "CL") else "SP"
-        weights = DEFAULT_TOOL_WEIGHTS["pitcher"][role]
-        tools = _pitcher_tools(d)
-        pot_tools = _pitcher_potential_tools(d)
-        arsenal = _arsenal(d)
+        weights = tool_weights.get("pitcher", DEFAULT_TOOL_WEIGHTS["pitcher"])[role]
+        tools = _pitcher_tools(d, scale)
+        pot_tools = _pitcher_potential_tools(d, scale)
+        arsenal = _arsenal(d, scale)
         composite = compute_composite_pitcher(tools, weights, arsenal, stamina, role)
         ceiling = compute_ceiling(
             pot_tools, weights, composite, accuracy=acc, work_ethic=wrk_ethic,
             is_pitcher=True, arsenal=arsenal, stamina=stamina, role=role, age=age or 25,
-            ratings_scale="20-80",
+            ratings_scale=scale,
         )
         true_ceiling = compute_true_ceiling(
             pot_tools, weights, composite, accuracy=acc, work_ethic=wrk_ethic,
@@ -356,17 +417,17 @@ def evaluate_row(d: dict, league_dir=None) -> dict | None:
         offensive_ceiling = None
         stf_l, stf_r = tools.get("stuff_l"), tools.get("stuff_r")
     else:
-        hitter_weights = DEFAULT_TOOL_WEIGHTS["hitter"]
+        hitter_weights = tool_weights.get("hitter", DEFAULT_TOOL_WEIGHTS["hitter"])
         weights = hitter_weights.get(bucket, hitter_weights.get("COF", {}))
-        tools = _hitter_tools(d)
-        pot_tools = _hitter_potential_tools(d)
-        defense, def_weights = _defense_for_bucket(d, bucket)
+        tools = _hitter_tools(d, scale)
+        pot_tools = _hitter_potential_tools(d, scale)
+        defense, def_weights = _defense_for_bucket(d, bucket, scale)
         pot_defense = defense  # no granular defensive *potential* fields exist in this export either
         composite = compute_composite_hitter(tools, weights, defense, def_weights)
         ceiling = compute_ceiling(
             pot_tools, weights, composite, accuracy=acc, work_ethic=wrk_ethic,
             defense=pot_defense, def_weights=def_weights, age=age or 25,
-            ratings_scale="20-80",
+            ratings_scale=scale,
         )
         true_ceiling = compute_true_ceiling(
             pot_tools, weights, composite, accuracy=acc, work_ethic=wrk_ethic,

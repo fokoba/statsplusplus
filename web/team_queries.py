@@ -14,6 +14,7 @@ from statsplusplus.evaluation.surplus import calc_pap
 from statsplusplus.config.league_config import dollars_per_war as _dpw_pkg, league_minimum as _lm_pkg
 from statsplusplus.utils.positions import ROLE_MAP
 from statsplusplus.evaluation.constants import DEFAULT_MINIMUM_SALARY
+from statsplusplus.data.evaluation_engine import load_tool_weights
 from web_league_context import (get_db, get_cfg, team_abbr_map, team_names_map,
                                  level_map, pos_map, pos_order, pyth_exp, my_team_id,
                                  mlb_team_ids, league_averages as _load_la,
@@ -967,7 +968,7 @@ def get_free_agent_candidates(team_id=None):
                r.composite_score, r.ceiling_score, r.true_ceiling,
                pf.fv, pf.fv_str, pf.bucket, ps.surplus, pf.prospect_surplus,
                pf.fv_continuous, fap.ask_raw,
-               r.cntct, r.gap, r.pow, r.eye, r.stf, r.mov, r.ctrl
+               r.cntct, r.gap, r.pow, r.eye, r.stf, r.mov, r.ctrl, r.bats
         FROM players p
         LEFT JOIN latest_ratings r ON p.player_id = r.player_id
         LEFT JOIN prospect_fv pf ON pf.player_id = p.player_id AND pf.eval_date = ?
@@ -979,7 +980,43 @@ def get_free_agent_candidates(team_id=None):
 
     from statsplusplus.config.ratings import norm_continuous as _normc
     from statsplusplus.evaluation.composite import compute_specialist_score, specialist_label as _spec_label
+    from statsplusplus.evaluation.park_fit import (
+        load_park_factors, compute_batter_park_fit,
+        compute_pitcher_park_fit_from_stats, compute_pitcher_park_fit_from_tools,
+    )
     ratings_scale = get_cfg().ratings_scale
+    park = load_park_factors(get_cfg().league_dir)
+    hitter_weights_by_bucket = load_tool_weights(get_cfg().league_dir).get("hitter", {}) if park else {}
+
+    # Real observed GB%/K%/BB% (all levels, career-to-date) for every free
+    # agent pitcher in this pool — preferred over the scouting-tool proxy
+    # whenever there's a meaningful sample (150+ batters faced, ~40 IP).
+    # Falls back to compute_pitcher_park_fit_from_tools() below the
+    # threshold, same as an uploaded CSV with no game logs at all.
+    _PARK_FIT_BF_THRESHOLD = 150
+    pitcher_pids = [r[0] for r in rows if r[5] in ROLE_MAP]
+    pitcher_stats = {}
+    lg_gb_pct = lg_k_pct = lg_bb_pct = None
+    if park and pitcher_pids:
+        pid_qs = ",".join("?" * len(pitcher_pids))
+        for row in conn.execute(
+            f"SELECT player_id, SUM(gb), SUM(fb), SUM(k), SUM(bb), SUM(bf) "
+            f"FROM pitching_stats WHERE player_id IN ({pid_qs}) GROUP BY player_id",
+            pitcher_pids,
+        ).fetchall():
+            p_pid, s_gb, s_fb, s_k, s_bb, s_bf = row
+            if s_bf and s_bf >= _PARK_FIT_BF_THRESHOLD:
+                pitcher_stats[p_pid] = {
+                    "gb_pct": s_gb / (s_gb + s_fb) if (s_gb or 0) + (s_fb or 0) > 0 else None,
+                    "k_pct": s_k / s_bf, "bb_pct": s_bb / s_bf,
+                }
+        lg = conn.execute(
+            "SELECT SUM(gb), SUM(fb), SUM(k), SUM(bb), SUM(bf) FROM mlb_pitching_stats"
+        ).fetchone()
+        if lg and lg[4]:
+            lg_gb, lg_fb, lg_k, lg_bb, lg_bf = lg
+            lg_gb_pct = lg_gb / (lg_gb + lg_fb) if (lg_gb or 0) + (lg_fb or 0) > 0 else None
+            lg_k_pct, lg_bb_pct = lg_k / lg_bf, lg_bb / lg_bf
 
     hitters, pitchers = [], []
     intl_hitters, intl_pitchers = [], []
@@ -987,7 +1024,7 @@ def get_free_agent_candidates(team_id=None):
         (pid, name, age, level, pos, role, intel, wrk_ethic, lead, loy, greed,
          acc, comp, ceil_score, true_ceil, fv, fv_str, pf_bucket, surplus_raw,
          prospect_surplus_raw, fv_continuous, ask_raw,
-         cntct, gap, pow_, eye, stf, mov, ctrl) = r
+         cntct, gap, pow_, eye, stf, mov, ctrl, bats) = r
         bucket = _bucket_for_display(pf_bucket, role, pos)
         potential = true_ceil if true_ceil is not None else ceil_score
         buffs, concerns = _personality_notes(intel, wrk_ethic, lead, loy, greed)
@@ -1000,6 +1037,21 @@ def get_free_agent_candidates(team_id=None):
             _tools = {"contact": _normc(cntct, ratings_scale), "gap": _normc(gap, ratings_scale),
                       "power": _normc(pow_, ratings_scale), "eye": _normc(eye, ratings_scale)}
         spec_score = compute_specialist_score(_tools, is_pitcher)
+
+        park_fit = None
+        if park:
+            if is_pitcher:
+                obs = pitcher_stats.get(pid)
+                if obs and obs["gb_pct"] is not None and lg_gb_pct is not None:
+                    park_fit = compute_pitcher_park_fit_from_stats(
+                        obs["gb_pct"], obs["k_pct"], obs["bb_pct"],
+                        lg_gb_pct, lg_k_pct, lg_bb_pct, park)
+                else:
+                    park_fit = compute_pitcher_park_fit_from_tools(_tools, park)
+            else:
+                _hw = hitter_weights_by_bucket.get(bucket, hitter_weights_by_bucket.get("COF", {}))
+                park_fit = compute_batter_park_fit(_tools, bats, _hw, park)
+
         entry = {
             "pid": pid, "name": name, "age": age,
             "level": level_disp,
@@ -1011,6 +1063,7 @@ def get_free_agent_candidates(team_id=None):
             "peak_surplus": _peak_surplus(fv_continuous, age, level_disp, pf_bucket, ovr=comp, pot=potential),
             "ask": ask_raw or "MiLC",
             "specialist_score": spec_score, "specialist_label": _spec_label(spec_score),
+            "park_fit": park_fit,
         }
         if age is not None and age <= _INTL_FA_AGE_MAX:
             (intl_pitchers if is_pitcher else intl_hitters).append(entry)

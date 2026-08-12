@@ -121,6 +121,7 @@
         <th data-sort="str">Platoon</th>
         <th data-sort="str">Skill Profile</th>
         <th data-sort="num" title="0 = perfectly balanced across core tools, 100 = one standout carrying tool. Spread between best and worst core tool (Contact/Gap/Power/Eye for hitters, Stuff/Movement/Control for pitchers) on the 20-80 scale.">Balance</th>
+        <th data-sort="num" title="-100 to 100: how well this player's skills match your home park's factors. Hitters: Contact/Gap/Power vs this park's AVG/2B+3B/HR factors (handedness-split). Pitchers: real observed GB%/K%/BB% when available, scouting tools (Movement/Control) otherwise.">Park Fit</th>
       </tr>
     </thead>
     <tbody>
@@ -150,6 +151,7 @@
         <td>{{ p.platoon_strong_side or '' }}</td>
         <td style="color:{% if p.specialist_label == 'Specialist' %}#ffc107{% else %}var(--text-dim){% endif %}">{{ p.specialist_label }}</td>
         <td>{{ p.specialist_score }}</td>
+        <td class="{{ 'pos' if p.park_fit and p.park_fit > 0 else 'neg' if p.park_fit and p.park_fit < 0 else '' }}">{{ p.park_fit if p.park_fit is not none else '-' }}</td>
       </tr>
       {% endfor %}
     </tbody>

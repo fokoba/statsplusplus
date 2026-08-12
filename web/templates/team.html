@@ -1027,7 +1027,7 @@
 
 {# ══════ Add Candidates ══════ #}
 <div class="tab-content" id="tab-adds">
-  {% macro add_table(rows, table_id, cur_team_col, show_ask=false, show_spec=false) %}
+  {% macro add_table(rows, table_id, cur_team_col, show_ask=false, show_spec=false, show_park=false) %}
   {% if rows %}
   <table id="{{ table_id }}">
     <thead>
@@ -1049,6 +1049,9 @@
         {% if show_spec %}
         <th data-sort="str">Skill Profile</th>
         <th data-sort="num" title="0 = perfectly balanced across core tools, 100 = one standout carrying tool. Spread between best and worst core tool (Contact/Gap/Power/Eye for hitters, Stuff/Movement/Control for pitchers) on the 20-80 scale.">Balance</th>
+        {% endif %}
+        {% if show_park %}
+        <th data-sort="num" title="-100 to 100: how well this player's skills match your home park's factors. Hitters: Contact/Gap/Power vs this park's AVG/2B+3B/HR factors (handedness-split). Pitchers: real observed GB%/K%/BB% when available, scouting tools otherwise.">Park Fit</th>
         {% endif %}
         <th class="left">Personality</th>
       </tr>
@@ -1073,6 +1076,9 @@
         {% if show_spec %}
         <td style="color:{% if p.specialist_label == 'Specialist' %}#ffc107{% else %}var(--text-dim){% endif %}">{{ p.specialist_label }}</td>
         <td>{{ p.specialist_score }}</td>
+        {% endif %}
+        {% if show_park %}
+        <td class="{{ 'pos' if p.park_fit and p.park_fit > 0 else 'neg' if p.park_fit and p.park_fit < 0 else '' }}">{{ p.park_fit if p.park_fit is not none else '-' }}</td>
         {% endif %}
         <td class="left" style="font-size:12px">
           {%- if p.buffs %}<span style="color:#4caf50">{{ p.buffs|join(", ") }}</span>{% endif -%}
@@ -1125,9 +1131,9 @@
       </label>
     </div>
     <h3 style="font-size:13px; margin:12px 0 6px">Hitters</h3>
-    {{ add_table(fa_candidates.hitters, "fa-hitters", false, show_ask=true, show_spec=true) }}
+    {{ add_table(fa_candidates.hitters, "fa-hitters", false, show_ask=true, show_spec=true, show_park=true) }}
     <h3 style="font-size:13px; margin:16px 0 6px">Pitchers</h3>
-    {{ add_table(fa_candidates.pitchers, "fa-pitchers", false, show_ask=true, show_spec=true) }}
+    {{ add_table(fa_candidates.pitchers, "fa-pitchers", false, show_ask=true, show_spec=true, show_park=true) }}
   </div>
 
   <script>

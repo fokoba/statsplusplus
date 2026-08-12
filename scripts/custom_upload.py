@@ -32,6 +32,9 @@ from statsplusplus.evaluation.fv import calc_fv_from_dict as calc_fv
 from statsplusplus.evaluation.constants import DEFENSIVE_WEIGHTS
 from statsplusplus.utils.positions import LEVEL_NORM_AGE, PITCH_FIELDS, display_pos
 from statsplusplus.data.db import get_conn
+from statsplusplus.evaluation.park_fit import (
+    load_park_factors, compute_batter_park_fit, compute_pitcher_park_fit_from_tools,
+)
 from prospect_value import prospect_surplus_with_option, peak_year_surplus
 
 # Same exclusion set as web/team_queries.py's get_free_agent_candidates —
@@ -405,6 +408,11 @@ def evaluate_row(d: dict, league_dir=None) -> dict | None:
     # minor leaguers bucket under their real MLB parent, not their affiliate.
     org_name = (d.get("ORG") or "").strip()
     org_abbr = (_dup(d, "ORG") or "").strip()
+    # First "B" occurrence is the full word ("Right"/"Left"/"Switch") in
+    # every export checked so far — sliced to a letter rather than reading
+    # the abbreviated duplicate, so this doesn't depend on which
+    # duplicate-column convention (see _dup()) this particular export uses.
+    bats = (d.get("B") or "").strip()[:1].upper()
     age = _num(d.get("Age"))
     role_str = (d.get("RL") or "").strip().upper()
     is_pitcher = role_str in ("SP", "RP", "CL")
@@ -415,6 +423,7 @@ def evaluate_row(d: dict, league_dir=None) -> dict | None:
     # stay on 20-80, so this can't be hardcoded.
     scale = "1-100"
     tool_weights = DEFAULT_TOOL_WEIGHTS
+    park = None
     if league_dir is not None:
         try:
             from statsplusplus.config.league_config import LeagueConfig
@@ -423,6 +432,10 @@ def evaluate_row(d: dict, league_dir=None) -> dict | None:
             pass
         try:
             tool_weights = load_tool_weights(league_dir)
+        except Exception:
+            pass
+        try:
+            park = load_park_factors(league_dir)
         except Exception:
             pass
     stamina = _num_scaled(d.get("STM"), scale) or 50
@@ -463,6 +476,9 @@ def evaluate_row(d: dict, league_dir=None) -> dict | None:
             _pitcher_side_tools(d, scale, tools, "L"), weights, arsenal, stamina, role)
         composite_vs_r = compute_composite_pitcher(
             _pitcher_side_tools(d, scale, tools, "R"), weights, arsenal, stamina, role)
+        # No game logs in an uploaded roster CSV — always the scouting-tool
+        # proxy (Movement/Control) here, never real observed GB%/K%/BB%.
+        park_fit = compute_pitcher_park_fit_from_tools(tools, park) if park else None
     else:
         hitter_weights = tool_weights.get("hitter", DEFAULT_TOOL_WEIGHTS["hitter"])
         weights = hitter_weights.get(bucket, hitter_weights.get("COF", {}))
@@ -486,6 +502,7 @@ def evaluate_row(d: dict, league_dir=None) -> dict | None:
             _hitter_side_tools(d, scale, tools, "L"), weights, defense, def_weights)
         composite_vs_r = compute_composite_hitter(
             _hitter_side_tools(d, scale, tools, "R"), weights, defense, def_weights)
+        park_fit = compute_batter_park_fit(tools, bats, weights, park) if park else None
 
     spec_score = compute_specialist_score(tools, is_pitcher)
     spec_label = specialist_label(spec_score)
@@ -557,6 +574,7 @@ def evaluate_row(d: dict, league_dir=None) -> dict | None:
         "true_ceiling": true_ceiling, "fv": fv_grade, "risk": risk,
         "composite_vs_l": composite_vs_l, "composite_vs_r": composite_vs_r,
         "specialist_score": spec_score, "specialist_label": spec_label,
+        "park_fit": park_fit,
         "acc": acc, "org": org_name, "org_abbr": org_abbr,
         "rule5_eligible": rule5_eligible, "ask": ask,
         "contract": contract, "contract_salary": contract_salary,

@@ -360,6 +360,38 @@ def _current_contract(d):
     return f"{sal_display}/yr", salary
 
 
+def _hitter_side_tools(d, scale, tools, side):
+    """Swap in the vL/vR split rating for whichever tools have one (contact,
+    power, gap, eye — speed/steal don't vary by pitcher handedness), falling
+    back to the unsplit value when this export doesn't carry that column."""
+    suffix = " vL" if side == "L" else " vR"
+    out = dict(tools)
+    for key, col in (("contact", "CON"), ("power", "POW"), ("gap", "GAP"), ("eye", "EYE")):
+        v = _num_scaled(d.get(f"{col}{suffix}"), scale)
+        if v is not None:
+            out[key] = v
+    return out
+
+
+def _pitcher_side_tools(d, scale, tools, side):
+    """Swap in the vL/vR split rating for stuff/movement/control, falling
+    back to the unsplit value when this export doesn't carry that column.
+    Control's split columns follow the same dual-convention duplicate-name
+    issue as the base control column (see _dup())."""
+    suffix = " vL" if side == "L" else " vR"
+    out = dict(tools)
+    v_stu = _num_scaled(d.get(f"STU{suffix}"), scale)
+    if v_stu is not None:
+        out["stuff"] = v_stu
+    v_mov = _num_scaled(d.get(f"MOV{suffix}"), scale)
+    if v_mov is not None:
+        out["movement"] = v_mov
+    v_con = _num_scaled(_dup(d, f"CON{suffix}"), scale)
+    if v_con is not None:
+        out["control"] = v_con
+    return out
+
+
 def evaluate_row(d: dict, league_dir=None) -> dict | None:
     """Evaluate one CSV row. Returns None for rows with no usable ID/name."""
     pid = (d.get("ID") or "").strip()
@@ -426,6 +458,10 @@ def evaluate_row(d: dict, league_dir=None) -> dict | None:
         )
         offensive_ceiling = None
         stf_l, stf_r = tools.get("stuff_l"), tools.get("stuff_r")
+        composite_vs_l = compute_composite_pitcher(
+            _pitcher_side_tools(d, scale, tools, "L"), weights, arsenal, stamina, role)
+        composite_vs_r = compute_composite_pitcher(
+            _pitcher_side_tools(d, scale, tools, "R"), weights, arsenal, stamina, role)
     else:
         hitter_weights = tool_weights.get("hitter", DEFAULT_TOOL_WEIGHTS["hitter"])
         weights = hitter_weights.get(bucket, hitter_weights.get("COF", {}))
@@ -445,6 +481,10 @@ def evaluate_row(d: dict, league_dir=None) -> dict | None:
         )
         offensive_ceiling = ceiling
         stf_l = stf_r = None
+        composite_vs_l = compute_composite_hitter(
+            _hitter_side_tools(d, scale, tools, "L"), weights, defense, def_weights)
+        composite_vs_r = compute_composite_hitter(
+            _hitter_side_tools(d, scale, tools, "R"), weights, defense, def_weights)
 
     role = "RP" if role_str in ("RP", "CL") else ("SP" if is_pitcher else bucket)
     norm_age = LEVEL_NORM_AGE.get(level_key, 25)
@@ -511,6 +551,7 @@ def evaluate_row(d: dict, league_dir=None) -> dict | None:
         "is_pitcher": is_pitcher,
         "composite_score": composite, "ceiling_score": ceiling,
         "true_ceiling": true_ceiling, "fv": fv_grade, "risk": risk,
+        "composite_vs_l": composite_vs_l, "composite_vs_r": composite_vs_r,
         "acc": acc, "org": org_name, "org_abbr": org_abbr,
         "rule5_eligible": rule5_eligible, "ask": ask,
         "contract": contract, "contract_salary": contract_salary,

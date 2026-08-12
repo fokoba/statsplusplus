@@ -97,6 +97,8 @@
         <th data-sort="str">Level</th>
         <th data-sort="num">Ovr</th>
         <th data-sort="num">Pot</th>
+        <th data-sort="num" title="Composite computed using vs-LHP/vs-LHB split tool ratings where available">Comp vL</th>
+        <th data-sort="num" title="Composite computed using vs-RHP/vs-RHB split tool ratings where available">Comp vR</th>
         <th data-sort="str">FV</th>
         <th data-sort="str">Risk</th>
         <th data-sort="str">Scout</th>
@@ -122,6 +124,8 @@
         <td>{{ p.level }}</td>
         <td><span class="ovr-color" data-g="{{ p.composite_score }}">{{ p.composite_score }}</span></td>
         <td><span class="ovr-color" data-g="{{ p.true_ceiling }}">{{ p.true_ceiling }}</span></td>
+        <td>{% if p.composite_vs_l is not none %}<span class="ovr-color" data-g="{{ p.composite_vs_l }}">{{ p.composite_vs_l }}</span>{% else %}-{% endif %}</td>
+        <td>{% if p.composite_vs_r is not none %}<span class="ovr-color" data-g="{{ p.composite_vs_r }}">{{ p.composite_vs_r }}</span>{% else %}-{% endif %}</td>
         <td>{{ '25+' if p.age is not none and p.age >= 25 else p.fv }}</td>
         <td style="color:{% if p.risk == 'Low' %}#4caf50{% elif p.risk == 'Medium' %}#ffc107{% elif p.risk == 'High' %}#ff9800{% else %}#f44336{% endif %}">{{ p.risk }}</td>
         <td>{{ p.acc }}</td>

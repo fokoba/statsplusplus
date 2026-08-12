@@ -311,7 +311,20 @@ def _pos_code(pos_name):
     return _POS_NAME_TO_CODE.get((pos_name or "").strip(), 0)
 
 
-_ACC_MAP = {"Very High": "VH", "High": "H", "Average": "A", "Low": "L", "Very Low": "L"}
+# Different OOTP export presets spell scouting accuracy differently — the
+# "All Free Agents" export uses abbreviated forms ("V.High", "Avg") while
+# others spell it out ("Very High", "Average"). Confirmed against a real
+# export: Baden Warby's SctAcc was "V.High", which this map previously
+# didn't recognize at all, silently falling back to the "A" (Average)
+# default for every V.High/Avg/V.Low player regardless of their real
+# scouting accuracy.
+_ACC_MAP = {
+    "Very High": "VH", "V.High": "VH", "VeryHigh": "VH",
+    "High": "H",
+    "Average": "A", "Avg": "A",
+    "Low": "L",
+    "Very Low": "L", "V.Low": "L", "VeryLow": "L",
+}
 
 # Priority order for "best position" display: (label, CSV potential column(s),
 # minimum grade to qualify). Checked in order; first match wins, so a

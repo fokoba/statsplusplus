@@ -966,7 +966,8 @@ def get_free_agent_candidates(team_id=None):
                r.int_, r.wrk_ethic, r.lead, r.loy, r.greed, r.acc,
                r.composite_score, r.ceiling_score, r.true_ceiling,
                pf.fv, pf.fv_str, pf.bucket, ps.surplus, pf.prospect_surplus,
-               pf.fv_continuous, fap.ask_raw
+               pf.fv_continuous, fap.ask_raw,
+               r.cntct, r.gap, r.pow, r.eye, r.stf, r.mov, r.ctrl
         FROM players p
         LEFT JOIN latest_ratings r ON p.player_id = r.player_id
         LEFT JOIN prospect_fv pf ON pf.player_id = p.player_id AND pf.eval_date = ?
@@ -976,16 +977,29 @@ def get_free_agent_candidates(team_id=None):
               AND r.composite_score IS NOT NULL
     """, (ed, ed_surplus, *_NIPPON_TEAM_IDS)).fetchall()
 
+    from statsplusplus.config.ratings import norm_continuous as _normc
+    from statsplusplus.evaluation.composite import compute_specialist_score, specialist_label as _spec_label
+    ratings_scale = get_cfg().ratings_scale
+
     hitters, pitchers = [], []
     intl_hitters, intl_pitchers = [], []
     for r in rows:
         (pid, name, age, level, pos, role, intel, wrk_ethic, lead, loy, greed,
          acc, comp, ceil_score, true_ceil, fv, fv_str, pf_bucket, surplus_raw,
-         prospect_surplus_raw, fv_continuous, ask_raw) = r
+         prospect_surplus_raw, fv_continuous, ask_raw,
+         cntct, gap, pow_, eye, stf, mov, ctrl) = r
         bucket = _bucket_for_display(pf_bucket, role, pos)
         potential = true_ceil if true_ceil is not None else ceil_score
         buffs, concerns = _personality_notes(intel, wrk_ethic, lead, loy, greed)
         level_disp = level_map().get(str(level)) or ("FA" if str(level)=="0" else str(level))
+        is_pitcher = role in ROLE_MAP
+        if is_pitcher:
+            _tools = {"stuff": _normc(stf, ratings_scale), "movement": _normc(mov, ratings_scale),
+                      "control": _normc(ctrl, ratings_scale)}
+        else:
+            _tools = {"contact": _normc(cntct, ratings_scale), "gap": _normc(gap, ratings_scale),
+                      "power": _normc(pow_, ratings_scale), "eye": _normc(eye, ratings_scale)}
+        spec_score = compute_specialist_score(_tools, is_pitcher)
         entry = {
             "pid": pid, "name": name, "age": age,
             "level": level_disp,
@@ -996,8 +1010,8 @@ def get_free_agent_candidates(team_id=None):
                        if (surplus_raw is not None or prospect_surplus_raw is not None) else None,
             "peak_surplus": _peak_surplus(fv_continuous, age, level_disp, pf_bucket, ovr=comp, pot=potential),
             "ask": ask_raw or "MiLC",
+            "specialist_score": spec_score, "specialist_label": _spec_label(spec_score),
         }
-        is_pitcher = role in ROLE_MAP
         if age is not None and age <= _INTL_FA_AGE_MAX:
             (intl_pitchers if is_pitcher else intl_hitters).append(entry)
         else:

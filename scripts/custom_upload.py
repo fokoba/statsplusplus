@@ -24,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from statsplusplus.evaluation.composite import (
     compute_composite_hitter, compute_composite_pitcher,
+    compute_specialist_score, specialist_label,
 )
 from statsplusplus.evaluation.ceiling import compute_ceiling, compute_true_ceiling
 from statsplusplus.data.evaluation_engine import DEFAULT_TOOL_WEIGHTS, load_tool_weights
@@ -486,6 +487,9 @@ def evaluate_row(d: dict, league_dir=None) -> dict | None:
         composite_vs_r = compute_composite_hitter(
             _hitter_side_tools(d, scale, tools, "R"), weights, defense, def_weights)
 
+    spec_score = compute_specialist_score(tools, is_pitcher)
+    spec_label = specialist_label(spec_score)
+
     role = "RP" if role_str in ("RP", "CL") else ("SP" if is_pitcher else bucket)
     norm_age = LEVEL_NORM_AGE.get(level_key, 25)
     fv_input = {
@@ -552,6 +556,7 @@ def evaluate_row(d: dict, league_dir=None) -> dict | None:
         "composite_score": composite, "ceiling_score": ceiling,
         "true_ceiling": true_ceiling, "fv": fv_grade, "risk": risk,
         "composite_vs_l": composite_vs_l, "composite_vs_r": composite_vs_r,
+        "specialist_score": spec_score, "specialist_label": spec_label,
         "acc": acc, "org": org_name, "org_abbr": org_abbr,
         "rule5_eligible": rule5_eligible, "ask": ask,
         "contract": contract, "contract_salary": contract_salary,

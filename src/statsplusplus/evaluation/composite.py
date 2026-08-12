@@ -52,6 +52,48 @@ PITCHER_TOOL_KEYS: tuple[str, ...] = ("stuff", "movement", "control", "hra", "pb
 # Core keys for imbalance/floor penalties (extended ratings excluded)
 PITCHER_CORE_KEYS: tuple[str, ...] = ("stuff", "movement", "control")
 
+# A "Specialist" carries composite on one standout tool; a "Generalist"
+# spreads it across several. Threshold on compute_specialist_score()'s 0-100
+# scale — 50 means at least half the max possible 20-80 spread (a 30-point
+# gap between best and worst core tool, e.g. an 80 next to a 50).
+SPECIALIST_SCORE_THRESHOLD: int = 50
+
+
+def compute_specialist_score(tools: dict[str, float | int | None], is_pitcher: bool) -> int:
+    """0-100: how much of a player's carrying skill comes from one standout
+    tool vs being spread across several core tools.
+
+    Reuses the exact same tool_spread concept (max - min across core tools)
+    that compute_composite_hitter/pitcher already use for the tool-imbalance
+    penalty below — this just exposes it as a standalone rating instead of a
+    composite deduction, so "specialist" here means the same thing it
+    already means to the composite formula.
+
+    0 = perfectly balanced (every core tool at the same grade).
+    100 = maximally specialized (widest possible 20-80 spread, e.g. one
+    tool at 80 and another at 20).
+
+    Args:
+        tools: Tool ratings on the 20-80 canonical scale (same dict passed
+            to compute_composite_hitter/pitcher).
+        is_pitcher: Whether to use pitcher core tools (stuff/movement/
+            control) or hitter core tools (contact/gap/power/eye).
+
+    Returns:
+        Integer 0-100.
+    """
+    keys = PITCHER_CORE_KEYS if is_pitcher else OFFENSIVE_TOOL_KEYS
+    vals = [v for k, v in tools.items() if k in keys and v]
+    if len(vals) < 2:
+        return 0
+    spread = max(vals) - min(vals)
+    return round(min(100.0, (spread / 60.0) * 100))
+
+
+def specialist_label(score: int) -> str:
+    """'Specialist' or 'Generalist' from a compute_specialist_score() value."""
+    return "Specialist" if score >= SPECIALIST_SCORE_THRESHOLD else "Generalist"
+
 
 # ---------------------------------------------------------------------------
 # Tool transform

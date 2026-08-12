@@ -82,6 +82,14 @@
       <input type="checkbox" id="cu-negpers-filter" onchange="cuFilterResults()">
       Dim negative personalities
     </label>
+    <label style="font-size:13px" title="Specialist/Generalist score (0-100) measures the spread between a player's best and worst core tool — 0 = perfectly balanced, 100 = one standout carrying tool. Specialist is 50+.">
+      Skill profile:
+      <select id="cu-spec-filter" onchange="cuFilterResults()">
+        <option value="">All</option>
+        <option value="Specialist">Specialist</option>
+        <option value="Generalist">Generalist</option>
+      </select>
+    </label>
     <button class="btn btn-sm" onclick="exportTableCSV('custom-upload-table', 'custom_upload_results.csv')">⬇ CSV</button>
   </div>
   {% endif %}
@@ -111,11 +119,13 @@
         <th data-sort="str">Best Pos</th>
         <th data-sort="num">Grade</th>
         <th data-sort="str">Platoon</th>
+        <th data-sort="str">Skill Profile</th>
+        <th data-sort="num" title="0 = perfectly balanced across core tools, 100 = one standout carrying tool. Spread between best and worst core tool (Contact/Gap/Power/Eye for hitters, Stuff/Movement/Control for pitchers) on the 20-80 scale.">Balance</th>
       </tr>
     </thead>
     <tbody>
       {% for p in results %}
-      <tr class="cu-row" data-pid="{{ p.pid }}" data-pos="{{ p.bucket }}" data-org="{{ p.org }}" data-type="{{ 'pitcher' if p.is_pitcher else 'hitter' }}" data-r5="{{ 'yes' if p.rule5_eligible else 'no' }}" data-fa="{{ 'yes' if p.is_free_agent else 'no' }}" data-waivers="{{ 'yes' if p.on_waivers else 'no' }}" data-platoon="{{ p.platoon_strong_side or '' }}" data-pers="{{ p.personality_class }}">
+      <tr class="cu-row" data-pid="{{ p.pid }}" data-pos="{{ p.bucket }}" data-org="{{ p.org }}" data-type="{{ 'pitcher' if p.is_pitcher else 'hitter' }}" data-r5="{{ 'yes' if p.rule5_eligible else 'no' }}" data-fa="{{ 'yes' if p.is_free_agent else 'no' }}" data-waivers="{{ 'yes' if p.on_waivers else 'no' }}" data-platoon="{{ p.platoon_strong_side or '' }}" data-pers="{{ p.personality_class }}" data-spec="{{ p.specialist_label }}">
         <td><input type="checkbox" class="cu-checkbox" data-pid="{{ p.pid }}"></td>
         <td class="left cu-name">{{ p.name }}</td>
         <td>{{ p.bucket }}</td>
@@ -138,6 +148,8 @@
         <td>{{ p.best_position or '' }}</td>
         <td>{{ p.best_position_grade if p.best_position_grade is not none else '' }}</td>
         <td>{{ p.platoon_strong_side or '' }}</td>
+        <td style="color:{% if p.specialist_label == 'Specialist' %}#ffc107{% else %}var(--text-dim){% endif %}">{{ p.specialist_label }}</td>
+        <td>{{ p.specialist_score }}</td>
       </tr>
       {% endfor %}
     </tbody>
@@ -157,6 +169,7 @@ function cuFilterResults() {
   var vsRightOnly = document.getElementById('cu-vsright-filter').checked;
   var vsLeftOnly = document.getElementById('cu-vsleft-filter').checked;
   var dimNegPers = document.getElementById('cu-negpers-filter').checked;
+  var specFilter = document.getElementById('cu-spec-filter').value;
   var rows = document.querySelectorAll('#custom-upload-table tbody tr');
   var shown = 0;
   rows.forEach(function(tr) {
@@ -168,7 +181,8 @@ function cuFilterResults() {
       && (!faOnly || tr.dataset.fa === 'yes')
       && (!waiversOnly || tr.dataset.waivers === 'yes')
       && (!vsRightOnly || platoon === 'vs RHP' || platoon === 'vs RHB')
-      && (!vsLeftOnly || platoon === 'vs LHP' || platoon === 'vs LHB');
+      && (!vsLeftOnly || platoon === 'vs LHP' || platoon === 'vs LHB')
+      && (!specFilter || tr.dataset.spec === specFilter);
     tr.style.display = match ? '' : 'none';
     if (match) shown++;
     tr.classList.toggle('cu-dimmed', dimNegPers && tr.dataset.pers === 'neg');
@@ -182,6 +196,7 @@ function cuFilterResults() {
   if (waiversOnly) parts.push('Waivers');
   if (vsRightOnly) parts.push('vs RHP/RHB');
   if (vsLeftOnly) parts.push('vs LHP/LHB');
+  if (specFilter) parts.push(specFilter + 's');
   if (dimNegPers) parts.push('negative personalities dimmed');
   var countEl = document.getElementById('cu-count');
   if (countEl) countEl.textContent = '(' + shown + ' shown' + (parts.length ? ' — ' + parts.join(', ') : '') + ')';

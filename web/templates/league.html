@@ -1222,7 +1222,7 @@ function renderBalance() {
   const abbrB = TRADE_ORGS.find(t => t.tid === b.teamId)?.abbr || '—';
   const nb = netA.base, np = netA.pessimistic, no_ = netA.optimistic;
   let verdict;
-  if (Math.abs(nb) < 1e6) verdict = 'Even trade in base scenario';
+  if (Math.abs(nb) < MONEY_DIVISOR) verdict = 'Even trade in base scenario';
   else if (nb > 0 && np > 0) verdict = `${abbrA} wins in all scenarios`;
   else if (nb > 0) verdict = `${abbrA} wins in base/optimistic`;
   else if (nb < 0 && no_ < 0) verdict = `${abbrB} wins in all scenarios`;
@@ -1231,7 +1231,7 @@ function renderBalance() {
 
   document.getElementById('trade-verdict').innerHTML = verdict;
   document.getElementById('trade-verdict').className = 'trade-verdict ' +
-    (nb > 1e6 ? 'surplus-pos' : nb < -1e6 ? 'surplus-neg' : '');
+    (nb > MONEY_DIVISOR ? 'surplus-pos' : nb < -MONEY_DIVISOR ? 'surplus-neg' : '');
 }
 
 /* ── Draft Tab ── */

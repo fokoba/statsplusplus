@@ -1274,7 +1274,7 @@ td.stat-bad  { color: var(--red); }
 .trade-page { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
 .trade-side { display: flex; flex-direction: column; gap: 10px; }
 .trade-org-select { background: var(--surface); border: 1px solid var(--border); color: var(--text); border-radius: 4px; padding: 6px 10px; font-size: 13px; width: 100%; }
-.trade-package { min-height: 180px; max-height: 280px; overflow-y: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.trade-package { min-height: 180px; max-height: 70vh; overflow-y: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
 .trade-cards { display: flex; flex-direction: column; gap: 8px; }
 .trade-card { background: rgba(15,52,96,0.3); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; position: relative; }
 .trade-card-header { display: flex; justify-content: space-between; align-items: center; }

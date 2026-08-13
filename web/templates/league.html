@@ -355,7 +355,7 @@
         <div class="trade-side-total" id="total-{{ side }}"></div>
         <div class="trade-cash">
           <label>Cash $</label>
-          <input type="number" min="0" step="100000" value="0"
+          <input type="number" min="0" step="{{ money_divisor|int }}" value="0"
                  id="cash-{{ side }}" onchange="updateCash('{{ side }}')">
         </div>
       </div>

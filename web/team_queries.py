@@ -1344,6 +1344,15 @@ def get_payroll_summary(team_id):
             pass
     cv_conn.close()
 
+    # Real per-year figures from an uploaded "Team Salary" export override the
+    # formula projection above wherever they cover a given calendar year.
+    uploaded_by_pid = {}
+    try:
+        for r in conn.execute("SELECT player_id, year, amount FROM salary_estimates"):
+            uploaded_by_pid.setdefault(r["player_id"], {})[r["year"]] = r["amount"]
+    except Exception:
+        pass
+
     horizon = 6
     future_years = [year + i for i in range(horizon)]
     min_sal = get_cfg().minimum_salary
@@ -1358,9 +1367,15 @@ def get_payroll_summary(team_id):
         proj = projections.get(pid)
         proj_map = {i: s for i, s in proj} if proj else {}
         by_year = []
+        pid_uploaded = uploaded_by_pid.get(pid)
         for i in range(horizon):
             contract_yr = cur_yr + i
-            if i in proj_map:
+            abs_year = year + i
+            if pid_uploaded and abs_year in pid_uploaded:
+                sal = pid_uploaded[abs_year]
+                by_year.append({"sal": sal, "option": None, "projected": True})
+                totals[i] += sal
+            elif i in proj_map:
                 by_year.append({"sal": proj_map[i], "option": None, "projected": True})
                 totals[i] += proj_map[i]
             elif contract_yr < yrs_total:

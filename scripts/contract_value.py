@@ -367,6 +367,28 @@ def contract_value(player_id, retention_pct=0.0, _conn=None, _hist=None, league_
     }
 
 
+def contract_surplus_horizons(player_id, game_year, _conn=None, _hist=None, league_dir=None):
+    """Current-year, next-year, and 3-year (years 1-3 ahead) surplus for an
+    MLB contract player — same real per-year breakdown contract_value()
+    already builds (real salary where known, projected arb/perpetual-arb
+    cost where estimated), just sliced by calendar year instead of shown as
+    the full multi-year table. Mirrors _surplus_horizons() in
+    player_queries.py, which does the identical slice for the player page.
+
+    Returns (current, next, three_year), or (None, None, None) if this
+    player has no contract breakdown at all.
+    """
+    result = contract_value(player_id, _conn=_conn, _hist=_hist, league_dir=league_dir)
+    if not result or not result.get("breakdown"):
+        return None, None, None
+    by_year = {b["year"]: b["surplus"] for b in result["breakdown"]}
+    current = by_year.get(game_year)
+    nxt = by_year.get(game_year + 1)
+    three_yr_years = [y for y in (game_year + 1, game_year + 2, game_year + 3) if y in by_year]
+    three_yr = sum(by_year[y] for y in three_yr_years) if three_yr_years else None
+    return current, nxt, three_yr
+
+
 def get_player_info(player_id):
     """Legacy shim for trade_calculator compatibility."""
     conn = get_connection(_league_dir)

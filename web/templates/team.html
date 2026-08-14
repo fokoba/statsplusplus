@@ -763,7 +763,11 @@
         <thead>
           <tr>
             <th data-sort="str" class="left">Name</th><th data-sort="num">Salary</th><th data-sort="num">Yrs</th>
-            <th data-sort="num">Total</th><th data-sort="num">Surplus</th>
+            <th data-sort="num">Total</th>
+            <th data-sort="num" title="Full-horizon projected surplus (same calculation as before, relabeled to distinguish from the shorter-horizon columns here)">Long-Term Surplus</th>
+            <th data-sort="num" title="Value minus expected cost for this season only">Current Yr Surplus</th>
+            <th data-sort="num" title="Value minus expected contract cost for next season">Next Yr Surplus</th>
+            <th data-sort="num" title="Summed value minus expected cost across the next 3 seasons (years 1-3 ahead)">3-Yr Surplus</th>
             <th data-sort="num" title="Best single projected year at expected grade — quality independent of remaining runway">Peak Yr Surplus</th>
             <th data-sort="str" class="left">Flags</th>
           </tr>
@@ -776,6 +780,9 @@
             <td>{{ c.years_left }}</td>
             <td>{{ c.total_left|money }}</td>
             <td class="{{ 'pos' if c.surplus > 0 else 'neg' if c.surplus < 0 else '' }}">${{ c.surplus }}{{ money_unit }}</td>
+            <td class="{{ 'pos' if c.current_year_surplus and c.current_year_surplus > 0 else 'neg' if c.current_year_surplus and c.current_year_surplus < 0 else '' }}">{{ '$' + c.current_year_surplus|string + money_unit if c.current_year_surplus is not none else '-' }}</td>
+            <td class="{{ 'pos' if c.next_year_surplus and c.next_year_surplus > 0 else 'neg' if c.next_year_surplus and c.next_year_surplus < 0 else '' }}">{{ '$' + c.next_year_surplus|string + money_unit if c.next_year_surplus is not none else '-' }}</td>
+            <td class="{{ 'pos' if c.three_year_surplus and c.three_year_surplus > 0 else 'neg' if c.three_year_surplus and c.three_year_surplus < 0 else '' }}">{{ '$' + c.three_year_surplus|string + money_unit if c.three_year_surplus is not none else '-' }}</td>
             <td class="{{ 'pos' if c.peak_surplus and c.peak_surplus > 0 else 'neg' if c.peak_surplus and c.peak_surplus < 0 else '' }}">{{ '$' + c.peak_surplus|string + money_unit if c.peak_surplus is not none else '-' }}</td>
             <td class="left">
               {%- if c.ntc %}<span class="opt-badge opt-ntc">NTC</span>{% endif %}
@@ -984,7 +991,10 @@
         <th data-sort="num">Pot</th>
         <th data-sort="str">FV</th>
         <th data-sort="str">Scout</th>
-        <th data-sort="num">Surplus</th>
+        <th data-sort="num" title="Full-horizon projected surplus">Long-Term Surplus</th>
+        <th data-sort="num" title="Value minus expected cost for this season only">Current Yr Surplus</th>
+        <th data-sort="num" title="Value minus expected contract cost for next season">Next Yr Surplus</th>
+        <th data-sort="num" title="Summed value minus expected cost across the next 3 seasons (years 1-3 ahead)">3-Yr Surplus</th>
         <th data-sort="num" title="Best single projected year at expected grade — quality independent of remaining runway">Peak Yr Surplus</th>
         <th class="left">Reasons</th>
       </tr>
@@ -1003,6 +1013,9 @@
         <td>{{ p.fv_str or '-' }}</td>
         <td>{{ p.acc or '-' }}</td>
         <td class="{{ 'pos' if p.surplus and p.surplus > 0 else 'neg' if p.surplus and p.surplus < 0 else '' }}">{{ '$' + p.surplus|string + money_unit if p.surplus is not none else '-' }}</td>
+        <td class="{{ 'pos' if p.current_year_surplus and p.current_year_surplus > 0 else 'neg' if p.current_year_surplus and p.current_year_surplus < 0 else '' }}">{{ '$' + p.current_year_surplus|string + money_unit if p.current_year_surplus is not none else '-' }}</td>
+        <td class="{{ 'pos' if p.next_year_surplus and p.next_year_surplus > 0 else 'neg' if p.next_year_surplus and p.next_year_surplus < 0 else '' }}">{{ '$' + p.next_year_surplus|string + money_unit if p.next_year_surplus is not none else '-' }}</td>
+        <td class="{{ 'pos' if p.three_year_surplus and p.three_year_surplus > 0 else 'neg' if p.three_year_surplus and p.three_year_surplus < 0 else '' }}">{{ '$' + p.three_year_surplus|string + money_unit if p.three_year_surplus is not none else '-' }}</td>
         <td class="{{ 'pos' if p.peak_surplus and p.peak_surplus > 0 else 'neg' if p.peak_surplus and p.peak_surplus < 0 else '' }}">{{ '$' + p.peak_surplus|string + money_unit if p.peak_surplus is not none else '-' }}</td>
         <td class="left" style="font-size:12px; color:var(--text-dim)">{{ p.reasons|join(", ") }}</td>
       </tr>
@@ -1043,7 +1056,10 @@
         <th data-sort="str">FV</th>
         <th data-sort="str">Scout</th>
         <th data-sort="str">Fits At</th>
-        <th data-sort="num">Surplus</th>
+        <th data-sort="num" title="Full-horizon projected surplus">Long-Term Surplus</th>
+        <th data-sort="num" title="Value minus expected cost for this season only">Current Yr Surplus</th>
+        <th data-sort="num" title="Value minus expected contract cost for next season">Next Yr Surplus</th>
+        <th data-sort="num" title="Summed value minus expected cost across the next 3 seasons (years 1-3 ahead)">3-Yr Surplus</th>
         <th data-sort="num" title="Best single projected year at expected grade — quality independent of remaining runway">Peak Yr Surplus</th>
         {% if show_ask %}<th data-sort="str" title="Current salary demand from the last uploaded free agent export; MiLC if none on file">Ask</th>{% endif %}
         {% if show_spec %}
@@ -1071,6 +1087,9 @@
         <td>{{ p.acc or '-' }}</td>
         <td>{{ p.fit or '-' }}</td>
         <td class="{{ 'pos' if p.surplus and p.surplus > 0 else 'neg' if p.surplus and p.surplus < 0 else '' }}">{{ '$' + p.surplus|string + money_unit if p.surplus is not none else '-' }}</td>
+        <td class="{{ 'pos' if p.current_year_surplus and p.current_year_surplus > 0 else 'neg' if p.current_year_surplus and p.current_year_surplus < 0 else '' }}">{{ '$' + p.current_year_surplus|string + money_unit if p.current_year_surplus is not none else '-' }}</td>
+        <td class="{{ 'pos' if p.next_year_surplus and p.next_year_surplus > 0 else 'neg' if p.next_year_surplus and p.next_year_surplus < 0 else '' }}">{{ '$' + p.next_year_surplus|string + money_unit if p.next_year_surplus is not none else '-' }}</td>
+        <td class="{{ 'pos' if p.three_year_surplus and p.three_year_surplus > 0 else 'neg' if p.three_year_surplus and p.three_year_surplus < 0 else '' }}">{{ '$' + p.three_year_surplus|string + money_unit if p.three_year_surplus is not none else '-' }}</td>
         <td class="{{ 'pos' if p.peak_surplus and p.peak_surplus > 0 else 'neg' if p.peak_surplus and p.peak_surplus < 0 else '' }}">{{ '$' + p.peak_surplus|string + money_unit if p.peak_surplus is not none else '-' }}</td>
         {% if show_ask %}<td>{{ p.ask }}</td>{% endif %}
         {% if show_spec %}

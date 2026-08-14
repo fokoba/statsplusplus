@@ -105,6 +105,25 @@ def _peak_surplus(fv_continuous, age, level, bucket, ovr=None, pot=None):
         return None
 
 
+def _surplus_horizons_live(fv_continuous, age, level, bucket, ovr=None, pot=None):
+    """Current-year, next-year, and 3-year surplus (money-scaled) for a
+    prospect/non-contract player. Same live-computed source as
+    _peak_surplus() above, just prospect_surplus_horizons() instead of
+    peak_year_surplus() — see scripts/prospect_value.py.
+    """
+    if fv_continuous is None or age is None or not level or not bucket:
+        return None, None, None
+    try:
+        from prospect_value import prospect_surplus_horizons as _psh
+        cur_s, next_s, three_s = _psh(fv_continuous, age, level, bucket, get_cfg().year,
+                                      ovr=ovr, pot=pot, league_dir=get_cfg().league_dir)
+        return (round(cur_s / _money_divisor(), 1) if cur_s is not None else None,
+                round(next_s / _money_divisor(), 1) if next_s is not None else None,
+                round(three_s / _money_divisor(), 1) if three_s is not None else None)
+    except Exception:
+        return None, None, None
+
+
 def get_summary(team_id=None):
     state = _get_state()
     conn = get_db()
@@ -725,9 +744,12 @@ def get_cut_candidates(team_id=None):
         if not reasons:
             continue
 
+        _lvl_disp = level_map().get(str(level), str(level))
+        _cur_s, _next_s, _three_s = _surplus_horizons_live(fv_continuous, age, _lvl_disp,
+                                                            pf_bucket, ovr=comp, pot=potential)
         entry = {
             "pid": pid, "name": name, "age": age,
-            "level": level_map().get(str(level), str(level)),
+            "level": _lvl_disp,
             "bucket": bucket_display,
             "team_id": aff_tid,
             "team_name": aff_name or team_names_map().get(aff_tid, str(aff_tid)),
@@ -735,8 +757,8 @@ def get_cut_candidates(team_id=None):
             "fv_str": fv_str, "acc": acc, "reasons": reasons,
             "surplus": round((surplus_raw if surplus_raw is not None else prospect_surplus_raw) / _money_divisor(), 1)
                        if (surplus_raw is not None or prospect_surplus_raw is not None) else None,
-            "peak_surplus": _peak_surplus(fv_continuous, age, level_map().get(str(level), str(level)),
-                                          pf_bucket, ovr=comp, pot=potential),
+            "peak_surplus": _peak_surplus(fv_continuous, age, _lvl_disp, pf_bucket, ovr=comp, pot=potential),
+            "current_year_surplus": _cur_s, "next_year_surplus": _next_s, "three_year_surplus": _three_s,
             "_is_bottom_20": is_bottom_20,
             "_is_personality": wrk_ethic == "L" or intel == "L",
         }
@@ -862,6 +884,8 @@ def get_waiver_candidates(team_id=None):
         potential = true_ceil if true_ceil is not None else ceil_score
         buffs, concerns = _personality_notes(intel, wrk_ethic, lead, loy, greed)
         level_disp = level_map().get(str(level)) or ("FA" if str(level)=="0" else str(level))
+        _cur_s, _next_s, _three_s = _surplus_horizons_live(fv_continuous, age, level_disp,
+                                                            pf_bucket, ovr=comp, pot=potential)
         out.append({
             "pid": pid, "name": name, "age": age,
             "level": level_disp,
@@ -873,6 +897,7 @@ def get_waiver_candidates(team_id=None):
             "surplus": round((surplus_raw if surplus_raw is not None else prospect_surplus_raw) / _money_divisor(), 1)
                        if (surplus_raw is not None or prospect_surplus_raw is not None) else None,
             "peak_surplus": _peak_surplus(fv_continuous, age, level_disp, pf_bucket, ovr=comp, pot=potential),
+            "current_year_surplus": _cur_s, "next_year_surplus": _next_s, "three_year_surplus": _three_s,
         })
     out.sort(key=lambda e: -(e["composite_score"] or 0))
     return out
@@ -1052,6 +1077,8 @@ def get_free_agent_candidates(team_id=None):
                 _hw = hitter_weights_by_bucket.get(bucket, hitter_weights_by_bucket.get("COF", {}))
                 park_fit = compute_batter_park_fit(_tools, bats, _hw, park)
 
+        _cur_s, _next_s, _three_s = _surplus_horizons_live(fv_continuous, age, level_disp,
+                                                            pf_bucket, ovr=comp, pot=potential)
         entry = {
             "pid": pid, "name": name, "age": age,
             "level": level_disp,
@@ -1061,6 +1088,7 @@ def get_free_agent_candidates(team_id=None):
             "surplus": round((surplus_raw if surplus_raw is not None else prospect_surplus_raw) / _money_divisor(), 1)
                        if (surplus_raw is not None or prospect_surplus_raw is not None) else None,
             "peak_surplus": _peak_surplus(fv_continuous, age, level_disp, pf_bucket, ovr=comp, pot=potential),
+            "current_year_surplus": _cur_s, "next_year_surplus": _next_s, "three_year_surplus": _three_s,
             "ask": ask_raw or "MiLC",
             "specialist_score": spec_score, "specialist_label": _spec_label(spec_score),
             "park_fit": park_fit,
@@ -1241,6 +1269,19 @@ def get_contracts(team_id):
     display = [c for c in out if c["is_major"] and (c["salary"] > DEFAULT_MINIMUM_SALARY or c["years_left"] > 1)]
     display.sort(key=lambda x: -x["salary"])
     total_payroll = sum(c["salary"] for c in out if c["is_major"])
+
+    from contract_value import contract_surplus_horizons as _csh
+    _game_year = get_cfg().year
+    _league_dir = get_cfg().league_dir
+    for c in display:
+        try:
+            cur_s, next_s, three_s = _csh(c["pid"], _game_year, league_dir=_league_dir)
+        except Exception:
+            cur_s, next_s, three_s = None, None, None
+        c["current_year_surplus"] = round(cur_s / _money_divisor(), 1) if cur_s is not None else None
+        c["next_year_surplus"] = round(next_s / _money_divisor(), 1) if next_s is not None else None
+        c["three_year_surplus"] = round(three_s / _money_divisor(), 1) if three_s is not None else None
+
     return display, total_payroll
 
 

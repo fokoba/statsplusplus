@@ -223,7 +223,7 @@ def _scarcity_mult(fv, bucket=None, def_rating=None):
 
 
 def prospect_surplus(fv, age, level, bucket, positional_adjust=False, fv_plus=False,
-                     ovr=None, pot=None, def_rating=None):
+                     ovr=None, pot=None, def_rating=None, league_dir=None):
     """
     Compute surplus value for a prospect over their 6-year control period.
     fv: integer FV grade (strip '+' before passing; use fv_plus=True for half-grades).
@@ -231,7 +231,16 @@ def prospect_surplus(fv, age, level, bucket, positional_adjust=False, fv_plus=Fa
     WAR ramp: players don't immediately produce peak WAR on debut. Early control
     years are discounted to reflect MLB adjustment and development variance:
       Year 1: 60% of peak, Year 2: 80%, Year 3+: 100%
+
+    league_dir: explicit league to compute against. Callers inside the
+    long-running web server must pass this — without it, this function
+    silently used whichever league was active when this module was first
+    imported (see _ensure_league_context), the same stale-caching bug class
+    already fixed for peak_year_surplus()/prospect_surplus_with_option(),
+    which both call _ensure_league_context() themselves but never refreshed
+    it for a caller that reaches prospect_surplus() directly.
     """
+    _ensure_league_context(league_dir)
     dpw       = dollars_per_war()
     lg_min    = league_minimum()
 
@@ -393,9 +402,36 @@ def peak_year_surplus(fv, age, level, bucket, positional_adjust=False, fv_plus=F
     """
     _ensure_league_context(league_dir)
     result = prospect_surplus(fv, age, level, bucket, positional_adjust=positional_adjust,
-                              fv_plus=fv_plus, ovr=ovr, pot=pot, def_rating=def_rating)
+                              fv_plus=fv_plus, ovr=ovr, pot=pot, def_rating=def_rating,
+                              league_dir=league_dir)
     best = max(result["breakdown"], key=lambda r: r["surplus"])
     return {"surplus": best["surplus"], "age": best["player_age"]}
+
+
+def prospect_surplus_horizons(fv, age, level, bucket, game_year, positional_adjust=False,
+                               fv_plus=False, ovr=None, pot=None, def_rating=None,
+                               league_dir=None):
+    """Current-year, next-year, and 3-year (years 1-3 ahead) surplus for a
+    prospect/non-contract player — same base (expected-grade) breakdown
+    prospect_surplus() already builds, just converted from control-year-
+    relative rows to calendar years (using years_to_mlb, same convention
+    player_queries.py uses for the player page) and sliced. Mirrors
+    contract_value.contract_surplus_horizons() for real-contract players.
+
+    Returns (current, next, three_year); any can be None if this player's
+    debut is too far out for that year to be covered by the breakdown.
+    """
+    _ensure_league_context(league_dir)
+    result = prospect_surplus(fv, age, level, bucket, positional_adjust=positional_adjust,
+                              fv_plus=fv_plus, ovr=ovr, pot=pot, def_rating=def_rating,
+                              league_dir=league_dir)
+    eta_yr = int(game_year + result["years_to_mlb"])
+    by_year = {eta_yr + b["control_year"] - 1: b["surplus"] for b in result["breakdown"]}
+    current = by_year.get(game_year)
+    nxt = by_year.get(game_year + 1)
+    three_yr_years = [y for y in (game_year + 1, game_year + 2, game_year + 3) if y in by_year]
+    three_yr = sum(by_year[y] for y in three_yr_years) if three_yr_years else None
+    return current, nxt, three_yr
 
 
 _PREMIUM_DEF_POSITIONS = {"SS", "C", "CF"}
@@ -609,7 +645,8 @@ def prospect_surplus_with_option(fv, age, level, bucket, ovr=None, pot=None,
     """
     _ensure_league_context(league_dir)
     base = prospect_surplus(fv, age, level, bucket, positional_adjust=positional_adjust,
-                            fv_plus=fv_plus, ovr=ovr, pot=pot, def_rating=def_rating)
+                            fv_plus=fv_plus, ovr=ovr, pot=pot, def_rating=def_rating,
+                            league_dir=league_dir)
     base_val = base["total_surplus"]
 
     cfv = _ceiling_fv(pot) if pot else fv
@@ -617,8 +654,10 @@ def prospect_surplus_with_option(fv, age, level, bucket, ovr=None, pot=None,
         return base_val
 
     mid_fv = 5 * round(((fv + cfv) / 2) / 5)
-    s_mid = prospect_surplus(mid_fv, age, level, bucket, ovr=ovr, pot=pot, def_rating=def_rating)["total_surplus"]
-    s_ceil = prospect_surplus(cfv, age, level, bucket, ovr=ovr, pot=pot, def_rating=def_rating)["total_surplus"]
+    s_mid = prospect_surplus(mid_fv, age, level, bucket, ovr=ovr, pot=pot, def_rating=def_rating,
+                             league_dir=league_dir)["total_surplus"]
+    s_ceil = prospect_surplus(cfv, age, level, bucket, ovr=ovr, pot=pot, def_rating=def_rating,
+                              league_dir=league_dir)["total_surplus"]
 
     youth_bonus = max(0, (20 - age)) * 0.05
     gap_factor = min(1.0, ((pot or fv) - fv) / 25)

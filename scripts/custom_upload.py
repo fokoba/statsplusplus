@@ -35,7 +35,7 @@ from statsplusplus.data.db import get_conn
 from statsplusplus.evaluation.park_fit import (
     load_park_factors, compute_batter_park_fit, compute_pitcher_park_fit_from_tools,
 )
-from prospect_value import prospect_surplus_with_option, peak_year_surplus
+from prospect_value import prospect_surplus_with_option, peak_year_surplus, prospect_surplus_horizons
 
 # Same exclusion set as web/team_queries.py's get_free_agent_candidates —
 # NPB-drafted players aren't actually signable even when marked a free agent.
@@ -437,10 +437,13 @@ def evaluate_row(d: dict, league_dir=None) -> dict | None:
     scale = "1-100"
     tool_weights = DEFAULT_TOOL_WEIGHTS
     park = None
+    game_year = None
     if league_dir is not None:
         try:
             from statsplusplus.config.league_config import LeagueConfig
-            scale = LeagueConfig(base_dir=league_dir).ratings_scale
+            _lc = LeagueConfig(base_dir=league_dir)
+            scale = _lc.ratings_scale
+            game_year = _lc.year
         except Exception:
             pass
         try:
@@ -547,6 +550,15 @@ def evaluate_row(d: dict, league_dir=None) -> dict | None:
         peak_surplus, peak_age = peak["surplus"], peak["age"]
     except Exception:
         peak_surplus, peak_age = None, None
+    current_year_surplus = next_year_surplus = three_year_surplus = None
+    if game_year is not None:
+        try:
+            current_year_surplus, next_year_surplus, three_year_surplus = prospect_surplus_horizons(
+                fv_grade, age or norm_age, level_abbr, role, game_year,
+                ovr=composite, pot=true_ceiling, league_dir=league_dir,
+            )
+        except Exception:
+            pass
 
     rule5_eligible = (d.get("R5") or "").strip().lower() == "yes"
     # Annual salary demand ("$9.0m" etc.) — verified against a real free
@@ -592,6 +604,8 @@ def evaluate_row(d: dict, league_dir=None) -> dict | None:
         "rule5_eligible": rule5_eligible, "ask": ask,
         "contract": contract, "contract_salary": contract_salary,
         "surplus": surplus, "peak_surplus": peak_surplus, "peak_age": peak_age,
+        "current_year_surplus": current_year_surplus, "next_year_surplus": next_year_surplus,
+        "three_year_surplus": three_year_surplus,
         "if_rng": if_rng, "of_rng": of_rng,
         "best_position": best_position, "best_position_grade": best_position_grade,
         "is_free_agent": is_free_agent, "on_waivers": on_waivers,

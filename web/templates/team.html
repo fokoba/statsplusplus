@@ -13,6 +13,24 @@
     <span class="label">MLB Surplus</span>
     <span class="value {{ 'pos' if summary.mlb_surplus > 0 else 'neg' if summary.mlb_surplus < 0 else '' }}">${{ summary.mlb_surplus }}{{ money_unit }}</span>
   </div>
+  {% if summary.current_year_surplus is not none %}
+  <div class="summary-item" title="Roster-wide Current-Year Surplus — value minus expected cost this season only, summed across the MLB roster. How built to win NOW you are.">
+    <span class="label">Current Yr Surplus</span>
+    <span class="value {{ 'pos' if summary.current_year_surplus > 0 else 'neg' if summary.current_year_surplus < 0 else '' }}">${{ summary.current_year_surplus }}{{ money_unit }}</span>
+  </div>
+  {% endif %}
+  {% if summary.next_year_surplus is not none %}
+  <div class="summary-item" title="Roster-wide Next-Year Surplus — value minus expected cost for next season, summed across the MLB roster.">
+    <span class="label">Next Yr Surplus</span>
+    <span class="value {{ 'pos' if summary.next_year_surplus > 0 else 'neg' if summary.next_year_surplus < 0 else '' }}">${{ summary.next_year_surplus }}{{ money_unit }}</span>
+  </div>
+  {% endif %}
+  {% if summary.three_year_surplus is not none %}
+  <div class="summary-item" title="Roster-wide 3-Year Surplus — summed value minus expected cost across the next 3 seasons (years 1-3 ahead), summed across the MLB roster. How built to win over the medium term you are.">
+    <span class="label">3-Yr Surplus</span>
+    <span class="value {{ 'pos' if summary.three_year_surplus > 0 else 'neg' if summary.three_year_surplus < 0 else '' }}">${{ summary.three_year_surplus }}{{ money_unit }}</span>
+  </div>
+  {% endif %}
   <div class="summary-item kpi-accent">
     <span class="label">Farm Surplus</span>
     <span class="value {{ 'pos' if summary.farm_surplus > 0 else 'neg' if summary.farm_surplus < 0 else '' }}">${{ summary.farm_surplus }}{{ money_unit }}</span>

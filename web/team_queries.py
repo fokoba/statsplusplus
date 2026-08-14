@@ -155,10 +155,40 @@ def get_summary(team_id=None):
     else:
         phase = "Regular Season"
 
+    # Roster-wide Current/Next/3-Year surplus — same per-player horizons
+    # shown on the Contracts tab, summed across every MLB roster player
+    # (not just the ones the Contracts table displays, which drops
+    # minimum-salary rookies to declutter that view).
+    cur_sum = next_sum = three_sum = 0.0
+    have_any = False
+    try:
+        from contract_value import contract_surplus_horizons as _csh
+        _game_year = get_cfg().year
+        _league_dir = get_cfg().league_dir
+        pids = [r[0] for r in conn.execute(
+            "SELECT player_id FROM contracts WHERE is_major=1 AND player_id IN "
+            "(SELECT player_id FROM players WHERE team_id=?)", (tid,)).fetchall()]
+        for pid in pids:
+            try:
+                cs, ns, ts = _csh(pid, _game_year, league_dir=_league_dir)
+            except Exception:
+                cs, ns, ts = None, None, None
+            if cs is not None:
+                cur_sum += cs; have_any = True
+            if ns is not None:
+                next_sum += ns
+            if ts is not None:
+                three_sum += ts
+    except Exception:
+        have_any = False
+
     return {
         "game_date": state["game_date"], "year": state["year"], "phase": phase,
         "mlb_surplus": round(mlb_surplus / _money_divisor(), 1),
         "farm_surplus": round(farm_surplus / _money_divisor(), 1),
+        "current_year_surplus": round(cur_sum / _money_divisor(), 1) if have_any else None,
+        "next_year_surplus": round(next_sum / _money_divisor(), 1) if have_any else None,
+        "three_year_surplus": round(three_sum / _money_divisor(), 1) if have_any else None,
         "fv50_count": fv50,
     }
 

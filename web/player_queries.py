@@ -405,6 +405,26 @@ def _compute_insights(rd: dict | None, is_pitcher: bool, composite: int | None,
     return insights
 
 
+def _surplus_horizons(rows, game_year):
+    """Current-year, next-year, and 3-year (years 1-3 ahead) surplus —
+    pulled directly from the same per-year breakdown that already feeds the
+    long-term total, not a separate calculation. Each row's surplus is
+    already "value minus expected cost" for that specific year (real
+    contract salary where known, projected arb/perpetual-arb salary where
+    estimated), so slicing by year is all that's needed here.
+
+    Returns (current, next, three_year), any of which is None when the
+    breakdown doesn't cover that year at all — e.g. a prospect who won't
+    debut for several more years has no "current year" surplus to show.
+    """
+    by_year = {r["year"]: r["surplus"] for r in rows}
+    current = by_year.get(game_year)
+    nxt = by_year.get(game_year + 1)
+    three_yr_years = [y for y in (game_year + 1, game_year + 2, game_year + 3) if y in by_year]
+    three_yr = sum(by_year[y] for y in three_yr_years) if three_yr_years else None
+    return current, nxt, three_yr
+
+
 def get_player(pid):
     conn = get_db()
     year = get_cfg().year
@@ -1513,6 +1533,15 @@ def get_player(pid):
                 pass
     except Exception:
         pass
+
+    if surplus_detail and surplus_detail.get("rows"):
+        try:
+            cur_s, next_s, three_s = _surplus_horizons(surplus_detail["rows"], get_cfg().year)
+            surplus_detail["current_year_surplus"] = cur_s
+            surplus_detail["next_year_surplus"] = next_s
+            surplus_detail["three_year_surplus"] = three_s
+        except Exception:
+            pass
 
     # Scouting summary
     summary = None

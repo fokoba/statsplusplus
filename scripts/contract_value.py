@@ -258,6 +258,18 @@ def contract_value(player_id, retention_pct=0.0, _conn=None, _hist=None, league_
     totals   = {s: 0.0 for s in SENSITIVITY}
     breakdown = []
 
+    # Real per-year figures from an uploaded "Team Salary" export (see
+    # custom_upload.import_team_salary) override the formula estimate below
+    # wherever they cover a given calendar year — most valuable for
+    # arbitration years, where the game's own number replaces our guess.
+    uploaded_salary = {}
+    try:
+        for row in conn.execute(
+                "SELECT year, amount FROM salary_estimates WHERE player_id=?", (pid,)):
+            uploaded_salary[row["year"]] = row["amount"]
+    except Exception:
+        pass
+
     # For perpetual arb: track cumulative career WAR (used by salary model)
     _career_war_accum = 0.0
     try:
@@ -335,6 +347,9 @@ def contract_value(player_id, retention_pct=0.0, _conn=None, _hist=None, league_
             idx = current_year + i
             sal_full = c[f"salary_{idx}"] if idx < 15 else min_sal
             sal_full = sal_full or min_sal
+
+        if (game_year + i) in uploaded_salary:
+            sal_full = uploaded_salary[game_year + i]
 
         sal_net = sal_full * (1 - retention_pct)
 

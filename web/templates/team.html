@@ -759,6 +759,15 @@
   <div class="columns">
     <div class="panel">
       <h2>Contracts</h2>
+      <div style="font-size:12px; color:var(--text-dim); margin-bottom:12px; padding:8px; border:1px solid var(--border); border-radius:6px">
+        Current/Next/3-Yr Surplus use the game's own real arbitration/renewal figure wherever one has been uploaded, falling back to our own formula estimate otherwise. Upload the in-game "Team Salary" export (BNN page, saved as .htm/.html) to refresh it:
+        <form method="post" action="/team/{{ tid }}/upload-salary" enctype="multipart/form-data" style="display:inline-flex; align-items:center; gap:6px; margin-top:6px">
+          <input type="file" name="salary_html_file" accept=".htm,.html" required>
+          <button type="submit" class="btn btn-sm">Upload</button>
+        </form>
+        {% if request.args.get('salary_count') %}<span style="color:#4caf50">Imported {{ request.args.get('salary_count') }} salary figures.</span>{% endif %}
+        {% if request.args.get('salary_error') %}<span style="color:#f44336">Upload failed — check the file and try again.</span>{% endif %}
+      </div>
       <table>
         <thead>
           <tr>

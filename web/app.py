@@ -463,5 +463,18 @@ def upload_fa_asks(tid):
         return redirect(f"/team/{tid}?fa_ask_error=1#tab-adds")
 
 
+@app.route("/team/<int:tid>/upload-salary", methods=["POST"])
+def upload_salary(tid):
+    import custom_upload as _cu
+    f = request.files.get("salary_html_file")
+    if not f or not f.filename:
+        return redirect(f"/team/{tid}?salary_error=1#tab-contracts")
+    try:
+        count = _cu.import_team_salary(f.read(), league_dir=_get_cfg().league_dir)
+        return redirect(f"/team/{tid}?salary_count={count}#tab-contracts")
+    except Exception:
+        return redirect(f"/team/{tid}?salary_error=1#tab-contracts")
+
+
 if __name__ == "__main__":
     app.run(debug=True, port=5001)

@@ -17,6 +17,7 @@ Stuff/Movement/Control matched exactly: STU=50, MOV=55, CON=55).
 
 import csv
 import io
+import re
 import sys
 from pathlib import Path
 
@@ -673,6 +674,68 @@ def import_fa_asking_prices(file_bytes: bytes, league_dir=None) -> int:
             (int(pid), dem, now),
         )
         count += 1
+    conn.commit()
+    conn.close()
+    return count
+
+
+def _parse_money_short(text):
+    """'$93k' -> 93000, '$1.2m' -> 1200000. None if no dollar figure found."""
+    m = re.search(r'\$([\d,.]+)\s*([km])?', text, re.I)
+    if not m:
+        return None
+    num = float(m.group(1).replace(",", ""))
+    suffix = (m.group(2) or "").lower()
+    if suffix == "k":
+        num *= 1_000
+    elif suffix == "m":
+        num *= 1_000_000
+    return round(num)
+
+
+def import_team_salary(file_bytes: bytes, league_dir=None) -> int:
+    """Import real per-year salary/arbitration figures from an uploaded OOTP
+    "Team Salary" HTML export. The game computes its own arbitration renewal
+    estimate for each future year (marked (A) in the export, driven mostly by
+    current-year performance) — a real, exact figure we can only approximate
+    with our own formula. Rows are keyed by (player_id, calendar year) and
+    override the formula wherever contract_value.py finds a match.
+
+    Returns the number of (player, year) cells imported.
+    """
+    import datetime
+    html = file_bytes.decode("utf-8", errors="ignore")
+    m = re.search(r'<table class="data sortable".*?</table>', html, re.S)
+    if not m:
+        return 0
+    table_html = m.group(0)
+    years = [int(y) for y in re.findall(r'<th class="hsu dr">(\d{4})</th>', table_html)]
+    if not years:
+        return 0
+
+    conn = get_conn(league_dir)
+    now = datetime.datetime.now().isoformat()
+    count = 0
+    for row_html in re.findall(r'<tr>(.*?)</tr>', table_html, re.S):
+        pid_m = re.search(r'player_(\d+)\.html', row_html)
+        if not pid_m:
+            continue
+        pid = int(pid_m.group(1))
+        cells = re.findall(r'<td[^>]*>(.*?)</td>', row_html, re.S)
+        year_cells = cells[3:3 + len(years)]
+        for yr, cell in zip(years, year_cells):
+            amt = _parse_money_short(cell)
+            if amt is None:
+                continue
+            marker_m = re.search(r'\(([A-Z][#*]?)\)', cell)
+            marker = marker_m.group(1) if marker_m else None
+            conn.execute(
+                "INSERT INTO salary_estimates (player_id, year, amount, marker, uploaded_at) "
+                "VALUES (?, ?, ?, ?, ?) ON CONFLICT(player_id, year) DO UPDATE SET "
+                "amount=excluded.amount, marker=excluded.marker, uploaded_at=excluded.uploaded_at",
+                (pid, yr, amt, marker, now),
+            )
+            count += 1
     conn.commit()
     conn.close()
     return count

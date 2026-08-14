@@ -343,6 +343,20 @@ CREATE TABLE IF NOT EXISTS fa_asking_prices (
     uploaded_at TEXT
 );
 
+-- Real per-year salary/arbitration figures, imported from a manually
+-- uploaded OOTP "Team Salary" export. The game computes its own arbitration
+-- renewal estimate (mostly driven by current-year performance) that we can
+-- only approximate with our own formula — this table lets a real, exact
+-- figure override that formula guess wherever the export covers it.
+CREATE TABLE IF NOT EXISTS salary_estimates (
+    player_id   INTEGER,
+    year        INTEGER,
+    amount      INTEGER,
+    marker      TEXT,
+    uploaded_at TEXT,
+    PRIMARY KEY (player_id, year)
+);
+
 CREATE VIEW IF NOT EXISTS mlb_batting_stats AS
     SELECT * FROM batting_stats WHERE league_id IS NULL;
 

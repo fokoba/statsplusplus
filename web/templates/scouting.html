@@ -138,22 +138,29 @@
 <style>
 .scout-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
 }
 .scout-card {
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 8px 10px;
+  min-width: 0;
+  overflow-x: auto;
 }
 .scout-card-weak { border-color: #ffc107; }
 .scout-card-head {
   font-weight: 600;
   font-size: 13px;
   margin-bottom: 6px;
+  white-space: nowrap;
 }
-.scout-mini-table { width: 100%; font-size: 12px; }
+.scout-mini-table { width: 100%; font-size: 12px; border-collapse: collapse; table-layout: fixed; }
 .scout-mini-table th, .scout-mini-table td { padding: 2px 4px; }
+.scout-mini-table th.left, .scout-mini-table td.left {
+  width: 42%; max-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.scout-mini-table th:first-child, .scout-mini-table td:first-child { width: 18px; }
 tr.scout-marked .player-link { color: var(--text-dim); text-decoration: line-through; }
 </style>
 

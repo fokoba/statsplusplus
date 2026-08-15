@@ -66,6 +66,12 @@ _COMPOSITE_DEF_BUCKET = {"C": "C", "SS": "SS", "2B": "2B", "3B": "3B",
 # SPECIFIC POSITION, so a thin position (e.g. catcher) is judged against
 # its own realistic pool, not squeezed out by a league-wide cutoff.
 _QUALITY_TOP_PCT = 0.25
+
+# Rule 5 Youth specifically uses a looser bar than every other quality-gated
+# section: the whole point there is catching a 55-60 Pot player who's only
+# a ~40 Ovr today (not yet realized, by definition), so a top-25% Ovr cutoff
+# was excluding exactly the profile the section exists to surface.
+_RULE5_YOUTH_TOP_PCT = 0.50
 _TOP_N = 10
 
 # A player counts as a genuine park-fit + surplus "both good" pick when
@@ -453,12 +459,14 @@ def _rule5_has_data(conn):
 
 
 def _rule5_all_players(conn):
-    """All Rule 5-eligible players with ratings, grouped by position, plus
-    each position's top-25%-Ovr cutoff — shared by every Rule 5 section
-    (main, youth) so the quality bar stays identical across both.
+    """All Rule 5-eligible players with ratings, grouped by position — the
+    shared base pool for every Rule 5 section (main, youth). Each caller
+    computes its own quality cutoff at whatever percentile it needs via
+    _position_cutoffs(), since the main and youth sections intentionally
+    use different bars.
     """
     if not _rule5_has_data(conn):
-        return {}, {}
+        return {}
     try:
         rows = conn.execute("""
             SELECT p.player_id, p.name, p.age, p.pos, p.role, r.acc,
@@ -469,7 +477,7 @@ def _rule5_all_players(conn):
             WHERE r.composite_score IS NOT NULL
         """).fetchall()
     except Exception:
-        return {}, {}
+        return {}
 
     players = []
     for pid, name, age, pos, role, acc, comp, ceil_score, true_ceil in rows:
@@ -485,22 +493,26 @@ def _rule5_all_players(conn):
     by_group = {}
     for p in players:
         by_group.setdefault(p["group"], []).append(p)
+    return by_group
 
+
+def _position_cutoffs(by_group, top_pct):
     cutoffs = {}
     for group, gp in by_group.items():
         ovrs = sorted((p["composite_score"] for p in gp if p["composite_score"] is not None), reverse=True)
         if ovrs:
-            n_ = max(1, round(len(ovrs) * _QUALITY_TOP_PCT))
+            n_ = max(1, round(len(ovrs) * top_pct))
             cutoffs[group] = ovrs[n_ - 1]
-    return by_group, cutoffs
+    return cutoffs
 
 
 def _rule5_targets(conn, high_confidence):
     """Rule 5-eligible players worth a look — same quality gate and
     accuracy split as everything else, scoped to this separate pool."""
-    by_group, cutoffs = _rule5_all_players(conn)
+    by_group = _rule5_all_players(conn)
     if not by_group:
         return {}
+    cutoffs = _position_cutoffs(by_group, _QUALITY_TOP_PCT)
 
     def _needs_scout(p):
         if high_confidence:
@@ -522,14 +534,16 @@ def _rule5_targets(conn, high_confidence):
 
 def _rule5_youth_targets(conn, high_confidence):
     """The real value in Rule 5 is near-MLB-ready upside: age 24 or under,
-    sorted by Potential instead of Ovr, but still gated to the same
-    top-25%-Ovr-at-position cutoff as the main section — surfaces a
-    55-60 Pot / ~40 Ovr type: not there yet, but close and with real
-    upside, exactly the profile Rule 5 is worth using on.
+    sorted by Potential instead of Ovr, gated to a looser top-50%-Ovr-at-
+    position cutoff (vs. the main section's top 25%) — a 55-60 Pot player
+    is often still only a ~40 Ovr today by definition (that's the whole
+    gap this section exists to surface), so the tighter bar was excluding
+    exactly the profile Rule 5 is worth using on.
     """
-    by_group, cutoffs = _rule5_all_players(conn)
+    by_group = _rule5_all_players(conn)
     if not by_group:
         return {}
+    cutoffs = _position_cutoffs(by_group, _RULE5_YOUTH_TOP_PCT)
 
     def _needs_scout(p):
         if high_confidence:

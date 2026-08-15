@@ -446,6 +446,29 @@ def best_available():
                            **data)
 
 
+@app.route("/team-compare")
+def team_compare():
+    import scouting_queries as _sq
+    from web_league_context import my_team_id as _my_team_id, team_names_map as _team_names_map
+    my_tid = _my_team_id()
+    my_scope = request.args.get("my") if request.args.get("my") in ("mlb", "org") else "mlb"
+    their_tid = request.args.get("their_team", type=int)
+    their_scope = request.args.get("their_scope") if request.args.get("their_scope") in ("mlb", "org") else "mlb"
+
+    data = {}
+    if their_tid and their_tid != my_tid:
+        data = _sq.get_team_compare(my_tid, my_scope, their_tid, their_scope)
+
+    other_teams = sorted(
+        ((tid, name) for tid, name in _team_names_map().items() if tid != my_tid),
+        key=lambda x: x[1],
+    )
+    return render_template("team_compare.html",
+                           breadcrumbs=[{"label": "Team Compare", "url": "/team-compare"}],
+                           my_scope=my_scope, their_team=their_tid, their_scope=their_scope,
+                           other_teams=other_teams, **data)
+
+
 @app.route("/rule5-upload", methods=["POST"])
 def rule5_upload():
     import scouting_queries as _sq

@@ -157,7 +157,7 @@ def _newly_confirmed_pids(conn):
     return latest_high - prior_high
 
 
-def _build_entries(rows, ratings_scale, park, hitter_weights, pitcher_weights, newly_confirmed, is_mine):
+def _build_entries(rows, ratings_scale, park, hitter_weights, pitcher_weights, newly_confirmed, is_mine, is_theirs=False):
     """Turn raw _ROW_COLUMNS_SQL rows into player entry dicts — the exact
     same computation (tools, park fit, defensive rating, vR/vL composite,
     surplus) regardless of whether the source is the free-agent pool or a
@@ -271,7 +271,8 @@ def _build_entries(rows, ratings_scale, park, hitter_weights, pitcher_weights, n
                                and surplus is not None and surplus > _GOOD_SURPLUS),
             "newly_confirmed": pid in newly_confirmed,
             "is_mine": is_mine,
-            "roster_tag": level_disp if is_mine else None,
+            "is_theirs": is_theirs,
+            "roster_tag": level_disp if (is_mine or is_theirs) else None,
         })
     return out
 
@@ -619,3 +620,75 @@ def import_rule5_eligible(file_bytes, league_dir=None):
     conn.commit()
     conn.close()
     return len(pids)
+
+
+def get_team_compare(my_team_id, my_scope, their_team_id, their_scope):
+    """Roster-vs-roster comparison: my team/org vs one other team/org,
+    comingled into the same ranked lists per position — no accuracy split
+    (this isn't about scouting allocation, both sides are fully known
+    rosters) and no top-25% quality gate (neither side is a free-agent
+    pool that needs filtering down to realistic MLB talent — every
+    rostered player from both sides is inherently relevant to the
+    comparison). Park Fit is always computed against MY park, regardless
+    of which side a player is on, since the question is "how would this
+    player perform in my park," not two different home parks at once.
+    """
+    conn = get_db()
+    park = load_park_factors(get_cfg().league_dir)
+    ratings_scale = get_cfg().ratings_scale
+    all_weights = load_tool_weights(get_cfg().league_dir)
+    hitter_weights = all_weights.get("hitter", {})
+    pitcher_weights = all_weights.get("pitcher", {})
+
+    ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
+    ed_surplus = conn.execute("SELECT MAX(eval_date) FROM player_surplus").fetchone()[0]
+
+    my_where, my_params = _org_where(my_team_id, my_scope)
+    my_rows = _fetch_rows(conn, my_where, my_params, ed, ed_surplus)
+    mine = _build_entries(my_rows, ratings_scale, park, hitter_weights, pitcher_weights,
+                           set(), is_mine=True)
+
+    their_where, their_params = _org_where(their_team_id, their_scope)
+    their_rows = _fetch_rows(conn, their_where, their_params, ed, ed_surplus)
+    theirs = _build_entries(their_rows, ratings_scale, park, hitter_weights, pitcher_weights,
+                             set(), is_mine=False, is_theirs=True)
+
+    by_group = {}
+    for p in mine + theirs:
+        by_group.setdefault(p["group"], []).append(p)
+
+    def _ranked(key):
+        out = {}
+        for group in ORDER:
+            pool = [p for p in by_group.get(group, []) if p[key] is not None]
+            pool.sort(key=lambda p: -p[key])
+            out[group] = pool
+        return out
+
+    def _ranked_def():
+        out = {}
+        for group in _HITTER_POS_CODES.values():
+            pool = [p for p in by_group.get(group, []) if p["def_rating"] is not None]
+            pool.sort(key=lambda p: -p["def_rating"])
+            out[group] = pool
+        return out
+
+    def _ranked_youth():
+        out = {}
+        for group in ORDER:
+            pool = [p for p in by_group.get(group, [])
+                    if p["age"] is not None and p["age"] <= 24 and p["potential"] is not None]
+            pool.sort(key=lambda p: -p["potential"])
+            out[group] = pool
+        return out
+
+    return {
+        "cmp_ovr": _ranked("composite_score"),
+        "cmp_park": _ranked("park_fit") if park else {},
+        "cmp_def": _ranked_def(),
+        "cmp_vr": _ranked("vr_score"),
+        "cmp_vl": _ranked("vl_score"),
+        "cmp_youth": _ranked_youth(),
+        "order": ORDER, "hitter_order": list(_HITTER_POS_CODES.values()),
+        "park_configured": bool(park),
+    }

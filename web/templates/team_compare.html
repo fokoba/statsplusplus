@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h1>Team Compare</h1>
+  <div style="color:var(--text-dim); font-size:13px; margin-top:4px">
+    My roster vs one other team's, comingled into the same ranked lists per position — every player from both sides
+    shows (no accuracy split, no quality gate: both rosters are fully known, so there's nothing to filter down).
+    Park Fit is always computed against MY home park, even for their players, since the question is how they'd perform
+    here. <span class="scout-mine-tag">tag</span> rows are mine, <span class="scout-theirs-tag">tag</span> rows are theirs.
+  </div>
+</div>
+
+<div style="margin-bottom:16px; display:flex; flex-wrap:wrap; gap:16px; align-items:center; font-size:13px">
+  <div>
+    Mine:
+    <label><input type="radio" name="my-scope" value="mlb" {% if my_scope == 'mlb' %}checked{% endif %} onchange="cmpUpdate()"> MLB Team</label>
+    <label><input type="radio" name="my-scope" value="org" {% if my_scope == 'org' %}checked{% endif %} onchange="cmpUpdate()"> Whole Org</label>
+  </div>
+  <div>
+    vs:
+    <select id="their-team-select" onchange="cmpUpdate()">
+      <option value="">Select a team…</option>
+      {% for tid, name in other_teams %}
+      <option value="{{ tid }}" {% if their_team == tid %}selected{% endif %}>{{ name }}</option>
+      {% endfor %}
+    </select>
+    <label><input type="radio" name="their-scope" value="mlb" {% if their_scope == 'mlb' %}checked{% endif %} onchange="cmpUpdate()"> MLB Team</label>
+    <label><input type="radio" name="their-scope" value="org" {% if their_scope == 'org' %}checked{% endif %} onchange="cmpUpdate()"> Whole Org</label>
+  </div>
+</div>
+
+{% if not their_team %}
+<div class="panel"><div style="color:var(--text-dim); font-size:13px">Select a team above to compare against.</div></div>
+{% else %}
+
+{% macro pos_card(group, players, value_key, value_label) %}
+<div class="scout-card" data-group="{{ group }}">
+  <div class="scout-card-head">{{ group }} <span style="color:var(--text-dim); font-weight:400">({{ players|length }})</span></div>
+  {% if players %}
+  <table class="scout-mini-table">
+    <thead>
+      <tr>
+        <th></th><th class="left">Name</th><th>Age</th><th>Ovr</th>
+        {% if value_key %}<th>{{ value_label }}</th>{% endif %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in players %}
+      <tr{% if p.is_mine %} class="scout-mine-row"{% elif p.is_theirs %} class="scout-theirs-row"{% endif %}>
+        <td><input type="checkbox" class="scout-checkbox" data-pid="{{ p.pid }}" data-page="team_compare"></td>
+        <td class="left">
+          {% if p.is_mine %}<span class="scout-mine-tag">{{ p.roster_tag }}</span>{% elif p.is_theirs %}<span class="scout-theirs-tag">{{ p.roster_tag }}</span>{% endif %}
+          <a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a>
+        </td>
+        <td>{{ p.age if p.age is not none else '-' }}</td>
+        <td><span class="ovr-color" data-g="{{ p.composite_score }}">{{ p.composite_score if p.composite_score is not none else '-' }}</span></td>
+        {% if value_key %}
+        <td class="{{ 'pos' if p[value_key] and p[value_key] > 0 else 'neg' if p[value_key] and p[value_key] < 0 else '' }}">
+          {{ p[value_key]|round(0, 'common')|int if p[value_key] is not none else '-' }}
+        </td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div style="color:var(--text-dim); font-size:12px; padding:8px 0">No qualifying players.</div>
+  {% endif %}
+</div>
+{% endmacro %}
+
+<div class="panel">
+  <h2>Ovr Comparison <span style="color:var(--text-dim); font-weight:400; font-size:13px">(every player from both rosters, per position, by Ovr)</span></h2>
+  <div class="scout-grid">
+    {% for group in order %}
+    {{ pos_card(group, cmp_ovr.get(group, []), none, '') }}
+    {% endfor %}
+  </div>
+</div>
+
+{% if park_configured %}
+<div class="panel">
+  <h2>Park Fit Comparison <span style="color:var(--text-dim); font-weight:400; font-size:13px">(how each player would fit MY home park)</span></h2>
+  <div class="scout-grid">
+    {% for group in order %}
+    {{ pos_card(group, cmp_park.get(group, []), 'park_fit', 'Fit') }}
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<div class="panel">
+  <h2>Defenders Comparison <span style="color:var(--text-dim); font-weight:400; font-size:13px">(hitters only, by defensive rating at the position)</span></h2>
+  <div class="scout-grid">
+    {% for group in hitter_order %}
+    {{ pos_card(group, cmp_def.get(group, []), 'def_rating', 'Def') }}
+    {% endfor %}
+  </div>
+</div>
+
+<div class="panel">
+  <h2>vR Comparison <span style="color:var(--text-dim); font-weight:400; font-size:13px">(Ovr specifically vs RHP)</span></h2>
+  <div class="scout-grid">
+    {% for group in order %}
+    {{ pos_card(group, cmp_vr.get(group, []), 'vr_score', 'vR') }}
+    {% endfor %}
+  </div>
+</div>
+
+<div class="panel">
+  <h2>vL Comparison <span style="color:var(--text-dim); font-weight:400; font-size:13px">(Ovr specifically vs LHP)</span></h2>
+  <div class="scout-grid">
+    {% for group in order %}
+    {{ pos_card(group, cmp_vl.get(group, []), 'vl_score', 'vL') }}
+    {% endfor %}
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Youth by Potential <span style="color:var(--text-dim); font-weight:400; font-size:13px">(age 24 or under, sorted by Potential — whose pipeline has more upside)</span></h2>
+  <div class="scout-grid">
+    {% for group in order %}
+    {{ pos_card(group, cmp_youth.get(group, []), 'potential', 'Pot') }}
+    {% endfor %}
+  </div>
+</div>
+
+{% endif %}
+
+<style>
+.scout-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
+}
+.scout-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  min-width: 0;
+  overflow-x: auto;
+}
+.scout-card-head {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 6px;
+  white-space: nowrap;
+}
+.scout-mini-table { width: 100%; font-size: 12px; border-collapse: collapse; table-layout: fixed; }
+.scout-mini-table th, .scout-mini-table td { padding: 2px 4px; }
+.scout-mini-table th.left, .scout-mini-table td.left {
+  width: 46%; max-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.scout-mini-table th:first-child, .scout-mini-table td:first-child { width: 18px; }
+tr.scout-marked .player-link { color: var(--text-dim); text-decoration: line-through; }
+tr.scout-mine-row { background: rgba(76, 175, 80, 0.12); }
+tr.scout-theirs-row { background: rgba(33, 150, 243, 0.12); }
+.scout-mine-tag {
+  display: inline-block; font-size: 9px; font-weight: 700; color: #4caf50;
+  border: 1px solid #4caf50; border-radius: 3px; padding: 0 3px; margin-right: 3px;
+}
+.scout-theirs-tag {
+  display: inline-block; font-size: 9px; font-weight: 700; color: #2196f3;
+  border: 1px solid #2196f3; border-radius: 3px; padding: 0 3px; margin-right: 3px;
+}
+</style>
+
+<script>
+function cmpUpdate() {
+  var url = new URL(window.location.href);
+  var myScope = document.querySelector('input[name="my-scope"]:checked');
+  var theirScope = document.querySelector('input[name="their-scope"]:checked');
+  var theirTeam = document.getElementById('their-team-select').value;
+  if (myScope) url.searchParams.set('my', myScope.value);
+  if (theirScope) url.searchParams.set('their_scope', theirScope.value);
+  if (theirTeam) url.searchParams.set('their_team', theirTeam);
+  else url.searchParams.delete('their_team');
+  window.location.href = url.toString();
+}
+</script>
+
+<script>
+/* ── Persisted per-page checkboxes: dims/checks every mention of a player on the page ── */
+(function() {
+  var STORAGE_KEY = 'statspp_scout_marks';
+  function loadMarks() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
+    catch (e) { return {}; }
+  }
+  function saveMarks(marks) { localStorage.setItem(STORAGE_KEY, JSON.stringify(marks)); }
+
+  var marks = loadMarks();
+
+  function applyMark(pid, marked) {
+    document.querySelectorAll('.scout-checkbox[data-pid="' + pid + '"]').forEach(function(cb) {
+      cb.checked = marked;
+      var row = cb.closest('tr');
+      if (marked) row.classList.add('scout-marked');
+      else row.classList.remove('scout-marked');
+    });
+  }
+
+  document.querySelectorAll('.scout-checkbox').forEach(function(cb) {
+    var key = cb.dataset.page + ':' + cb.dataset.pid;
+    if (marks[key]) applyMark(cb.dataset.pid, true);
+    cb.addEventListener('change', function() {
+      var pid = cb.dataset.pid;
+      var k = cb.dataset.page + ':' + pid;
+      if (cb.checked) { marks[k] = true; } else { delete marks[k]; }
+      applyMark(pid, cb.checked);
+      saveMarks(marks);
+    });
+  });
+})();
+</script>
+
+{% endblock %}

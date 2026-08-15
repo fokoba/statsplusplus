@@ -66,7 +66,7 @@
       {% for p in players %}
       <tr>
         <td><input type="checkbox" class="scout-checkbox" data-pid="{{ p.pid }}" data-page="{{ page_key }}"></td>
-        <td class="left">{% if p.good_pick %}⭐{% endif %}<a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
+        <td class="left">{% if p.good_pick %}<span title="Both a good Park Fit (20+) and a positive Long-Term Surplus — a high-confidence add">⭐</span>{% endif %}<a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
         <td>{{ p.age if p.age is not none else '-' }}</td>
         <td><span class="ovr-color" data-g="{{ p.composite_score }}">{{ p.composite_score if p.composite_score is not none else '-' }}</span></td>
         {% if value_key %}

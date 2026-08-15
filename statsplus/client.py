@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -72,11 +73,23 @@ class CookieExpiredError(Exception):
     pass
 
 
-def _fetch(url: str) -> str:
+def _fetch(url: str, max_retries: int = 5) -> str:
     _, cookie = _resolve_creds()
     req = urllib.request.Request(url, headers={"Cookie": cookie, "Accept": "application/json"})
-    with urllib.request.urlopen(req) as r:
-        body = r.read().decode()
+    for attempt in range(max_retries):
+        try:
+            with urllib.request.urlopen(req) as r:
+                body = r.read().decode()
+            break
+        except urllib.error.HTTPError as e:
+            if e.code in (429, 502, 503, 504) and attempt < max_retries - 1:
+                retry_after = e.headers.get("Retry-After") if e.headers else None
+                wait = int(retry_after) if retry_after and retry_after.isdigit() else 20 * (attempt + 1)
+                log.info("HTTP %d — waiting %ds before retry... (attempt %d/%d)",
+                          e.code, wait, attempt + 1, max_retries)
+                time.sleep(wait)
+                continue
+            raise
     if "requires user to be logged in" in body:
         raise CookieExpiredError(
             "StatsPlus session expired — update your cookie in Settings.")

@@ -1050,7 +1050,8 @@ def get_free_agent_candidates(team_id=None):
                r.composite_score, r.ceiling_score, r.true_ceiling,
                pf.fv, pf.fv_str, pf.bucket, ps.surplus, pf.prospect_surplus,
                pf.fv_continuous, fap.ask_raw,
-               r.cntct, r.gap, r.pow, r.eye, r.stf, r.mov, r.ctrl, r.bats
+               r.cntct, r.gap, r.pow, r.eye, r.stf, r.mov, r.ctrl, r.bats,
+               r.pot_cntct, r.pot_gap, r.pot_pow, r.pot_stf, r.pot_mov, r.pot_ctrl
         FROM players p
         LEFT JOIN latest_ratings r ON p.player_id = r.player_id
         LEFT JOIN prospect_fv pf ON pf.player_id = p.player_id AND pf.eval_date = ?
@@ -1063,7 +1064,7 @@ def get_free_agent_candidates(team_id=None):
     from statsplusplus.config.ratings import norm_continuous as _normc
     from statsplusplus.evaluation.composite import compute_specialist_score, specialist_label as _spec_label
     from statsplusplus.evaluation.park_fit import (
-        load_park_factors, compute_batter_park_fit,
+        load_park_factors, compute_batter_park_fit, compute_batter_park_value_pct,
         compute_pitcher_park_fit_from_stats, compute_pitcher_park_fit_from_tools,
     )
     ratings_scale = get_cfg().ratings_scale
@@ -1106,7 +1107,8 @@ def get_free_agent_candidates(team_id=None):
         (pid, name, age, level, pos, role, intel, wrk_ethic, lead, loy, greed,
          acc, comp, ceil_score, true_ceil, fv, fv_str, pf_bucket, surplus_raw,
          prospect_surplus_raw, fv_continuous, ask_raw,
-         cntct, gap, pow_, eye, stf, mov, ctrl, bats) = r
+         cntct, gap, pow_, eye, stf, mov, ctrl, bats,
+         pot_cntct, pot_gap, pot_pow, pot_stf, pot_mov, pot_ctrl) = r
         bucket = _bucket_for_display(pf_bucket, role, pos)
         potential = true_ceil if true_ceil is not None else ceil_score
         buffs, concerns = _personality_notes(intel, wrk_ethic, lead, loy, greed)
@@ -1120,7 +1122,23 @@ def get_free_agent_candidates(team_id=None):
                       "power": _normc(pow_, ratings_scale), "eye": _normc(eye, ratings_scale)}
         spec_score = compute_specialist_score(_tools, is_pitcher)
 
+        # Park fit/value for a not-yet-MLB player should reflect what he'll
+        # grow into, not his barely-developed current tools (a 16yo's
+        # current Power is close to meaningless — his Pot is the signal).
+        # Established MLB free agents use current tools as before: their
+        # potential IS effectively already realized.
+        if level_disp != "MLB":
+            if is_pitcher:
+                _park_tools = {"stuff": _normc(pot_stf, ratings_scale), "movement": _normc(pot_mov, ratings_scale),
+                               "control": _normc(pot_ctrl, ratings_scale)}
+            else:
+                _park_tools = {"contact": _normc(pot_cntct, ratings_scale), "gap": _normc(pot_gap, ratings_scale),
+                               "power": _normc(pot_pow, ratings_scale)}
+        else:
+            _park_tools = _tools
+
         park_fit = None
+        park_value = None
         if park:
             if is_pitcher:
                 obs = pitcher_stats.get(pid)
@@ -1129,10 +1147,14 @@ def get_free_agent_candidates(team_id=None):
                         obs["gb_pct"], obs["k_pct"], obs["bb_pct"],
                         lg_gb_pct, lg_k_pct, lg_bb_pct, park)
                 else:
-                    park_fit = compute_pitcher_park_fit_from_tools(_tools, park)
+                    park_fit = compute_pitcher_park_fit_from_tools(_park_tools, park)
             else:
                 _hw = hitter_weights_by_bucket.get(bucket, hitter_weights_by_bucket.get("COF", {}))
-                park_fit = compute_batter_park_fit(_tools, bats, _hw, park)
+                park_fit = compute_batter_park_fit(_park_tools, bats, _hw, park)
+                _value_pct = compute_batter_park_value_pct(_park_tools, bats, _hw, park)
+                _park_val_basis = surplus_raw if surplus_raw is not None else prospect_surplus_raw
+                if _value_pct is not None and _park_val_basis:
+                    park_value = round((_park_val_basis * _value_pct) / _money_divisor(), 1)
 
         _cur_s, _next_s, _three_s = _surplus_horizons_live(fv_continuous, age, level_disp,
                                                             pf_bucket, ovr=comp, pot=potential)
@@ -1148,7 +1170,7 @@ def get_free_agent_candidates(team_id=None):
             "current_year_surplus": _cur_s, "next_year_surplus": _next_s, "three_year_surplus": _three_s,
             "ask": ask_raw or "MiLC",
             "specialist_score": spec_score, "specialist_label": _spec_label(spec_score),
-            "park_fit": park_fit,
+            "park_fit": park_fit, "park_value": park_value,
         }
         if age is not None and age <= _INTL_FA_AGE_MAX:
             if _intl_bids_enabled:

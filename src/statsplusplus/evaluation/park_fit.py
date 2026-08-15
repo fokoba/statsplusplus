@@ -37,6 +37,49 @@ def _clamp100(v: float) -> int:
 # Batters
 # ---------------------------------------------------------------------------
 
+def _batter_park_raw(
+    tools: dict[str, float | int | None],
+    bats: Optional[str],
+    weights: dict[str, float],
+    park: dict,
+) -> Optional[tuple[float, float]]:
+    """Shared setup for both batter park functions below: resolves
+    handedness-split factors, matches them against available tools/weights,
+    and returns (raw, max_possible) — see compute_batter_park_fit() for what
+    each represents. None if there's not enough tool data to score.
+    """
+    if not park:
+        return None
+
+    bats = (bats or "").upper()
+    if bats == "L":
+        avg_pf, hr_pf = park.get("avg_l", park["avg"]), park.get("hr_l", park["hr"])
+    elif bats == "R":
+        avg_pf, hr_pf = park.get("avg_r", park["avg"]), park.get("hr_r", park["hr"])
+    elif bats == "S":
+        avg_pf = (park.get("avg_l", park["avg"]) + park.get("avg_r", park["avg"])) / 2
+        hr_pf = (park.get("hr_l", park["hr"]) + park.get("hr_r", park["hr"])) / 2
+    else:
+        avg_pf, hr_pf = park["avg"], park["hr"]
+
+    gap_pf = (park["doubles"] + park["triples"]) / 2
+
+    categories = [
+        ("contact", avg_pf),
+        ("gap", gap_pf),
+        ("power", hr_pf),
+    ]
+    available = [(tools.get(k), pf, weights.get(k, 0.0)) for k, pf in categories]
+    available = [(v, pf, w) for v, pf, w in available if v is not None and w > 0]
+    if not available:
+        return None
+
+    total_w = sum(w for _, _, w in available)
+    raw = sum((v - 50.0) * (pf - 1.0) * (w / total_w) for v, pf, w in available)
+    max_possible = sum(30.0 * abs(pf - 1.0) * (w / total_w) for _, pf, w in available)
+    return raw, max_possible
+
+
 def compute_batter_park_fit(
     tools: dict[str, float | int | None],
     bats: Optional[str],
@@ -67,44 +110,51 @@ def compute_batter_park_fit(
 
     Returns:
         Integer -100..100, or None if there's not enough tool data to score.
+        This is a RELATIVE/comparative score (100 = the best any player's
+        profile could possibly do in this park) — not a dollar or % figure.
+        See compute_batter_park_value_pct() for a quantified version.
     """
-    if not park:
+    result = _batter_park_raw(tools, bats, weights, park)
+    if result is None:
         return None
-
-    bats = (bats or "").upper()
-    if bats == "L":
-        avg_pf, hr_pf = park.get("avg_l", park["avg"]), park.get("hr_l", park["hr"])
-    elif bats == "R":
-        avg_pf, hr_pf = park.get("avg_r", park["avg"]), park.get("hr_r", park["hr"])
-    elif bats == "S":
-        avg_pf = (park.get("avg_l", park["avg"]) + park.get("avg_r", park["avg"])) / 2
-        hr_pf = (park.get("hr_l", park["hr"]) + park.get("hr_r", park["hr"])) / 2
-    else:
-        avg_pf, hr_pf = park["avg"], park["hr"]
-
-    gap_pf = (park["doubles"] + park["triples"]) / 2
-
-    categories = [
-        ("contact", avg_pf),
-        ("gap", gap_pf),
-        ("power", hr_pf),
-    ]
-    available = [(tools.get(k), pf, weights.get(k, 0.0)) for k, pf in categories]
-    available = [(v, pf, w) for v, pf, w in available if v is not None and w > 0]
-    if not available:
-        return None
-
-    total_w = sum(w for _, _, w in available)
-    raw = sum((v - 50.0) * (pf - 1.0) * (w / total_w) for v, pf, w in available)
-
-    # Scale so 100 = the best this specific park can reward (an 80 in every
-    # available category, each already pointed the direction this park
-    # favors) — keeps the scale meaningful across parks with very different
-    # factor magnitudes instead of picking one arbitrary global constant.
-    max_possible = sum(30.0 * abs(pf - 1.0) * (w / total_w) for _, pf, w in available)
+    raw, max_possible = result
     if max_possible <= 0:
         return 0
     return _clamp100(100.0 * raw / max_possible)
+
+
+def compute_batter_park_value_pct(
+    tools: dict[str, float | int | None],
+    bats: Optional[str],
+    weights: dict[str, float],
+    park: dict,
+) -> Optional[float]:
+    """Estimated marginal %% swing in this batter's total production from
+    park fit, relative to a league-average hitter (tools at 50 in every
+    category) — a quantified counterpart to compute_batter_park_fit()'s
+    0-100 relative score, meant to convert directly into dollars.
+
+    Same weighted category setup as compute_batter_park_fit() (so the two
+    always agree in sign and roughly in ranking), but this one isn't
+    normalized against a theoretical max-grade profile: dividing by 30 (the
+    full range from average(50) to max(80) on the 20-80 scale) means a
+    player who is fully maxed out and 100% weighted toward one category
+    converges to that category's exact real park-factor deviation — e.g. a
+    grade-80 pure power bat in a park with hr=1.10 nets +10.0% here, not an
+    arbitrary comparative score. An average hitter (all tools at 50) nets
+    0% — this measures the marginal park benefit of leaning into what the
+    park rewards, not the park's absolute effect on a league-average player.
+
+    Multiply the result by a projected value figure (e.g. Long-Term
+    Surplus) for a rough dollar estimate. Deliberately kept out of surplus/
+    bid figures themselves — this is a discovery signal on top of them, not
+    a correction folded into the core valuation.
+    """
+    result = _batter_park_raw(tools, bats, weights, park)
+    if result is None:
+        return None
+    raw, _ = result
+    return raw / 30.0
 
 
 # ---------------------------------------------------------------------------

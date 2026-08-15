@@ -1067,7 +1067,7 @@
 
 {# ══════ Add Candidates ══════ #}
 <div class="tab-content" id="tab-adds">
-  {% macro add_table(rows, table_id, cur_team_col, show_ask=false, show_spec=false, show_park=false, show_bid=false) %}
+  {% macro add_table(rows, table_id, cur_team_col, show_ask=false, show_spec=false, show_park=false, show_bid=false, show_park_value=false) %}
   {% if rows %}
   <table id="{{ table_id }}">
     <thead>
@@ -1098,7 +1098,10 @@
         <th data-sort="num" title="0 = perfectly balanced across core tools, 100 = one standout carrying tool. Spread between best and worst core tool (Contact/Gap/Power/Eye for hitters, Stuff/Movement/Control for pitchers) on the 20-80 scale.">Balance</th>
         {% endif %}
         {% if show_park %}
-        <th data-sort="num" title="-100 to 100: how well this player's skills match your home park's factors. Hitters: Contact/Gap/Power vs this park's AVG/2B+3B/HR factors (handedness-split). Pitchers: real observed GB%/K%/BB% when available, scouting tools otherwise.">Park Fit</th>
+        <th data-sort="num" title="-100 to 100: how well this player's skills match your home park's factors. Hitters: Contact/Gap/Power vs this park's AVG/2B+3B/HR factors (handedness-split). Pitchers: real observed GB%/K%/BB% when available, scouting tools otherwise. Not-yet-MLB players are scored on their POTENTIAL tools, not current — reflects who they'll grow into.">Park Fit</th>
+        {% endif %}
+        {% if show_park_value %}
+        <th data-sort="num" title="Estimated $ swing in Long-Term Surplus from park fit alone — Park Fit quantified into dollars. Deliberately NOT included in Long-Term Surplus or Rec. Bid above; this is a discovery signal on top of them, not a correction to them.">Park Value</th>
         {% endif %}
         <th class="left">Personality</th>
       </tr>
@@ -1133,6 +1136,9 @@
         {% endif %}
         {% if show_park %}
         <td class="{{ 'pos' if p.park_fit and p.park_fit > 0 else 'neg' if p.park_fit and p.park_fit < 0 else '' }}">{{ p.park_fit if p.park_fit is not none else '-' }}</td>
+        {% endif %}
+        {% if show_park_value %}
+        <td class="{{ 'pos' if p.park_value and p.park_value > 0 else 'neg' if p.park_value and p.park_value < 0 else '' }}">{{ '$' + p.park_value|string + money_unit if p.park_value is not none else '-' }}</td>
         {% endif %}
         <td class="left" style="font-size:12px">
           {%- if p.buffs %}<span style="color:#4caf50">{{ p.buffs|join(", ") }}</span>{% endif -%}
@@ -1185,7 +1191,7 @@
       </label>
     </div>
     <h3 style="font-size:13px; margin:12px 0 6px">Hitters</h3>
-    {{ add_table(fa_candidates.hitters, "fa-hitters", false, show_ask=true, show_spec=true, show_park=true) }}
+    {{ add_table(fa_candidates.hitters, "fa-hitters", false, show_ask=true, show_spec=true, show_park=true, show_park_value=true) }}
     <h3 style="font-size:13px; margin:16px 0 6px">Pitchers</h3>
     {{ add_table(fa_candidates.pitchers, "fa-pitchers", false, show_ask=true, show_spec=true, show_park=true) }}
   </div>
@@ -1209,9 +1215,9 @@
       All signable free agents age {{ fa_candidates.prospect_age_max }} or under with FV {{ fa_candidates.prospect_min_fv }} or higher, ranked by FV (or potential ceiling when unevaluated) instead of current Ovr — surfaces high-upside youth the Ovr-based list above misses.
     </div>
     <h3 style="font-size:13px; margin:12px 0 6px">Hitters</h3>
-    {{ add_table(fa_candidates.young_hitters, "fa-young-hitters", false) }}
+    {{ add_table(fa_candidates.young_hitters, "fa-young-hitters", false, show_park=true, show_park_value=true) }}
     <h3 style="font-size:13px; margin:16px 0 6px">Pitchers</h3>
-    {{ add_table(fa_candidates.young_pitchers, "fa-young-pitchers", false) }}
+    {{ add_table(fa_candidates.young_pitchers, "fa-young-pitchers", false, show_park=true) }}
   </div>
 
   <div class="panel">
@@ -1231,9 +1237,9 @@
       All signable free agents age {{ fa_candidates.prospect_age_max }} or under with FV {{ fa_candidates.prospect_min_fv }} or higher and zero personality concerns, ranked by FV (or potential ceiling when unevaluated).
     </div>
     <h3 style="font-size:13px; margin:12px 0 6px">Hitters</h3>
-    {{ add_table(fa_candidates.clean_young_hitters, "fa-clean-young-hitters", false) }}
+    {{ add_table(fa_candidates.clean_young_hitters, "fa-clean-young-hitters", false, show_park=true, show_park_value=true) }}
     <h3 style="font-size:13px; margin:16px 0 6px">Pitchers</h3>
-    {{ add_table(fa_candidates.clean_young_pitchers, "fa-clean-young-pitchers", false) }}
+    {{ add_table(fa_candidates.clean_young_pitchers, "fa-clean-young-pitchers", false, show_park=true) }}
   </div>
 
   <div class="panel">
@@ -1252,9 +1258,9 @@
     </div>
     {% endif %}
     <h3 style="font-size:13px; margin:12px 0 6px">Hitters</h3>
-    {{ add_table(fa_candidates.international_hitters, "fa-intl-hitters", false, show_bid=_show_intl_bid) }}
+    {{ add_table(fa_candidates.international_hitters, "fa-intl-hitters", false, show_bid=_show_intl_bid, show_park=true, show_park_value=true) }}
     <h3 style="font-size:13px; margin:16px 0 6px">Pitchers</h3>
-    {{ add_table(fa_candidates.international_pitchers, "fa-intl-pitchers", false, show_bid=_show_intl_bid) }}
+    {{ add_table(fa_candidates.international_pitchers, "fa-intl-pitchers", false, show_bid=_show_intl_bid, show_park=true) }}
   </div>
 </div>
 

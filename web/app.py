@@ -433,6 +433,15 @@ def scouting():
                            **data)
 
 
+@app.route("/best-available")
+def best_available():
+    import scouting_queries as _sq
+    data = _sq.get_scouting_targets(high_confidence=True)
+    return render_template("best_available.html",
+                           breadcrumbs=[{"label": "Best Available", "url": "/best-available"}],
+                           **data)
+
+
 @app.route("/custom-upload", methods=["GET", "POST"])
 def custom_upload():
     import custom_upload as _cu

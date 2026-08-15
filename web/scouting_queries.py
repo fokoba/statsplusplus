@@ -31,6 +31,11 @@ from team_queries import _NIPPON_TEAM_IDS, _INTL_FA_AGE_MAX
 # report too, arguably more than "Average" does.
 _NEEDS_SCOUT_ACC = ("A", "L", "VL")
 
+# The complement: reports already reliable enough to trust immediately —
+# powers the "Best Available" page (same lists, opposite confidence band),
+# for players you can act on right now instead of ones worth a scout's time.
+_HIGH_CONF_ACC = ("H", "VH")
+
 # Hitter field positions this page tracks individually (raw pos code 1=P,
 # 10=DH excluded — DH has no defensive category to bucket into, and
 # pitchers are grouped by role instead, not by pos).
@@ -84,7 +89,13 @@ def _pos_group(pos, role):
     return _HITTER_POS_CODES.get(pos), False
 
 
-def get_scouting_targets():
+def get_scouting_targets(high_confidence=False):
+    """Same four lists either way — high_confidence=False (default, powers
+    /scouting) restricts to Average/Low/Very Low/unscouted, the players
+    worth spending a scouting report on. high_confidence=True (powers
+    /best-available) restricts to High/Very High instead: players you
+    already know enough about to act on immediately.
+    """
     conn = get_db()
     park = load_park_factors(get_cfg().league_dir)
     ratings_scale = get_cfg().ratings_scale
@@ -128,6 +139,8 @@ def get_scouting_targets():
         by_group.setdefault(p["group"], []).append(p)
 
     def _needs_scout(p):
+        if high_confidence:
+            return p["acc"] in _HIGH_CONF_ACC
         return p["acc"] is None or p["acc"] in _NEEDS_SCOUT_ACC
 
     def _quality_cutoff(group_players):

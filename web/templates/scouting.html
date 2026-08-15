@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h1>Scouting Targets</h1>
+  <div style="color:var(--text-dim); font-size:13px; margin-top:4px">
+    A scout can only turn in so many reports each sim — this surfaces the best use of that allocation league-wide.
+    Every player below already has an Average, Low, or Very Low (or entirely unscouted) accuracy grade — anyone with a
+    High/Very High report is already reliable and left off, since scouting them again wouldn't tell you anything new.
+  </div>
+</div>
+
+{% macro pos_card(group, players, value_key, value_label) %}
+<div class="scout-card">
+  <div class="scout-card-head">{{ group }} <span style="color:var(--text-dim); font-weight:400">({{ players|length }})</span></div>
+  {% if players %}
+  <table class="scout-mini-table">
+    <thead>
+      <tr>
+        <th class="left">Name</th><th>Age</th><th>Ovr</th>
+        {% if value_key %}<th>{{ value_label }}</th>{% endif %}
+        <th>Acc</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in players %}
+      <tr>
+        <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
+        <td>{{ p.age if p.age is not none else '-' }}</td>
+        <td><span class="ovr-color" data-g="{{ p.composite_score }}">{{ p.composite_score if p.composite_score is not none else '-' }}</span></td>
+        {% if value_key %}
+        <td class="{{ 'pos' if p[value_key] and p[value_key] > 0 else 'neg' if p[value_key] and p[value_key] < 0 else '' }}">
+          {{ p[value_key]|round(0, 'common')|int if p[value_key] is not none else '-' }}
+        </td>
+        {% endif %}
+        <td>{{ p.acc or '-' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div style="color:var(--text-dim); font-size:12px; padding:8px 0">No qualifying players.</div>
+  {% endif %}
+</div>
+{% endmacro %}
+
+<div class="panel">
+  <h2>Best Free Agents Available <span style="color:var(--text-dim); font-weight:400; font-size:13px">(top 10 per position, by Ovr)</span></h2>
+  <div class="scout-grid">
+    {% for group in order %}
+    {{ pos_card(group, best_fa.get(group, []), none, '') }}
+    {% endfor %}
+  </div>
+</div>
+
+{% if park_configured %}
+<div class="panel">
+  <h2>Best Park Fits Available <span style="color:var(--text-dim); font-weight:400; font-size:13px">(top 10 per position by Park Fit, restricted to the top 25% Ovr at that position)</span></h2>
+  <div class="scout-grid">
+    {% for group in order %}
+    {{ pos_card(group, best_park.get(group, []), 'park_fit', 'Fit') }}
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<div class="panel">
+  <h2>Best Defenders Available <span style="color:var(--text-dim); font-weight:400; font-size:13px">(hitters only — top 10 per position by defensive rating, restricted to the top 25% Ovr at that position)</span></h2>
+  <div class="scout-grid">
+    {% for group in hitter_order %}
+    {{ pos_card(group, best_def.get(group, []), 'def_rating', 'Def') }}
+    {% endfor %}
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Best Youth Available <span style="color:var(--text-dim); font-weight:400; font-size:13px">(age 24 or under, top 10 per position by Potential)</span></h2>
+  <div class="scout-grid">
+    {% for group in order %}
+    {{ pos_card(group, best_youth.get(group, []), 'potential', 'Pot') }}
+    {% endfor %}
+  </div>
+</div>
+
+<style>
+.scout-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+.scout-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.scout-card-head {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+.scout-mini-table { width: 100%; font-size: 12px; }
+.scout-mini-table th, .scout-mini-table td { padding: 2px 4px; }
+</style>
+
+{% endblock %}

@@ -424,6 +424,15 @@ def player(pid):
     return render_template("player.html", p=p, my_abbr=my_abbr, breadcrumbs=bc)
 
 
+@app.route("/scouting")
+def scouting():
+    import scouting_queries as _sq
+    data = _sq.get_scouting_targets()
+    return render_template("scouting.html",
+                           breadcrumbs=[{"label": "Scouting Targets", "url": "/scouting"}],
+                           **data)
+
+
 @app.route("/custom-upload", methods=["GET", "POST"])
 def custom_upload():
     import custom_upload as _cu

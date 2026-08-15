@@ -286,11 +286,14 @@ def get_scouting_targets(high_confidence=False, team_id=None, roster_view=None):
     team_id, if given, attaches a per-position "weak" flag so the page can
     highlight (or filter to) positions that specific org is thin at.
 
-    roster_view, if "mlb" or "org", adds that team's own qualifying
-    players to every box for comparison — always shown in full alongside
-    the top 10, never subject to the quality gate, top-10 cap, or the
-    accuracy split (the point is "how do mine compare," not "are they a
-    fresh target").
+    roster_view, if "mlb" or "org", comingles that team's own qualifying
+    players into every ranked list for direct comparison — merged and
+    re-sorted by the same metric as the section (so e.g. a 54 Ovr player
+    of yours shows up ahead of a 50 Ovr free agent target, right where it
+    visually demonstrates whether there's an upgrade available), but never
+    subject to the quality gate or accuracy split, and never able to push
+    an original top-10 target off the list entirely — only reorders and
+    extends it.
     """
     conn = get_db()
     park = load_park_factors(get_cfg().league_dir)
@@ -344,74 +347,89 @@ def get_scouting_targets(high_confidence=False, team_id=None, roster_view=None):
             return []
         return [p for p in group_players if _needs_scout(p) and (p["composite_score"] or -999) >= cutoff]
 
-    def _mine_pool(group, key):
-        """This org's qualifying players for a given section — no accuracy
-        split, no quality gate, no top-10 cap, sorted by the same metric."""
-        pool = [p for p in mine_by_group.get(group, []) if p[key] is not None]
-        pool.sort(key=lambda p: -p[key])
-        return pool
+    def _comingle(target_pool, group, key):
+        """Merge this org's qualifying players (no accuracy split, no
+        quality gate, no cap) into the ranked target list and re-sort the
+        whole thing together by the same metric — every original target
+        stays visible, just reordered, with mine interleaved at its true
+        rank. No-op (returns target_pool unchanged) when roster_view is
+        off, since mine_by_group is empty in that case anyway.
+        """
+        mine_pool = [p for p in mine_by_group.get(group, []) if p[key] is not None]
+        if not mine_pool:
+            return target_pool
+        merged = target_pool + mine_pool
+        merged.sort(key=lambda p: -(p[key] if p[key] is not None else -999))
+        return merged
 
     # ── Best Free Agents Available: top 10 per position by Ovr (no quality gate — it IS the quality ranking) ──
-    best_fa, best_fa_mine = {}, {}
+    best_fa = {}
     for group in ORDER:
         pool = [p for p in by_group.get(group, []) if _needs_scout(p) and p["composite_score"] is not None]
         pool.sort(key=lambda p: -p["composite_score"])
-        best_fa[group] = pool[:_TOP_N]
-        best_fa_mine[group] = _mine_pool(group, "composite_score")
+        best_fa[group] = _comingle(pool[:_TOP_N], group, "composite_score")
 
     # ── Best Park Fits: top 10 per position by Park Fit, gated to top-25%-Ovr-at-position ──
-    best_park, best_park_mine = {}, {}
+    best_park = {}
     if park:
         for group in ORDER:
             pool = [p for p in _gated_pool(group) if p["park_fit"] is not None]
             pool.sort(key=lambda p: -p["park_fit"])
-            best_park[group] = pool[:_TOP_N]
-            best_park_mine[group] = _mine_pool(group, "park_fit")
+            best_park[group] = _comingle(pool[:_TOP_N], group, "park_fit")
 
     # ── Best Defenders: hitters only, top 10 per position by def rating, same quality gate ──
-    best_def, best_def_mine = {}, {}
+    best_def = {}
     for group in _HITTER_POS_CODES.values():
         pool = [p for p in _gated_pool(group) if p["def_rating"] is not None]
         pool.sort(key=lambda p: -p["def_rating"])
-        best_def[group] = pool[:_TOP_N]
-        best_def_mine[group] = _mine_pool(group, "def_rating")
+        best_def[group] = _comingle(pool[:_TOP_N], group, "def_rating")
 
     # ── Best Youth: age <= 24, top 10 per position by Potential ──
-    best_youth, best_youth_mine = {}, {}
+    best_youth = {}
     for group in ORDER:
         pool = [p for p in by_group.get(group, [])
                 if _needs_scout(p) and p["age"] is not None and p["age"] <= 24 and p["potential"] is not None]
         pool.sort(key=lambda p: -p["potential"])
-        best_youth[group] = pool[:_TOP_N]
-        mine_youth = [p for p in mine_by_group.get(group, [])
-                      if p["age"] is not None and p["age"] <= 24 and p["potential"] is not None]
-        mine_youth.sort(key=lambda p: -p["potential"])
-        best_youth_mine[group] = mine_youth
+        top = pool[:_TOP_N]
+        mine_pool = [p for p in mine_by_group.get(group, [])
+                     if p["age"] is not None and p["age"] <= 24 and p["potential"] is not None]
+        if mine_pool:
+            top = top + mine_pool
+            top.sort(key=lambda p: -(p["potential"] if p["potential"] is not None else -999))
+        best_youth[group] = top
 
     # ── Best vR / Best vL: top 10 per position by the split-tool composite, same quality gate ──
-    best_vr, best_vl, best_vr_mine, best_vl_mine = {}, {}, {}, {}
+    best_vr, best_vl = {}, {}
     for group in ORDER:
         gated = _gated_pool(group)
         vr_pool = [p for p in gated if p["vr_score"] is not None]
         vr_pool.sort(key=lambda p: -p["vr_score"])
-        best_vr[group] = vr_pool[:_TOP_N]
-        best_vr_mine[group] = _mine_pool(group, "vr_score")
+        best_vr[group] = _comingle(vr_pool[:_TOP_N], group, "vr_score")
         vl_pool = [p for p in gated if p["vl_score"] is not None]
         vl_pool.sort(key=lambda p: -p["vl_score"])
-        best_vl[group] = vl_pool[:_TOP_N]
-        best_vl_mine[group] = _mine_pool(group, "vl_score")
+        best_vl[group] = _comingle(vl_pool[:_TOP_N], group, "vl_score")
 
     # ── Best Rule 5 Eligible / Rule 5 Youth: separate pool entirely (other
     # orgs' minor leaguers, not free agents) — see rule5_eligible table.
-    # Empty until an export has been uploaded.
+    # Empty until an export has been uploaded. "Mine" here means something
+    # different (your OWN exposed players needing protection, not a
+    # comparison target) but comingles the same way — sorted in together
+    # so you can see at a glance where your exposed players rank against
+    # the broader eligible crop.
     best_rule5 = _rule5_targets(conn, high_confidence)
     best_rule5_youth = _rule5_youth_targets(conn, high_confidence)
-    best_rule5_mine = _rule5_mine(conn, team_id, roster_view) if roster_view in ("mlb", "org") and team_id else {}
-    best_rule5_youth_mine = {}
-    for group, gp in best_rule5_mine.items():
+    rule5_mine = _rule5_mine(conn, team_id, roster_view) if roster_view in ("mlb", "org") and team_id else {}
+    for group, gp in rule5_mine.items():
+        merged = best_rule5.get(group, []) + gp
+        merged.sort(key=lambda p: -(p["composite_score"] if p["composite_score"] is not None else -999))
+        best_rule5[group] = merged
+    for group, gp in rule5_mine.items():
         young = [p for p in gp if p["age"] is not None and p["age"] <= 24]
-        if young:
-            best_rule5_youth_mine[group] = young
+        if not young:
+            continue
+        merged = best_rule5_youth.get(group, []) + young
+        merged.sort(key=lambda p: -(p["potential"] if p["potential"] is not None else -999))
+        best_rule5_youth[group] = merged
 
     weak_positions = _weak_positions_for_org(team_id) if team_id else set()
 
@@ -419,11 +437,6 @@ def get_scouting_targets(high_confidence=False, team_id=None, roster_view=None):
         "best_fa": best_fa, "best_park": best_park, "best_def": best_def, "best_youth": best_youth,
         "best_vr": best_vr, "best_vl": best_vl,
         "best_rule5": best_rule5, "best_rule5_youth": best_rule5_youth,
-        "mine": {
-            "best_fa": best_fa_mine, "best_park": best_park_mine, "best_def": best_def_mine,
-            "best_youth": best_youth_mine, "best_vr": best_vr_mine, "best_vl": best_vl_mine,
-            "best_rule5": best_rule5_mine, "best_rule5_youth": best_rule5_youth_mine,
-        },
         "order": ORDER, "hitter_order": list(_HITTER_POS_CODES.values()),
         "park_configured": bool(park), "weak_positions": weak_positions,
         "rule5_uploaded": _rule5_has_data(conn),

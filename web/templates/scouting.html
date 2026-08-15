@@ -27,10 +27,10 @@
   </div>
 </div>
 
-{% macro pos_card(group, players, value_key, value_label, page_key, mine_players=[]) %}
+{% macro pos_card(group, players, value_key, value_label, page_key) %}
 <div class="scout-card{{ ' scout-card-weak' if group in weak_positions else '' }}" data-group="{{ group }}">
-  <div class="scout-card-head">{{ group }} <span style="color:var(--text-dim); font-weight:400">({{ players|length }}{% if mine_players %} + {{ mine_players|length }} mine{% endif %})</span></div>
-  {% if players or mine_players %}
+  <div class="scout-card-head">{{ group }} <span style="color:var(--text-dim); font-weight:400">({{ players|length }})</span></div>
+  {% if players %}
   <table class="scout-mini-table">
     <thead>
       <tr>
@@ -41,23 +41,9 @@
     </thead>
     <tbody>
       {% for p in players %}
-      <tr>
+      <tr{% if p.is_mine %} class="scout-mine-row"{% endif %}>
         <td><input type="checkbox" class="scout-checkbox" data-pid="{{ p.pid }}" data-page="{{ page_key }}"></td>
-        <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
-        <td>{{ p.age if p.age is not none else '-' }}</td>
-        <td><span class="ovr-color" data-g="{{ p.composite_score }}">{{ p.composite_score if p.composite_score is not none else '-' }}</span></td>
-        {% if value_key %}
-        <td class="{{ 'pos' if p[value_key] and p[value_key] > 0 else 'neg' if p[value_key] and p[value_key] < 0 else '' }}">
-          {{ p[value_key]|round(0, 'common')|int if p[value_key] is not none else '-' }}
-        </td>
-        {% endif %}
-        <td>{{ p.acc or '-' }}</td>
-      </tr>
-      {% endfor %}
-      {% for p in mine_players %}
-      <tr class="scout-mine-row">
-        <td><input type="checkbox" class="scout-checkbox" data-pid="{{ p.pid }}" data-page="{{ page_key }}"></td>
-        <td class="left"><span class="scout-mine-tag">{{ p.roster_tag }}</span><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
+        <td class="left">{% if p.is_mine %}<span class="scout-mine-tag">{{ p.roster_tag }}</span>{% endif %}<a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
         <td>{{ p.age if p.age is not none else '-' }}</td>
         <td><span class="ovr-color" data-g="{{ p.composite_score }}">{{ p.composite_score if p.composite_score is not none else '-' }}</span></td>
         {% if value_key %}
@@ -80,7 +66,7 @@
   <h2>Best Free Agents Available <span style="color:var(--text-dim); font-weight:400; font-size:13px">(top 10 per position, by Ovr)</span></h2>
   <div class="scout-grid">
     {% for group in order %}
-    {{ pos_card(group, best_fa.get(group, []), none, '', 'scouting', mine.best_fa.get(group, [])) }}
+    {{ pos_card(group, best_fa.get(group, []), none, '', 'scouting') }}
     {% endfor %}
   </div>
 </div>
@@ -90,7 +76,7 @@
   <h2>Best Park Fits Available <span style="color:var(--text-dim); font-weight:400; font-size:13px">(top 10 per position by Park Fit, restricted to the top 25% Ovr at that position)</span></h2>
   <div class="scout-grid">
     {% for group in order %}
-    {{ pos_card(group, best_park.get(group, []), 'park_fit', 'Fit', 'scouting', mine.best_park.get(group, [])) }}
+    {{ pos_card(group, best_park.get(group, []), 'park_fit', 'Fit', 'scouting') }}
     {% endfor %}
   </div>
 </div>
@@ -100,7 +86,7 @@
   <h2>Best Defenders Available <span style="color:var(--text-dim); font-weight:400; font-size:13px">(hitters only — top 10 per position by defensive rating, restricted to the top 25% Ovr at that position)</span></h2>
   <div class="scout-grid">
     {% for group in hitter_order %}
-    {{ pos_card(group, best_def.get(group, []), 'def_rating', 'Def', 'scouting', mine.best_def.get(group, [])) }}
+    {{ pos_card(group, best_def.get(group, []), 'def_rating', 'Def', 'scouting') }}
     {% endfor %}
   </div>
 </div>
@@ -109,7 +95,7 @@
   <h2>Best Youth Available <span style="color:var(--text-dim); font-weight:400; font-size:13px">(age 24 or under, top 10 per position by Potential)</span></h2>
   <div class="scout-grid">
     {% for group in order %}
-    {{ pos_card(group, best_youth.get(group, []), 'potential', 'Pot', 'scouting', mine.best_youth.get(group, [])) }}
+    {{ pos_card(group, best_youth.get(group, []), 'potential', 'Pot', 'scouting') }}
     {% endfor %}
   </div>
 </div>
@@ -118,7 +104,7 @@
   <h2>Best vR Available <span style="color:var(--text-dim); font-weight:400; font-size:13px">(top 10 per position by Ovr specifically vs RHP, restricted to the top 25% Ovr at that position)</span></h2>
   <div class="scout-grid">
     {% for group in order %}
-    {{ pos_card(group, best_vr.get(group, []), 'vr_score', 'vR', 'scouting', mine.best_vr.get(group, [])) }}
+    {{ pos_card(group, best_vr.get(group, []), 'vr_score', 'vR', 'scouting') }}
     {% endfor %}
   </div>
 </div>
@@ -127,7 +113,7 @@
   <h2>Best vL Available <span style="color:var(--text-dim); font-weight:400; font-size:13px">(top 10 per position by Ovr specifically vs LHP, restricted to the top 25% Ovr at that position)</span></h2>
   <div class="scout-grid">
     {% for group in order %}
-    {{ pos_card(group, best_vl.get(group, []), 'vl_score', 'vL', 'scouting', mine.best_vl.get(group, [])) }}
+    {{ pos_card(group, best_vl.get(group, []), 'vl_score', 'vL', 'scouting') }}
     {% endfor %}
   </div>
 </div>
@@ -150,7 +136,7 @@
   {% if rule5_uploaded %}
   <div class="scout-grid">
     {% for group in order %}
-    {{ pos_card(group, best_rule5.get(group, []), none, '', 'scouting', mine.best_rule5.get(group, [])) }}
+    {{ pos_card(group, best_rule5.get(group, []), none, '', 'scouting') }}
     {% endfor %}
   </div>
   {% else %}
@@ -168,7 +154,7 @@
   {% if rule5_uploaded %}
   <div class="scout-grid">
     {% for group in order %}
-    {{ pos_card(group, best_rule5_youth.get(group, []), 'potential', 'Pot', 'scouting', mine.best_rule5_youth.get(group, [])) }}
+    {{ pos_card(group, best_rule5_youth.get(group, []), 'potential', 'Pot', 'scouting') }}
     {% endfor %}
   </div>
   {% else %}
@@ -226,7 +212,11 @@ function scoutSetRoster(radio) {
 </script>
 
 <script>
-/* ── Persisted per-page checkboxes: track who you've scouted/actioned ── */
+/* ── Persisted per-page checkboxes: track who you've scouted/actioned.
+   The same player can appear in several cards on one page (e.g. Best FA
+   and Best Youth both drawing from the same pool) — checking him in one
+   place dims/checks every mention of him on the page, so he doesn't get
+   double-counted while scanning down the lists. ── */
 (function() {
   var STORAGE_KEY = 'statspp_scout_marks';
   function loadMarks() {
@@ -236,16 +226,24 @@ function scoutSetRoster(radio) {
   function saveMarks(marks) { localStorage.setItem(STORAGE_KEY, JSON.stringify(marks)); }
 
   var marks = loadMarks();
+
+  function applyMark(pid, marked) {
+    document.querySelectorAll('.scout-checkbox[data-pid="' + pid + '"]').forEach(function(cb) {
+      cb.checked = marked;
+      var row = cb.closest('tr');
+      if (marked) row.classList.add('scout-marked');
+      else row.classList.remove('scout-marked');
+    });
+  }
+
   document.querySelectorAll('.scout-checkbox').forEach(function(cb) {
     var key = cb.dataset.page + ':' + cb.dataset.pid;
-    var row = cb.closest('tr');
-    if (marks[key]) {
-      cb.checked = true;
-      row.classList.add('scout-marked');
-    }
+    if (marks[key]) applyMark(cb.dataset.pid, true);
     cb.addEventListener('change', function() {
-      if (cb.checked) { marks[key] = true; row.classList.add('scout-marked'); }
-      else { delete marks[key]; row.classList.remove('scout-marked'); }
+      var pid = cb.dataset.pid;
+      var k = cb.dataset.page + ':' + pid;
+      if (cb.checked) { marks[k] = true; } else { delete marks[k]; }
+      applyMark(pid, cb.checked);
       saveMarks(marks);
     });
   });

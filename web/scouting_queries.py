@@ -29,6 +29,7 @@ from statsplusplus.evaluation.park_fit import (
 from statsplusplus.evaluation.composite import compute_composite_hitter, compute_composite_pitcher
 from statsplusplus.evaluation.constants import DEFENSIVE_WEIGHTS
 from statsplusplus.data.evaluation_engine import load_tool_weights
+from statsplusplus.data.db import get_conn
 from web_league_context import get_db, get_cfg, money_divisor as _money_divisor
 
 from team_queries import _NIPPON_TEAM_IDS, _INTL_FA_AGE_MAX, _weak_positions_for_org
@@ -389,7 +390,8 @@ def _rule5_targets(conn, high_confidence):
             continue
         potential = true_ceil if true_ceil is not None else ceil_score
         players.append({"pid": pid, "name": name, "age": age, "group": group,
-                         "composite_score": comp, "potential": potential, "acc": acc})
+                         "composite_score": comp, "potential": potential, "acc": acc,
+                         "surplus": None, "good_pick": False, "newly_confirmed": False})
 
     by_group = {}
     for p in players:
@@ -417,9 +419,36 @@ def _rule5_targets(conn, high_confidence):
 
 
 def import_rule5_eligible(file_bytes, league_dir=None):
-    """Placeholder — needs a real OOTP 'Rule 5 Draft Eligible' export to
-    build the actual parser against (format not yet seen). Returns 0 until
-    then; the upload box surfaces that rather than silently accepting a
-    file it can't really parse.
+    """Import Rule 5 eligibility from a "Player List (All Columns)" export
+    that was filtered in-game to "Is Rule 5 Eligible" before exporting —
+    every row in a correctly-filtered export IS eligible, so this takes
+    the file at its word rather than trying to re-derive eligibility from
+    age/draft-year/40-man fields (which, unfiltered, don't reliably encode
+    it — real Rule 5 status depends on internal roster-protection history
+    the live sync doesn't carry either).
+
+    Full replace on each upload, not a merge: eligibility changes as
+    players get added to a 40-man or pass their protection deadline, so a
+    stale entry from a prior upload would be actively wrong to keep.
     """
-    return 0
+    import datetime
+    from custom_upload import parse_rows
+    rows = parse_rows(file_bytes)
+    pids = []
+    for d in rows:
+        pid = (d.get("ID") or "").strip()
+        if pid:
+            pids.append(int(pid))
+    if not pids:
+        return 0
+
+    conn = get_conn(league_dir)
+    now = datetime.datetime.now().isoformat()
+    conn.execute("DELETE FROM rule5_eligible")
+    conn.executemany(
+        "INSERT INTO rule5_eligible (player_id, uploaded_at) VALUES (?, ?)",
+        [(pid, now) for pid in pids],
+    )
+    conn.commit()
+    conn.close()
+    return len(pids)

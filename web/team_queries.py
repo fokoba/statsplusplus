@@ -962,6 +962,32 @@ _FA_PROSPECT_MIN_FV = 30
 # snapshot — not a sign the heuristic is wrong).
 _INTL_FA_AGE_MAX = 17
 
+# Recommended international-signing bid, PPL only (25-year control makes a
+# hit here worth uniquely more than in a standard-FA league — not meaningful
+# under eMLB's normal arb/FA timeline). "Long-Term Surplus" for these
+# entries is already a probability-weighted figure (prospect_surplus_with_
+# option blends in dev-discount ~0.35 at Intl level plus upside-scenario
+# option value — see scripts/prospect_value.py), so bidding a fixed
+# fraction of it directly targets a fixed expected-return multiple on the
+# signing bonus dollar, independent of hit rate: at 12%, expected return is
+# ~1/0.12 ≈ 8x per dollar bid, in expectation, as long as that EV figure is
+# unbiased. This is why the "budget for an ~8-9 in 10 bust rate" framing
+# and "bid a fraction of expected surplus" framing are the same idea, not
+# two separate risk controls to stack.
+_INTL_BID_FRACTION = 0.12
+# Scouting accuracy shifts confidence in the underlying grade — a 16yo dart
+# throw with unusually high scout confidence is a stronger signal than the
+# same grade at "Average," and a "Low" accuracy grade means the surplus
+# estimate itself carries wider error than the model already assumes.
+_INTL_BID_ACC_MULT = {"VH": 1.15, "H": 1.05, "A": 1.00, "L": 0.80, "VL": 0.65}
+
+
+def _recommended_intl_bid(surplus_raw, acc):
+    if surplus_raw is None or surplus_raw <= 0:
+        return None
+    mult = _INTL_BID_ACC_MULT.get(acc, 1.00)
+    return round((surplus_raw * _INTL_BID_FRACTION * mult) / _money_divisor(), 1)
+
 
 def get_free_agent_candidates(team_id=None):
     """Top 5% of free-agent hitters and top 5% of free-agent pitchers
@@ -991,6 +1017,7 @@ def get_free_agent_candidates(team_id=None):
     ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
     ed_surplus = _get_eval_date()
     weak_positions = _weak_positions_for_org(tid)
+    _intl_bids_enabled = get_cfg().perpetual_arb
 
     _nippon_qs = ",".join("?" * len(_NIPPON_TEAM_IDS))
     _signable_where = f"""
@@ -1124,6 +1151,9 @@ def get_free_agent_candidates(team_id=None):
             "park_fit": park_fit,
         }
         if age is not None and age <= _INTL_FA_AGE_MAX:
+            if _intl_bids_enabled:
+                _bid_surplus_raw = surplus_raw if surplus_raw is not None else prospect_surplus_raw
+                entry["recommended_bid"] = _recommended_intl_bid(_bid_surplus_raw, acc)
             (intl_pitchers if is_pitcher else intl_hitters).append(entry)
         else:
             (pitchers if is_pitcher else hitters).append(entry)

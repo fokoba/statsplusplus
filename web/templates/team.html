@@ -1067,7 +1067,7 @@
 
 {# ══════ Add Candidates ══════ #}
 <div class="tab-content" id="tab-adds">
-  {% macro add_table(rows, table_id, cur_team_col, show_ask=false, show_spec=false, show_park=false) %}
+  {% macro add_table(rows, table_id, cur_team_col, show_ask=false, show_spec=false, show_park=false, show_bid=false) %}
   {% if rows %}
   <table id="{{ table_id }}">
     <thead>
@@ -1084,6 +1084,7 @@
         <th data-sort="str">Scout</th>
         <th data-sort="str">Fits At</th>
         <th data-sort="num" title="Full-horizon projected surplus">Long-Term Surplus</th>
+        {% if show_bid %}<th data-sort="num" title="Recommended international signing bid: 12% of probability-weighted career surplus, adjusted for scouting-accuracy confidence. Sized so a hit pays for many busts — see chat for the full reasoning.">Rec. Bid</th>{% endif %}
         <th data-sort="num" title="Value minus expected cost for this season only">Current Yr Surplus</th>
         <th data-sort="num" title="Value minus expected contract cost for next season">Next Yr Surplus</th>
         <th data-sort="num" title="Summed value minus expected cost across the next 3 seasons (years 1-3 ahead)">3-Yr Surplus</th>
@@ -1114,6 +1115,7 @@
         <td>{{ p.acc or '-' }}</td>
         <td>{{ p.fit or '-' }}</td>
         <td class="{{ 'pos' if p.surplus and p.surplus > 0 else 'neg' if p.surplus and p.surplus < 0 else '' }}">{{ '$' + p.surplus|string + money_unit if p.surplus is not none else '-' }}</td>
+        {% if show_bid %}<td class="{{ 'pos' if p.recommended_bid }}">{{ '$' + p.recommended_bid|string + money_unit if p.recommended_bid is not none else '-' }}</td>{% endif %}
         <td class="{{ 'pos' if p.current_year_surplus and p.current_year_surplus > 0 else 'neg' if p.current_year_surplus and p.current_year_surplus < 0 else '' }}">{{ '$' + p.current_year_surplus|string + money_unit if p.current_year_surplus is not none else '-' }}</td>
         <td class="{{ 'pos' if p.next_year_surplus and p.next_year_surplus > 0 else 'neg' if p.next_year_surplus and p.next_year_surplus < 0 else '' }}">{{ '$' + p.next_year_surplus|string + money_unit if p.next_year_surplus is not none else '-' }}</td>
         <td class="{{ 'pos' if p.three_year_surplus and p.three_year_surplus > 0 else 'neg' if p.three_year_surplus and p.three_year_surplus < 0 else '' }}">{{ '$' + p.three_year_surplus|string + money_unit if p.three_year_surplus is not none else '-' }}</td>
@@ -1233,10 +1235,12 @@
     <div style="font-size:12px; color:var(--text-dim); margin-bottom:8px">
       International-market amateur free agents (age {{ fa_candidates.intl_age_max }} or under) — these sign via a separate process from domestic free agents and are kept out of the lists above. Ranked by FV (or potential ceiling when unevaluated); no FV floor applied since these are early-stage amateur evaluations, not a curated "sign now" cut.
     </div>
+    {% set _show_intl_bid = fa_candidates.international_hitters and fa_candidates.international_hitters[0].recommended_bid is defined
+                             or fa_candidates.international_pitchers and fa_candidates.international_pitchers[0].recommended_bid is defined %}
     <h3 style="font-size:13px; margin:12px 0 6px">Hitters</h3>
-    {{ add_table(fa_candidates.international_hitters, "fa-intl-hitters", false) }}
+    {{ add_table(fa_candidates.international_hitters, "fa-intl-hitters", false, show_bid=_show_intl_bid) }}
     <h3 style="font-size:13px; margin:16px 0 6px">Pitchers</h3>
-    {{ add_table(fa_candidates.international_pitchers, "fa-intl-pitchers", false) }}
+    {{ add_table(fa_candidates.international_pitchers, "fa-intl-pitchers", false, show_bid=_show_intl_bid) }}
   </div>
 </div>
 

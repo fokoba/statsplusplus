@@ -1084,7 +1084,10 @@
         <th data-sort="str">Scout</th>
         <th data-sort="str">Fits At</th>
         <th data-sort="num" title="Full-horizon projected surplus">Long-Term Surplus</th>
-        {% if show_bid %}<th data-sort="num" title="Recommended international signing bid: 12% of probability-weighted career surplus, adjusted for scouting-accuracy confidence. Sized so a hit pays for many busts — see chat for the full reasoning.">Rec. Bid</th>{% endif %}
+        {% if show_bid %}
+        <th data-sort="num" title="Recommended international signing bid: 12% of probability-weighted career surplus, adjusted for scouting-accuracy confidence. Sized so a hit pays for many busts — see chat for the full reasoning.">Rec. Bid</th>
+        <th title="Running total of Rec. Bid in the table's current sort order — sort by Rec. Bid descending to see where your budget runs out.">Cumulative</th>
+        {% endif %}
         <th data-sort="num" title="Value minus expected cost for this season only">Current Yr Surplus</th>
         <th data-sort="num" title="Value minus expected contract cost for next season">Next Yr Surplus</th>
         <th data-sort="num" title="Summed value minus expected cost across the next 3 seasons (years 1-3 ahead)">3-Yr Surplus</th>
@@ -1115,7 +1118,10 @@
         <td>{{ p.acc or '-' }}</td>
         <td>{{ p.fit or '-' }}</td>
         <td class="{{ 'pos' if p.surplus and p.surplus > 0 else 'neg' if p.surplus and p.surplus < 0 else '' }}">{{ '$' + p.surplus|string + money_unit if p.surplus is not none else '-' }}</td>
-        {% if show_bid %}<td class="{{ 'pos' if p.recommended_bid }}">{{ '$' + p.recommended_bid|string + money_unit if p.recommended_bid is not none else '-' }}</td>{% endif %}
+        {% if show_bid %}
+        <td class="rec-bid {{ 'pos' if p.recommended_bid }}" data-bid="{{ p.recommended_bid if p.recommended_bid is not none else 0 }}">{{ '$' + p.recommended_bid|string + money_unit if p.recommended_bid is not none else '-' }}</td>
+        <td class="cum-bid" style="color:var(--text-dim)">-</td>
+        {% endif %}
         <td class="{{ 'pos' if p.current_year_surplus and p.current_year_surplus > 0 else 'neg' if p.current_year_surplus and p.current_year_surplus < 0 else '' }}">{{ '$' + p.current_year_surplus|string + money_unit if p.current_year_surplus is not none else '-' }}</td>
         <td class="{{ 'pos' if p.next_year_surplus and p.next_year_surplus > 0 else 'neg' if p.next_year_surplus and p.next_year_surplus < 0 else '' }}">{{ '$' + p.next_year_surplus|string + money_unit if p.next_year_surplus is not none else '-' }}</td>
         <td class="{{ 'pos' if p.three_year_surplus and p.three_year_surplus > 0 else 'neg' if p.three_year_surplus and p.three_year_surplus < 0 else '' }}">{{ '$' + p.three_year_surplus|string + money_unit if p.three_year_surplus is not none else '-' }}</td>
@@ -1237,6 +1243,14 @@
     </div>
     {% set _show_intl_bid = fa_candidates.international_hitters and fa_candidates.international_hitters[0].recommended_bid is defined
                              or fa_candidates.international_pitchers and fa_candidates.international_pitchers[0].recommended_bid is defined %}
+    {% if _show_intl_bid %}
+    <div id="intl-bid-tracker" style="font-size:12px; color:var(--text-dim); margin-bottom:12px; padding:8px; border:1px solid var(--border); border-radius:6px; display:flex; align-items:center; gap:16px; flex-wrap:wrap">
+      <span>Check off players below (✓ persists) to build your target list.</span>
+      <span>Selected total: <strong id="intl-selected-total" style="color:var(--text)">$0{{ money_unit }}</strong></span>
+      <span>Budget: $<input id="intl-budget-input" type="number" min="0" step="1" placeholder="e.g. 860" style="width:80px">{{ money_unit }}
+        <span id="intl-budget-remaining"></span></span>
+    </div>
+    {% endif %}
     <h3 style="font-size:13px; margin:12px 0 6px">Hitters</h3>
     {{ add_table(fa_candidates.international_hitters, "fa-intl-hitters", false, show_bid=_show_intl_bid) }}
     <h3 style="font-size:13px; margin:16px 0 6px">Pitchers</h3>
@@ -1281,6 +1295,77 @@
       saveMarks(marks);
     });
   });
+})();
+</script>
+
+<script>
+/* ── International FA Pool: running cumulative Rec. Bid + selected-total budget tracker ── */
+(function() {
+  var tracker = document.getElementById('intl-bid-tracker');
+  if (!tracker) return;
+
+  var intlTableIds = ['fa-intl-hitters', 'fa-intl-pitchers'];
+  var BUDGET_KEY = 'statspp_intl_budget';
+
+  function recalcCumulative(table) {
+    var total = 0;
+    table.querySelectorAll('tbody tr').forEach(function(row) {
+      var bidCell = row.querySelector('.rec-bid');
+      var cumCell = row.querySelector('.cum-bid');
+      if (!bidCell || !cumCell) return;
+      total += parseFloat(bidCell.dataset.bid) || 0;
+      cumCell.textContent = '$' + Math.round(total * 10) / 10 + '{{ money_unit }}';
+    });
+  }
+
+  function recalcSelectedTotal() {
+    var total = 0;
+    intlTableIds.forEach(function(id) {
+      var table = document.getElementById(id);
+      if (!table) return;
+      table.querySelectorAll('tbody tr').forEach(function(row) {
+        var cb = row.querySelector('.add-checkbox');
+        var bidCell = row.querySelector('.rec-bid');
+        if (cb && cb.checked && bidCell) total += parseFloat(bidCell.dataset.bid) || 0;
+      });
+    });
+    total = Math.round(total * 10) / 10;
+    document.getElementById('intl-selected-total').textContent = '$' + total + '{{ money_unit }}';
+
+    var budgetInput = document.getElementById('intl-budget-input');
+    var remaining = document.getElementById('intl-budget-remaining');
+    var budget = parseFloat(budgetInput.value);
+    if (budget > 0) {
+      var left = Math.round((budget - total) * 10) / 10;
+      remaining.textContent = ' — ' + (left >= 0 ? left + '{{ money_unit }} left' : 'OVER by ' + Math.abs(left) + '{{ money_unit }}');
+      remaining.style.color = left >= 0 ? 'var(--text-dim)' : '#f44336';
+    } else {
+      remaining.textContent = '';
+    }
+  }
+
+  intlTableIds.forEach(function(id) {
+    var table = document.getElementById(id);
+    if (!table) return;
+    recalcCumulative(table);
+    var tbody = table.querySelector('tbody');
+    if (tbody) {
+      new MutationObserver(function() { recalcCumulative(table); }).observe(tbody, {childList: true});
+    }
+    table.querySelectorAll('.add-checkbox').forEach(function(cb) {
+      cb.addEventListener('change', recalcSelectedTotal);
+    });
+  });
+
+  var budgetInput = document.getElementById('intl-budget-input');
+  var savedBudget = localStorage.getItem(BUDGET_KEY);
+  if (savedBudget) budgetInput.value = savedBudget;
+  budgetInput.addEventListener('input', function() {
+    localStorage.setItem(BUDGET_KEY, budgetInput.value);
+    recalcSelectedTotal();
+  });
+
+  recalcSelectedTotal();
 })();
 </script>
 

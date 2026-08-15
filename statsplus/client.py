@@ -281,13 +281,17 @@ def _fix_ratings_header(text: str) -> str:
 
 def start_ratings_export() -> str:
     """Kick off the ratings export and return the poll URL without waiting."""
-    for _ in range(3):
+    for attempt in range(5):
         resp = _get("/ratings/")
         wait = re.search(r'wait (\d+) seconds', resp)
         if wait:
             secs = int(wait.group(1))
-            log.info("Rate limited — waiting {secs}s...")
+            log.info(f"Rate limited — waiting {secs}s...")
             time.sleep(secs + 2)
+            continue
+        if "being updated" in resp.lower():
+            log.info("Ratings still being updated league-side — waiting 60s... (attempt %d)", attempt + 1)
+            time.sleep(60)
             continue
         break
     match = re.search(r'https?://\S+', resp)

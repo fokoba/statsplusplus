@@ -7,22 +7,30 @@
     A scout can only turn in so many reports each sim — this surfaces the best use of that allocation league-wide.
     Every player below already has an Average, Low, or Very Low (or entirely unscouted) accuracy grade — anyone with a
     High/Very High report is already reliable and left off, since scouting them again wouldn't tell you anything new.
+    Rows tagged with a team/level badge are your own players, shown for comparison — always in full, never subject to
+    the top-10 cap or quality gate above them.
   </div>
 </div>
 
-{% if weak_positions %}
-<div style="margin-bottom:12px">
+<div style="margin-bottom:12px; display:flex; flex-wrap:wrap; gap:16px; align-items:center">
+  {% if weak_positions %}
   <label style="font-size:13px">
     <input type="checkbox" id="weak-only-toggle" onchange="scoutFilterWeak()">
     Show only positions where my team is below-average ({{ weak_positions|join(', ') }})
   </label>
+  {% endif %}
+  <div style="font-size:13px">
+    Compare against:
+    <label><input type="radio" name="roster-view" value="" {% if not roster_view %}checked{% endif %} onchange="scoutSetRoster(this)"> Off</label>
+    <label><input type="radio" name="roster-view" value="mlb" {% if roster_view == 'mlb' %}checked{% endif %} onchange="scoutSetRoster(this)"> My MLB Team</label>
+    <label><input type="radio" name="roster-view" value="org" {% if roster_view == 'org' %}checked{% endif %} onchange="scoutSetRoster(this)"> My Whole Org</label>
+  </div>
 </div>
-{% endif %}
 
-{% macro pos_card(group, players, value_key, value_label, page_key) %}
+{% macro pos_card(group, players, value_key, value_label, page_key, mine_players=[]) %}
 <div class="scout-card{{ ' scout-card-weak' if group in weak_positions else '' }}" data-group="{{ group }}">
-  <div class="scout-card-head">{{ group }} <span style="color:var(--text-dim); font-weight:400">({{ players|length }})</span></div>
-  {% if players %}
+  <div class="scout-card-head">{{ group }} <span style="color:var(--text-dim); font-weight:400">({{ players|length }}{% if mine_players %} + {{ mine_players|length }} mine{% endif %})</span></div>
+  {% if players or mine_players %}
   <table class="scout-mini-table">
     <thead>
       <tr>
@@ -46,6 +54,20 @@
         <td>{{ p.acc or '-' }}</td>
       </tr>
       {% endfor %}
+      {% for p in mine_players %}
+      <tr class="scout-mine-row">
+        <td><input type="checkbox" class="scout-checkbox" data-pid="{{ p.pid }}" data-page="{{ page_key }}"></td>
+        <td class="left"><span class="scout-mine-tag">{{ p.roster_tag }}</span><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
+        <td>{{ p.age if p.age is not none else '-' }}</td>
+        <td><span class="ovr-color" data-g="{{ p.composite_score }}">{{ p.composite_score if p.composite_score is not none else '-' }}</span></td>
+        {% if value_key %}
+        <td class="{{ 'pos' if p[value_key] and p[value_key] > 0 else 'neg' if p[value_key] and p[value_key] < 0 else '' }}">
+          {{ p[value_key]|round(0, 'common')|int if p[value_key] is not none else '-' }}
+        </td>
+        {% endif %}
+        <td>{{ p.acc or '-' }}</td>
+      </tr>
+      {% endfor %}
     </tbody>
   </table>
   {% else %}
@@ -58,7 +80,7 @@
   <h2>Best Free Agents Available <span style="color:var(--text-dim); font-weight:400; font-size:13px">(top 10 per position, by Ovr)</span></h2>
   <div class="scout-grid">
     {% for group in order %}
-    {{ pos_card(group, best_fa.get(group, []), none, '', 'scouting') }}
+    {{ pos_card(group, best_fa.get(group, []), none, '', 'scouting', mine.best_fa.get(group, [])) }}
     {% endfor %}
   </div>
 </div>
@@ -68,7 +90,7 @@
   <h2>Best Park Fits Available <span style="color:var(--text-dim); font-weight:400; font-size:13px">(top 10 per position by Park Fit, restricted to the top 25% Ovr at that position)</span></h2>
   <div class="scout-grid">
     {% for group in order %}
-    {{ pos_card(group, best_park.get(group, []), 'park_fit', 'Fit', 'scouting') }}
+    {{ pos_card(group, best_park.get(group, []), 'park_fit', 'Fit', 'scouting', mine.best_park.get(group, [])) }}
     {% endfor %}
   </div>
 </div>
@@ -78,7 +100,7 @@
   <h2>Best Defenders Available <span style="color:var(--text-dim); font-weight:400; font-size:13px">(hitters only — top 10 per position by defensive rating, restricted to the top 25% Ovr at that position)</span></h2>
   <div class="scout-grid">
     {% for group in hitter_order %}
-    {{ pos_card(group, best_def.get(group, []), 'def_rating', 'Def', 'scouting') }}
+    {{ pos_card(group, best_def.get(group, []), 'def_rating', 'Def', 'scouting', mine.best_def.get(group, [])) }}
     {% endfor %}
   </div>
 </div>
@@ -87,7 +109,7 @@
   <h2>Best Youth Available <span style="color:var(--text-dim); font-weight:400; font-size:13px">(age 24 or under, top 10 per position by Potential)</span></h2>
   <div class="scout-grid">
     {% for group in order %}
-    {{ pos_card(group, best_youth.get(group, []), 'potential', 'Pot', 'scouting') }}
+    {{ pos_card(group, best_youth.get(group, []), 'potential', 'Pot', 'scouting', mine.best_youth.get(group, [])) }}
     {% endfor %}
   </div>
 </div>
@@ -96,7 +118,7 @@
   <h2>Best vR Available <span style="color:var(--text-dim); font-weight:400; font-size:13px">(top 10 per position by Ovr specifically vs RHP, restricted to the top 25% Ovr at that position)</span></h2>
   <div class="scout-grid">
     {% for group in order %}
-    {{ pos_card(group, best_vr.get(group, []), 'vr_score', 'vR', 'scouting') }}
+    {{ pos_card(group, best_vr.get(group, []), 'vr_score', 'vR', 'scouting', mine.best_vr.get(group, [])) }}
     {% endfor %}
   </div>
 </div>
@@ -105,7 +127,7 @@
   <h2>Best vL Available <span style="color:var(--text-dim); font-weight:400; font-size:13px">(top 10 per position by Ovr specifically vs LHP, restricted to the top 25% Ovr at that position)</span></h2>
   <div class="scout-grid">
     {% for group in order %}
-    {{ pos_card(group, best_vl.get(group, []), 'vl_score', 'vL', 'scouting') }}
+    {{ pos_card(group, best_vl.get(group, []), 'vl_score', 'vL', 'scouting', mine.best_vl.get(group, [])) }}
     {% endfor %}
   </div>
 </div>
@@ -115,7 +137,8 @@
   <div style="font-size:12px; color:var(--text-dim); margin-bottom:12px; padding:8px; border:1px solid var(--border); border-radius:6px">
     Not free agents — this pool is every other org's exposed minor leaguers, from a manually uploaded OOTP "Rule 5 Draft
     Eligible" export (real eligibility depends on internal roster-protection history the live sync doesn't carry).
-    Upload it here to identify who still needs a report before draft day:
+    Upload it here to identify who still needs a report before draft day. With a Compare toggle on above, your own
+    tagged rows here are YOUR players currently exposed and needing 40-man protection, not comparison targets:
     <form method="post" action="/rule5-upload" enctype="multipart/form-data" style="display:inline-flex; align-items:center; gap:6px; margin-top:6px">
       <input type="hidden" name="dest" value="/scouting">
       <input type="file" name="rule5_file" required>
@@ -127,7 +150,25 @@
   {% if rule5_uploaded %}
   <div class="scout-grid">
     {% for group in order %}
-    {{ pos_card(group, best_rule5.get(group, []), none, '', 'scouting') }}
+    {{ pos_card(group, best_rule5.get(group, []), none, '', 'scouting', mine.best_rule5.get(group, [])) }}
+    {% endfor %}
+  </div>
+  {% else %}
+  <div style="color:var(--text-dim); font-size:13px">No Rule 5 export uploaded yet.</div>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <h2>Best Rule 5 Youth <span style="color:var(--text-dim); font-weight:400; font-size:13px">(age 24 or under, sorted by Potential, still restricted to the top 25% Ovr at that position)</span></h2>
+  <div style="font-size:12px; color:var(--text-dim); margin-bottom:12px">
+    The real value in Rule 5 is near-MLB-ready upside — this is the same eligible pool sorted by Potential instead of
+    Ovr, so a 55-60 Pot player with only a ~40 Ovr today (not there yet, but close, with real upside left) surfaces
+    here even though he wouldn't rank near the top of the Ovr-sorted list above.
+  </div>
+  {% if rule5_uploaded %}
+  <div class="scout-grid">
+    {% for group in order %}
+    {{ pos_card(group, best_rule5_youth.get(group, []), 'potential', 'Pot', 'scouting', mine.best_rule5_youth.get(group, [])) }}
     {% endfor %}
   </div>
   {% else %}
@@ -162,6 +203,11 @@
 }
 .scout-mini-table th:first-child, .scout-mini-table td:first-child { width: 18px; }
 tr.scout-marked .player-link { color: var(--text-dim); text-decoration: line-through; }
+tr.scout-mine-row { background: rgba(76, 175, 80, 0.12); }
+.scout-mine-tag {
+  display: inline-block; font-size: 9px; font-weight: 700; color: #4caf50;
+  border: 1px solid #4caf50; border-radius: 3px; padding: 0 3px; margin-right: 3px;
+}
 </style>
 
 <script>
@@ -170,6 +216,12 @@ function scoutFilterWeak() {
   document.querySelectorAll('.scout-card').forEach(function(card) {
     card.style.display = (!only || card.classList.contains('scout-card-weak')) ? '' : 'none';
   });
+}
+function scoutSetRoster(radio) {
+  var url = new URL(window.location.href);
+  if (radio.value) { url.searchParams.set('roster', radio.value); }
+  else { url.searchParams.delete('roster'); }
+  window.location.href = url.toString();
 }
 </script>
 

@@ -428,7 +428,8 @@ def player(pid):
 def scouting():
     import scouting_queries as _sq
     from web_league_context import my_team_id as _my_team_id
-    data = _sq.get_scouting_targets(team_id=_my_team_id())
+    roster_view = request.args.get("roster") if request.args.get("roster") in ("mlb", "org") else None
+    data = _sq.get_scouting_targets(team_id=_my_team_id(), roster_view=roster_view)
     return render_template("scouting.html",
                            breadcrumbs=[{"label": "Scouting Targets", "url": "/scouting"}],
                            **data)
@@ -438,7 +439,8 @@ def scouting():
 def best_available():
     import scouting_queries as _sq
     from web_league_context import my_team_id as _my_team_id
-    data = _sq.get_scouting_targets(high_confidence=True, team_id=_my_team_id())
+    roster_view = request.args.get("roster") if request.args.get("roster") in ("mlb", "org") else None
+    data = _sq.get_scouting_targets(high_confidence=True, team_id=_my_team_id(), roster_view=roster_view)
     return render_template("best_available.html",
                            breadcrumbs=[{"label": "Best Available", "url": "/best-available"}],
                            **data)

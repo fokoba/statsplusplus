@@ -1066,6 +1066,7 @@ def get_free_agent_candidates(team_id=None):
     from statsplusplus.evaluation.park_fit import (
         load_park_factors, compute_batter_park_fit, compute_batter_park_value_pct,
         compute_pitcher_park_fit_from_stats, compute_pitcher_park_fit_from_tools,
+        compute_pitcher_park_value_pct_from_stats, compute_pitcher_park_value_pct_from_tools,
     )
     ratings_scale = get_cfg().ratings_scale
     park = load_park_factors(get_cfg().league_dir)
@@ -1139,6 +1140,7 @@ def get_free_agent_candidates(team_id=None):
 
         park_fit = None
         park_value = None
+        _value_pct = None
         if park:
             if is_pitcher:
                 obs = pitcher_stats.get(pid)
@@ -1146,15 +1148,24 @@ def get_free_agent_candidates(team_id=None):
                     park_fit = compute_pitcher_park_fit_from_stats(
                         obs["gb_pct"], obs["k_pct"], obs["bb_pct"],
                         lg_gb_pct, lg_k_pct, lg_bb_pct, park)
+                    _value_pct = compute_pitcher_park_value_pct_from_stats(
+                        obs["gb_pct"], obs["k_pct"], obs["bb_pct"],
+                        lg_gb_pct, lg_k_pct, lg_bb_pct, park)
                 else:
                     park_fit = compute_pitcher_park_fit_from_tools(_park_tools, park)
+                    _value_pct = compute_pitcher_park_value_pct_from_tools(_park_tools, park)
             else:
                 _hw = hitter_weights_by_bucket.get(bucket, hitter_weights_by_bucket.get("COF", {}))
                 park_fit = compute_batter_park_fit(_park_tools, bats, _hw, park)
                 _value_pct = compute_batter_park_value_pct(_park_tools, bats, _hw, park)
-                _park_val_basis = surplus_raw if surplus_raw is not None else prospect_surplus_raw
-                if _value_pct is not None and _park_val_basis:
-                    park_value = round((_park_val_basis * _value_pct) / _money_divisor(), 1)
+
+            # surplus_raw can be a genuine 0 (a real, below-replacement
+            # valuation) — must check "is not None" rather than truthiness,
+            # or a legitimate $0.0 park value silently renders blank instead
+            # (this is exactly what happened before this fix).
+            _park_val_basis = surplus_raw if surplus_raw is not None else prospect_surplus_raw
+            if _value_pct is not None and _park_val_basis is not None:
+                park_value = round((_park_val_basis * _value_pct) / _money_divisor(), 1)
 
         _cur_s, _next_s, _three_s = _surplus_horizons_live(fv_continuous, age, level_disp,
                                                             pf_bucket, ovr=comp, pot=potential)

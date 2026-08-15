@@ -161,6 +161,36 @@ def compute_batter_park_value_pct(
 # Pitchers
 # ---------------------------------------------------------------------------
 
+def _pitcher_park_raw_from_stats(
+    gb_pct: float, k_pct: float, bb_pct: float,
+    lg_gb_pct: float, lg_k_pct: float, lg_bb_pct: float,
+    park: dict,
+) -> Optional[tuple[float, float]]:
+    """Shared setup for both stats-based pitcher park functions — see
+    compute_pitcher_park_fit_from_stats() for what raw/max_possible mean.
+    """
+    if not park:
+        return None
+
+    gb_dev = gb_pct - lg_gb_pct
+    bb_dev = bb_pct - lg_bb_pct
+    k_dev = k_pct - lg_k_pct
+
+    hr_dev = park["hr"] - 1.0
+    overall_dev = park["overall"] - 1.0
+
+    gb_term = gb_dev * hr_dev
+    bb_term = -bb_dev * overall_dev
+
+    # Dampen up to 40% for a pitcher striking out well above league average;
+    # no bonus for below-average K% (absence of whiffs doesn't add park
+    # exposure beyond what GB/BB already capture).
+    k_dampen = max(0.0, min(0.4, k_dev * 2.0))
+    raw = (gb_term + bb_term) * (1.0 - k_dampen)
+    max_possible = 0.20 * (abs(hr_dev) + abs(overall_dev))
+    return raw, max_possible
+
+
 def compute_pitcher_park_fit_from_stats(
     gb_pct: float, k_pct: float, bb_pct: float,
     lg_gb_pct: float, lg_k_pct: float, lg_bb_pct: float,
@@ -186,49 +216,48 @@ def compute_pitcher_park_fit_from_stats(
         elite-K pitchers are less exposed to park effects generally (fewer
         balls in play means less at stake either way), so their score
         compresses toward neutral as K% rises above league average.
+
+    Returns a RELATIVE/comparative score (100 = one full standard "extreme"
+    GB/BB profile, fully aligned with this park's largest factor) — not a
+    dollar or %% figure. See compute_pitcher_park_value_pct_from_stats().
     """
-    if not park:
+    result = _pitcher_park_raw_from_stats(gb_pct, k_pct, bb_pct, lg_gb_pct, lg_k_pct, lg_bb_pct, park)
+    if result is None:
         return None
-
-    gb_dev = gb_pct - lg_gb_pct
-    bb_dev = bb_pct - lg_bb_pct
-    k_dev = k_pct - lg_k_pct
-
-    hr_dev = park["hr"] - 1.0
-    overall_dev = park["overall"] - 1.0
-
-    gb_term = gb_dev * hr_dev
-    bb_term = -bb_dev * overall_dev
-
-    # Dampen up to 40% for a pitcher striking out well above league average;
-    # no bonus for below-average K% (absence of whiffs doesn't add park
-    # exposure beyond what GB/BB already capture).
-    k_dampen = max(0.0, min(0.4, k_dev * 2.0))
-    raw = (gb_term + bb_term) * (1.0 - k_dampen)
-
-    # Scale so 100 = a pitcher one full standard "extreme" (20 points of
-    # GB%/BB% above/below league average, expressed as a 0.20 fraction) in
-    # both dimensions, fully aligned with this park's largest factor.
-    max_possible = 0.20 * (abs(hr_dev) + abs(overall_dev))
+    raw, max_possible = result
     if max_possible <= 0:
         return 0
     return _clamp100(100.0 * raw / max_possible)
 
 
-def compute_pitcher_park_fit_from_tools(
+def compute_pitcher_park_value_pct_from_stats(
+    gb_pct: float, k_pct: float, bb_pct: float,
+    lg_gb_pct: float, lg_k_pct: float, lg_bb_pct: float,
+    park: dict,
+) -> Optional[float]:
+    """Estimated marginal %% swing in this pitcher's value from park fit —
+    quantified counterpart to compute_pitcher_park_fit_from_stats(), same
+    relationship compute_batter_park_value_pct() has to its 0-100 score.
+
+    Dividing by 0.20 (the "one full standard extreme" denominator that
+    scales the 0-100 fit score) means a pitcher at that full extreme,
+    fully aligned with the park, converges to the park's exact real hr/
+    overall factor deviation — same convergence property as the batter
+    version. Multiply by a projected value figure for a dollar estimate.
+    """
+    result = _pitcher_park_raw_from_stats(gb_pct, k_pct, bb_pct, lg_gb_pct, lg_k_pct, lg_bb_pct, park)
+    if result is None:
+        return None
+    raw, _ = result
+    return raw / 0.20
+
+
+def _pitcher_park_raw_from_tools(
     tools: dict[str, float | int | None],
     park: dict,
-) -> Optional[int]:
-    """-100 to 100, scouting-tool fallback for pitchers with no real innings
-    sample (a fresh upload, an amateur, a rookie) — Custom Upload always
-    uses this path since an uploaded roster CSV has no game logs at all.
-
-    Movement stands in for groundball tendency (this league's own model
-    already ties higher Movement to more ground-ball contact), Control
-    stands in for command/walk avoidance, matched against the same park
-    factors compute_pitcher_park_fit_from_stats() uses. No Stuff/strikeout
-    term — without a real K rate there's nothing to dampen with, so Stuff
-    is left out rather than guessed at.
+) -> Optional[tuple[float, float]]:
+    """Shared setup for both tools-based pitcher park functions — see
+    compute_pitcher_park_fit_from_tools() for what raw/max_possible mean.
     """
     if not park:
         return None
@@ -250,6 +279,48 @@ def compute_pitcher_park_fit_from_tools(
 
     raw = sum(terms) / len(terms)
     max_possible = sum(max_terms) / len(max_terms) if max_terms else 0
+    return raw, max_possible
+
+
+def compute_pitcher_park_fit_from_tools(
+    tools: dict[str, float | int | None],
+    park: dict,
+) -> Optional[int]:
+    """-100 to 100, scouting-tool fallback for pitchers with no real innings
+    sample (a fresh upload, an amateur, a rookie) — Custom Upload always
+    uses this path since an uploaded roster CSV has no game logs at all.
+
+    Movement stands in for groundball tendency (this league's own model
+    already ties higher Movement to more ground-ball contact), Control
+    stands in for command/walk avoidance, matched against the same park
+    factors compute_pitcher_park_fit_from_stats() uses. No Stuff/strikeout
+    term — without a real K rate there's nothing to dampen with, so Stuff
+    is left out rather than guessed at.
+
+    Returns a RELATIVE/comparative score, not a dollar or %% figure — see
+    compute_pitcher_park_value_pct_from_tools().
+    """
+    result = _pitcher_park_raw_from_tools(tools, park)
+    if result is None:
+        return None
+    raw, max_possible = result
     if max_possible <= 0:
         return 0
     return _clamp100(100.0 * raw / max_possible)
+
+
+def compute_pitcher_park_value_pct_from_tools(
+    tools: dict[str, float | int | None],
+    park: dict,
+) -> Optional[float]:
+    """Estimated marginal %% swing in this pitcher's value from park fit,
+    quantified counterpart to compute_pitcher_park_fit_from_tools() — same
+    relationship compute_batter_park_value_pct() has to its 0-100 score.
+    Dividing by 30 (grade-80 ceiling on the 20-80 scale) gives the same
+    "converges to the park's real factor deviation at max grade" property.
+    """
+    result = _pitcher_park_raw_from_tools(tools, park)
+    if result is None:
+        return None
+    raw, _ = result
+    return raw / 30.0

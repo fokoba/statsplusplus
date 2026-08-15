@@ -5,13 +5,18 @@ question this page answers is: of everyone still worth investigating,
 who's the best use of that allocation? "Worth investigating" specifically
 means good players whose accuracy is still Average/Low/Very Low (or
 altogether unscouted) — a High/Very High report is already reliable, so
-spending a scouting slot there is wasted allocation.
+spending a scouting slot there is wasted allocation. Best Available flips
+the same lists to the opposite confidence band: players already reliable
+enough to act on today.
 
 Not team-scoped: which players are worth scouting is a league-wide
-question, independent of any one roster's needs.
+question, independent of any one roster's needs. The one exception is the
+optional team-fit highlight, which needs to know which positions a
+specific org is weak at.
 """
 
 import os, sys
+import datetime
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, "scripts"))
@@ -21,10 +26,12 @@ from statsplusplus.evaluation.park_fit import (
     load_park_factors, compute_batter_park_fit,
     compute_pitcher_park_fit_from_stats, compute_pitcher_park_fit_from_tools,
 )
+from statsplusplus.evaluation.composite import compute_composite_hitter, compute_composite_pitcher
+from statsplusplus.evaluation.constants import DEFENSIVE_WEIGHTS
 from statsplusplus.data.evaluation_engine import load_tool_weights
-from web_league_context import get_db, get_cfg
+from web_league_context import get_db, get_cfg, money_divisor as _money_divisor
 
-from team_queries import _NIPPON_TEAM_IDS, _INTL_FA_AGE_MAX
+from team_queries import _NIPPON_TEAM_IDS, _INTL_FA_AGE_MAX, _weak_positions_for_org
 
 # Only these accuracy grades are "worth scouting" — High/Very High reports
 # are already reliable. NULL (never scouted at all) counts as needing a
@@ -44,12 +51,31 @@ _HITTER_POS_CODES = {2: "C", 3: "1B", 4: "2B", 5: "3B", 6: "SS", 7: "LF", 8: "CF
 _DEF_COL = {"C": "c", "1B": "first_b", "2B": "second_b", "3B": "third_b",
             "SS": "ss", "LF": "lf", "CF": "cf", "RF": "rf"}
 
-# Quality gate for Best Park Fits / Best Defenders: only consider players
-# in the top 25% by Ovr AT THAT SPECIFIC POSITION, so a thin position (e.g.
-# catcher) is judged against its own realistic pool, not squeezed out by
-# bat-first outfielders dominating a league-wide cutoff.
+# compute_composite_hitter's defensive-component bucket keys — distinct
+# from DEFENSIVE_WEIGHTS' own naming (COF splits into COF_LF/COF_RF; 1B has
+# no meaningful defensive skill differentiation in this model, so it's
+# left out entirely — matches how real 1B defense barely moves value).
+_COMPOSITE_DEF_BUCKET = {"C": "C", "SS": "SS", "2B": "2B", "3B": "3B",
+                          "CF": "CF", "LF": "COF_LF", "RF": "COF_RF"}
+
+# Pitch-arsenal field names, matching compute_composite_pitcher's expected
+# arsenal dict keys exactly (see scripts/custom_upload.py's _PITCH_COL_MAP
+# for the same mapping against a different data source).
+_ARSENAL_COLS = {"Fst": "fst", "Snk": "snk", "Crv": "crv", "Sld": "sld", "Chg": "chg",
+                  "Splt": "splt", "Cutt": "cutt", "CirChg": "cir_chg", "Scr": "scr",
+                  "Frk": "frk", "Kncrv": "kncrv", "Knbl": "knbl"}
+
+# Quality gate: only consider players in the top 25% by Ovr AT THAT
+# SPECIFIC POSITION, so a thin position (e.g. catcher) is judged against
+# its own realistic pool, not squeezed out by a league-wide cutoff.
 _QUALITY_TOP_PCT = 0.25
 _TOP_N = 10
+
+# A player counts as a genuine park-fit + surplus "both good" pick when
+# both clear these bars — not a precise science, just enough to flag the
+# highest-confidence adds without hiding everyone else.
+_GOOD_PARK_FIT = 20
+_GOOD_SURPLUS = 0
 
 
 def _signable_where():
@@ -64,19 +90,26 @@ def _signable_where():
     return where, (*_NIPPON_TEAM_IDS, _INTL_FA_AGE_MAX)
 
 
-def _fetch_pool(conn):
-    """All signable, non-international free agents with the ratings needed
-    for every section below. One query, reused by all four lists."""
+def _fetch_pool(conn, eval_date, ed_surplus):
+    """All signable, non-international free agents with everything every
+    section below needs — one query, reused by all lists."""
     where, params = _signable_where()
     rows = conn.execute(f"""
         SELECT p.player_id, p.name, p.age, p.pos, p.role, r.bats, r.acc,
                r.composite_score, r.ceiling_score, r.true_ceiling,
                r.cntct, r.gap, r.pow, r.eye, r.stf, r.mov, r.ctrl,
-               r.c, r.first_b, r.second_b, r.third_b, r.ss, r.lf, r.cf, r.rf
+               r.cntct_r, r.gap_r, r.pow_r, r.eye_r, r.stf_r, r.mov_r, r.ctrl_r,
+               r.cntct_l, r.gap_l, r.pow_l, r.eye_l, r.stf_l, r.mov_l, r.ctrl_l,
+               r.c, r.first_b, r.second_b, r.third_b, r.ss, r.lf, r.cf, r.rf,
+               r.c_frm, r.c_blk, r.c_arm, r.ifr, r.ife, r.ifa, r.tdp, r.ofr, r.ofe, r.ofa,
+               r.fst, r.snk, r.crv, r.sld, r.chg, r.splt, r.cutt, r.cir_chg, r.scr, r.frk, r.kncrv, r.knbl,
+               r.stm, ps.surplus, pf.prospect_surplus
         FROM players p
         LEFT JOIN latest_ratings r ON p.player_id = r.player_id
+        LEFT JOIN player_surplus ps ON ps.player_id = p.player_id AND ps.eval_date = ?
+        LEFT JOIN prospect_fv pf ON pf.player_id = p.player_id AND pf.eval_date = ?
         WHERE {where} AND r.composite_score IS NOT NULL
-    """, params).fetchall()
+    """, (ed_surplus, eval_date, *params)).fetchall()
     return rows
 
 
@@ -89,49 +122,153 @@ def _pos_group(pos, role):
     return _HITTER_POS_CODES.get(pos), False
 
 
-def get_scouting_targets(high_confidence=False):
-    """Same four lists either way — high_confidence=False (default, powers
+def _newly_confirmed_pids(conn):
+    """Player IDs whose accuracy is High/Very High as of the latest ratings
+    snapshot but was NOT in the prior snapshot — a fresh scouting-report
+    confirmation, worth surfacing separately from the rest of Best
+    Available since it's new information, not a standing recommendation.
+    Empty set if there's no prior snapshot to compare against.
+    """
+    dates = conn.execute(
+        "SELECT DISTINCT snapshot_date FROM ratings ORDER BY snapshot_date DESC LIMIT 2"
+    ).fetchall()
+    if len(dates) < 2:
+        return set()
+    latest, prior = dates[0][0], dates[1][0]
+    latest_high = {r[0] for r in conn.execute(
+        "SELECT player_id FROM ratings WHERE snapshot_date=? AND acc IN ('H','VH')", (latest,))}
+    prior_high = {r[0] for r in conn.execute(
+        "SELECT player_id FROM ratings WHERE snapshot_date=? AND acc IN ('H','VH')", (prior,))}
+    return latest_high - prior_high
+
+
+def get_scouting_targets(high_confidence=False, team_id=None):
+    """Same lists either way — high_confidence=False (default, powers
     /scouting) restricts to Average/Low/Very Low/unscouted, the players
     worth spending a scouting report on. high_confidence=True (powers
     /best-available) restricts to High/Very High instead: players you
     already know enough about to act on immediately.
+
+    team_id, if given, attaches a per-position "weak" flag so the page can
+    highlight (or filter to) positions that specific org is thin at.
     """
     conn = get_db()
     park = load_park_factors(get_cfg().league_dir)
     ratings_scale = get_cfg().ratings_scale
-    hitter_weights = load_tool_weights(get_cfg().league_dir).get("hitter", {}) if park else {}
+    all_weights = load_tool_weights(get_cfg().league_dir)
+    hitter_weights = all_weights.get("hitter", {})
+    pitcher_weights = all_weights.get("pitcher", {})
 
-    rows = _fetch_pool(conn)
+    ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
+    ed_surplus = conn.execute("SELECT MAX(eval_date) FROM player_surplus").fetchone()[0]
+    rows = _fetch_pool(conn, ed, ed_surplus)
+    newly_confirmed = _newly_confirmed_pids(conn) if high_confidence else set()
 
-    # One entry per player, with everything every section needs.
     players = []
     for r in rows:
         (pid, name, age, pos, role, bats, acc, comp, ceil_score, true_ceil,
          cntct, gap, pow_, eye, stf, mov, ctrl,
-         c_def, first_b, second_b, third_b, ss_def, lf, cf, rf) = r
+         cntct_r, gap_r, pow_r, eye_r, stf_r, mov_r, ctrl_r,
+         cntct_l, gap_l, pow_l, eye_l, stf_l, mov_l, ctrl_l,
+         c_def, first_b, second_b, third_b, ss_def, lf, cf, rf,
+         c_frm, c_blk, c_arm, ifr, ife, ifa, tdp, ofr, ofe, ofa,
+         fst, snk, crv, sld, chg, splt, cutt, cir_chg, scr, frk, kncrv, knbl,
+         stm, surplus_raw, prospect_surplus_raw) = r
         group, is_pitcher = _pos_group(pos, role)
         if group is None:
             continue
         potential = true_ceil if true_ceil is not None else ceil_score
 
+        def n(v):
+            return _normc(v, ratings_scale)
+
         if is_pitcher:
-            _tools = {"stuff": _normc(stf, ratings_scale), "movement": _normc(mov, ratings_scale),
-                      "control": _normc(ctrl, ratings_scale)}
+            role_key = group  # "SP" or "RP"
+            weights = pitcher_weights.get(role_key, {})
+            _tools = {"stuff": n(stf), "movement": n(mov), "control": n(ctrl)}
+            arsenal = {}
+            for pname, raw in (("Fst", fst), ("Snk", snk), ("Crv", crv), ("Sld", sld), ("Chg", chg),
+                                ("Splt", splt), ("Cutt", cutt), ("CirChg", cir_chg), ("Scr", scr),
+                                ("Frk", frk), ("Kncrv", kncrv), ("Knbl", knbl)):
+                v = n(raw)
+                if v is not None:
+                    arsenal[pname] = v
+            stamina = n(stm)
             park_fit = compute_pitcher_park_fit_from_tools(_tools, park) if park else None
             def_rating = None
+
+            vr_tools = dict(_tools)
+            if stf_r is not None:
+                vr_tools["stuff"] = n(stf_r)
+            if mov_r is not None:
+                vr_tools["movement"] = n(mov_r)
+            if ctrl_r is not None:
+                vr_tools["control"] = n(ctrl_r)
+            vl_tools = dict(_tools)
+            if stf_l is not None:
+                vl_tools["stuff"] = n(stf_l)
+            if mov_l is not None:
+                vl_tools["movement"] = n(mov_l)
+            if ctrl_l is not None:
+                vl_tools["control"] = n(ctrl_l)
+            try:
+                vr_score = compute_composite_pitcher(vr_tools, weights, arsenal, stamina, role_key)
+                vl_score = compute_composite_pitcher(vl_tools, weights, arsenal, stamina, role_key)
+            except Exception:
+                vr_score = vl_score = None
         else:
-            _tools = {"contact": _normc(cntct, ratings_scale), "gap": _normc(gap, ratings_scale),
-                      "power": _normc(pow_, ratings_scale), "eye": _normc(eye, ratings_scale)}
-            _hw = hitter_weights.get(group, hitter_weights.get("COF", {}))
-            park_fit = compute_batter_park_fit(_tools, bats, _hw, park) if park else None
+            weights = hitter_weights.get(group, hitter_weights.get("COF", {}))
+            _tools = {"contact": n(cntct), "gap": n(gap), "power": n(pow_), "eye": n(eye)}
+            park_fit = compute_batter_park_fit(_tools, bats, weights, park) if park else None
             def_raw = {"C": c_def, "1B": first_b, "2B": second_b, "3B": third_b,
                        "SS": ss_def, "LF": lf, "CF": cf, "RF": rf}[group]
-            def_rating = _normc(def_raw, ratings_scale)
+            def_rating = n(def_raw)
+
+            def_bucket = _COMPOSITE_DEF_BUCKET.get(group)
+            if def_bucket:
+                def_weights = DEFENSIVE_WEIGHTS.get(def_bucket, {})
+                defense = {"CFrm": n(c_frm), "CBlk": n(c_blk), "CArm": n(c_arm),
+                           "IFR": n(ifr), "IFE": n(ife), "IFA": n(ifa), "TDP": n(tdp),
+                           "OFR": n(ofr), "OFE": n(ofe), "OFA": n(ofa)}
+            else:
+                def_weights, defense = {}, {}
+
+            vr_tools = dict(_tools)
+            if cntct_r is not None:
+                vr_tools["contact"] = n(cntct_r)
+            if gap_r is not None:
+                vr_tools["gap"] = n(gap_r)
+            if pow_r is not None:
+                vr_tools["power"] = n(pow_r)
+            if eye_r is not None:
+                vr_tools["eye"] = n(eye_r)
+            vl_tools = dict(_tools)
+            if cntct_l is not None:
+                vl_tools["contact"] = n(cntct_l)
+            if gap_l is not None:
+                vl_tools["gap"] = n(gap_l)
+            if pow_l is not None:
+                vl_tools["power"] = n(pow_l)
+            if eye_l is not None:
+                vl_tools["eye"] = n(eye_l)
+            try:
+                vr_score = compute_composite_hitter(vr_tools, weights, defense, def_weights)
+                vl_score = compute_composite_hitter(vl_tools, weights, defense, def_weights)
+            except Exception:
+                vr_score = vl_score = None
+
+        surplus_basis = surplus_raw if surplus_raw is not None else prospect_surplus_raw
+        surplus = round(surplus_basis / _money_divisor(), 1) if surplus_basis is not None else None
 
         players.append({
             "pid": pid, "name": name, "age": age, "group": group, "is_pitcher": is_pitcher,
             "composite_score": comp, "potential": potential, "acc": acc,
             "park_fit": park_fit, "def_rating": def_rating,
+            "vr_score": vr_score, "vl_score": vl_score,
+            "surplus": surplus,
+            "good_pick": bool(park_fit is not None and park_fit >= _GOOD_PARK_FIT
+                               and surplus is not None and surplus > _GOOD_SURPLUS),
+            "newly_confirmed": pid in newly_confirmed,
         })
 
     by_group = {}
@@ -150,12 +287,19 @@ def get_scouting_targets(high_confidence=False):
         ovrs = sorted((p["composite_score"] for p in group_players if p["composite_score"] is not None), reverse=True)
         if not ovrs:
             return None
-        n = max(1, round(len(ovrs) * _QUALITY_TOP_PCT))
-        return ovrs[n - 1]
+        n_ = max(1, round(len(ovrs) * _QUALITY_TOP_PCT))
+        return ovrs[n_ - 1]
 
     ORDER = list(_HITTER_POS_CODES.values()) + ["SP", "RP"]
 
-    # ── Best Free Agents Available: top 10 per position by Ovr ──
+    def _gated_pool(group):
+        group_players = by_group.get(group, [])
+        cutoff = _quality_cutoff(group_players)
+        if cutoff is None:
+            return []
+        return [p for p in group_players if _needs_scout(p) and (p["composite_score"] or -999) >= cutoff]
+
+    # ── Best Free Agents Available: top 10 per position by Ovr (no quality gate — it IS the quality ranking) ──
     best_fa = {}
     for group in ORDER:
         pool = [p for p in by_group.get(group, []) if _needs_scout(p) and p["composite_score"] is not None]
@@ -166,22 +310,14 @@ def get_scouting_targets(high_confidence=False):
     best_park = {}
     if park:
         for group in ORDER:
-            group_players = by_group.get(group, [])
-            cutoff = _quality_cutoff(group_players)
-            pool = [p for p in group_players
-                    if _needs_scout(p) and p["park_fit"] is not None
-                    and cutoff is not None and (p["composite_score"] or -999) >= cutoff]
+            pool = [p for p in _gated_pool(group) if p["park_fit"] is not None]
             pool.sort(key=lambda p: -p["park_fit"])
             best_park[group] = pool[:_TOP_N]
 
     # ── Best Defenders: hitters only, top 10 per position by def rating, same quality gate ──
     best_def = {}
     for group in _HITTER_POS_CODES.values():
-        group_players = by_group.get(group, [])
-        cutoff = _quality_cutoff(group_players)
-        pool = [p for p in group_players
-                if _needs_scout(p) and p["def_rating"] is not None
-                and cutoff is not None and (p["composite_score"] or -999) >= cutoff]
+        pool = [p for p in _gated_pool(group) if p["def_rating"] is not None]
         pool.sort(key=lambda p: -p["def_rating"])
         best_def[group] = pool[:_TOP_N]
 
@@ -193,8 +329,97 @@ def get_scouting_targets(high_confidence=False):
         pool.sort(key=lambda p: -p["potential"])
         best_youth[group] = pool[:_TOP_N]
 
+    # ── Best vR / Best vL: top 10 per position by the split-tool composite, same quality gate ──
+    best_vr, best_vl = {}, {}
+    for group in ORDER:
+        gated = _gated_pool(group)
+        vr_pool = [p for p in gated if p["vr_score"] is not None]
+        vr_pool.sort(key=lambda p: -p["vr_score"])
+        best_vr[group] = vr_pool[:_TOP_N]
+        vl_pool = [p for p in gated if p["vl_score"] is not None]
+        vl_pool.sort(key=lambda p: -p["vl_score"])
+        best_vl[group] = vl_pool[:_TOP_N]
+
+    # ── Best Rule 5 Eligible: separate pool entirely (other orgs' minor
+    # leaguers, not free agents) — see rule5_eligible table. Empty until an
+    # export has been uploaded.
+    best_rule5 = _rule5_targets(conn, high_confidence)
+
+    weak_positions = _weak_positions_for_org(team_id) if team_id else set()
+
     return {
         "best_fa": best_fa, "best_park": best_park, "best_def": best_def, "best_youth": best_youth,
+        "best_vr": best_vr, "best_vl": best_vl, "best_rule5": best_rule5,
         "order": ORDER, "hitter_order": list(_HITTER_POS_CODES.values()),
-        "park_configured": bool(park),
+        "park_configured": bool(park), "weak_positions": weak_positions,
+        "rule5_uploaded": _rule5_has_data(conn),
     }
+
+
+def _rule5_has_data(conn):
+    try:
+        return conn.execute("SELECT COUNT(*) FROM rule5_eligible").fetchone()[0] > 0
+    except Exception:
+        return False
+
+
+def _rule5_targets(conn, high_confidence):
+    """Rule 5-eligible players (any org's farm system, not just free
+    agents) worth a look — same quality gate and accuracy split as
+    everything else, but scoped to this much smaller, separate pool.
+    """
+    if not _rule5_has_data(conn):
+        return {}
+    try:
+        rows = conn.execute("""
+            SELECT p.player_id, p.name, p.age, p.pos, p.role, r.acc,
+                   r.composite_score, r.ceiling_score, r.true_ceiling
+            FROM rule5_eligible re
+            JOIN players p ON p.player_id = re.player_id
+            LEFT JOIN latest_ratings r ON p.player_id = r.player_id
+            WHERE r.composite_score IS NOT NULL
+        """).fetchall()
+    except Exception:
+        return {}
+
+    players = []
+    for pid, name, age, pos, role, acc, comp, ceil_score, true_ceil in rows:
+        group, is_pitcher = _pos_group(pos, role)
+        if group is None:
+            continue
+        potential = true_ceil if true_ceil is not None else ceil_score
+        players.append({"pid": pid, "name": name, "age": age, "group": group,
+                         "composite_score": comp, "potential": potential, "acc": acc})
+
+    by_group = {}
+    for p in players:
+        by_group.setdefault(p["group"], []).append(p)
+
+    def _needs_scout(p):
+        if high_confidence:
+            return p["acc"] in _HIGH_CONF_ACC
+        return p["acc"] is None or p["acc"] in _NEEDS_SCOUT_ACC
+
+    ORDER = list(_HITTER_POS_CODES.values()) + ["SP", "RP"]
+    out = {}
+    for group in ORDER:
+        group_players = by_group.get(group, [])
+        ovrs = sorted((p["composite_score"] for p in group_players if p["composite_score"] is not None), reverse=True)
+        if not ovrs:
+            out[group] = []
+            continue
+        n_ = max(1, round(len(ovrs) * _QUALITY_TOP_PCT))
+        cutoff = ovrs[n_ - 1]
+        pool = [p for p in group_players if _needs_scout(p) and (p["composite_score"] or -999) >= cutoff]
+        pool.sort(key=lambda p: -(p["composite_score"] or 0))
+        out[group] = pool[:_TOP_N]
+    return out
+
+
+def import_rule5_eligible(file_bytes, league_dir=None):
+    """Placeholder — needs a real OOTP 'Rule 5 Draft Eligible' export to
+    build the actual parser against (format not yet seen). Returns 0 until
+    then; the upload box surfaces that rather than silently accepting a
+    file it can't really parse.
+    """
+    return 0

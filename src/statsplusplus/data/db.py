@@ -357,6 +357,15 @@ CREATE TABLE IF NOT EXISTS salary_estimates (
     PRIMARY KEY (player_id, year)
 );
 
+-- Rule 5 draft eligibility, imported from a manually uploaded OOTP
+-- "Rule 5 Draft Eligible" export. Not derivable from synced data — real
+-- Rule 5 status depends on internal roster-protection history the live
+-- sync doesn't expose, so this is the only reliable source for it.
+CREATE TABLE IF NOT EXISTS rule5_eligible (
+    player_id   INTEGER PRIMARY KEY,
+    uploaded_at TEXT
+);
+
 CREATE VIEW IF NOT EXISTS mlb_batting_stats AS
     SELECT * FROM batting_stats WHERE league_id IS NULL;
 

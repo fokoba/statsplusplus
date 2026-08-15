@@ -427,7 +427,8 @@ def player(pid):
 @app.route("/scouting")
 def scouting():
     import scouting_queries as _sq
-    data = _sq.get_scouting_targets()
+    from web_league_context import my_team_id as _my_team_id
+    data = _sq.get_scouting_targets(team_id=_my_team_id())
     return render_template("scouting.html",
                            breadcrumbs=[{"label": "Scouting Targets", "url": "/scouting"}],
                            **data)
@@ -436,10 +437,25 @@ def scouting():
 @app.route("/best-available")
 def best_available():
     import scouting_queries as _sq
-    data = _sq.get_scouting_targets(high_confidence=True)
+    from web_league_context import my_team_id as _my_team_id
+    data = _sq.get_scouting_targets(high_confidence=True, team_id=_my_team_id())
     return render_template("best_available.html",
                            breadcrumbs=[{"label": "Best Available", "url": "/best-available"}],
                            **data)
+
+
+@app.route("/rule5-upload", methods=["POST"])
+def rule5_upload():
+    import scouting_queries as _sq
+    f = request.files.get("rule5_file")
+    dest = request.form.get("dest") or "/scouting"
+    if not f or not f.filename:
+        return redirect(f"{dest}?rule5_error=1")
+    try:
+        count = _sq.import_rule5_eligible(f.read(), league_dir=_get_cfg().league_dir)
+        return redirect(f"{dest}?rule5_count={count}")
+    except Exception:
+        return redirect(f"{dest}?rule5_error=1")
 
 
 @app.route("/custom-upload", methods=["GET", "POST"])

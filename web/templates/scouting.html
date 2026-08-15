@@ -10,14 +10,23 @@
   </div>
 </div>
 
-{% macro pos_card(group, players, value_key, value_label) %}
-<div class="scout-card">
+{% if weak_positions %}
+<div style="margin-bottom:12px">
+  <label style="font-size:13px">
+    <input type="checkbox" id="weak-only-toggle" onchange="scoutFilterWeak()">
+    Show only positions where my team is below-average ({{ weak_positions|join(', ') }})
+  </label>
+</div>
+{% endif %}
+
+{% macro pos_card(group, players, value_key, value_label, page_key) %}
+<div class="scout-card{{ ' scout-card-weak' if group in weak_positions else '' }}" data-group="{{ group }}">
   <div class="scout-card-head">{{ group }} <span style="color:var(--text-dim); font-weight:400">({{ players|length }})</span></div>
   {% if players %}
   <table class="scout-mini-table">
     <thead>
       <tr>
-        <th class="left">Name</th><th>Age</th><th>Ovr</th>
+        <th></th><th class="left">Name</th><th>Age</th><th>Ovr</th>
         {% if value_key %}<th>{{ value_label }}</th>{% endif %}
         <th>Acc</th>
       </tr>
@@ -25,6 +34,7 @@
     <tbody>
       {% for p in players %}
       <tr>
+        <td><input type="checkbox" class="scout-checkbox" data-pid="{{ p.pid }}" data-page="{{ page_key }}"></td>
         <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
         <td>{{ p.age if p.age is not none else '-' }}</td>
         <td><span class="ovr-color" data-g="{{ p.composite_score }}">{{ p.composite_score if p.composite_score is not none else '-' }}</span></td>
@@ -48,7 +58,7 @@
   <h2>Best Free Agents Available <span style="color:var(--text-dim); font-weight:400; font-size:13px">(top 10 per position, by Ovr)</span></h2>
   <div class="scout-grid">
     {% for group in order %}
-    {{ pos_card(group, best_fa.get(group, []), none, '') }}
+    {{ pos_card(group, best_fa.get(group, []), none, '', 'scouting') }}
     {% endfor %}
   </div>
 </div>
@@ -58,7 +68,7 @@
   <h2>Best Park Fits Available <span style="color:var(--text-dim); font-weight:400; font-size:13px">(top 10 per position by Park Fit, restricted to the top 25% Ovr at that position)</span></h2>
   <div class="scout-grid">
     {% for group in order %}
-    {{ pos_card(group, best_park.get(group, []), 'park_fit', 'Fit') }}
+    {{ pos_card(group, best_park.get(group, []), 'park_fit', 'Fit', 'scouting') }}
     {% endfor %}
   </div>
 </div>
@@ -68,7 +78,7 @@
   <h2>Best Defenders Available <span style="color:var(--text-dim); font-weight:400; font-size:13px">(hitters only — top 10 per position by defensive rating, restricted to the top 25% Ovr at that position)</span></h2>
   <div class="scout-grid">
     {% for group in hitter_order %}
-    {{ pos_card(group, best_def.get(group, []), 'def_rating', 'Def') }}
+    {{ pos_card(group, best_def.get(group, []), 'def_rating', 'Def', 'scouting') }}
     {% endfor %}
   </div>
 </div>
@@ -77,9 +87,52 @@
   <h2>Best Youth Available <span style="color:var(--text-dim); font-weight:400; font-size:13px">(age 24 or under, top 10 per position by Potential)</span></h2>
   <div class="scout-grid">
     {% for group in order %}
-    {{ pos_card(group, best_youth.get(group, []), 'potential', 'Pot') }}
+    {{ pos_card(group, best_youth.get(group, []), 'potential', 'Pot', 'scouting') }}
     {% endfor %}
   </div>
+</div>
+
+<div class="panel">
+  <h2>Best vR Available <span style="color:var(--text-dim); font-weight:400; font-size:13px">(top 10 per position by Ovr specifically vs RHP, restricted to the top 25% Ovr at that position)</span></h2>
+  <div class="scout-grid">
+    {% for group in order %}
+    {{ pos_card(group, best_vr.get(group, []), 'vr_score', 'vR', 'scouting') }}
+    {% endfor %}
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Best vL Available <span style="color:var(--text-dim); font-weight:400; font-size:13px">(top 10 per position by Ovr specifically vs LHP, restricted to the top 25% Ovr at that position)</span></h2>
+  <div class="scout-grid">
+    {% for group in order %}
+    {{ pos_card(group, best_vl.get(group, []), 'vl_score', 'vL', 'scouting') }}
+    {% endfor %}
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Best Rule 5 Eligible <span style="color:var(--text-dim); font-weight:400; font-size:13px">(top 10 per position, restricted to the top 25% Ovr at that position)</span></h2>
+  <div style="font-size:12px; color:var(--text-dim); margin-bottom:12px; padding:8px; border:1px solid var(--border); border-radius:6px">
+    Not free agents — this pool is every other org's exposed minor leaguers, from a manually uploaded OOTP "Rule 5 Draft
+    Eligible" export (real eligibility depends on internal roster-protection history the live sync doesn't carry).
+    Upload it here to identify who still needs a report before draft day:
+    <form method="post" action="/rule5-upload" enctype="multipart/form-data" style="display:inline-flex; align-items:center; gap:6px; margin-top:6px">
+      <input type="hidden" name="dest" value="/scouting">
+      <input type="file" name="rule5_file" required>
+      <button type="submit" class="btn btn-sm">Upload</button>
+    </form>
+    {% if request.args.get('rule5_count') %}<span style="color:#4caf50">Imported {{ request.args.get('rule5_count') }} players.</span>{% endif %}
+    {% if request.args.get('rule5_error') %}<span style="color:#f44336">Upload failed — check the file and try again.</span>{% endif %}
+  </div>
+  {% if rule5_uploaded %}
+  <div class="scout-grid">
+    {% for group in order %}
+    {{ pos_card(group, best_rule5.get(group, []), none, '', 'scouting') }}
+    {% endfor %}
+  </div>
+  {% else %}
+  <div style="color:var(--text-dim); font-size:13px">No Rule 5 export uploaded yet.</div>
+  {% endif %}
 </div>
 
 <style>
@@ -93,6 +146,7 @@
   border-radius: 6px;
   padding: 8px 10px;
 }
+.scout-card-weak { border-color: #ffc107; }
 .scout-card-head {
   font-weight: 600;
   font-size: 13px;
@@ -100,6 +154,43 @@
 }
 .scout-mini-table { width: 100%; font-size: 12px; }
 .scout-mini-table th, .scout-mini-table td { padding: 2px 4px; }
+tr.scout-marked .player-link { color: var(--text-dim); text-decoration: line-through; }
 </style>
+
+<script>
+function scoutFilterWeak() {
+  var only = document.getElementById('weak-only-toggle').checked;
+  document.querySelectorAll('.scout-card').forEach(function(card) {
+    card.style.display = (!only || card.classList.contains('scout-card-weak')) ? '' : 'none';
+  });
+}
+</script>
+
+<script>
+/* ── Persisted per-page checkboxes: track who you've scouted/actioned ── */
+(function() {
+  var STORAGE_KEY = 'statspp_scout_marks';
+  function loadMarks() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
+    catch (e) { return {}; }
+  }
+  function saveMarks(marks) { localStorage.setItem(STORAGE_KEY, JSON.stringify(marks)); }
+
+  var marks = loadMarks();
+  document.querySelectorAll('.scout-checkbox').forEach(function(cb) {
+    var key = cb.dataset.page + ':' + cb.dataset.pid;
+    var row = cb.closest('tr');
+    if (marks[key]) {
+      cb.checked = true;
+      row.classList.add('scout-marked');
+    }
+    cb.addEventListener('change', function() {
+      if (cb.checked) { marks[key] = true; row.classList.add('scout-marked'); }
+      else { delete marks[key]; row.classList.remove('scout-marked'); }
+      saveMarks(marks);
+    });
+  });
+})();
+</script>
 
 {% endblock %}

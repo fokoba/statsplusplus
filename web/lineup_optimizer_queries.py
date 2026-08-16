@@ -121,8 +121,73 @@ def _league_park_has_data(conn):
 
 
 def import_league_park_factors(file_bytes, league_dir=None):
-    """Placeholder — needs a real league-wide OOTP park-info export to
-    build the actual parser against (format not yet seen). Returns 0
-    until then.
+    """Import league-wide park factors from an OOTP "Team Info"/"Park
+    Info" export. Two real formats seen (one per league so far): one with
+    a literal team ID column (matches team_id directly), one without
+    (team name only — matched against this league's own team_names_map,
+    the same lookup the rest of the app already uses for display names).
+
+    Static data (only relocation changes it, which isn't modeled yet —
+    a fresh upload at that point just replaces these rows), so a full
+    replace on each upload is correct, not a merge.
     """
-    return 0
+    import datetime
+    from custom_upload import parse_rows
+    from statsplusplus.config.league_config import LeagueConfig
+    from statsplusplus.data.db import get_conn as _get_conn
+
+    rows = parse_rows(file_bytes)
+    if not rows:
+        return 0
+
+    lc = LeagueConfig(base_dir=league_dir)
+    name_to_tid = {name: tid for tid, name in lc.team_names_map.items()}
+
+    def _num(v):
+        if v is None:
+            return None
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    entries = []
+    for d in rows:
+        team_id = None
+        raw_id = (d.get("ID") or "").strip()
+        if raw_id:
+            try:
+                team_id = int(raw_id)
+            except ValueError:
+                team_id = None
+        if team_id is None:
+            team_id = name_to_tid.get((d.get("Team Name") or "").strip())
+        if team_id is None:
+            continue
+
+        avg = _num(d.get("PF AVG"))
+        if avg is None:
+            continue
+        park_name = (d.get("Park") or d.get("Team Name") or "").strip()
+        entries.append((
+            team_id, park_name,
+            avg, _num(d.get("AVG L")), _num(d.get("AVG R")),
+            _num(d.get("PF HR")), _num(d.get("HR L")), _num(d.get("HR R")),
+            _num(d.get("PF D")), _num(d.get("PF T")), _num(d.get("PF")),
+        ))
+
+    if not entries:
+        return 0
+
+    conn = _get_conn(league_dir)
+    now = datetime.datetime.now().isoformat()
+    conn.execute("DELETE FROM league_park_factors")
+    conn.executemany(
+        "INSERT INTO league_park_factors "
+        "(team_id, park, avg, avg_l, avg_r, hr, hr_l, hr_r, doubles, triples, overall, uploaded_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        [tuple(e) + (now,) for e in entries],
+    )
+    conn.commit()
+    conn.close()
+    return len(entries)

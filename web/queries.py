@@ -1208,10 +1208,15 @@ def get_positional_rankings():
     cfg = get_cfg()
     stats_year = cfg.year
 
-    # Get MLB org IDs for filtering
+    # Get MLB org IDs for filtering. LeagueConfig() with no base_dir silently
+    # falls back to whichever league it defaults to internally — not
+    # necessarily the currently-active one in this request — so every row
+    # was being filtered against the wrong league's team IDs and every
+    # group came back empty. Must pass this request's league_dir explicitly,
+    # same as everywhere else in the app.
     try:
         from statsplusplus.config.league_config import LeagueConfig
-        mlb_org_ids = LeagueConfig().mlb_team_ids
+        mlb_org_ids = LeagueConfig(base_dir=cfg.league_dir).mlb_team_ids
     except Exception:
         mlb_org_ids = set(teams.keys())
 

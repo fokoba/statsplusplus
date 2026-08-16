@@ -366,6 +366,20 @@ CREATE TABLE IF NOT EXISTS rule5_eligible (
     uploaded_at TEXT
 );
 
+-- League-wide park factors (every team's home park), imported from a
+-- manually uploaded OOTP park-info export. Only the active team's own
+-- park is available any other way (config/park_factors.json) — this
+-- table is what makes an AWAY-game park selectable in Lineup Optimizer.
+CREATE TABLE IF NOT EXISTS league_park_factors (
+    team_id     INTEGER PRIMARY KEY,
+    park        TEXT,
+    avg         REAL, avg_l  REAL, avg_r  REAL,
+    hr          REAL, hr_l   REAL, hr_r   REAL,
+    doubles     REAL, triples REAL,
+    overall     REAL,
+    uploaded_at TEXT
+);
+
 CREATE VIEW IF NOT EXISTS mlb_batting_stats AS
     SELECT * FROM batting_stats WHERE league_id IS NULL;
 

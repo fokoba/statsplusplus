@@ -447,6 +447,30 @@ def best_available():
                            **data)
 
 
+@app.route("/lineup-optimizer")
+def lineup_optimizer():
+    import lineup_optimizer_queries as _loq
+    opponent_id = request.args.get("opponent", type=int)
+    is_home = request.args.get("venue", "home") != "away"
+    data = _loq.get_lineup_optimizer(opponent_id=opponent_id, is_home=is_home)
+    return render_template("lineup_optimizer.html",
+                           breadcrumbs=[{"label": "Lineup Optimizer", "url": "/lineup-optimizer"}],
+                           **data)
+
+
+@app.route("/park-factors-upload", methods=["POST"])
+def park_factors_upload():
+    import lineup_optimizer_queries as _loq
+    f = request.files.get("park_file")
+    if not f or not f.filename:
+        return redirect("/lineup-optimizer?park_error=1")
+    try:
+        count = _loq.import_league_park_factors(f.read(), league_dir=_get_cfg().league_dir)
+        return redirect(f"/lineup-optimizer?park_count={count}")
+    except Exception:
+        return redirect("/lineup-optimizer?park_error=1")
+
+
 @app.route("/team-compare")
 def team_compare():
     import scouting_queries as _sq

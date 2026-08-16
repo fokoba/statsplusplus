@@ -26,8 +26,9 @@ sys.path.insert(0, os.path.join(BASE, "scripts"))
 from statsplusplus.utils.positions import GAME_POS_MAP, ROLE_MAP
 from statsplusplus.config.ratings import norm_continuous as _normc
 from statsplusplus.evaluation.park_fit import (
-    load_park_factors, compute_batter_park_fit,
+    load_park_factors, compute_batter_park_fit, compute_batter_park_value_pct,
     compute_pitcher_park_fit_from_stats, compute_pitcher_park_fit_from_tools,
+    compute_pitcher_park_value_pct_from_stats, compute_pitcher_park_value_pct_from_tools,
 )
 from statsplusplus.evaluation.composite import compute_composite_hitter, compute_composite_pitcher
 from statsplusplus.evaluation.constants import DEFENSIVE_WEIGHTS
@@ -201,6 +202,7 @@ def _build_entries(rows, ratings_scale, park, hitter_weights, pitcher_weights, n
                     arsenal[pname] = v
             stamina = n(stm)
             park_fit = compute_pitcher_park_fit_from_tools(_tools, park) if park else None
+            park_value_pct = compute_pitcher_park_value_pct_from_tools(_tools, park) if park else None
             def_rating = None
 
             vr_tools = dict(_tools)
@@ -226,6 +228,7 @@ def _build_entries(rows, ratings_scale, park, hitter_weights, pitcher_weights, n
             weights = hitter_weights.get(group, hitter_weights.get("COF", {}))
             _tools = {"contact": n(cntct), "gap": n(gap), "power": n(pow_), "eye": n(eye)}
             park_fit = compute_batter_park_fit(_tools, bats, weights, park) if park else None
+            park_value_pct = compute_batter_park_value_pct(_tools, bats, weights, park) if park else None
             def_raw = {"C": c_def, "1B": first_b, "2B": second_b, "3B": third_b,
                        "SS": ss_def, "LF": lf, "CF": cf, "RF": rf}[group]
             def_rating = n(def_raw)
@@ -270,7 +273,7 @@ def _build_entries(rows, ratings_scale, park, hitter_weights, pitcher_weights, n
         out.append({
             "pid": pid, "name": name, "age": age, "group": group, "is_pitcher": is_pitcher,
             "composite_score": comp, "potential": potential, "acc": acc,
-            "park_fit": park_fit, "def_rating": def_rating,
+            "park_fit": park_fit, "park_value_pct": park_value_pct, "def_rating": def_rating,
             "vr_score": vr_score, "vl_score": vl_score,
             "surplus": surplus,
             "good_pick": bool(park_fit is not None and park_fit >= _GOOD_PARK_FIT

@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h1>Lineup Optimizer</h1>
+  <div style="color:var(--text-dim); font-size:13px; margin-top:4px">
+    Best available hitter per position from your current MLB roster, split by vR/vL, for a specific matchup — ranked
+    primarily by the same vR/vL composite as Best vR/vL Available, with Park Fit breaking ties. Not a lineup order —
+    just who to start at each spot; you already know who's actually pitching that day.
+  </div>
+</div>
+
+<div style="margin-bottom:16px; display:flex; flex-wrap:wrap; gap:16px; align-items:center; font-size:13px">
+  <div>
+    Opponent:
+    <select id="opp-select" onchange="lineupUpdate()">
+      <option value="">Select a team…</option>
+      {% for tid, name in other_teams %}
+      <option value="{{ tid }}" {% if opponent_id == tid %}selected{% endif %}>{{ name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div>
+    <label><input type="radio" name="venue" value="home" {% if is_home %}checked{% endif %} onchange="lineupUpdate()"> Home</label>
+    <label><input type="radio" name="venue" value="away" {% if not is_home %}checked{% endif %} onchange="lineupUpdate()"> Away</label>
+  </div>
+  {% if park %}
+  <div style="color:var(--text-dim)">
+    Park: <strong style="color:var(--text)">{{ park.park }}</strong> ({{ park_team_abbr }}){% if not park_is_mine %} — from uploaded league park data{% endif %}
+  </div>
+  {% elif not is_home and opponent_id %}
+  <div style="color:#f44336">No park data uploaded for this team yet — see upload box below.</div>
+  {% endif %}
+</div>
+
+{% if not park_uploaded %}
+<div class="panel" style="font-size:12px; color:var(--text-dim); margin-bottom:16px">
+  Away games need the opposing team's park factors, which only come from a manually uploaded league-wide OOTP park-info
+  export (your own home park already loads automatically). Upload it here once you have it:
+  <form method="post" action="/park-factors-upload" enctype="multipart/form-data" style="display:inline-flex; align-items:center; gap:6px; margin-top:6px">
+    <input type="file" name="park_file" required>
+    <button type="submit" class="btn btn-sm">Upload</button>
+  </form>
+  {% if request.args.get('park_count') %}<span style="color:#4caf50">Imported {{ request.args.get('park_count') }} teams.</span>{% endif %}
+  {% if request.args.get('park_error') %}<span style="color:#f44336">Upload failed — check the file and try again.</span>{% endif %}
+</div>
+{% endif %}
+
+<div class="panel">
+  <h2>Optimal Lineup</h2>
+  <table>
+    <thead>
+      <tr>
+        <th class="left">Pos</th>
+        <th class="left">vR Pick</th><th>Ovr</th><th>vR</th><th>Fit</th><th class="left">Park Impact</th>
+        <th class="left">vL Pick</th><th>Ovr</th><th>vL</th><th>Fit</th><th class="left">Park Impact</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for slot in lineup %}
+      <tr>
+        <td class="left" style="font-weight:600">{{ slot.group }}</td>
+        {% for p, score_key in [(slot.vr, 'vr_score'), (slot.vl, 'vl_score')] %}
+        {% if p %}
+        <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
+        <td><span class="ovr-color" data-g="{{ p.composite_score }}">{{ p.composite_score if p.composite_score is not none else '-' }}</span></td>
+        <td>{{ p[score_key]|round|int if p[score_key] is not none else '-' }}</td>
+        <td class="{{ 'pos' if p.park_fit and p.park_fit > 0 else 'neg' if p.park_fit and p.park_fit < 0 else '' }}">{{ p.park_fit if p.park_fit is not none else '-' }}</td>
+        <td class="left {{ 'pos' if p.park_value_pct and p.park_value_pct > 0 else 'neg' if p.park_value_pct and p.park_value_pct < 0 else '' }}">
+          {% if p.park_value_pct is not none and park %}{% set pv = (p.park_value_pct * 100)|round|int %}{{ '+' if pv > 0 else '' }}{{ pv }}% in {{ park.park }}{% if park_team_abbr %} ({{ park_team_abbr }}){% endif %}{% else %}-{% endif %}
+        </td>
+        {% else %}
+        <td class="left text-dim" colspan="5">No qualifying player</td>
+        {% endif %}
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="panel">
+  <h2>Rotation <span style="color:var(--text-dim); font-weight:400; font-size:13px">(sorted by Ovr — use Park Fit/Impact to decide start order against this park)</span></h2>
+  <table>
+    <thead>
+      <tr><th class="left">Name</th><th>Age</th><th>Ovr</th><th>Fit</th><th class="left">Park Impact</th></tr>
+    </thead>
+    <tbody>
+      {% for p in rotation %}
+      <tr>
+        <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
+        <td>{{ p.age if p.age is not none else '-' }}</td>
+        <td><span class="ovr-color" data-g="{{ p.composite_score }}">{{ p.composite_score if p.composite_score is not none else '-' }}</span></td>
+        <td class="{{ 'pos' if p.park_fit and p.park_fit > 0 else 'neg' if p.park_fit and p.park_fit < 0 else '' }}">{{ p.park_fit if p.park_fit is not none else '-' }}</td>
+        <td class="left {{ 'pos' if p.park_value_pct and p.park_value_pct > 0 else 'neg' if p.park_value_pct and p.park_value_pct < 0 else '' }}">
+          {% if p.park_value_pct is not none and park %}{% set pv = (p.park_value_pct * 100)|round|int %}{{ '+' if pv > 0 else '' }}{{ pv }}% in {{ park.park }}{% if park_team_abbr %} ({{ park_team_abbr }}){% endif %}{% else %}-{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+      {% if not rotation %}<tr><td colspan="5" class="text-dim">No starters found on your active roster.</td></tr>{% endif %}
+    </tbody>
+  </table>
+</div>
+
+<div class="panel">
+  <h2>Bullpen <span style="color:var(--text-dim); font-weight:400; font-size:13px">(sorted by Ovr)</span></h2>
+  <table>
+    <thead>
+      <tr><th class="left">Name</th><th>Age</th><th>Ovr</th><th>Fit</th><th class="left">Park Impact</th></tr>
+    </thead>
+    <tbody>
+      {% for p in bullpen %}
+      <tr>
+        <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
+        <td>{{ p.age if p.age is not none else '-' }}</td>
+        <td><span class="ovr-color" data-g="{{ p.composite_score }}">{{ p.composite_score if p.composite_score is not none else '-' }}</span></td>
+        <td class="{{ 'pos' if p.park_fit and p.park_fit > 0 else 'neg' if p.park_fit and p.park_fit < 0 else '' }}">{{ p.park_fit if p.park_fit is not none else '-' }}</td>
+        <td class="left {{ 'pos' if p.park_value_pct and p.park_value_pct > 0 else 'neg' if p.park_value_pct and p.park_value_pct < 0 else '' }}">
+          {% if p.park_value_pct is not none and park %}{% set pv = (p.park_value_pct * 100)|round|int %}{{ '+' if pv > 0 else '' }}{{ pv }}% in {{ park.park }}{% if park_team_abbr %} ({{ park_team_abbr }}){% endif %}{% else %}-{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+      {% if not bullpen %}<tr><td colspan="5" class="text-dim">No relievers found on your active roster.</td></tr>{% endif %}
+    </tbody>
+  </table>
+</div>
+
+<script>
+function lineupUpdate() {
+  var url = new URL(window.location.href);
+  var opp = document.getElementById('opp-select').value;
+  var venue = document.querySelector('input[name="venue"]:checked');
+  if (opp) url.searchParams.set('opponent', opp);
+  else url.searchParams.delete('opponent');
+  if (venue) url.searchParams.set('venue', venue.value);
+  window.location.href = url.toString();
+}
+</script>
+
+{% endblock %}

@@ -1382,11 +1382,31 @@ def get_contracts(team_id):
         ORDER BY c.salary_0 DESC
     """.format(_CONTRACT_ORG_SQL=_CONTRACT_ORG_SQL), (ed, *_contract_org_params(team_id))).fetchall()
 
+    # Real per-year figures from an uploaded "Team Salary" export override
+    # the raw synced contract value wherever they cover a given calendar
+    # year — same override get_payroll_summary() (Finances tab) already
+    # applies. Without this here too, the Contracts tab's Salary column and
+    # the top-bar Payroll tile silently drift out of sync with Finances
+    # for any player whose uploaded figure differs from the raw sync.
+    game_year = get_cfg().year
+    uploaded_by_pid = {}
+    try:
+        for r in conn.execute("SELECT player_id, year, amount FROM salary_estimates"):
+            uploaded_by_pid.setdefault(r["player_id"], {})[r["year"]] = r["amount"]
+    except Exception:
+        pass
+
     out = []
     for r in rows:
         pid, name = r[0], r[1]
         years, cur_yr = r[2], r[3]
         salaries = [r[4 + i] for i in range(15)]
+        pid_uploaded = uploaded_by_pid.get(pid)
+        if pid_uploaded:
+            for idx in range(cur_yr, min(years, 15)):
+                abs_year = game_year + (idx - cur_yr)
+                if abs_year in pid_uploaded:
+                    salaries[idx] = pid_uploaded[abs_year]
         ntc, to, po = r[19], r[20], r[21]
         surplus, is_major = r[22], r[23]
         ps_fv, ps_age, ps_bucket = r[24], r[25], r[26]

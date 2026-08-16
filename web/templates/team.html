@@ -93,6 +93,7 @@
   <button class="tab" data-tab="org">Organization</button>
   <button class="tab" data-tab="hitters">Hitters</button>
   <button class="tab" data-tab="pitchers">Pitchers</button>
+  <button class="tab" data-tab="intl">Intl Complex</button>
   <button class="tab" data-tab="contracts">Contracts</button>
   <button class="tab" data-tab="finances">Finances</button>
   <button class="tab" data-tab="dev">Player Development</button>
@@ -768,6 +769,40 @@
         </tr>
       </thead>
       <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+{# ══════ Intl Complex ══════ #}
+<div class="tab-content" id="tab-intl">
+  <div class="panel">
+    <h2>International Complex <span style="color:var(--text-dim); font-weight:400; font-size:13px">({{ intl_complex|length }} players)</span></h2>
+    <div style="font-size:12px; color:var(--text-dim); margin-bottom:8px">
+      OOTP gives this level no affiliate team of its own — these players sit directly on the org's roster with level
+      Intl. Now included in Farm Surplus above.
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th data-sort="pos">Pos</th><th data-sort="str" class="left">Name</th><th data-sort="num" data-sort-best="low">Age</th>
+          <th data-sort="num">Ovr</th><th data-sort="num">Pot</th>
+          <th data-sort="str" data-sort-best="high" class="left">FV</th><th data-sort="str">Acc</th><th data-sort="num">Surplus</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in intl_complex %}
+        <tr>
+          <td data-sort-value="{{ p.pos_order }}">{{ p.bucket }}</td>
+          <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
+          <td>{{ p.age }}</td>
+          <td><span class="ovr-color" data-g="{{ p.composite_score }}">{{ p.composite_score if p.composite_score is not none else '-' }}</span></td>
+          <td><span class="ovr-color" data-g="{{ p.ceiling_score }}">{{ p.ceiling_score if p.ceiling_score is not none else '-' }}</span></td>
+          <td class="left">{{ p.fv_str }}{% if p.risk %} <span style="font-size:10px;color:{% if p.risk == 'Low' %}#4caf50{% elif p.risk == 'Medium' %}#ffc107{% elif p.risk == 'High' %}#ff9800{% else %}#f44336{% endif %}">{{ p.risk[0] }}</span>{% endif %}</td>
+          <td>{{ p.acc or '-' }}</td>
+          <td class="{{ 'pos' if p.surplus > 0 else 'neg' if p.surplus < 0 else '' }}">${{ p.surplus }}{{ money_unit }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
     </table>
   </div>
 </div>

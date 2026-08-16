@@ -826,7 +826,7 @@ def get_prospect_comp_stats(pid):
 # ── re-exports from extracted modules ───────────────────────────────────
 
 from team_queries import (get_summary, get_standings, get_division_standings,
-                          get_roster, get_farm, get_team_stats, get_contracts,
+                          get_roster, get_farm, get_intl_complex, get_team_stats, get_contracts,
                           get_roster_summary, get_upcoming_fa, get_surplus_leaders,
                           get_age_distribution, get_farm_depth, get_stat_leaders,
                           get_power_rankings, get_recent_games, get_payroll_summary,

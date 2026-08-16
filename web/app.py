@@ -242,6 +242,7 @@ def team(tid):
         "p_bb_pct": _la["pitching"]["bb_pct"],
     }
     farm = queries.get_farm(tid)
+    intl_complex = queries.get_intl_complex(tid)
     team_stats = queries.get_team_stats(tid)
     contracts, payroll = queries.get_contracts(tid)
     roster_summary = queries.get_roster_summary(tid)
@@ -266,7 +267,7 @@ def team(tid):
                                         {"label": name, "url": f"/team/{tid}"}],
                            summary=summary, standings=div_standings,
                            div_name=div_name, my_abbr=my_abbr,
-                           hitters=hitters, pitchers=pitchers, farm=farm,
+                           hitters=hitters, pitchers=pitchers, farm=farm, intl_complex=intl_complex,
                            team_stats=team_stats, contracts=contracts,
                            payroll=payroll, roster_summary=roster_summary,
                            upcoming_fa=upcoming_fa,

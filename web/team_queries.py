@@ -41,6 +41,18 @@ _CONTRACT_ORG_SQL = (
 def _contract_org_params(team_id):
     return (team_id, team_id)
 
+# SQL fragment for farm/prospect queries (prospect_fv-driven): affiliate
+# levels (AAA/AA/A/etc) get their own team_id with parent_team_id pointing
+# back to the org, same as contracts above — but the International Complex
+# has no affiliate team of its own in OOTP's structure at all, its players
+# just sit directly on the MLB team_id with level='8' (parent_team_id=0),
+# the same way a young MLB-level rookie still graded on the prospect scale
+# does with level='1'. Without the level='8' branch here, international
+# prospects were silently excluded from Farm Surplus and the farm lists.
+_FARM_ORG_SQL = "(p.parent_team_id = ? OR (p.team_id = ? AND p.level IN ('1', '8')))"
+def _farm_org_params(team_id):
+    return (team_id, team_id)
+
 
 def _pap_context(conn, tid, year):
     """Get shared context for PAP calculation: team games, $/WAR, salary map."""
@@ -134,11 +146,11 @@ def get_summary(team_id=None):
         "SELECT COALESCE(SUM(surplus),0) FROM player_surplus WHERE eval_date=? AND team_id=?",
         (ed, tid)).fetchone()[0]
     farm_surplus = conn.execute(
-        "SELECT COALESCE(SUM(prospect_surplus),0) FROM prospect_fv pf JOIN players p ON pf.player_id=p.player_id WHERE pf.eval_date=? AND (p.parent_team_id=? OR (p.team_id=? AND p.level='1'))",
-        (ed, tid, tid)).fetchone()[0]
+        "SELECT COALESCE(SUM(prospect_surplus),0) FROM prospect_fv pf JOIN players p ON pf.player_id=p.player_id WHERE pf.eval_date=? AND {_FARM_ORG_SQL}".format(_FARM_ORG_SQL=_FARM_ORG_SQL),
+        (ed, *_farm_org_params(tid))).fetchone()[0]
     fv50 = conn.execute(
-        "SELECT COUNT(*) FROM prospect_fv pf JOIN players p ON pf.player_id=p.player_id WHERE pf.eval_date=? AND (p.parent_team_id=? OR (p.team_id=? AND p.level='1')) AND pf.fv>=50 AND p.age<=25",
-        (ed, tid, tid)).fetchone()[0]
+        "SELECT COUNT(*) FROM prospect_fv pf JOIN players p ON pf.player_id=p.player_id WHERE pf.eval_date=? AND {_FARM_ORG_SQL} AND pf.fv>=50 AND p.age<=25".format(_FARM_ORG_SQL=_FARM_ORG_SQL),
+        (ed, *_farm_org_params(tid))).fetchone()[0]
     # Determine season phase from game date
     gd = state["game_date"]
     month = int(gd[5:7]) if gd and len(gd) >= 7 else 0
@@ -1249,10 +1261,10 @@ def get_farm(team_id=None):
         FROM prospect_fv pf
         JOIN players p ON pf.player_id=p.player_id
         LEFT JOIN latest_ratings r ON pf.player_id=r.player_id
-        WHERE pf.eval_date=? AND (p.parent_team_id=? OR (p.team_id=? AND p.level='1'))
+        WHERE pf.eval_date=? AND {_FARM_ORG_SQL}
               AND p.age <= 25
         ORDER BY pf.fv DESC, p.age ASC
-    """, (ed, tid, tid)).fetchall()
+    """.format(_FARM_ORG_SQL=_FARM_ORG_SQL), (ed, *_farm_org_params(tid))).fetchall()
 
     def sort_key(r):
         fv_val = r[3] + (0.1 if r[4].endswith("+") else 0)
@@ -1269,6 +1281,42 @@ def get_farm(team_id=None):
              "composite_score": r[9], "ceiling_score": r[10],
              "risk": r[11]}
             for i, r in enumerate(rows)]
+
+
+def get_intl_complex(team_id=None):
+    """International Complex roster — unlike AAA/AA/A/etc, OOTP gives this
+    level no affiliate team of its own; its players just sit directly on
+    the parent team_id with level='8' (parent_team_id=0), the same way a
+    young MLB-level rookie still on the prospect scale does with level='1'.
+    That's why it never showed up as a browsable affiliate before, and why
+    it was silently excluded from Farm Surplus (see _FARM_ORG_SQL).
+    """
+    conn = get_db()
+    tid = team_id or my_team_id()
+    ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
+
+    rows = conn.execute("""
+        SELECT p.name, p.age, pf.fv, pf.fv_str, pf.bucket, pf.prospect_surplus, p.player_id, p.pos,
+               r.composite_score, r.ceiling_score, r.acc, pf.risk
+        FROM players p
+        LEFT JOIN prospect_fv pf ON pf.player_id=p.player_id AND pf.eval_date=?
+        LEFT JOIN latest_ratings r ON p.player_id=r.player_id
+        WHERE p.team_id=? AND p.level='8' AND p.retired=0
+    """, (ed, tid)).fetchall()
+
+    out = []
+    for name, age, fv, fv_str, bucket, surplus, pid, pos, comp, ceil_score, acc, risk in rows:
+        disp_bucket = _display_pos(bucket, pos) if bucket else pos_map().get(pos, "?")
+        out.append({
+            "pid": pid, "name": name, "age": age,
+            "bucket": disp_bucket, "pos_order": pos_order().get(disp_bucket, 99),
+            "fv": fv, "fv_str": fv_str or "-",
+            "composite_score": comp, "ceiling_score": ceil_score,
+            "surplus": round(surplus / _money_divisor(), 1) if surplus else 0,
+            "acc": acc, "risk": risk,
+        })
+    out.sort(key=lambda x: (-(x["fv"] if x["fv"] is not None else -1), x["age"] if x["age"] is not None else 99))
+    return out
 
 
 def get_team_stats(team_id):
@@ -1863,18 +1911,18 @@ def get_farm_depth(team_id):
     by_bucket = conn.execute("""
         SELECT pf.bucket, COUNT(*), COALESCE(SUM(pf.prospect_surplus), 0)
         FROM prospect_fv pf JOIN players p ON pf.player_id = p.player_id
-        WHERE pf.eval_date=? AND (p.parent_team_id=? OR (p.team_id=? AND p.level='1')) AND pf.fv >= 40
+        WHERE pf.eval_date=? AND {_FARM_ORG_SQL} AND pf.fv >= 40
               AND p.age <= 25
         GROUP BY pf.bucket
-    """, (ed, team_id, team_id)).fetchall()
+    """.format(_FARM_ORG_SQL=_FARM_ORG_SQL), (ed, *_farm_org_params(team_id))).fetchall()
 
     by_level = conn.execute("""
         SELECT pf.level, COUNT(*)
         FROM prospect_fv pf JOIN players p ON pf.player_id = p.player_id
-        WHERE pf.eval_date=? AND (p.parent_team_id=? OR (p.team_id=? AND p.level='1')) AND pf.fv >= 40
+        WHERE pf.eval_date=? AND {_FARM_ORG_SQL} AND pf.fv >= 40
               AND p.age <= 25
         GROUP BY pf.level
-    """, (ed, team_id, team_id)).fetchall()
+    """.format(_FARM_ORG_SQL=_FARM_ORG_SQL), (ed, *_farm_org_params(team_id))).fetchall()
 
     mlb_tids = mlb_team_ids()
     lg = conn.execute("""

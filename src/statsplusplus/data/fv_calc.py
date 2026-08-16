@@ -215,8 +215,15 @@ def run(league_dir: Path | None = None) -> None:
         _DEF_KEY = {'CF': 'PotCF', 'SS': 'PotSS', 'C': 'PotC', '2B': 'Pot2B', '3B': 'Pot3B'}
         def_rating = p.get(_DEF_KEY.get(bucket)) or 0
 
-        # Skip foreign/independent league players
-        if str(level) in ("7", "8"):
+        # Skip independent-league and foreign-league players — but level 8
+        # is overloaded: it also means "our own International Complex" for
+        # a player directly on our own team_id (parent_team_id=0), who
+        # should be graded exactly like any other domestic prospect, not
+        # treated as an unowned foreign scouting target. Only skip level 8
+        # rows that AREN'T actually ours.
+        if str(level) == "7":
+            continue
+        if str(level) == "8" and p["team_id"] not in _our_tids:
             continue
 
         if int(level) == 1:

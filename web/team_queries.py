@@ -202,6 +202,90 @@ def get_summary(team_id=None):
         "next_year_surplus": round(next_sum / _money_divisor(), 1) if have_any else None,
         "three_year_surplus": round(three_sum / _money_divisor(), 1) if have_any else None,
         "fv50_count": fv50,
+        "rank": _league_surplus_rankings(tid),
+    }
+
+
+def _league_surplus_rankings(team_id):
+    """League rank + vs-median context for the 5 summary-bar surplus
+    metrics, scoped to real MLB orgs only (not minor-league affiliate
+    team_ids). Reuses one connection and one shared stat-history load
+    across every team's contract-horizon calc (the same _conn/_hist batch
+    mode contract_value() already supports elsewhere) — computing this with
+    a fresh connection and a fresh stat-history reload per player, times
+    every team in the league, would be far too slow for a page that loads
+    on every visit.
+    """
+    conn = get_db()
+    ed = _get_eval_date()
+    org_tids = list(get_cfg().team_names_map.keys())
+    if len(org_tids) < 2:
+        return {}
+    qs = ",".join("?" * len(org_tids))
+
+    mlb_by_team = {t: 0.0 for t in org_tids}
+    for r in conn.execute(
+        f"SELECT team_id, COALESCE(SUM(surplus),0) FROM player_surplus "
+        f"WHERE eval_date=? AND team_id IN ({qs}) GROUP BY team_id",
+        (ed, *org_tids)
+    ):
+        mlb_by_team[r[0]] = r[1]
+
+    farm_by_team = {t: 0.0 for t in org_tids}
+    for r in conn.execute(
+        "SELECT (CASE WHEN p.parent_team_id != 0 THEN p.parent_team_id ELSE p.team_id END) AS org_tid, "
+        "SUM(pf.prospect_surplus) FROM prospect_fv pf JOIN players p ON pf.player_id=p.player_id "
+        "WHERE pf.eval_date=? AND (p.parent_team_id != 0 OR p.level IN ('1','8')) GROUP BY org_tid",
+        (ed,)
+    ):
+        if r[0] in farm_by_team:
+            farm_by_team[r[0]] = r[1] or 0.0
+
+    cur_by_team = {t: 0.0 for t in org_tids}
+    next_by_team = {t: 0.0 for t in org_tids}
+    three_by_team = {t: 0.0 for t in org_tids}
+    try:
+        from statsplusplus.evaluation.war import load_stat_history
+        from contract_value import contract_surplus_horizons as _csh
+        state = _get_state()
+        _game_year = get_cfg().year
+        _league_dir = get_cfg().league_dir
+        bat_hist, pit_hist, _tw = load_stat_history(conn, state["game_date"])
+        hist = (bat_hist, pit_hist)
+        for pid, org_tid in conn.execute(
+            f"SELECT c.player_id, p.team_id FROM contracts c JOIN players p ON c.player_id=p.player_id "
+            f"WHERE c.is_major=1 AND p.team_id IN ({qs})", org_tids
+        ):
+            try:
+                cs, ns, ts = _csh(pid, _game_year, _conn=conn, _hist=hist, league_dir=_league_dir)
+            except Exception:
+                cs, ns, ts = None, None, None
+            if cs is not None:
+                cur_by_team[org_tid] += cs
+            if ns is not None:
+                next_by_team[org_tid] += ns
+            if ts is not None:
+                three_by_team[org_tid] += ts
+    except Exception:
+        pass
+
+    import statistics
+
+    def _rank_ctx(by_team):
+        vals = list(by_team.values())
+        n = len(vals)
+        my = by_team.get(team_id, 0.0)
+        sorted_desc = sorted(vals, reverse=True)
+        rank = sorted_desc.index(my) + 1 if my in sorted_desc else n
+        med = statistics.median(vals) if vals else 0.0
+        return {"rank": rank, "n": n, "vs_median": round((my - med) / _money_divisor(), 1)}
+
+    return {
+        "mlb_surplus": _rank_ctx(mlb_by_team),
+        "farm_surplus": _rank_ctx(farm_by_team),
+        "current_year_surplus": _rank_ctx(cur_by_team),
+        "next_year_surplus": _rank_ctx(next_by_team),
+        "three_year_surplus": _rank_ctx(three_by_team),
     }
 
 
@@ -1084,6 +1168,19 @@ def _weak_positions_for_org(tid):
     return weak
 
 
+# Scouting accuracy grades trustworthy enough to act on without a fresh
+# report — same "confirmed" cutoff used elsewhere (Best Available/Scouting
+# Targets). Used to bucket Add Candidates lists so the confirmed, ready-to-
+# act-on rows lead and the ones that need a scouting report before you can
+# trust the grade follow — display order only, never changes which players
+# make each list.
+_ACC_CONFIRMED = {"H", "VH"}
+
+
+def _acc_first(pool, key):
+    return sorted(pool, key=lambda e: (0 if e.get("acc") in _ACC_CONFIRMED else 1, key(e)))
+
+
 def _fit_position(bucket, weak_positions):
     """Where a candidate would fit in the org, or '' if no obvious need.
 
@@ -1150,7 +1247,7 @@ def get_waiver_candidates(team_id=None):
             "peak_surplus": _peak_surplus(fv_continuous, age, level_disp, pf_bucket, ovr=comp, pot=potential),
             "current_year_surplus": _cur_s, "next_year_surplus": _next_s, "three_year_surplus": _three_s,
         })
-    out.sort(key=lambda e: -(e["composite_score"] or 0))
+    out = _acc_first(out, lambda e: -(e["composite_score"] or 0))
     return out
 
 
@@ -1413,9 +1510,12 @@ def get_free_agent_candidates(team_id=None):
             (pitchers if is_pitcher else hitters).append(entry)
 
     def _top_pct(pool, key, min_count=1):
-        pool = sorted(pool, key=key)
-        n = max(min_count, int(len(pool) * _FA_TOP_PCT)) if pool else 0
-        return pool[:n]
+        sorted_pool = sorted(pool, key=key)
+        n = max(min_count, int(len(sorted_pool) * _FA_TOP_PCT)) if sorted_pool else 0
+        # Selection (who makes the top-N% cut) stays purely by `key`;
+        # accuracy-first only reorders that already-selected slice for
+        # display, so it can't bump anyone off the list.
+        return _acc_first(sorted_pool[:n], key)
 
     def _ovr_key(e):
         return -(e["composite_score"] or 0)
@@ -1434,13 +1534,13 @@ def get_free_agent_candidates(team_id=None):
 
     def _fv_min(pool):
         qualifying = [e for e in pool if e["fv"] is not None and e["fv"] >= _FA_PROSPECT_MIN_FV]
-        return sorted(qualifying, key=_prospect_key)
+        return _acc_first(qualifying, _prospect_key)
 
     # No FV floor here — these are 15-17yo amateurs being browsed as a pool,
     # not a curated "worth signing now" cut, so an FV threshold tuned for
     # domestic prospects doesn't apply.
-    international_hitters = sorted(intl_hitters, key=_prospect_key)
-    international_pitchers = sorted(intl_pitchers, key=_prospect_key)
+    international_hitters = _acc_first(intl_hitters, _prospect_key)
+    international_pitchers = _acc_first(intl_pitchers, _prospect_key)
 
     return {"hitters": _top_pct(hitters, _ovr_key), "pitchers": _top_pct(pitchers, _ovr_key),
             "young_hitters": _fv_min(young_hitters),

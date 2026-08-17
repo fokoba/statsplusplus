@@ -4,6 +4,13 @@
 <h1 class="page-title">{{ team_name }} <a href="{{ statsplus_base }}/team/{{ tid }}" target="_blank" class="ext-link" title="View on StatsPlus">↗</a></h1>
 
 {# ── Summary Bar — KPI Cards ── #}
+{% macro rank_sub(r) %}
+{% if r %}
+<span class="summary-rank" title="League rank out of {{ r.n }} teams, and this value vs. the league median (average of the middle two if {{ r.n }} is even)">
+  {{ r.rank }}/{{ r.n }} &middot; {{ '+' if r.vs_median > 0 else '' }}{{ r.vs_median }}{{ money_unit }} vs med
+</span>
+{% endif %}
+{% endmacro %}
 <div class="summary-bar">
   <div class="summary-item">
     <span class="label">Game Date</span>
@@ -12,28 +19,33 @@
   <div class="summary-item kpi-accent">
     <span class="label">MLB Surplus</span>
     <span class="value {{ 'pos' if summary.mlb_surplus > 0 else 'neg' if summary.mlb_surplus < 0 else '' }}">${{ summary.mlb_surplus }}{{ money_unit }}</span>
+    {{ rank_sub(summary.rank.mlb_surplus) }}
   </div>
   {% if summary.current_year_surplus is not none %}
   <div class="summary-item" title="Roster-wide Current-Year Surplus — value minus expected cost this season only, summed across the MLB roster. How built to win NOW you are.">
     <span class="label">Current Yr Surplus</span>
     <span class="value {{ 'pos' if summary.current_year_surplus > 0 else 'neg' if summary.current_year_surplus < 0 else '' }}">${{ summary.current_year_surplus }}{{ money_unit }}</span>
+    {{ rank_sub(summary.rank.current_year_surplus) }}
   </div>
   {% endif %}
   {% if summary.next_year_surplus is not none %}
   <div class="summary-item" title="Roster-wide Next-Year Surplus — value minus expected cost for next season, summed across the MLB roster.">
     <span class="label">Next Yr Surplus</span>
     <span class="value {{ 'pos' if summary.next_year_surplus > 0 else 'neg' if summary.next_year_surplus < 0 else '' }}">${{ summary.next_year_surplus }}{{ money_unit }}</span>
+    {{ rank_sub(summary.rank.next_year_surplus) }}
   </div>
   {% endif %}
   {% if summary.three_year_surplus is not none %}
   <div class="summary-item" title="Roster-wide 3-Year Surplus — summed value minus expected cost across the next 3 seasons (years 1-3 ahead), summed across the MLB roster. How built to win over the medium term you are.">
     <span class="label">3-Yr Surplus</span>
     <span class="value {{ 'pos' if summary.three_year_surplus > 0 else 'neg' if summary.three_year_surplus < 0 else '' }}">${{ summary.three_year_surplus }}{{ money_unit }}</span>
+    {{ rank_sub(summary.rank.three_year_surplus) }}
   </div>
   {% endif %}
   <div class="summary-item kpi-accent">
     <span class="label">Farm Surplus</span>
     <span class="value {{ 'pos' if summary.farm_surplus > 0 else 'neg' if summary.farm_surplus < 0 else '' }}">${{ summary.farm_surplus }}{{ money_unit }}</span>
+    {{ rank_sub(summary.rank.farm_surplus) }}
   </div>
   <div class="summary-item">
     <span class="label">FV 50+</span>
@@ -1205,7 +1217,7 @@
     </thead>
     <tbody>
       {% for p in rows %}
-      <tr class="add-row" data-pid="{{ p.pid }}"{% if show_spec %} data-spec="{{ p.specialist_label }}"{% endif %}>
+      <tr class="add-row" data-pid="{{ p.pid }}" data-pers="{{ 'neg' if p.concerns else '' }}"{% if show_spec %} data-spec="{{ p.specialist_label }}"{% endif %}>
         <td><input type="checkbox" class="add-checkbox" data-pid="{{ p.pid }}"></td>
         <td class="left"><a class="player-link add-name" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
         <td>{{ p.bucket }}</td>
@@ -1251,6 +1263,13 @@
   <div style="color:var(--text-dim); font-size:13px; padding:12px 0">No candidates right now.</div>
   {% endif %}
   {% endmacro %}
+
+  <div style="margin-bottom:16px">
+    <label style="font-size:13px" title="Dims (doesn't hide) rows with a Low Work Ethic, Low Intelligence, Low Leadership, Low Loyalty, or Greedy flag — same flags shown in each row's Personality column.">
+      <input type="checkbox" id="adds-negpers-filter" onchange="addsFilterPers()">
+      Dim bad personalities
+    </label>
+  </div>
 
   <div class="panel">
     <h2>Waiver Wire Adds <span style="color:var(--text-dim); font-weight:400; font-size:13px">({{ waiver_candidates|length }})</span></h2>
@@ -1364,7 +1383,17 @@
 <style>
 .cut-row.cut-marked .cut-name { color: var(--text-dim); text-decoration: line-through; }
 .cut-row.cut-marked td { opacity: 0.5; }
+.add-row.add-dimmed { opacity: 0.4; }
 </style>
+
+<script>
+function addsFilterPers() {
+  var dim = document.getElementById('adds-negpers-filter').checked;
+  document.querySelectorAll('#tab-adds .add-row').forEach(function(tr) {
+    tr.classList.toggle('add-dimmed', dim && tr.dataset.pers === 'neg');
+  });
+}
+</script>
 
 <script>
 /* ── Cut Candidates: mark-as-cut checkboxes, persisted per-player in localStorage ── */

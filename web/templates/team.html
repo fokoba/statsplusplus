@@ -1283,7 +1283,7 @@
     <div style="font-size:12px; color:var(--text-dim); margin-bottom:8px">
       All players currently on waivers league-wide (excluding your own org). "Fits At" is blank if {{ team_name }} doesn't have an obvious need at that position.
     </div>
-    {{ add_table_pair(waiver_candidates.confirmed, waiver_candidates.unconfirmed, "waiver-adds", true) }}
+    {{ add_table_pair(waiver_candidates.confirmed, waiver_candidates.unconfirmed, "waiver-adds", true, show_park=true, show_park_value=true) }}
   </div>
 
   <div class="panel">
@@ -1349,9 +1349,9 @@
       Top {{ fa_candidates.top_pct }}% (minimum 5 each) of signable free agents with zero personality concerns (no Low Work Ethic, Low IQ, Low Leadership, Low Loyalty, or Greedy flags), ranked by current Ovr.
     </div>
     <h3 style="font-size:13px; margin:12px 0 6px">Hitters</h3>
-    {{ add_table_pair(fa_candidates.clean_hitters_confirmed, fa_candidates.clean_hitters_unconfirmed, "fa-clean-hitters", false) }}
+    {{ add_table_pair(fa_candidates.clean_hitters_confirmed, fa_candidates.clean_hitters_unconfirmed, "fa-clean-hitters", false, show_park=true, show_park_value=true) }}
     <h3 style="font-size:13px; margin:16px 0 6px">Pitchers</h3>
-    {{ add_table_pair(fa_candidates.clean_pitchers_confirmed, fa_candidates.clean_pitchers_unconfirmed, "fa-clean-pitchers", false) }}
+    {{ add_table_pair(fa_candidates.clean_pitchers_confirmed, fa_candidates.clean_pitchers_unconfirmed, "fa-clean-pitchers", false, show_park=true, show_park_value=true) }}
   </div>
 
   <div class="panel">

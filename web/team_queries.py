@@ -1220,7 +1220,9 @@ def get_waiver_candidates(team_id=None):
                r.int_, r.wrk_ethic, r.lead, r.loy, r.greed, r.acc,
                r.composite_score, r.ceiling_score, r.true_ceiling,
                pf.fv, pf.fv_str, pf.bucket, t.name, ps.surplus, pf.prospect_surplus,
-               pf.fv_continuous
+               pf.fv_continuous,
+               r.cntct, r.gap, r.pow, r.eye, r.stf, r.mov, r.ctrl, r.bats,
+               r.pot_cntct, r.pot_gap, r.pot_pow, r.pot_stf, r.pot_mov, r.pot_ctrl
         FROM players p
         LEFT JOIN latest_ratings r ON p.player_id = r.player_id
         LEFT JOIN prospect_fv pf ON pf.player_id = p.player_id AND pf.eval_date = ?
@@ -1229,15 +1231,101 @@ def get_waiver_candidates(team_id=None):
         WHERE p.is_on_waivers = 1 AND p.team_id != ?
     """, (ed, ed_surplus, tid)).fetchall()
 
+    from statsplusplus.config.ratings import norm_continuous as _normc
+    from statsplusplus.evaluation.park_fit import (
+        load_park_factors, compute_batter_park_fit, compute_batter_park_value_pct,
+        compute_pitcher_park_fit_from_stats, compute_pitcher_park_fit_from_tools,
+        compute_pitcher_park_value_pct_from_stats, compute_pitcher_park_value_pct_from_tools,
+    )
+    ratings_scale = get_cfg().ratings_scale
+    park = load_park_factors(get_cfg().league_dir)
+    hitter_weights_by_bucket = load_tool_weights(get_cfg().league_dir).get("hitter", {}) if park else {}
+
+    # Same real-observed-vs-tools-proxy fallback as get_free_agent_candidates()
+    # — home park fit for any waiver-wire pitcher with a real track record.
+    _PARK_FIT_BF_THRESHOLD = 150
+    pitcher_pids = [r[0] for r in rows if r[5] in ROLE_MAP]
+    pitcher_stats = {}
+    lg_gb_pct = lg_k_pct = lg_bb_pct = None
+    if park and pitcher_pids:
+        pid_qs = ",".join("?" * len(pitcher_pids))
+        for row in conn.execute(
+            f"SELECT player_id, SUM(gb), SUM(fb), SUM(k), SUM(bb), SUM(bf) "
+            f"FROM pitching_stats WHERE player_id IN ({pid_qs}) GROUP BY player_id",
+            pitcher_pids,
+        ).fetchall():
+            p_pid, s_gb, s_fb, s_k, s_bb, s_bf = row
+            if s_bf and s_bf >= _PARK_FIT_BF_THRESHOLD:
+                pitcher_stats[p_pid] = {
+                    "gb_pct": s_gb / (s_gb + s_fb) if (s_gb or 0) + (s_fb or 0) > 0 else None,
+                    "k_pct": s_k / s_bf, "bb_pct": s_bb / s_bf,
+                }
+        lg = conn.execute(
+            "SELECT SUM(gb), SUM(fb), SUM(k), SUM(bb), SUM(bf) FROM mlb_pitching_stats"
+        ).fetchone()
+        if lg and lg[4]:
+            lg_gb, lg_fb, lg_k, lg_bb, lg_bf = lg
+            lg_gb_pct = lg_gb / (lg_gb + lg_fb) if (lg_gb or 0) + (lg_fb or 0) > 0 else None
+            lg_k_pct, lg_bb_pct = lg_k / lg_bf, lg_bb / lg_bf
+
     out = []
     for r in rows:
         (pid, name, age, level, pos, role, cur_tid, intel, wrk_ethic, lead, loy,
          greed, acc, comp, ceil_score, true_ceil, fv, fv_str, pf_bucket, cur_name,
-         surplus_raw, prospect_surplus_raw, fv_continuous) = r
+         surplus_raw, prospect_surplus_raw, fv_continuous,
+         cntct, gap, pow_, eye, stf, mov, ctrl, bats,
+         pot_cntct, pot_gap, pot_pow, pot_stf, pot_mov, pot_ctrl) = r
         bucket = _bucket_for_display(pf_bucket, role, pos)
         potential = true_ceil if true_ceil is not None else ceil_score
         buffs, concerns = _personality_notes(intel, wrk_ethic, lead, loy, greed)
         level_disp = level_map().get(str(level)) or ("FA" if str(level)=="0" else str(level))
+        is_pitcher = role in ROLE_MAP
+
+        if is_pitcher:
+            _tools = {"stuff": _normc(stf, ratings_scale), "movement": _normc(mov, ratings_scale),
+                      "control": _normc(ctrl, ratings_scale)}
+        else:
+            _tools = {"contact": _normc(cntct, ratings_scale), "gap": _normc(gap, ratings_scale),
+                      "power": _normc(pow_, ratings_scale), "eye": _normc(eye, ratings_scale)}
+
+        # Not-yet-MLB players are scored on potential tools (their current
+        # tools are barely developed and not the real signal) — same
+        # convention as get_free_agent_candidates().
+        if level_disp != "MLB":
+            if is_pitcher:
+                _park_tools = {"stuff": _normc(pot_stf, ratings_scale), "movement": _normc(pot_mov, ratings_scale),
+                               "control": _normc(pot_ctrl, ratings_scale)}
+            else:
+                _park_tools = {"contact": _normc(pot_cntct, ratings_scale), "gap": _normc(pot_gap, ratings_scale),
+                               "power": _normc(pot_pow, ratings_scale)}
+        else:
+            _park_tools = _tools
+
+        park_fit = None
+        park_value = None
+        _value_pct = None
+        if park:
+            if is_pitcher:
+                obs = pitcher_stats.get(pid)
+                if obs and obs["gb_pct"] is not None and lg_gb_pct is not None:
+                    park_fit = compute_pitcher_park_fit_from_stats(
+                        obs["gb_pct"], obs["k_pct"], obs["bb_pct"],
+                        lg_gb_pct, lg_k_pct, lg_bb_pct, park)
+                    _value_pct = compute_pitcher_park_value_pct_from_stats(
+                        obs["gb_pct"], obs["k_pct"], obs["bb_pct"],
+                        lg_gb_pct, lg_k_pct, lg_bb_pct, park)
+                else:
+                    park_fit = compute_pitcher_park_fit_from_tools(_park_tools, park)
+                    _value_pct = compute_pitcher_park_value_pct_from_tools(_park_tools, park)
+            else:
+                _hw = hitter_weights_by_bucket.get(bucket, hitter_weights_by_bucket.get("COF", {}))
+                park_fit = compute_batter_park_fit(_park_tools, bats, _hw, park)
+                _value_pct = compute_batter_park_value_pct(_park_tools, bats, _hw, park)
+
+            _park_val_basis = surplus_raw if surplus_raw is not None else prospect_surplus_raw
+            if _value_pct is not None and _park_val_basis is not None:
+                park_value = round((_park_val_basis * _value_pct) / _money_divisor(), 1)
+
         _cur_s, _next_s, _three_s = _surplus_horizons_live(fv_continuous, age, level_disp,
                                                             pf_bucket, ovr=comp, pot=potential)
         out.append({
@@ -1248,6 +1336,7 @@ def get_waiver_candidates(team_id=None):
             "composite_score": comp, "potential": potential, "fv_str": fv_str,
             "acc": acc, "buffs": buffs, "concerns": concerns,
             "fit": _fit_position(bucket, weak_positions),
+            "park_fit": park_fit, "park_value": park_value,
             "surplus": round((surplus_raw if surplus_raw is not None else prospect_surplus_raw) / _money_divisor(), 1)
                        if (surplus_raw is not None or prospect_surplus_raw is not None) else None,
             "peak_surplus": _peak_surplus(fv_continuous, age, level_disp, pf_bucket, ovr=comp, pot=potential),

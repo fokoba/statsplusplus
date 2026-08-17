@@ -536,6 +536,22 @@ def custom_upload():
                            breadcrumbs=[{"label": "Custom Upload", "url": "/custom-upload"}])
 
 
+@app.route("/sync-ratings", methods=["POST"])
+def sync_ratings():
+    import custom_upload as _cu
+    f = request.files.get("ratings_csv_file")
+    if not f or not f.filename:
+        return redirect("/custom-upload?sync_error=1")
+    try:
+        summary = _cu.import_ratings_sync(f.read(), league_dir=_get_cfg().league_dir)
+        return redirect(
+            f"/custom-upload?sync_updated={summary['updated']}&sync_inserted={summary['inserted']}"
+            f"&sync_skipped={summary['skipped']}&sync_total={summary['total_rows']}"
+        )
+    except Exception as e:
+        return redirect(f"/custom-upload?sync_error=1&sync_error_msg={e}")
+
+
 @app.route("/team/<int:tid>/upload-fa-asks", methods=["POST"])
 def upload_fa_asks(tid):
     import custom_upload as _cu

@@ -27,6 +27,26 @@
 <div class="panel" style="color:#f44336">{{ error }}</div>
 {% endif %}
 
+<div class="panel" style="margin-top:16px">
+  <h2 style="margin-bottom:4px">Sync Ratings</h2>
+  <div style="color:var(--text-dim); font-size:13px; margin-bottom:10px">
+    Upload the same OOTP "All Columns" export to write real ratings back into this league's data — every field the file carries (tools, position current/potential, defense specialty, pitch arsenal, personality). Existing values are only replaced when the file has real data for them; blanks never clobber what's already on file. Works for both leagues.
+  </div>
+  <form method="post" action="/sync-ratings" enctype="multipart/form-data">
+    <input type="file" name="ratings_csv_file" accept=".csv" required>
+    <button type="submit" class="btn btn-sm" style="margin-left:16px">Sync</button>
+  </form>
+  {% if request.args.get('sync_updated') is not none %}
+  <div style="margin-top:10px; color:var(--green); font-size:13px">
+    Synced {{ request.args.get('sync_total') }} rows — {{ request.args.get('sync_updated') }} updated, {{ request.args.get('sync_inserted') }} new, {{ request.args.get('sync_skipped') }} skipped.
+  </div>
+  {% elif request.args.get('sync_error') %}
+  <div style="margin-top:10px; color:#f44336; font-size:13px">
+    Couldn't sync that file{% if request.args.get('sync_error_msg') %}: {{ request.args.get('sync_error_msg') }}{% endif %}
+  </div>
+  {% endif %}
+</div>
+
 {% if results is not none %}
 <div class="panel">
   <h2>Results <span id="cu-count" style="color:var(--text-dim); font-weight:400; font-size:13px">({{ results|length }} players{% if under_24_only %}, age 24 or under{% endif %})</span></h2>

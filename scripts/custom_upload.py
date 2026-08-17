@@ -615,6 +615,218 @@ def evaluate_row(d: dict, league_dir=None) -> dict | None:
     }
 
 
+# ---------------------------------------------------------------------------
+# Full ratings sync — writes raw (un-normalized) values straight into the
+# league DB's `ratings` table, keyed by player_id, so every page that reads
+# `latest_ratings` (Defense, player page, scouting, etc.) picks up whatever
+# this export has, not just the one-off Custom Upload scoring view above.
+#
+# Values here are intentionally RAW (via _num(), never _num_scaled()) — the
+# `ratings` table stores the same raw OOTP scale the normal statsplus.net
+# sync writes, and every reader normalizes at render time via norm()/
+# norm_continuous(). Scaling here would double-convert.
+# ---------------------------------------------------------------------------
+
+def _get_any(d, *names):
+    for n in names:
+        v = d.get(n)
+        if v is not None and v.strip() not in ("", "-"):
+            return v
+    return None
+
+
+def _bats_throws_letter(v):
+    return (v or "").strip()[:1].upper() or None
+
+
+# (db_column, fn(d) -> raw value or None). eMLB's export spells the home-run
+# -rate column "HRA" instead of PPL's "HRR" (confirmed against a real eMLB
+# export — every other column name matched); _get_any() tries both so one
+# map works for both leagues.
+_RATINGS_SYNC_MAP = [
+    ("ovr", lambda d: _num(d.get("OVR"))),
+    ("pot", lambda d: _num(d.get("POT"))),
+    # Hitter tools
+    ("cntct", lambda d: _num(d.get("CON"))),
+    ("gap", lambda d: _num(d.get("GAP"))),
+    ("pow", lambda d: _num(d.get("POW"))),
+    ("eye", lambda d: _num(d.get("EYE"))),
+    ("ks", lambda d: _num(d.get("K's"))),
+    ("babip", lambda d: _num(d.get("BABIP"))),
+    ("speed", lambda d: _num(d.get("SPE"))),
+    ("steal", lambda d: _num(d.get("STE"))),
+    ("stl_rt", lambda d: _num(d.get("SR"))),
+    ("run", lambda d: _num(d.get("RUN"))),
+    ("sac_bunt", lambda d: _num(d.get("BUN"))),
+    ("bunt_hit", lambda d: _num(d.get("BFH"))),
+    ("pot_cntct", lambda d: _num(d.get("CON P"))),
+    ("pot_gap", lambda d: _num(d.get("GAP P"))),
+    ("pot_pow", lambda d: _num(d.get("POW P"))),
+    ("pot_eye", lambda d: _num(d.get("EYE P"))),
+    ("pot_ks", lambda d: _num(d.get("K P"))),
+    ("cntct_l", lambda d: _num(d.get("CON vL"))),
+    ("cntct_r", lambda d: _num(d.get("CON vR"))),
+    ("gap_l", lambda d: _num(d.get("GAP vL"))),
+    ("gap_r", lambda d: _num(d.get("GAP vR"))),
+    ("pow_l", lambda d: _num(d.get("POW vL"))),
+    ("pow_r", lambda d: _num(d.get("POW vR"))),
+    ("eye_l", lambda d: _num(d.get("EYE vL"))),
+    ("eye_r", lambda d: _num(d.get("EYE vR"))),
+    ("ks_l", lambda d: _num(d.get("K vL"))),
+    ("ks_r", lambda d: _num(d.get("K vR"))),
+    ("babip_l", lambda d: _num(d.get("BA vL"))),
+    ("babip_r", lambda d: _num(d.get("BA vR"))),
+    # Pitcher tools
+    ("stf", lambda d: _num(d.get("STU"))),
+    ("mov", lambda d: _num(d.get("MOV"))),
+    ("ctrl", lambda d: _num(_dup(d, "CON"))),
+    ("hra", lambda d: _num(_get_any(d, "HRR", "HRA"))),
+    ("pbabip", lambda d: _num(d.get("PBABIP"))),
+    ("pot_stf", lambda d: _num(d.get("STU P"))),
+    ("pot_mov", lambda d: _num(d.get("MOV P"))),
+    ("pot_ctrl", lambda d: _num(_dup(d, "CON P"))),
+    ("pot_hra", lambda d: _num(_get_any(d, "HRR P", "HRA P"))),
+    ("pot_pbabip", lambda d: _num(d.get("PBABIP P"))),
+    ("stf_l", lambda d: _num(d.get("STU vL"))),
+    ("stf_r", lambda d: _num(d.get("STU vR"))),
+    ("mov_l", lambda d: _num(d.get("MOV vL"))),
+    ("mov_r", lambda d: _num(d.get("MOV vR"))),
+    ("ctrl_l", lambda d: _num(_dup(d, "CON vL"))),
+    ("ctrl_r", lambda d: _num(_dup(d, "CON vR"))),
+    ("hra_l", lambda d: _num(_get_any(d, "HRR vL", "HRA vL"))),
+    ("hra_r", lambda d: _num(_get_any(d, "HRR vR", "HRA vR"))),
+    ("pbabip_l", lambda d: _num(d.get("PBABIP vL"))),
+    ("pbabip_r", lambda d: _num(d.get("PBABIP vR"))),
+    ("stm", lambda d: _num(d.get("STM"))),
+    ("hold", lambda d: _num(d.get("HLD"))),
+    ("vel", lambda d: (d.get("VELO") or "").strip() or None),
+    # Pitch arsenal (current + potential)
+    ("fst", lambda d: _num(d.get("FB"))), ("pot_fst", lambda d: _num(d.get("FBP"))),
+    ("snk", lambda d: _num(d.get("SI"))), ("pot_snk", lambda d: _num(d.get("SIP"))),
+    ("crv", lambda d: _num(d.get("CB"))), ("pot_crv", lambda d: _num(d.get("CBP"))),
+    ("sld", lambda d: _num(d.get("SL"))), ("pot_sld", lambda d: _num(d.get("SLP"))),
+    ("chg", lambda d: _num(d.get("CH"))), ("pot_chg", lambda d: _num(d.get("CHP"))),
+    ("splt", lambda d: _num(d.get("SP"))), ("pot_splt", lambda d: _num(d.get("SPP"))),
+    ("cutt", lambda d: _num(d.get("CT"))), ("pot_cutt", lambda d: _num(d.get("CTP"))),
+    ("cir_chg", lambda d: _num(d.get("CC"))), ("pot_cir_chg", lambda d: _num(d.get("CCP"))),
+    ("scr", lambda d: _num(d.get("SC"))), ("pot_scr", lambda d: _num(d.get("SCP"))),
+    ("frk", lambda d: _num(d.get("FO"))), ("pot_frk", lambda d: _num(d.get("FOP"))),
+    ("kncrv", lambda d: _num(d.get("KC"))), ("pot_kncrv", lambda d: _num(d.get("KCP"))),
+    ("knbl", lambda d: _num(d.get("KN"))), ("pot_knbl", lambda d: _num(d.get("KNP"))),
+    # Positions (current + potential)
+    ("p", lambda d: _num(d.get("P"))), ("pot_p", lambda d: _num(d.get("P Pot"))),
+    ("c", lambda d: _num(d.get("C"))), ("pot_c", lambda d: _num(d.get("C Pot"))),
+    ("first_b", lambda d: _num(d.get("1B"))), ("pot_first_b", lambda d: _num(d.get("1B Pot"))),
+    ("second_b", lambda d: _num(d.get("2B"))), ("pot_second_b", lambda d: _num(d.get("2B Pot"))),
+    ("third_b", lambda d: _num(d.get("3B"))), ("pot_third_b", lambda d: _num(d.get("3B Pot"))),
+    ("ss", lambda d: _num(d.get("SS"))), ("pot_ss", lambda d: _num(d.get("SS Pot"))),
+    ("lf", lambda d: _num(d.get("LF"))), ("pot_lf", lambda d: _num(d.get("LF Pot"))),
+    ("cf", lambda d: _num(d.get("CF"))), ("pot_cf", lambda d: _num(d.get("CF Pot"))),
+    ("rf", lambda d: _num(d.get("RF"))), ("pot_rf", lambda d: _num(d.get("RF Pot"))),
+    # Defense specialty
+    ("c_arm", lambda d: _num(d.get("C ARM"))),
+    ("c_blk", lambda d: _num(d.get("C ABI"))),
+    ("c_frm", lambda d: _num(d.get("C FRM"))),
+    ("ifr", lambda d: _num(d.get("IF RNG"))),
+    ("ife", lambda d: _num(d.get("IF ERR"))),
+    ("ifa", lambda d: _num(d.get("IF ARM"))),
+    ("tdp", lambda d: _num(d.get("TDP"))),
+    ("ofr", lambda d: _num(d.get("OF RNG"))),
+    ("ofe", lambda d: _num(d.get("OF ERR"))),
+    ("ofa", lambda d: _num(d.get("OF ARM"))),
+    # Personality / traits (text)
+    ("int_", lambda d: (d.get("INT") or "").strip() or None),
+    ("wrk_ethic", lambda d: (d.get("WE") or "").strip() or None),
+    ("greed", lambda d: (d.get("FIN") or "").strip() or None),
+    ("loy", lambda d: (d.get("LOY") or "").strip() or None),
+    ("lead", lambda d: (d.get("LEA") or "").strip() or None),
+    ("prone", lambda d: (d.get("Prone") or "").strip() or None),
+    ("acc", lambda d: _ACC_MAP.get((d.get("SctAcc") or "").strip())),
+    ("bats", lambda d: _bats_throws_letter(d.get("B"))),
+    ("throws", lambda d: _bats_throws_letter(d.get("T"))),
+]
+
+
+def import_ratings_sync(file_bytes: bytes, league_dir=None) -> dict:
+    """Sync ratings from an uploaded OOTP "All Columns" export into this
+    league's own `ratings` table, keyed by player_id.
+
+    Unlike evaluate_csv() (a standalone scratch scoring view), this writes
+    real data back into the DB so every page that reads latest_ratings
+    reflects it. Existing rows are merged, not overwritten: a blank/"-"
+    field in the CSV never clobbers a good existing value (COALESCE against
+    the current row), so a partial or older export can't regress data a
+    fuller/newer one already fixed.
+
+    Writes land on the table's current latest snapshot_date (not a new
+    date) — latest_ratings picks the single global max snapshot_date across
+    ALL players, so minting a new date here would blank out every player
+    not present in this CSV. New player_ids not yet in the table are
+    inserted at that same snapshot_date.
+    """
+    import datetime
+    conn = get_conn(league_dir)
+    row = conn.execute("SELECT MAX(snapshot_date) FROM ratings").fetchone()
+    snapshot_date = row[0] if row and row[0] else datetime.date.today().isoformat()
+
+    rows = parse_rows(file_bytes)
+    updated = 0
+    inserted = 0
+    skipped = 0
+    for d in rows:
+        pid = (d.get("ID") or "").strip()
+        if not pid:
+            skipped += 1
+            continue
+        try:
+            pid = int(pid)
+        except ValueError:
+            skipped += 1
+            continue
+
+        values = {}
+        for col, fn in _RATINGS_SYNC_MAP:
+            try:
+                v = fn(d)
+            except Exception:
+                v = None
+            if v is not None:
+                values[col] = v
+        if not values:
+            skipped += 1
+            continue
+
+        exists = conn.execute(
+            "SELECT 1 FROM ratings WHERE player_id=? AND snapshot_date=?",
+            (pid, snapshot_date),
+        ).fetchone()
+
+        cols = list(values.keys())
+        if exists:
+            set_clause = ", ".join(f"{c}=?" for c in cols)
+            conn.execute(
+                f"UPDATE ratings SET {set_clause} WHERE player_id=? AND snapshot_date=?",
+                [values[c] for c in cols] + [pid, snapshot_date],
+            )
+            updated += 1
+        else:
+            col_list = ", ".join(["player_id", "snapshot_date"] + cols)
+            placeholders = ", ".join(["?"] * (2 + len(cols)))
+            conn.execute(
+                f"INSERT INTO ratings ({col_list}) VALUES ({placeholders})",
+                [pid, snapshot_date] + [values[c] for c in cols],
+            )
+            inserted += 1
+
+    conn.commit()
+    conn.close()
+    return {
+        "total_rows": len(rows), "updated": updated,
+        "inserted": inserted, "skipped": skipped,
+        "snapshot_date": snapshot_date,
+    }
+
+
 def _db_free_agent_status(pids: list[str]) -> dict[str, bool]:
     """Look up each pid in this league's own DB and return whether it's a
     truly signable free agent there (same criteria as get_free_agent_candidates

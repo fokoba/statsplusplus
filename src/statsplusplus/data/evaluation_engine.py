@@ -658,16 +658,29 @@ def derive_composite_from_components(
     directly from tools, we compute it from the component scores using the
     same offense/defense/baserunning shares.
 
-    When called with the **raw unclamped** component values (as floats from
+    Even with the **raw unclamped** component values (as floats from
     ``offensive_grade_raw``, ``baserunning_value_raw``,
-    ``defensive_value_raw``), the result is identical to
-    ``compute_composite_hitter`` for the same inputs — the decomposition is
-    lossless.
+    ``defensive_value_raw``) and shares mirroring
+    ``compute_composite_hitter``'s weight profile, this is only an
+    approximation of ``compute_composite_hitter`` for the same inputs, NOT
+    an exact inverse — it reproduces the plain share-weighted blend, but
+    ``compute_composite_hitter`` also applies several adjustments after
+    that blend that this function has no way to replicate from component
+    scores alone (their inputs, e.g. the raw contact tool or the max raw
+    defensive tool, aren't recoverable from an already-aggregated
+    component grade): a contact-scaled reallocation of share from offense
+    to baserunning, an elite-defense reallocation of share from offense to
+    defense, a speed×contact synergy bonus, a sub-MLB-floor penalty, and a
+    tool-imbalance penalty. For lopsided tool profiles (one standout tool
+    against several at the floor) these can compound to a gap of ~30
+    points on the 20-80 scale — see
+    ``TestCompositeDecompositionRoundTrip`` in test_evaluation_engine.py
+    for the empirical bound. Only use this for a rough estimate, not a
+    substitute for calling ``compute_composite_hitter`` directly.
 
     When called with clamped integer component scores (the public 20-80
-    values), the result may differ by up to ±1 at the scale boundaries due
-    to per-component clamping.  For display purposes this is acceptable;
-    for round-trip verification, pass raw floats.
+    values) instead of raw floats, expect additional drift on top of the
+    above from per-component clamping at the scale boundaries.
 
     When a component is ``None``, its share is redistributed proportionally
     to the remaining components.

@@ -96,7 +96,7 @@ _ROW_COLUMNS_SQL = """
     r.c_frm, r.c_blk, r.c_arm, r.ifr, r.ife, r.ifa, r.tdp, r.ofr, r.ofe, r.ofa,
     r.fst, r.snk, r.crv, r.sld, r.chg, r.splt, r.cutt, r.cir_chg, r.scr, r.frk, r.kncrv, r.knbl,
     r.stm, ps.surplus, pf.prospect_surplus,
-    r.int_, r.wrk_ethic, r.lead, r.loy, r.greed
+    r.int_, r.wrk_ethic, r.lead, r.loy, r.greed, fap.ask_raw
 """
 
 
@@ -132,6 +132,7 @@ def _fetch_rows(conn, where, params, eval_date, ed_surplus):
         LEFT JOIN latest_ratings r ON p.player_id = r.player_id
         LEFT JOIN player_surplus ps ON ps.player_id = p.player_id AND ps.eval_date = ?
         LEFT JOIN prospect_fv pf ON pf.player_id = p.player_id AND pf.eval_date = ?
+        LEFT JOIN fa_asking_prices fap ON fap.player_id = p.player_id
         WHERE {where} AND r.composite_score IS NOT NULL
     """, (ed_surplus, eval_date, *params)).fetchall()
 
@@ -182,7 +183,7 @@ def _build_entries(rows, ratings_scale, park, hitter_weights, pitcher_weights, n
          c_frm, c_blk, c_arm, ifr, ife, ifa, tdp, ofr, ofe, ofa,
          fst, snk, crv, sld, chg, splt, cutt, cir_chg, scr, frk, kncrv, knbl,
          stm, surplus_raw, prospect_surplus_raw,
-         intel, wrk_ethic, lead, loy, greed) = r
+         intel, wrk_ethic, lead, loy, greed, ask_raw) = r
         group, is_pitcher = _pos_group(pos, role)
         if group is None:
             continue
@@ -279,6 +280,12 @@ def _build_entries(rows, ratings_scale, park, hitter_weights, pitcher_weights, n
             "park_fit": park_fit, "park_value_pct": park_value_pct, "def_rating": def_rating,
             "vr_score": vr_score, "vl_score": vl_score,
             "surplus": surplus, "buffs": buffs, "concerns": concerns,
+            # No asking price on file means the last uploaded "All Free
+            # Agents" export reported a blank/"-" demand for this player
+            # (or the export simply hasn't been uploaded yet, which reads
+            # the same way) — same "MiLC" convention already used for the
+            # Ask column on Add Candidates.
+            "is_milc": ask_raw is None,
             "good_pick": bool(park_fit is not None and park_fit >= _GOOD_PARK_FIT
                                and surplus is not None and surplus > _GOOD_SURPLUS),
             "newly_confirmed": pid in newly_confirmed,
@@ -428,10 +435,15 @@ def get_scouting_targets(high_confidence=False, team_id=None, roster_view=None):
     # different (your OWN exposed players needing protection, not a
     # comparison target) but comingles the same way — sorted in together
     # so you can see at a glance where your exposed players rank against
-    # the broader eligible crop.
+    # the broader eligible crop. Unlike the FA sections above, this merge
+    # is NOT gated behind the "Compare against" toggle — knowing which of
+    # your own prospects need 40-man protection isn't optional context,
+    # it's the entire point of this section. Always scoped to the whole
+    # org (not just the MLB roster), since Rule 5 exposure is inherently
+    # about minor leaguers.
     best_rule5 = _rule5_targets(conn, high_confidence)
     best_rule5_youth = _rule5_youth_targets(conn, high_confidence)
-    rule5_mine = _rule5_mine(conn, team_id, roster_view) if roster_view in ("mlb", "org") and team_id else {}
+    rule5_mine = _rule5_mine(conn, team_id, "org") if team_id else {}
     for group, gp in rule5_mine.items():
         merged = best_rule5.get(group, []) + gp
         merged.sort(key=lambda p: -(p["composite_score"] if p["composite_score"] is not None else -999))
@@ -445,6 +457,7 @@ def get_scouting_targets(high_confidence=False, team_id=None, roster_view=None):
         best_rule5_youth[group] = merged
 
     weak_positions = _weak_positions_for_org(team_id) if team_id else set()
+    asks_uploaded = conn.execute("SELECT COUNT(*) FROM fa_asking_prices").fetchone()[0] > 0
 
     return {
         "best_fa": best_fa, "best_park": best_park, "best_def": best_def, "best_youth": best_youth,
@@ -454,6 +467,7 @@ def get_scouting_targets(high_confidence=False, team_id=None, roster_view=None):
         "park_configured": bool(park), "weak_positions": weak_positions,
         "rule5_uploaded": _rule5_has_data(conn),
         "roster_view": roster_view,
+        "asks_uploaded": asks_uploaded,
     }
 
 
@@ -476,7 +490,8 @@ def _rule5_all_players(conn):
     try:
         rows = conn.execute("""
             SELECT p.player_id, p.name, p.age, p.pos, p.role, r.acc,
-                   r.composite_score, r.ceiling_score, r.true_ceiling
+                   r.composite_score, r.ceiling_score, r.true_ceiling,
+                   r.int_, r.wrk_ethic, r.lead, r.loy, r.greed
             FROM rule5_eligible re
             JOIN players p ON p.player_id = re.player_id
             LEFT JOIN latest_ratings r ON p.player_id = r.player_id
@@ -486,15 +501,17 @@ def _rule5_all_players(conn):
         return {}
 
     players = []
-    for pid, name, age, pos, role, acc, comp, ceil_score, true_ceil in rows:
+    for pid, name, age, pos, role, acc, comp, ceil_score, true_ceil, intel, wrk_ethic, lead, loy, greed in rows:
         group, is_pitcher = _pos_group(pos, role)
         if group is None:
             continue
         potential = true_ceil if true_ceil is not None else ceil_score
+        buffs, concerns = _personality_notes(intel, wrk_ethic, lead, loy, greed)
         players.append({"pid": pid, "name": name, "age": age, "group": group,
                          "composite_score": comp, "potential": potential, "acc": acc,
                          "surplus": None, "good_pick": False, "newly_confirmed": False,
-                         "is_mine": False, "roster_tag": None})
+                         "is_mine": False, "roster_tag": None,
+                         "buffs": buffs, "concerns": concerns})
 
     by_group = {}
     for p in players:
@@ -582,7 +599,8 @@ def _rule5_mine(conn, team_id, scope):
     try:
         rows = conn.execute(f"""
             SELECT p.player_id, p.name, p.age, p.pos, p.role, r.acc,
-                   r.composite_score, r.ceiling_score, r.true_ceiling, p.level
+                   r.composite_score, r.ceiling_score, r.true_ceiling, p.level,
+                   r.int_, r.wrk_ethic, r.lead, r.loy, r.greed
             FROM rule5_eligible re
             JOIN players p ON p.player_id = re.player_id
             LEFT JOIN latest_ratings r ON p.player_id = r.player_id
@@ -592,15 +610,17 @@ def _rule5_mine(conn, team_id, scope):
         return {}
 
     out = {}
-    for pid, name, age, pos, role, acc, comp, ceil_score, true_ceil, level in rows:
+    for pid, name, age, pos, role, acc, comp, ceil_score, true_ceil, level, intel, wrk_ethic, lead, loy, greed in rows:
         group, is_pitcher = _pos_group(pos, role)
         if group is None:
             continue
         potential = true_ceil if true_ceil is not None else ceil_score
+        buffs, concerns = _personality_notes(intel, wrk_ethic, lead, loy, greed)
         entry = {"pid": pid, "name": name, "age": age, "group": group,
                  "composite_score": comp, "potential": potential, "acc": acc,
                  "surplus": None, "good_pick": False, "newly_confirmed": False,
-                 "is_mine": True, "roster_tag": level_map().get(str(level), str(level))}
+                 "is_mine": True, "roster_tag": level_map().get(str(level), str(level)),
+                 "buffs": buffs, "concerns": concerns}
         out.setdefault(group, []).append(entry)
     for group in out:
         out[group].sort(key=lambda p: -(p["composite_score"] or 0))

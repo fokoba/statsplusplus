@@ -28,7 +28,7 @@
     <thead><tr><th></th><th class="left">Name</th><th>Pos</th><th>Age</th><th>Ovr</th></tr></thead>
     <tbody>
       {% for p in newly %}
-      <tr data-pers="{{ 'neg' if p.concerns else '' }}">
+      <tr data-pers="{{ 'neg' if p.concerns else '' }}" data-milc="{{ 'yes' if p.is_milc else 'no' }}">
         <td><input type="checkbox" class="scout-checkbox" data-pid="{{ p.pid }}" data-page="best_available"></td>
         <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
         <td>{{ p.group }}</td>
@@ -58,11 +58,20 @@
     <input type="checkbox" id="negpers-filter" onchange="filterPers()">
     Dim bad personalities
   </label>
+  <label style="font-size:13px" title="Highlights free agents with no asking price on file — no demand reported usually means they'd sign for a minor-league deal. Doesn't apply to Rule 5 rows (not free agents). A negative-personality row stays dimmed instead of highlighted whenever Dim bad personalities is also on.">
+    <input type="checkbox" id="milc-filter" onchange="filterMilc()">
+    Highlight MiLC opportunities
+  </label>
   <span>
     <button type="button" class="btn btn-sm" onclick="scoutSetAll(true)">Check All</button>
     <button type="button" class="btn btn-sm" onclick="scoutSetAll(false)">Uncheck All</button>
   </span>
 </div>
+{% if not asks_uploaded %}
+<div style="font-size:12px; color:var(--text-dim); margin:-8px 0 12px">
+  No "All Free Agents" export uploaded yet (see Ask on the Add Candidates page to upload one) — until then, every free agent here reads as a MiLC opportunity by default.
+</div>
+{% endif %}
 
 {% macro pos_card(group, players, value_key, value_label, page_key) %}
 <div class="scout-card{{ ' scout-card-weak' if group in weak_positions else '' }}" data-group="{{ group }}">
@@ -79,7 +88,7 @@
     </thead>
     <tbody>
       {% for p in players %}
-      <tr{% if p.is_mine %} class="scout-mine-row"{% endif %} data-pers="{{ 'neg' if p.concerns else '' }}">
+      <tr{% if p.is_mine %} class="scout-mine-row"{% endif %} data-pers="{{ 'neg' if p.concerns else '' }}" data-milc="{{ 'yes' if (p.is_milc and not p.is_mine) else 'no' }}">
         <td><input type="checkbox" class="scout-checkbox" data-pid="{{ p.pid }}" data-page="{{ page_key }}"></td>
         <td class="left">{% if p.is_mine %}<span class="scout-mine-tag">{{ p.roster_tag }}</span>{% endif %}{% if p.good_pick %}<span title="Both a good Park Fit (20+) and a positive Long-Term Surplus — a high-confidence add">⭐</span>{% endif %}<a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
         <td>{{ p.age if p.age is not none else '-' }}</td>
@@ -232,6 +241,7 @@
 tr.scout-marked .player-link { color: var(--text-dim); text-decoration: line-through; }
 tr.scout-mine-row { background: rgba(76, 175, 80, 0.12); }
 tr[data-pers="neg"].scout-dimmed { opacity: 0.4; }
+tr.scout-milc-row { background: rgba(255, 122, 26, 0.14); }
 .scout-mine-tag {
   display: inline-block; font-size: 9px; font-weight: 700; color: #4caf50;
   border: 1px solid #4caf50; border-radius: 3px; padding: 0 3px; margin-right: 3px;
@@ -251,12 +261,21 @@ function scoutSetRoster(radio) {
   else { url.searchParams.delete('roster'); }
   window.location.href = url.toString();
 }
-function filterPers() {
+function applyRowHighlights() {
   var dim = document.getElementById('negpers-filter').checked;
+  var milc = document.getElementById('milc-filter').checked;
   document.querySelectorAll('.scout-mini-table tbody tr').forEach(function(tr) {
-    tr.classList.toggle('scout-dimmed', dim && tr.dataset.pers === 'neg');
+    var isNeg = tr.dataset.pers === 'neg';
+    var dimmed = dim && isNeg;
+    tr.classList.toggle('scout-dimmed', dimmed);
+    // A dimmed row (bad personality, with the dim filter on) never also
+    // gets the MiLC highlight — dimmed always wins, even if that same
+    // player would otherwise qualify as a MiLC opportunity.
+    tr.classList.toggle('scout-milc-row', milc && tr.dataset.milc === 'yes' && !dimmed);
   });
 }
+function filterPers() { applyRowHighlights(); }
+function filterMilc() { applyRowHighlights(); }
 </script>
 
 <script>

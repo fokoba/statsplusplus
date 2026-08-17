@@ -97,6 +97,106 @@
 </div>
 
 <div class="panel">
+  <h2>Optimal Lineup Order</h2>
+  <div style="font-size:12px; color:var(--text-dim); margin-bottom:10px">
+    Built from the players already picked above, using the same batting-order construction (composite/speed
+    weighting and slotting rules) established for this team, now with park factored into each hitter's composite.
+    Not a pure composite sort: the two fastest hitters anchor the top and bottom of the order — turning the bottom
+    into a second leadoff spot — the best remaining speed+bat combo hits 2nd, the three best composites hit 3-4-5,
+    and the next two best hit 6-7.
+    {% if not has_dh %}Your league has no DH, so this models the 8 real position players only; the actual pitcher's
+    spot (traditionally 9th, batting behind the held-back speed threat at 8th) isn't chosen here.{% endif %}
+  </div>
+  <div style="overflow-x:auto">
+  <table>
+    <thead>
+      <tr>
+        <th>Slot</th>
+        <th class="left">vs RHP</th><th title="(CON + GAP×1.08 + POW×1.2 + EYE×1.1) / 4.3, park-adjusted">Comp</th><th title="Speed×0.7 + Steal×0.3">Speed</th>
+        <th class="left">vs LHP</th><th title="(CON + GAP×1.08 + POW×1.2 + EYE×1.1) / 4.3, park-adjusted">Comp</th><th title="Speed×0.7 + Steal×0.3">Speed</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for i in range(9) %}
+      <tr>
+        <td style="font-weight:600">{{ i + 1 }}</td>
+        {% for p in [batting_order_vr[i], batting_order_vl[i]] %}
+        {% if p %}
+        <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
+        <td>{{ p.gm_composite if p.gm_composite is not none else '-' }}</td>
+        <td>{{ p.speed_score if p.speed_score is not none else '-' }}</td>
+        {% elif i == 8 and not has_dh %}
+        <td class="left text-dim" colspan="3">Pitcher (not modeled)</td>
+        {% else %}
+        <td class="left text-dim" colspan="3">-</td>
+        {% endif %}
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Bench</h2>
+  <div style="font-size:12px; color:var(--text-dim); margin-bottom:10px">
+    Every roster hitter not in the starting lineup for that split, ranked — <strong>Pinch Hitters</strong> by the
+    same park-adjusted composite as the batting order, <strong>Pinch Runners</strong> by speed score alone.
+  </div>
+  <div class="scout-grid">
+    <div class="scout-card">
+      <div class="scout-card-head">Pinch Hitters — vs RHP</div>
+      <table class="scout-mini-table">
+        <thead><tr><th class="left">Name</th><th>Comp</th></tr></thead>
+        <tbody>
+          {% for e in ph_vr %}
+          <tr><td class="left"><a class="player-link" href="/player/{{ e.p.pid }}">{{ e.p.name }}</a></td><td>{{ e.gm }}</td></tr>
+          {% endfor %}
+          {% if not ph_vr %}<tr><td colspan="2" class="text-dim">No bench hitters</td></tr>{% endif %}
+        </tbody>
+      </table>
+    </div>
+    <div class="scout-card">
+      <div class="scout-card-head">Pinch Hitters — vs LHP</div>
+      <table class="scout-mini-table">
+        <thead><tr><th class="left">Name</th><th>Comp</th></tr></thead>
+        <tbody>
+          {% for e in ph_vl %}
+          <tr><td class="left"><a class="player-link" href="/player/{{ e.p.pid }}">{{ e.p.name }}</a></td><td>{{ e.gm }}</td></tr>
+          {% endfor %}
+          {% if not ph_vl %}<tr><td colspan="2" class="text-dim">No bench hitters</td></tr>{% endif %}
+        </tbody>
+      </table>
+    </div>
+    <div class="scout-card">
+      <div class="scout-card-head">Pinch Runners — vs RHP lineup</div>
+      <table class="scout-mini-table">
+        <thead><tr><th class="left">Name</th><th>Speed</th></tr></thead>
+        <tbody>
+          {% for e in pr_vr %}
+          <tr><td class="left"><a class="player-link" href="/player/{{ e.p.pid }}">{{ e.p.name }}</a></td><td>{{ e.speed }}</td></tr>
+          {% endfor %}
+          {% if not pr_vr %}<tr><td colspan="2" class="text-dim">No bench hitters</td></tr>{% endif %}
+        </tbody>
+      </table>
+    </div>
+    <div class="scout-card">
+      <div class="scout-card-head">Pinch Runners — vs LHP lineup</div>
+      <table class="scout-mini-table">
+        <thead><tr><th class="left">Name</th><th>Speed</th></tr></thead>
+        <tbody>
+          {% for e in pr_vl %}
+          <tr><td class="left"><a class="player-link" href="/player/{{ e.p.pid }}">{{ e.p.name }}</a></td><td>{{ e.speed }}</td></tr>
+          {% endfor %}
+          {% if not pr_vl %}<tr><td colspan="2" class="text-dim">No bench hitters</td></tr>{% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="panel">
   <h2>Rotation <span style="color:var(--text-dim); font-weight:400; font-size:13px">(sorted by Ovr — use Park Fit/Impact to decide start order against this park)</span></h2>
   <table>
     <thead>

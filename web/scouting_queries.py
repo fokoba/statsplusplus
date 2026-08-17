@@ -96,7 +96,8 @@ _ROW_COLUMNS_SQL = """
     r.c_frm, r.c_blk, r.c_arm, r.ifr, r.ife, r.ifa, r.tdp, r.ofr, r.ofe, r.ofa,
     r.fst, r.snk, r.crv, r.sld, r.chg, r.splt, r.cutt, r.cir_chg, r.scr, r.frk, r.kncrv, r.knbl,
     r.stm, ps.surplus, pf.prospect_surplus,
-    r.int_, r.wrk_ethic, r.lead, r.loy, r.greed, fap.ask_raw
+    r.int_, r.wrk_ethic, r.lead, r.loy, r.greed, fap.ask_raw,
+    r.speed, r.steal
 """
 
 
@@ -183,7 +184,8 @@ def _build_entries(rows, ratings_scale, park, hitter_weights, pitcher_weights, n
          c_frm, c_blk, c_arm, ifr, ife, ifa, tdp, ofr, ofe, ofa,
          fst, snk, crv, sld, chg, splt, cutt, cir_chg, scr, frk, kncrv, knbl,
          stm, surplus_raw, prospect_surplus_raw,
-         intel, wrk_ethic, lead, loy, greed, ask_raw) = r
+         intel, wrk_ethic, lead, loy, greed, ask_raw,
+         speed_raw, steal_raw) = r
         group, is_pitcher = _pos_group(pos, role)
         if group is None:
             continue
@@ -279,6 +281,15 @@ def _build_entries(rows, ratings_scale, park, hitter_weights, pitcher_weights, n
             "composite_score": comp, "potential": potential, "acc": acc,
             "park_fit": park_fit, "park_value_pct": park_value_pct, "def_rating": def_rating,
             "vr_score": vr_score, "vl_score": vl_score,
+            # Split tool dicts + speed/steal, hitters only — not used by any
+            # existing composite/park-fit math above, but the Lineup
+            # Optimizer's batting-order builder needs the raw split tools
+            # directly (its ordering formula isn't the same weighting as
+            # compute_composite_hitter) rather than just the final score.
+            "vr_tools": vr_tools if not is_pitcher else None,
+            "vl_tools": vl_tools if not is_pitcher else None,
+            "speed": n(speed_raw) if not is_pitcher else None,
+            "steal": n(steal_raw) if not is_pitcher else None,
             "surplus": surplus, "buffs": buffs, "concerns": concerns,
             # No asking price on file means the last uploaded "All Free
             # Agents" export reported a blank/"-" demand for this player

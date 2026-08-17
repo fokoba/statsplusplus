@@ -34,6 +34,135 @@ def _park_delta(park_fit):
     return max(-_PARK_DELTA_CAP, min(_PARK_DELTA_CAP, round(park_fit / 20)))
 
 
+# ---------------------------------------------------------------------------
+# Batting order — reproduces the same composite/weighting/ordering logic
+# used in the Philadelphia Athletics Assistant GM conversations, now with
+# park factored into the composite (that methodology predates park-factor
+# data existing in this app at all).
+# ---------------------------------------------------------------------------
+
+# Deliberately NOT the same weighting as compute_composite_hitter() — this
+# is its own simpler, unrounded weighted average of the split-specific
+# tools, matching the exact formula validated in those conversations.
+_GM_TOOL_W = {"contact": 1.0, "gap": 1.08, "power": 1.2, "eye": 1.1}
+_GM_DIVISOR = 4.3
+# Speed/steal blend used for leadoff/9-hole/PR ranking — reverse-engineered
+# from a known-good example order (Endicott > Cano > Jarmon) in those same
+# conversations. Not a hard constant, just what reproduced that order.
+_SPEED_W = (0.7, 0.3)
+
+
+def _gm_composite(tools, park_delta=0):
+    """(CON + GAP*1.08 + POW*1.2 + EYE*1.1) / 4.3, plus the same small
+    park-fit nudge already used for the Optimal Lineup Adjusted column —
+    None if any of the four core tools is missing rather than silently
+    zero-filling a hole in the average.
+    """
+    if not tools:
+        return None
+    con, gap, pw, eye = tools.get("contact"), tools.get("gap"), tools.get("power"), tools.get("eye")
+    if None in (con, gap, pw, eye):
+        return None
+    base = (con * _GM_TOOL_W["contact"] + gap * _GM_TOOL_W["gap"]
+            + pw * _GM_TOOL_W["power"] + eye * _GM_TOOL_W["eye"]) / _GM_DIVISOR
+    return round(base + (park_delta or 0), 1)
+
+
+def _speed_score(speed, steal):
+    if speed is None or steal is None:
+        return None
+    return round(speed * _SPEED_W[0] + steal * _SPEED_W[1], 1)
+
+
+def _build_batting_order(starters, tools_key, has_dh):
+    """9-slot batting order (1-indexed slots as a 0-indexed list) via the
+    "bat the pitcher 8th" construction: the two fastest hitters anchor the
+    top and bottom of the real lineup (turning the bottom of the order into
+    a second leadoff spot), the best remaining speed+bat combo hits 2nd,
+    the three best composites hit 3-4-5, and the next two best hit 6-7.
+
+    In a DH league all 9 slots are real hitters, so whoever's left after
+    6-7 simply bats 8th. In a No-DH league there are only 8 real position
+    players — the second-fastest hitter (who'd otherwise anchor slot 9)
+    bats 8th instead, right in front of the actual pitcher's spot, which
+    this function doesn't model (no specific starter is chosen here).
+    """
+    pool = []
+    for p in starters:
+        gm = _gm_composite(p.get(tools_key), p.get("park_delta", 0))
+        if gm is None:
+            continue
+        spd = _speed_score(p.get("speed"), p.get("steal"))
+        pool.append({"p": p, "gm": gm, "speed": spd if spd is not None else -1})
+
+    order = [None] * 9
+
+    def _place(slot, e):
+        order[slot] = dict(e["p"], gm_composite=e["gm"],
+                            speed_score=e["speed"] if e["speed"] != -1 else None)
+
+    by_speed = sorted(pool, key=lambda e: (-e["speed"], -e["gm"]))
+    speed_picks = by_speed[:2]
+    for e in speed_picks:
+        pool.remove(e)
+    leadoff = speed_picks[0] if len(speed_picks) >= 1 else None
+    bottom = speed_picks[1] if len(speed_picks) >= 2 else None
+    if leadoff:
+        _place(0, leadoff)
+
+    two_hole = None
+    if pool:
+        two_hole = max(pool, key=lambda e: e["gm"] * 0.7 + e["speed"] * 0.3)
+        pool.remove(two_hole)
+    if two_hole:
+        _place(1, two_hole)
+
+    pool.sort(key=lambda e: -e["gm"])
+    for slot, e in zip((2, 3, 4), pool[:3]):
+        _place(slot, e)
+    pool = pool[3:]
+    for slot, e in zip((5, 6), pool[:2]):
+        _place(slot, e)
+    pool = pool[2:]
+
+    if has_dh:
+        if pool:
+            _place(7, pool[0])
+        if bottom:
+            _place(8, bottom)
+    else:
+        if bottom:
+            _place(7, bottom)
+
+    return order
+
+
+def _bench_pool(hitters, starter_pids):
+    return [p for p in hitters if p["pid"] not in starter_pids]
+
+
+def _ph_ranking(bench, tools_key):
+    """Bench hitters ranked by GM composite (handedness-specific, park-
+    adjusted), descending — every bench bat, not an arbitrary top-N cut."""
+    ranked = []
+    for p in bench:
+        gm = _gm_composite(p.get(tools_key), p.get("park_delta", 0))
+        if gm is not None:
+            ranked.append({"p": p, "gm": gm})
+    ranked.sort(key=lambda e: -e["gm"])
+    return ranked
+
+
+def _pr_ranking(bench):
+    ranked = []
+    for p in bench:
+        spd = _speed_score(p.get("speed"), p.get("steal"))
+        if spd is not None:
+            ranked.append({"p": p, "speed": spd})
+    ranked.sort(key=lambda e: -e["speed"])
+    return ranked
+
+
 def _load_park(team_id, opponent_id, is_home):
     """My own park (config/park_factors.json) for a home game; the
     opponent's park from the league-wide upload for an away game. None if
@@ -123,11 +252,26 @@ def get_lineup_optimizer(opponent_id=None, is_home=True):
         if vl_pick:
             used_pids.add(vl_pick["pid"])
 
-    if cfg.settings.get("dh_rule", "No DH") != "No DH":
+    has_dh = cfg.settings.get("dh_rule", "No DH") != "No DH"
+    if has_dh:
         dh_pool = [p for p in hitters if p["pid"] not in used_pids]
         dh_vr = _best(dh_pool, "vr_score")
         dh_vl = _best([p for p in dh_pool if p["pid"] != (dh_vr["pid"] if dh_vr else None)], "vl_score")
         lineup.append({"group": "DH", "vr": dh_vr, "vl": dh_vl})
+
+    vr_starters = [slot["vr"] for slot in lineup if slot["vr"]]
+    vl_starters = [slot["vl"] for slot in lineup if slot["vl"]]
+    batting_order_vr = _build_batting_order(vr_starters, "vr_tools", has_dh)
+    batting_order_vl = _build_batting_order(vl_starters, "vl_tools", has_dh)
+
+    vr_starter_pids = {p["pid"] for p in vr_starters}
+    vl_starter_pids = {p["pid"] for p in vl_starters}
+    bench_vr = _bench_pool(hitters, vr_starter_pids)
+    bench_vl = _bench_pool(hitters, vl_starter_pids)
+    ph_vr = _ph_ranking(bench_vr, "vr_tools")
+    ph_vl = _ph_ranking(bench_vl, "vl_tools")
+    pr_vr = _pr_ranking(bench_vr)
+    pr_vl = _pr_ranking(bench_vl)
 
     rotation = [p for p in pitchers if p["group"] == "SP"]
     rotation.sort(key=lambda p: -(p["composite_score"] or 0))
@@ -147,6 +291,9 @@ def get_lineup_optimizer(opponent_id=None, is_home=True):
         ),
         "park_uploaded": _league_park_has_data(conn),
         "def_floor": _DEF_FLOOR,
+        "batting_order_vr": batting_order_vr, "batting_order_vl": batting_order_vl,
+        "has_dh": has_dh,
+        "ph_vr": ph_vr, "ph_vl": ph_vl, "pr_vr": pr_vr, "pr_vl": pr_vl,
     }
 
 

@@ -48,35 +48,59 @@
 
 <div class="panel">
   <h2>Optimal Lineup</h2>
+  <div style="font-size:12px; color:var(--text-dim); margin-bottom:10px">
+    Picks are ranked by Base Rating first — the pure ratings-based vR/vL composite — restricted to players grading
+    {{ def_floor }}/80 or better on defense at that position (falls back to the full pool if nobody clears that bar).
+    Observed and Park then show as separate +/- adjustments on top, not as ranking factors: <strong>Observed</strong>
+    is how many points above/below Base this player's real production vs that handedness is running this season
+    (vs. what a league-wide rating-to-performance fit would predict for that Base grade — blank under {{ min_split_pa }}
+    PA vs that handedness, too small a sample to mean anything), and <strong>Park</strong> is this park's fit for
+    their tool profile, scaled to the same point scale. <strong>Adjusted</strong> = Base + Observed + Park.
+  </div>
+  <div style="overflow-x:auto">
   <table>
     <thead>
       <tr>
         <th class="left">Pos</th>
-        <th class="left">vR Pick</th><th>Ovr</th><th>vR</th><th>Fit</th><th class="left">Park Impact</th>
-        <th class="left">vL Pick</th><th>Ovr</th><th>vL</th><th>Fit</th><th class="left">Park Impact</th>
+        <th class="left">vR Pick</th><th title="Overall composite score (not split-specific)">Ovr</th>
+        <th title="Pure ratings-based vR composite — the primary ranking signal">Base</th>
+        <th title="Points above/below Base from real observed performance vs RHP this season">Observed</th>
+        <th title="Points above/below Base from park fit">Park</th>
+        <th title="Base + Observed + Park">Adjusted</th>
+        <th class="left">vL Pick</th><th title="Overall composite score (not split-specific)">Ovr</th>
+        <th title="Pure ratings-based vL composite — the primary ranking signal">Base</th>
+        <th title="Points above/below Base from real observed performance vs LHP this season">Observed</th>
+        <th title="Points above/below Base from park fit">Park</th>
+        <th title="Base + Observed + Park">Adjusted</th>
       </tr>
     </thead>
     <tbody>
       {% for slot in lineup %}
       <tr>
         <td class="left" style="font-weight:600">{{ slot.group }}</td>
-        {% for p, score_key in [(slot.vr, 'vr_score'), (slot.vl, 'vl_score')] %}
+        {% for p, score_key, obs_key, adj_key in [(slot.vr, 'vr_score', 'vr_obs_delta', 'vr_adjusted'), (slot.vl, 'vl_score', 'vl_obs_delta', 'vl_adjusted')] %}
         {% if p %}
         <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
         <td><span class="ovr-color" data-g="{{ p.composite_score }}">{{ p.composite_score if p.composite_score is not none else '-' }}</span></td>
         <td>{{ p[score_key]|round|int if p[score_key] is not none else '-' }}</td>
-        <td class="{{ 'pos' if p.park_fit and p.park_fit > 0 else 'neg' if p.park_fit and p.park_fit < 0 else '' }}">{{ p.park_fit if p.park_fit is not none else '-' }}</td>
-        <td class="left {{ 'pos' if p.park_value_pct and p.park_value_pct > 0 else 'neg' if p.park_value_pct and p.park_value_pct < 0 else '' }}">
-          {% if p.park_value_pct is not none and park %}{% set pv = (p.park_value_pct * 100)|round|int %}{{ '+' if pv > 0 else '' }}{{ pv }}% in {{ park.park }}{% if park_team_abbr %} ({{ park_team_abbr }}){% endif %}{% else %}-{% endif %}
+        <td class="{{ 'pos' if p[obs_key] and p[obs_key] > 0 else 'neg' if p[obs_key] and p[obs_key] < 0 else '' }}">
+          {% if p[obs_key] is not none %}{{ '+' if p[obs_key] > 0 else '' }}{{ p[obs_key] }}{% else %}-{% endif %}
+        </td>
+        <td class="{{ 'pos' if p.park_delta and p.park_delta > 0 else 'neg' if p.park_delta and p.park_delta < 0 else '' }}">
+          {{ '+' if p.park_delta and p.park_delta > 0 else '' }}{{ p.park_delta if p.park_delta is not none else '-' }}
+        </td>
+        <td style="font-weight:600" class="{{ 'pos' if p[adj_key] and p[adj_key] > p[score_key] else 'neg' if p[adj_key] and p[adj_key] < p[score_key] else '' }}">
+          {{ p[adj_key] if p[adj_key] is not none else '-' }}
         </td>
         {% else %}
-        <td class="left text-dim" colspan="5">No qualifying player</td>
+        <td class="left text-dim" colspan="6">No qualifying player</td>
         {% endif %}
         {% endfor %}
       </tr>
       {% endfor %}
     </tbody>
   </table>
+  </div>
 </div>
 
 <div class="panel">

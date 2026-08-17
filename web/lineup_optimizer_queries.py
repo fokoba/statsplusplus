@@ -13,8 +13,126 @@ from web_league_context import get_db, get_cfg, my_team_id, team_names_map, team
 
 from scouting_queries import _fetch_rows, _org_where, _build_entries, _HITTER_POS_CODES
 from statsplusplus.data.evaluation_engine import load_tool_weights
+from team_queries import _get_state
 
 _HITTER_ORDER = list(_HITTER_POS_CODES.values())  # C,1B,2B,3B,SS,LF,CF,RF
+
+# Minimum PA vs a given handedness before "observed performance" shows a
+# real adjustment instead of 0 — below this a hot/cold stretch is mostly
+# noise, not signal.
+_MIN_SPLIT_PA = 40
+# Standard (unweighted-by-season) wOBA linear weights — good enough for a
+# relative actual-vs-expected comparison, since both sides of that
+# comparison use the same weights and any era/league-wide bias cancels out.
+_WOBA_W = {"bb": 0.69, "hbp": 0.72, "1b": 0.89, "2b": 1.27, "3b": 1.62, "hr": 2.10}
+# Observed-performance and park-fit deltas are both hints on top of the
+# base rating, not a replacement for it — capped so neither can swing the
+# adjusted composite further than a real talent gap between two players.
+_OBS_DELTA_CAP = 15
+_PARK_DELTA_CAP = 5
+# Def rating (20-80, same scale as Viable Positions on the minors page)
+# required at a position before a player is even considered for that slot.
+_DEF_FLOOR = 65
+
+
+def _linreg(xs, ys):
+    """Simple OLS regression: returns (slope, intercept), or None if there
+    isn't enough spread in the sample to fit one. Mirrors calibrate.py's
+    _linreg() — kept as a small local copy rather than importing that
+    module, since it's an offline batch-calibration script, not something
+    meant to load into the live web server.
+    """
+    n = len(xs)
+    if n < 5:
+        return None
+    mx = sum(xs) / n
+    my = sum(ys) / n
+    ss_xx = sum((x - mx) ** 2 for x in xs)
+    ss_xy = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+    if ss_xx == 0:
+        return None
+    slope = ss_xy / ss_xx
+    intercept = my - slope * mx
+    return slope, intercept
+
+
+def _woba(ab, h, d, t, hr, bb, hbp, sf):
+    singles = h - d - t - hr
+    num = (_WOBA_W["bb"] * bb + _WOBA_W["hbp"] * hbp + _WOBA_W["1b"] * singles
+           + _WOBA_W["2b"] * d + _WOBA_W["3b"] * t + _WOBA_W["hr"] * hr)
+    denom = ab + bb + sf + hbp
+    return num / denom if denom > 0 else None
+
+
+def _split_regression(conn, year, split_id):
+    """(slope, intercept) fit of actual wOBA vs composite_score, across
+    every qualified MLB hitter league-wide for this one split — the
+    "expected wOBA for this composite" baseline real observed performance
+    gets compared against. Self-calibrating: no hardcoded assumption about
+    how many runs a composite point is worth, just "what did hitters who
+    graded out this way actually produce, this split, this league, right
+    now."
+    """
+    rows = conn.execute("""
+        SELECT r.composite_score, b.ab, b.h, b.d, b.t, b.hr, b.bb, b.hbp, b.sf
+        FROM mlb_batting_stats b
+        JOIN players p ON p.player_id = b.player_id
+        JOIN latest_ratings r ON r.player_id = b.player_id
+        WHERE b.year=? AND b.split_id=? AND p.level='1' AND b.pa >= ?
+              AND r.composite_score IS NOT NULL
+    """, (year, split_id, _MIN_SPLIT_PA)).fetchall()
+    xs, ys = [], []
+    for comp, ab, h, d, t, hr, bb, hbp, sf in rows:
+        w = _woba(ab or 0, h or 0, d or 0, t or 0, hr or 0, bb or 0, hbp or 0, sf or 0)
+        if w is not None:
+            xs.append(comp)
+            ys.append(w)
+    return _linreg(xs, ys)
+
+
+def _split_stats_by_pid(conn, team_id, year):
+    """{pid: {2: {...vs-L raw stat dict...}, 3: {...vs-R...}}} for this
+    team's active roster — the raw ingredients _obs_delta() needs per
+    player, fetched once rather than per-player.
+    """
+    rows = conn.execute("""
+        SELECT player_id, split_id, ab, h, d, t, hr, bb, hbp, sf, pa
+        FROM mlb_batting_stats WHERE year=? AND split_id IN (2,3) AND team_id=?
+    """, (year, team_id)).fetchall()
+    by_pid = {}
+    for pid, split_id, ab, h, d, t, hr, bb, hbp, sf, pa in rows:
+        by_pid.setdefault(pid, {})[split_id] = {
+            "ab": ab or 0, "h": h or 0, "d": d or 0, "t": t or 0, "hr": hr or 0,
+            "bb": bb or 0, "hbp": hbp or 0, "sf": sf or 0, "pa": pa or 0,
+        }
+    return by_pid
+
+
+def _obs_delta(reg, split_stats, composite):
+    """Composite points above/below `composite` this player's real
+    observed performance in this split currently runs, per the league-wide
+    wOBA~composite fit — None (not 0) below the PA floor or with no
+    regression fit, so the template can show "-" instead of a misleadingly
+    confident "+0".
+    """
+    if not reg or not split_stats or split_stats["pa"] < _MIN_SPLIT_PA or composite is None:
+        return None
+    actual = _woba(split_stats["ab"], split_stats["h"], split_stats["d"], split_stats["t"],
+                    split_stats["hr"], split_stats["bb"], split_stats["hbp"], split_stats["sf"])
+    if actual is None:
+        return None
+    slope, intercept = reg
+    if slope == 0:
+        return None
+    expected = intercept + slope * composite
+    points = (actual - expected) / slope
+    return max(-_OBS_DELTA_CAP, min(_OBS_DELTA_CAP, round(points)))
+
+
+def _park_delta(park_fit):
+    if park_fit is None:
+        return 0
+    return max(-_PARK_DELTA_CAP, min(_PARK_DELTA_CAP, round(park_fit / 20)))
 
 
 def _load_park(team_id, opponent_id, is_home):
@@ -58,6 +176,27 @@ def get_lineup_optimizer(opponent_id=None, is_home=True):
 
     hitters = [p for p in entries if not p["is_pitcher"]]
     pitchers = [p for p in entries if p["is_pitcher"]]
+
+    # Base rating (vR/vL composite) is the primary signal — this just adds
+    # two more numbers alongside it: how far real observed performance vs
+    # that handedness is currently running from what the rating alone would
+    # predict, and how many points this park is worth for this hitter's
+    # tool profile. Both computed once per hitter here, up front, so every
+    # pool the selection logic below considers already carries them.
+    stats_year = _get_state()["stats_year"]
+    reg_r = _split_regression(conn, stats_year, 3)  # vs RHP -> feeds vR
+    reg_l = _split_regression(conn, stats_year, 2)  # vs LHP -> feeds vL
+    split_stats = _split_stats_by_pid(conn, team_id, stats_year)
+    for p in hitters:
+        ss = split_stats.get(p["pid"], {})
+        p["vr_obs_delta"] = _obs_delta(reg_r, ss.get(3), p["vr_score"])
+        p["vl_obs_delta"] = _obs_delta(reg_l, ss.get(2), p["vl_score"])
+        p["park_delta"] = _park_delta(p["park_fit"])
+        p["vr_adjusted"] = (round(p["vr_score"] + (p["vr_obs_delta"] or 0) + p["park_delta"])
+                             if p["vr_score"] is not None else None)
+        p["vl_adjusted"] = (round(p["vl_score"] + (p["vl_obs_delta"] or 0) + p["park_delta"])
+                             if p["vl_score"] is not None else None)
+
     by_group = {}
     for p in hitters:
         by_group.setdefault(p["group"], []).append(p)
@@ -75,10 +214,17 @@ def get_lineup_optimizer(opponent_id=None, is_home=True):
         ))
         return candidates[0]
 
+    def _def_qualified(pool):
+        """Only players grading _DEF_FLOOR+ at this position — falls back
+        to the full pool if nobody clears it, so a thin position never
+        goes empty just because no one's a plus defender there yet."""
+        qualified = [p for p in pool if p["def_rating"] is not None and p["def_rating"] >= _DEF_FLOOR]
+        return qualified if qualified else pool
+
     lineup = []
     used_pids = set()
     for group in _HITTER_ORDER:
-        pool = by_group.get(group, [])
+        pool = _def_qualified(by_group.get(group, []))
         vr_pick = _best(pool, "vr_score")
         vl_pick = _best(pool, "vl_score")
         lineup.append({"group": group, "vr": vr_pick, "vl": vl_pick})
@@ -110,6 +256,7 @@ def get_lineup_optimizer(opponent_id=None, is_home=True):
             key=lambda x: x[1],
         ),
         "park_uploaded": _league_park_has_data(conn),
+        "def_floor": _DEF_FLOOR, "min_split_pa": _MIN_SPLIT_PA,
     }
 
 

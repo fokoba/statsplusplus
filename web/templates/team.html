@@ -1264,6 +1264,13 @@
   {% endif %}
   {% endmacro %}
 
+  {% macro add_table_pair(confirmed, unconfirmed, table_id, cur_team_col, show_ask=false, show_spec=false, show_park=false, show_bid=false, show_park_value=false) %}
+  <div class="add-subsection-label">High Scouting Confidence <span class="text-dim">({{ confirmed|length }})</span></div>
+  {{ add_table(confirmed, table_id + '-conf', cur_team_col, show_ask, show_spec, show_park, show_bid, show_park_value) }}
+  <div class="add-subsection-label" style="margin-top:14px">Needs Scouting <span class="text-dim">({{ unconfirmed|length }})</span></div>
+  {{ add_table(unconfirmed, table_id + '-unconf', cur_team_col, show_ask, show_spec, show_park, show_bid, show_park_value) }}
+  {% endmacro %}
+
   <div style="margin-bottom:16px">
     <label style="font-size:13px" title="Dims (doesn't hide) rows with a Low Work Ethic, Low Intelligence, Low Leadership, Low Loyalty, or Greedy flag — same flags shown in each row's Personality column.">
       <input type="checkbox" id="adds-negpers-filter" onchange="addsFilterPers()">
@@ -1272,15 +1279,15 @@
   </div>
 
   <div class="panel">
-    <h2>Waiver Wire Adds <span style="color:var(--text-dim); font-weight:400; font-size:13px">({{ waiver_candidates|length }})</span></h2>
+    <h2>Waiver Wire Adds <span style="color:var(--text-dim); font-weight:400; font-size:13px">({{ waiver_candidates.confirmed|length + waiver_candidates.unconfirmed|length }})</span></h2>
     <div style="font-size:12px; color:var(--text-dim); margin-bottom:8px">
       All players currently on waivers league-wide (excluding your own org). "Fits At" is blank if {{ team_name }} doesn't have an obvious need at that position.
     </div>
-    {{ add_table(waiver_candidates, "waiver-adds", true) }}
+    {{ add_table_pair(waiver_candidates.confirmed, waiver_candidates.unconfirmed, "waiver-adds", true) }}
   </div>
 
   <div class="panel">
-    <h2>Free Agent Adds <span style="color:var(--text-dim); font-weight:400; font-size:13px">({{ fa_candidates.hitters|length }} hitters, {{ fa_candidates.pitchers|length }} pitchers)</span></h2>
+    <h2>Free Agent Adds <span style="color:var(--text-dim); font-weight:400; font-size:13px">({{ fa_candidates.hitters_confirmed|length + fa_candidates.hitters_unconfirmed|length }} hitters, {{ fa_candidates.pitchers_confirmed|length + fa_candidates.pitchers_unconfirmed|length }} pitchers)</span></h2>
     <div style="font-size:12px; color:var(--text-dim); margin-bottom:8px">
       Top {{ fa_candidates.top_pct }}% of free-agent hitters and top {{ fa_candidates.top_pct }}% of free-agent pitchers league-wide, by current Ovr.
       <br>
@@ -1307,15 +1314,15 @@
       </label>
     </div>
     <h3 style="font-size:13px; margin:12px 0 6px">Hitters</h3>
-    {{ add_table(fa_candidates.hitters, "fa-hitters", false, show_ask=true, show_spec=true, show_park=true, show_park_value=true) }}
+    {{ add_table_pair(fa_candidates.hitters_confirmed, fa_candidates.hitters_unconfirmed, "fa-hitters", false, show_ask=true, show_spec=true, show_park=true, show_park_value=true) }}
     <h3 style="font-size:13px; margin:16px 0 6px">Pitchers</h3>
-    {{ add_table(fa_candidates.pitchers, "fa-pitchers", false, show_ask=true, show_spec=true, show_park=true, show_park_value=true) }}
+    {{ add_table_pair(fa_candidates.pitchers_confirmed, fa_candidates.pitchers_unconfirmed, "fa-pitchers", false, show_ask=true, show_spec=true, show_park=true, show_park_value=true) }}
   </div>
 
   <script>
   function faFilterSpec() {
     var val = document.getElementById('fa-spec-filter').value;
-    ['fa-hitters', 'fa-pitchers'].forEach(function(tableId) {
+    ['fa-hitters-conf', 'fa-hitters-unconf', 'fa-pitchers-conf', 'fa-pitchers-unconf'].forEach(function(tableId) {
       var table = document.getElementById(tableId);
       if (!table) return;
       table.querySelectorAll('tbody tr').forEach(function(tr) {
@@ -1326,45 +1333,47 @@
   </script>
 
   <div class="panel">
-    <h2>Top Free Agent Prospects (Age ≤ {{ fa_candidates.prospect_age_max }}) <span style="color:var(--text-dim); font-weight:400; font-size:13px">({{ fa_candidates.young_hitters|length }} hitters, {{ fa_candidates.young_pitchers|length }} pitchers)</span></h2>
+    <h2>Top Free Agent Prospects (Age ≤ {{ fa_candidates.prospect_age_max }}) <span style="color:var(--text-dim); font-weight:400; font-size:13px">({{ fa_candidates.young_hitters_confirmed|length + fa_candidates.young_hitters_unconfirmed|length }} hitters, {{ fa_candidates.young_pitchers_confirmed|length + fa_candidates.young_pitchers_unconfirmed|length }} pitchers)</span></h2>
     <div style="font-size:12px; color:var(--text-dim); margin-bottom:8px">
       All signable free agents age {{ fa_candidates.prospect_age_max }} or under with FV {{ fa_candidates.prospect_min_fv }} or higher, ranked by FV (or potential ceiling when unevaluated) instead of current Ovr — surfaces high-upside youth the Ovr-based list above misses.
     </div>
     <h3 style="font-size:13px; margin:12px 0 6px">Hitters</h3>
-    {{ add_table(fa_candidates.young_hitters, "fa-young-hitters", false, show_park=true, show_park_value=true) }}
+    {{ add_table_pair(fa_candidates.young_hitters_confirmed, fa_candidates.young_hitters_unconfirmed, "fa-young-hitters", false, show_park=true, show_park_value=true) }}
     <h3 style="font-size:13px; margin:16px 0 6px">Pitchers</h3>
-    {{ add_table(fa_candidates.young_pitchers, "fa-young-pitchers", false, show_park=true, show_park_value=true) }}
+    {{ add_table_pair(fa_candidates.young_pitchers_confirmed, fa_candidates.young_pitchers_unconfirmed, "fa-young-pitchers", false, show_park=true, show_park_value=true) }}
   </div>
 
   <div class="panel">
-    <h2>Clean Personalities <span style="color:var(--text-dim); font-weight:400; font-size:13px">({{ fa_candidates.clean_hitters|length }} hitters, {{ fa_candidates.clean_pitchers|length }} pitchers)</span></h2>
+    <h2>Clean Personalities <span style="color:var(--text-dim); font-weight:400; font-size:13px">({{ fa_candidates.clean_hitters_confirmed|length + fa_candidates.clean_hitters_unconfirmed|length }} hitters, {{ fa_candidates.clean_pitchers_confirmed|length + fa_candidates.clean_pitchers_unconfirmed|length }} pitchers)</span></h2>
     <div style="font-size:12px; color:var(--text-dim); margin-bottom:8px">
       Top {{ fa_candidates.top_pct }}% (minimum 5 each) of signable free agents with zero personality concerns (no Low Work Ethic, Low IQ, Low Leadership, Low Loyalty, or Greedy flags), ranked by current Ovr.
     </div>
     <h3 style="font-size:13px; margin:12px 0 6px">Hitters</h3>
-    {{ add_table(fa_candidates.clean_hitters, "fa-clean-hitters", false) }}
+    {{ add_table_pair(fa_candidates.clean_hitters_confirmed, fa_candidates.clean_hitters_unconfirmed, "fa-clean-hitters", false) }}
     <h3 style="font-size:13px; margin:16px 0 6px">Pitchers</h3>
-    {{ add_table(fa_candidates.clean_pitchers, "fa-clean-pitchers", false) }}
+    {{ add_table_pair(fa_candidates.clean_pitchers_confirmed, fa_candidates.clean_pitchers_unconfirmed, "fa-clean-pitchers", false) }}
   </div>
 
   <div class="panel">
-    <h2>Clean Prospect Personalities <span style="color:var(--text-dim); font-weight:400; font-size:13px">({{ fa_candidates.clean_young_hitters|length }} hitters, {{ fa_candidates.clean_young_pitchers|length }} pitchers)</span></h2>
+    <h2>Clean Prospect Personalities <span style="color:var(--text-dim); font-weight:400; font-size:13px">({{ fa_candidates.clean_young_hitters_confirmed|length + fa_candidates.clean_young_hitters_unconfirmed|length }} hitters, {{ fa_candidates.clean_young_pitchers_confirmed|length + fa_candidates.clean_young_pitchers_unconfirmed|length }} pitchers)</span></h2>
     <div style="font-size:12px; color:var(--text-dim); margin-bottom:8px">
       All signable free agents age {{ fa_candidates.prospect_age_max }} or under with FV {{ fa_candidates.prospect_min_fv }} or higher and zero personality concerns, ranked by FV (or potential ceiling when unevaluated).
     </div>
     <h3 style="font-size:13px; margin:12px 0 6px">Hitters</h3>
-    {{ add_table(fa_candidates.clean_young_hitters, "fa-clean-young-hitters", false, show_park=true, show_park_value=true) }}
+    {{ add_table_pair(fa_candidates.clean_young_hitters_confirmed, fa_candidates.clean_young_hitters_unconfirmed, "fa-clean-young-hitters", false, show_park=true, show_park_value=true) }}
     <h3 style="font-size:13px; margin:16px 0 6px">Pitchers</h3>
-    {{ add_table(fa_candidates.clean_young_pitchers, "fa-clean-young-pitchers", false, show_park=true, show_park_value=true) }}
+    {{ add_table_pair(fa_candidates.clean_young_pitchers_confirmed, fa_candidates.clean_young_pitchers_unconfirmed, "fa-clean-young-pitchers", false, show_park=true, show_park_value=true) }}
   </div>
 
   <div class="panel">
-    <h2>International Free Agent Pool <span style="color:var(--text-dim); font-weight:400; font-size:13px">({{ fa_candidates.international_hitters|length }} hitters, {{ fa_candidates.international_pitchers|length }} pitchers)</span></h2>
+    <h2>International Free Agent Pool <span style="color:var(--text-dim); font-weight:400; font-size:13px">({{ fa_candidates.international_hitters_confirmed|length + fa_candidates.international_hitters_unconfirmed|length }} hitters, {{ fa_candidates.international_pitchers_confirmed|length + fa_candidates.international_pitchers_unconfirmed|length }} pitchers)</span></h2>
     <div style="font-size:12px; color:var(--text-dim); margin-bottom:8px">
       International-market amateur free agents (age {{ fa_candidates.intl_age_max }} or under) — these sign via a separate process from domestic free agents and are kept out of the lists above. Ranked by FV (or potential ceiling when unevaluated); no FV floor applied since these are early-stage amateur evaluations, not a curated "sign now" cut.
     </div>
-    {% set _show_intl_bid = fa_candidates.international_hitters and fa_candidates.international_hitters[0].recommended_bid is defined
-                             or fa_candidates.international_pitchers and fa_candidates.international_pitchers[0].recommended_bid is defined %}
+    {% set _show_intl_bid = fa_candidates.international_hitters_confirmed and fa_candidates.international_hitters_confirmed[0].recommended_bid is defined
+                             or fa_candidates.international_hitters_unconfirmed and fa_candidates.international_hitters_unconfirmed[0].recommended_bid is defined
+                             or fa_candidates.international_pitchers_confirmed and fa_candidates.international_pitchers_confirmed[0].recommended_bid is defined
+                             or fa_candidates.international_pitchers_unconfirmed and fa_candidates.international_pitchers_unconfirmed[0].recommended_bid is defined %}
     {% if _show_intl_bid %}
     <div id="intl-bid-tracker" style="font-size:12px; color:var(--text-dim); margin-bottom:12px; padding:8px; border:1px solid var(--border); border-radius:6px; display:flex; align-items:center; gap:16px; flex-wrap:wrap">
       <span>Check off players below (✓ persists) to build your target list.</span>
@@ -1374,9 +1383,9 @@
     </div>
     {% endif %}
     <h3 style="font-size:13px; margin:12px 0 6px">Hitters</h3>
-    {{ add_table(fa_candidates.international_hitters, "fa-intl-hitters", false, show_bid=_show_intl_bid, show_park=true, show_park_value=true) }}
+    {{ add_table_pair(fa_candidates.international_hitters_confirmed, fa_candidates.international_hitters_unconfirmed, "fa-intl-hitters", false, show_bid=_show_intl_bid, show_park=true, show_park_value=true) }}
     <h3 style="font-size:13px; margin:16px 0 6px">Pitchers</h3>
-    {{ add_table(fa_candidates.international_pitchers, "fa-intl-pitchers", false, show_bid=_show_intl_bid, show_park=true, show_park_value=true) }}
+    {{ add_table_pair(fa_candidates.international_pitchers_confirmed, fa_candidates.international_pitchers_unconfirmed, "fa-intl-pitchers", false, show_bid=_show_intl_bid, show_park=true, show_park_value=true) }}
   </div>
 </div>
 
@@ -1436,7 +1445,7 @@ function addsFilterPers() {
   var tracker = document.getElementById('intl-bid-tracker');
   if (!tracker) return;
 
-  var intlTableIds = ['fa-intl-hitters', 'fa-intl-pitchers'];
+  var intlTableIds = ['fa-intl-hitters-conf', 'fa-intl-hitters-unconf', 'fa-intl-pitchers-conf', 'fa-intl-pitchers-unconf'];
   var BUDGET_KEY = 'statspp_intl_budget';
 
   function recalcCumulative(table) {
@@ -1504,6 +1513,7 @@ function addsFilterPers() {
 <style>
 .add-row.add-marked .add-name { color: var(--text-dim); text-decoration: line-through; }
 .add-row.add-marked td { opacity: 0.5; }
+.add-subsection-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-dim); margin-bottom: 4px; }
 </style>
 
 <script>

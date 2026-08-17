@@ -326,16 +326,13 @@ def prospect_surplus(fv, age, level, bucket, positional_adjust=False, fv_plus=Fa
             # Perpetual arb: no pre-arb period. Salary = f(career_WAR, current_WAR).
             # Accumulate projected career WAR from debut.
             _cum_war = sum(r["war"] for r in rows) + war
-            _perp_model = None
-            try:
-                from statsplusplus.config.league_context import get_league_dir
-                import json as _json
-                _mw_path = get_league_dir() / "config" / "model_weights.json"
-                if _mw_path.exists():
-                    _mw = _json.load(open(_mw_path))
-                    _perp_model = _mw.get("ARB_SALARY_MODEL")
-            except Exception:
-                pass
+            # _weights is already the parsed, module-cached model_weights.json
+            # (kept in sync with the active league by _ensure_league_context())
+            # — re-opening and re-parsing the file here on every control-year
+            # iteration of every prospect (up to ~40k times for a full free-
+            # agent pool under perpetual arb) was the entire cause of this
+            # page's ~9s load time.
+            _perp_model = _weights.get("ARB_SALARY_MODEL")
             salary = _arb_salary_perp(player_age, war, dpw, lg_min,
                                       career_war=_cum_war, model=_perp_model)
         elif ctrl_year <= 3:

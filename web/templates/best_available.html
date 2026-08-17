@@ -28,7 +28,7 @@
     <thead><tr><th></th><th class="left">Name</th><th>Pos</th><th>Age</th><th>Ovr</th></tr></thead>
     <tbody>
       {% for p in newly %}
-      <tr>
+      <tr data-pers="{{ 'neg' if p.concerns else '' }}">
         <td><input type="checkbox" class="scout-checkbox" data-pid="{{ p.pid }}" data-page="best_available"></td>
         <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
         <td>{{ p.group }}</td>
@@ -54,6 +54,14 @@
     <label><input type="radio" name="roster-view" value="mlb" {% if roster_view == 'mlb' %}checked{% endif %} onchange="scoutSetRoster(this)"> My MLB Team</label>
     <label><input type="radio" name="roster-view" value="org" {% if roster_view == 'org' %}checked{% endif %} onchange="scoutSetRoster(this)"> My Whole Org</label>
   </div>
+  <label style="font-size:13px" title="Dims (doesn't hide) rows with a Low Work Ethic, Low Intelligence, Low Leadership, Low Loyalty, or Greedy flag.">
+    <input type="checkbox" id="negpers-filter" onchange="filterPers()">
+    Dim bad personalities
+  </label>
+  <span>
+    <button type="button" class="btn btn-sm" onclick="scoutSetAll(true)">Check All</button>
+    <button type="button" class="btn btn-sm" onclick="scoutSetAll(false)">Uncheck All</button>
+  </span>
 </div>
 
 {% macro pos_card(group, players, value_key, value_label, page_key) %}
@@ -71,7 +79,7 @@
     </thead>
     <tbody>
       {% for p in players %}
-      <tr{% if p.is_mine %} class="scout-mine-row"{% endif %}>
+      <tr{% if p.is_mine %} class="scout-mine-row"{% endif %} data-pers="{{ 'neg' if p.concerns else '' }}">
         <td><input type="checkbox" class="scout-checkbox" data-pid="{{ p.pid }}" data-page="{{ page_key }}"></td>
         <td class="left">{% if p.is_mine %}<span class="scout-mine-tag">{{ p.roster_tag }}</span>{% endif %}{% if p.good_pick %}<span title="Both a good Park Fit (20+) and a positive Long-Term Surplus — a high-confidence add">⭐</span>{% endif %}<a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
         <td>{{ p.age if p.age is not none else '-' }}</td>
@@ -223,6 +231,7 @@
 .scout-mini-table th:first-child, .scout-mini-table td:first-child { width: 18px; }
 tr.scout-marked .player-link { color: var(--text-dim); text-decoration: line-through; }
 tr.scout-mine-row { background: rgba(76, 175, 80, 0.12); }
+tr[data-pers="neg"].scout-dimmed { opacity: 0.4; }
 .scout-mine-tag {
   display: inline-block; font-size: 9px; font-weight: 700; color: #4caf50;
   border: 1px solid #4caf50; border-radius: 3px; padding: 0 3px; margin-right: 3px;
@@ -241,6 +250,12 @@ function scoutSetRoster(radio) {
   if (radio.value) { url.searchParams.set('roster', radio.value); }
   else { url.searchParams.delete('roster'); }
   window.location.href = url.toString();
+}
+function filterPers() {
+  var dim = document.getElementById('negpers-filter').checked;
+  document.querySelectorAll('.scout-mini-table tbody tr').forEach(function(tr) {
+    tr.classList.toggle('scout-dimmed', dim && tr.dataset.pers === 'neg');
+  });
 }
 </script>
 
@@ -268,6 +283,16 @@ function scoutSetRoster(radio) {
       else row.classList.remove('scout-marked');
     });
   }
+
+  window.scoutSetAll = function(checked) {
+    document.querySelectorAll('.scout-checkbox').forEach(function(cb) {
+      var pid = cb.dataset.pid;
+      var k = cb.dataset.page + ':' + pid;
+      if (checked) { marks[k] = true; } else { delete marks[k]; }
+      applyMark(pid, checked);
+    });
+    saveMarks(marks);
+  };
 
   document.querySelectorAll('.scout-checkbox').forEach(function(cb) {
     var key = cb.dataset.page + ':' + cb.dataset.pid;

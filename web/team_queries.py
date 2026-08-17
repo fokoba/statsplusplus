@@ -1177,8 +1177,14 @@ def _weak_positions_for_org(tid):
 _ACC_CONFIRMED = {"H", "VH"}
 
 
-def _acc_first(pool, key):
-    return sorted(pool, key=lambda e: (0 if e.get("acc") in _ACC_CONFIRMED else 1, key(e)))
+def _split_acc(pool, key):
+    """Split into (confirmed, unconfirmed) sub-lists, each still sorted by
+    `key` — powers the "High Scouting Confidence" / "Needs Scouting"
+    subsections on Add Candidates. Splitting (not just reordering) so each
+    half can render as its own small table under its own label."""
+    confirmed = sorted((e for e in pool if e.get("acc") in _ACC_CONFIRMED), key=key)
+    unconfirmed = sorted((e for e in pool if e.get("acc") not in _ACC_CONFIRMED), key=key)
+    return confirmed, unconfirmed
 
 
 def _fit_position(bucket, weak_positions):
@@ -1247,8 +1253,8 @@ def get_waiver_candidates(team_id=None):
             "peak_surplus": _peak_surplus(fv_continuous, age, level_disp, pf_bucket, ovr=comp, pot=potential),
             "current_year_surplus": _cur_s, "next_year_surplus": _next_s, "three_year_surplus": _three_s,
         })
-    out = _acc_first(out, lambda e: -(e["composite_score"] or 0))
-    return out
+    confirmed, unconfirmed = _split_acc(out, lambda e: -(e["composite_score"] or 0))
+    return {"confirmed": confirmed, "unconfirmed": unconfirmed}
 
 
 _FA_TOP_PCT = 0.05
@@ -1512,10 +1518,10 @@ def get_free_agent_candidates(team_id=None):
     def _top_pct(pool, key, min_count=1):
         sorted_pool = sorted(pool, key=key)
         n = max(min_count, int(len(sorted_pool) * _FA_TOP_PCT)) if sorted_pool else 0
-        # Selection (who makes the top-N% cut) stays purely by `key`;
-        # accuracy-first only reorders that already-selected slice for
-        # display, so it can't bump anyone off the list.
-        return _acc_first(sorted_pool[:n], key)
+        # Selection (who makes the top-N% cut) stays purely by `key`; the
+        # confidence split only divides that already-selected slice into
+        # two display groups, so it can't bump anyone off the list.
+        return _split_acc(sorted_pool[:n], key)
 
     def _ovr_key(e):
         return -(e["composite_score"] or 0)
@@ -1534,23 +1540,36 @@ def get_free_agent_candidates(team_id=None):
 
     def _fv_min(pool):
         qualifying = [e for e in pool if e["fv"] is not None and e["fv"] >= _FA_PROSPECT_MIN_FV]
-        return _acc_first(qualifying, _prospect_key)
+        return _split_acc(qualifying, _prospect_key)
 
+    hitters_confirmed, hitters_unconfirmed = _top_pct(hitters, _ovr_key)
+    pitchers_confirmed, pitchers_unconfirmed = _top_pct(pitchers, _ovr_key)
+    young_hitters_confirmed, young_hitters_unconfirmed = _fv_min(young_hitters)
+    young_pitchers_confirmed, young_pitchers_unconfirmed = _fv_min(young_pitchers)
+    clean_hitters_confirmed, clean_hitters_unconfirmed = _top_pct(clean_hitters, _ovr_key, min_count=5)
+    clean_pitchers_confirmed, clean_pitchers_unconfirmed = _top_pct(clean_pitchers, _ovr_key, min_count=5)
+    clean_young_hitters_confirmed, clean_young_hitters_unconfirmed = _fv_min(clean_young_hitters)
+    clean_young_pitchers_confirmed, clean_young_pitchers_unconfirmed = _fv_min(clean_young_pitchers)
     # No FV floor here — these are 15-17yo amateurs being browsed as a pool,
     # not a curated "worth signing now" cut, so an FV threshold tuned for
     # domestic prospects doesn't apply.
-    international_hitters = _acc_first(intl_hitters, _prospect_key)
-    international_pitchers = _acc_first(intl_pitchers, _prospect_key)
+    international_hitters_confirmed, international_hitters_unconfirmed = _split_acc(intl_hitters, _prospect_key)
+    international_pitchers_confirmed, international_pitchers_unconfirmed = _split_acc(intl_pitchers, _prospect_key)
 
-    return {"hitters": _top_pct(hitters, _ovr_key), "pitchers": _top_pct(pitchers, _ovr_key),
-            "young_hitters": _fv_min(young_hitters),
-            "young_pitchers": _fv_min(young_pitchers),
-            "clean_hitters": _top_pct(clean_hitters, _ovr_key, min_count=5),
-            "clean_pitchers": _top_pct(clean_pitchers, _ovr_key, min_count=5),
-            "clean_young_hitters": _fv_min(clean_young_hitters),
-            "clean_young_pitchers": _fv_min(clean_young_pitchers),
-            "international_hitters": international_hitters,
-            "international_pitchers": international_pitchers,
+    return {"hitters_confirmed": hitters_confirmed, "hitters_unconfirmed": hitters_unconfirmed,
+            "pitchers_confirmed": pitchers_confirmed, "pitchers_unconfirmed": pitchers_unconfirmed,
+            "young_hitters_confirmed": young_hitters_confirmed, "young_hitters_unconfirmed": young_hitters_unconfirmed,
+            "young_pitchers_confirmed": young_pitchers_confirmed, "young_pitchers_unconfirmed": young_pitchers_unconfirmed,
+            "clean_hitters_confirmed": clean_hitters_confirmed, "clean_hitters_unconfirmed": clean_hitters_unconfirmed,
+            "clean_pitchers_confirmed": clean_pitchers_confirmed, "clean_pitchers_unconfirmed": clean_pitchers_unconfirmed,
+            "clean_young_hitters_confirmed": clean_young_hitters_confirmed,
+            "clean_young_hitters_unconfirmed": clean_young_hitters_unconfirmed,
+            "clean_young_pitchers_confirmed": clean_young_pitchers_confirmed,
+            "clean_young_pitchers_unconfirmed": clean_young_pitchers_unconfirmed,
+            "international_hitters_confirmed": international_hitters_confirmed,
+            "international_hitters_unconfirmed": international_hitters_unconfirmed,
+            "international_pitchers_confirmed": international_pitchers_confirmed,
+            "international_pitchers_unconfirmed": international_pitchers_unconfirmed,
             "intl_age_max": _INTL_FA_AGE_MAX,
             "prospect_min_fv": _FA_PROSPECT_MIN_FV,
             "prospect_age_max": _FA_PROSPECT_AGE_MAX,

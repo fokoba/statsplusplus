@@ -36,7 +36,7 @@ from statsplusplus.data.evaluation_engine import load_tool_weights
 from statsplusplus.data.db import get_conn
 from web_league_context import get_db, get_cfg, money_divisor as _money_divisor, level_map
 
-from team_queries import _NIPPON_TEAM_IDS, _INTL_FA_AGE_MAX, _weak_positions_for_org
+from team_queries import _NIPPON_TEAM_IDS, _INTL_FA_AGE_MAX, _weak_positions_for_org, _personality_notes
 
 # Only these accuracy grades are "worth scouting" — High/Very High reports
 # are already reliable. NULL (never scouted at all) counts as needing a
@@ -95,7 +95,8 @@ _ROW_COLUMNS_SQL = """
     r.c, r.first_b, r.second_b, r.third_b, r.ss, r.lf, r.cf, r.rf,
     r.c_frm, r.c_blk, r.c_arm, r.ifr, r.ife, r.ifa, r.tdp, r.ofr, r.ofe, r.ofa,
     r.fst, r.snk, r.crv, r.sld, r.chg, r.splt, r.cutt, r.cir_chg, r.scr, r.frk, r.kncrv, r.knbl,
-    r.stm, ps.surplus, pf.prospect_surplus
+    r.stm, ps.surplus, pf.prospect_surplus,
+    r.int_, r.wrk_ethic, r.lead, r.loy, r.greed
 """
 
 
@@ -180,7 +181,8 @@ def _build_entries(rows, ratings_scale, park, hitter_weights, pitcher_weights, n
          c_def, first_b, second_b, third_b, ss_def, lf, cf, rf,
          c_frm, c_blk, c_arm, ifr, ife, ifa, tdp, ofr, ofe, ofa,
          fst, snk, crv, sld, chg, splt, cutt, cir_chg, scr, frk, kncrv, knbl,
-         stm, surplus_raw, prospect_surplus_raw) = r
+         stm, surplus_raw, prospect_surplus_raw,
+         intel, wrk_ethic, lead, loy, greed) = r
         group, is_pitcher = _pos_group(pos, role)
         if group is None:
             continue
@@ -269,13 +271,14 @@ def _build_entries(rows, ratings_scale, park, hitter_weights, pitcher_weights, n
         surplus_basis = surplus_raw if surplus_raw is not None else prospect_surplus_raw
         surplus = round(surplus_basis / _money_divisor(), 1) if surplus_basis is not None else None
         level_disp = level_map().get(str(level), str(level)) if level is not None else None
+        buffs, concerns = _personality_notes(intel, wrk_ethic, lead, loy, greed)
 
         out.append({
             "pid": pid, "name": name, "age": age, "group": group, "is_pitcher": is_pitcher,
             "composite_score": comp, "potential": potential, "acc": acc,
             "park_fit": park_fit, "park_value_pct": park_value_pct, "def_rating": def_rating,
             "vr_score": vr_score, "vl_score": vl_score,
-            "surplus": surplus,
+            "surplus": surplus, "buffs": buffs, "concerns": concerns,
             "good_pick": bool(park_fit is not None and park_fit >= _GOOD_PARK_FIT
                                and surplus is not None and surplus > _GOOD_SURPLUS),
             "newly_confirmed": pid in newly_confirmed,

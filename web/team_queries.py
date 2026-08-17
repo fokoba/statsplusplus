@@ -688,6 +688,22 @@ def get_roster_hitters(team_id=None):
                                                   and _cur_pa >= _BABIP_MIN_PA) else None
         _babip_luck_tag = _babip_luck(_luck_gap)
         _c_bb_pct, _c_k_pct = career_pct.get(pid, (None, None))
+        _cur_bb_pct = _fmt_split(s1)["bb_pct"] if s1 else None
+        _cur_k_pct = _fmt_split(s1)["k_pct"] if s1 else None
+
+        def _trend(cur, career):
+            # Same 80+ PA gate as BABIP Luck — below that, a BB%/K% swing is
+            # too small a sample to call one way or the other.
+            if cur is None or career is None or _cur_pa < _BABIP_MIN_PA:
+                return None
+            if cur > career:
+                return "higher"
+            if cur < career:
+                return "lower"
+            return "same"
+
+        _bb_pct_trend = _trend(_cur_bb_pct, _c_bb_pct)
+        _k_pct_trend = _trend(_cur_k_pct, _c_k_pct)
         result.append({
             "pid": pid, "name": p["name"], "age": p["age"],
             "ovr": _display_ovr, "pos": pos,
@@ -697,7 +713,7 @@ def get_roster_hitters(team_id=None):
             "is_two_way": pid in twp_pids,
             "career_babip": _r3(_c_babip), "babip_diff": _r3(_luck_gap), "luck": _babip_luck_tag,
             "career_bb_pct": _c_bb_pct, "career_k_pct": _c_k_pct,
-            "all_up_luck": _all_up_luck(_babip_luck_tag),
+            "bb_pct_trend": _bb_pct_trend, "k_pct_trend": _k_pct_trend,
             "status": "DL" if (p["is_on_dl"] or p["is_on_dl60"]) else
                       ("INJ" if p["injury_is_injured"] else
                        ("DFA" if p["designated_for_assignment"] else

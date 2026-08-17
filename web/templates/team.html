@@ -763,10 +763,11 @@
           <th data-sort="num" title="Current BABIP minus career BABIP">Diff</th>
           <th data-sort="str" title="How far this season's BABIP is running from the player's own career level — a hint at coming regression, not a value judgment. Blank until 80+ PA this season.">BABIP Luck</th>
           <th data-sort="num" class="col-sep" title="Walk rate, this season">BB%</th>
+          <th data-sort="str" title="This season's BB% vs. career MLB BB% — higher/lower isn't cleanly good or bad luck (could be approach, aging, or how he's being pitched), shown for reference. Blank until 80+ PA this season.">BB% Trend</th>
           <th data-sort="num" title="Career MLB walk rate — reference only, not tiered: walking more/less than career isn't cleanly lucky or unlucky, it could be approach, aging, or how he's being pitched.">Career BB%</th>
           <th data-sort="num" data-sort-best="low" title="Strikeout rate, this season">K%</th>
+          <th data-sort="str" data-sort-best="low" title="This season's K% vs. career MLB K% — lower is favorable (green), higher is unfavorable (red), shown for reference. Blank until 80+ PA this season.">K% Trend</th>
           <th data-sort="num" data-sort-best="low" title="Career MLB strikeout rate — reference only, not tiered, for the same reason as Career BB%.">Career K%</th>
-          <th data-sort="str" class="col-sep" title="Average of every available luck metric for this player, mapped back to the same 5-tier scale. BABIP only — BB%/K% are shown for reference but not scored, since deviation from career isn't cleanly lucky or unlucky.">All-Up Luck</th>
         </tr>
       </thead>
       <tbody></tbody>
@@ -1918,6 +1919,19 @@ function addsFilterPers() {
     return '';
   }
   function papCls(v) { return v >= 7 ? 'pos' : v < 4 ? 'neg' : ''; }
+  // BB%: higher is favorable (green). K%: lower is favorable (green) — pass
+  // lowerIsGood=true for K%. "same" always renders neutral/white.
+  function trendCls(trend, lowerIsGood) {
+    if (trend === 'same' || trend == null) return '';
+    var favorable = lowerIsGood ? trend === 'lower' : trend === 'higher';
+    return favorable ? 'pos' : 'neg';
+  }
+  function trendLabel(trend) {
+    if (trend == null) return '-';
+    if (trend === 'higher') return 'Higher';
+    if (trend === 'lower') return 'Lower';
+    return 'Same';
+  }
   function fmtPap(v) { return v != null ? v.toFixed(1) : '-'; }
   function fmtSigned(v, digits) {
     if (v == null) return '-';
@@ -2021,10 +2035,11 @@ function addsFilterPers() {
         '<td>' + fmtSigned(p.babip_diff, 3) + '</td>' +
         '<td class="' + luckCls(p.luck) + '">' + (p.luck || '-') + '</td>' +
         '<td class="col-sep">' + (s ? fmtPct(s.bb_pct) : '-') + '</td>' +
+        '<td class="' + trendCls(p.bb_pct_trend, false) + '">' + trendLabel(p.bb_pct_trend) + '</td>' +
         '<td>' + (p.career_bb_pct != null ? fmtPct(p.career_bb_pct) : '-') + '</td>' +
         '<td>' + (s ? fmtPct(s.k_pct) : '-') + '</td>' +
-        '<td>' + (p.career_k_pct != null ? fmtPct(p.career_k_pct) : '-') + '</td>' +
-        '<td class="col-sep ' + luckCls(p.all_up_luck) + '">' + (p.all_up_luck || '-') + '</td>';
+        '<td class="' + trendCls(p.k_pct_trend, true) + '">' + trendLabel(p.k_pct_trend) + '</td>' +
+        '<td>' + (p.career_k_pct != null ? fmtPct(p.career_k_pct) : '-') + '</td>';
       tb.appendChild(tr);
     });
   }

@@ -25,9 +25,21 @@
     <label><input type="radio" name="roster-view" value="mlb" {% if roster_view == 'mlb' %}checked{% endif %} onchange="scoutSetRoster(this)"> My MLB Team</label>
     <label><input type="radio" name="roster-view" value="org" {% if roster_view == 'org' %}checked{% endif %} onchange="scoutSetRoster(this)"> My Whole Org</label>
   </div>
-  <label style="font-size:13px" title="Dims (doesn't hide) rows with a Low Work Ethic, Low Intelligence, Low Leadership, Low Loyalty, or Greedy flag.">
+  <label style="font-size:13px" title="Dims rows whose personality Type is Selfish, Outspoken, Unmotivated, or Disruptive.">
     <input type="checkbox" id="negpers-filter" onchange="filterPers()">
     Dim bad personalities
+  </label>
+  <label style="font-size:13px" title="Bolds rows whose personality Type is Fan Fav, Sparkplug, Captain, Humble, or Prankster.">
+    <input type="checkbox" id="pospers-filter" onchange="filterPers()">
+    Show positive personalities
+  </label>
+  <label style="font-size:13px" title="Bolds rows with a high Work Ethic, Baseball IQ, or Adaptability.">
+    <input type="checkbox" id="devgood-filter" onchange="filterPers()">
+    Show good development
+  </label>
+  <label style="font-size:13px" title="Dims rows with a low Work Ethic, Baseball IQ, or Adaptability.">
+    <input type="checkbox" id="devbad-filter" onchange="filterPers()">
+    Dim bad development
   </label>
   <span>
     <button type="button" class="btn btn-sm" onclick="scoutSetAll(true)">Check All</button>
@@ -44,12 +56,12 @@
       <tr>
         <th></th><th class="left">Name</th><th>Age</th><th>Ovr</th>
         {% if value_key %}<th>{{ value_label }}</th>{% endif %}
-        <th>Acc</th>
+        <th>Acc</th><th class="pers-type-col">Type</th><th class="pers-type-col">Notes</th>
       </tr>
     </thead>
     <tbody>
       {% for p in players %}
-      <tr{% if p.is_mine %} class="scout-mine-row"{% endif %} data-pers="{{ 'neg' if p.concerns else '' }}">
+      <tr{% if p.is_mine %} class="scout-mine-row"{% endif %} data-ptype="{{ p.personality_type_class }}" data-dev-good="{{ '1' if p.dev_good else '' }}" data-dev-bad="{{ '1' if p.dev_bad else '' }}">
         <td><input type="checkbox" class="scout-checkbox" data-pid="{{ p.pid }}" data-page="{{ page_key }}"></td>
         <td class="left">{% if p.is_mine %}<span class="scout-mine-tag">{{ p.roster_tag }}</span>{% endif %}<a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
         <td>{{ p.age if p.age is not none else '-' }}</td>
@@ -60,6 +72,12 @@
         </td>
         {% endif %}
         <td>{{ p.acc or '-' }}</td>
+        <td class="pers-type-col"><span class="ptype-{{ p.personality_type_class }}" style="font-size:11px">{{ p.personality_type }}</span></td>
+        <td class="pers-type-col pers-notes" style="font-size:11px">
+          {%- if p.buffs %}<span class="buff">{{ p.buffs|join(", ") }}</span>{% endif -%}
+          {%- if p.concerns %}<span class="concern">{{ p.concerns|join(", ") }}</span>{% endif -%}
+          {%- if not p.buffs and not p.concerns %}—{% endif -%}
+        </td>
       </tr>
       {% endfor %}
     </tbody>
@@ -198,7 +216,9 @@
 .scout-mini-table th:first-child, .scout-mini-table td:first-child { width: 18px; }
 tr.scout-marked .player-link { color: var(--text-dim); text-decoration: line-through; }
 tr.scout-mine-row { background: rgba(76, 175, 80, 0.12); }
-tr[data-pers="neg"].scout-dimmed { opacity: 0.4; }
+.scout-mini-table th.pers-type-col, .scout-mini-table td.pers-type-col {
+  width: 12%; max-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left;
+}
 .scout-mine-tag {
   display: inline-block; font-size: 9px; font-weight: 700; color: #4caf50;
   border: 1px solid #4caf50; border-radius: 3px; padding: 0 3px; margin-right: 3px;
@@ -219,9 +239,9 @@ function scoutSetRoster(radio) {
   window.location.href = url.toString();
 }
 function filterPers() {
-  var dim = document.getElementById('negpers-filter').checked;
-  document.querySelectorAll('.scout-mini-table tbody tr').forEach(function(tr) {
-    tr.classList.toggle('scout-dimmed', dim && tr.dataset.pers === 'neg');
+  applyPersDevFilters('.scout-mini-table tbody tr', {
+    negId: 'negpers-filter', posId: 'pospers-filter',
+    devGoodId: 'devgood-filter', devBadId: 'devbad-filter',
   });
 }
 </script>

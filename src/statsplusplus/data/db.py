@@ -546,11 +546,12 @@ def _migrate_ratings(conn: sqlite3.Connection) -> None:
         "true_ceiling", "positional_percentile", "positional_median",
         "offensive_grade", "baserunning_value", "defensive_value",
         "durability_score", "offensive_ceiling",
+        "personality_type", "adaptability",
     ]
     for col in new_cols:
         if col not in existing:
             typ = "REAL" if col == "positional_percentile" else (
-                "TEXT" if col == "prone" else "INTEGER"
+                "TEXT" if col in ("prone", "personality_type", "adaptability") else "INTEGER"
             )
             conn.execute(f"ALTER TABLE ratings ADD COLUMN {col} {typ}")
 

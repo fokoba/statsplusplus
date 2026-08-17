@@ -381,6 +381,24 @@
       for (var i = 0; i < tiers.length; i++) { if (g >= tiers[i][0]) { el.style.color = tiers[i][1]; break; } }
     });
   })();
+  // Shared personality/development row dim+bold — every roster table calls
+  // this from its own filter-refresh function. Rows carry data-ptype
+  // ("pos"/"neg"/"neutral"/"unknown"/"unscouted") and data-dev-good/
+  // data-dev-bad ("1"/""); each page wires whichever of the 4 checkbox ids
+  // it has (any can be omitted).
+  function applyPersDevFilters(rowSelector, opts) {
+    opts = opts || {};
+    function checked(id) { var el = id && document.getElementById(id); return !!(el && el.checked); }
+    var dimNeg = checked(opts.negId), hlPos = checked(opts.posId);
+    var hlGood = checked(opts.devGoodId), dimBad = checked(opts.devBadId);
+    document.querySelectorAll(rowSelector).forEach(function(tr) {
+      var ptype = tr.getAttribute('data-ptype');
+      var devGood = tr.getAttribute('data-dev-good') === '1';
+      var devBad = tr.getAttribute('data-dev-bad') === '1';
+      tr.classList.toggle('row-dim', (dimNeg && ptype === 'neg') || (dimBad && devBad));
+      tr.classList.toggle('row-bold', (hlPos && ptype === 'pos') || (hlGood && devGood));
+    });
+  }
   // Global player search
   (function() {
     var input = document.getElementById('player-search');

@@ -36,7 +36,7 @@ from statsplusplus.data.evaluation_engine import load_tool_weights
 from statsplusplus.data.db import get_conn
 from web_league_context import get_db, get_cfg, money_divisor as _money_divisor, level_map
 
-from team_queries import _NIPPON_TEAM_IDS, _INTL_FA_AGE_MAX, _weak_positions_for_org, _personality_notes
+from team_queries import _NIPPON_TEAM_IDS, _INTL_FA_AGE_MAX, _weak_positions_for_org, _personality_fields
 
 # Only these accuracy grades are "worth scouting" — High/Very High reports
 # are already reliable. NULL (never scouted at all) counts as needing a
@@ -97,7 +97,7 @@ _ROW_COLUMNS_SQL = """
     r.fst, r.snk, r.crv, r.sld, r.chg, r.splt, r.cutt, r.cir_chg, r.scr, r.frk, r.kncrv, r.knbl,
     r.stm, ps.surplus, pf.prospect_surplus,
     r.int_, r.wrk_ethic, r.lead, r.loy, r.greed, fap.ask_raw,
-    r.speed, r.steal
+    r.speed, r.steal, r.adaptability, r.personality_type
 """
 
 
@@ -185,7 +185,7 @@ def _build_entries(rows, ratings_scale, park, hitter_weights, pitcher_weights, n
          fst, snk, crv, sld, chg, splt, cutt, cir_chg, scr, frk, kncrv, knbl,
          stm, surplus_raw, prospect_surplus_raw,
          intel, wrk_ethic, lead, loy, greed, ask_raw,
-         speed_raw, steal_raw) = r
+         speed_raw, steal_raw, adaptability, ptype) = r
         group, is_pitcher = _pos_group(pos, role)
         if group is None:
             continue
@@ -274,7 +274,7 @@ def _build_entries(rows, ratings_scale, park, hitter_weights, pitcher_weights, n
         surplus_basis = surplus_raw if surplus_raw is not None else prospect_surplus_raw
         surplus = round(surplus_basis / _money_divisor(), 1) if surplus_basis is not None else None
         level_disp = level_map().get(str(level), str(level)) if level is not None else None
-        buffs, concerns = _personality_notes(intel, wrk_ethic, lead, loy, greed)
+        _pers = _personality_fields(intel, wrk_ethic, lead, loy, greed, adaptability, ptype)
 
         out.append({
             "pid": pid, "name": name, "age": age, "group": group, "is_pitcher": is_pitcher,
@@ -290,7 +290,7 @@ def _build_entries(rows, ratings_scale, park, hitter_weights, pitcher_weights, n
             "vl_tools": vl_tools if not is_pitcher else None,
             "speed": n(speed_raw) if not is_pitcher else None,
             "steal": n(steal_raw) if not is_pitcher else None,
-            "surplus": surplus, "buffs": buffs, "concerns": concerns,
+            "surplus": surplus, **_pers,
             # No asking price on file means the last uploaded "All Free
             # Agents" export reported a blank/"-" demand for this player
             # (or the export simply hasn't been uploaded yet, which reads
@@ -512,7 +512,7 @@ def _rule5_all_players(conn):
         rows = conn.execute("""
             SELECT p.player_id, p.name, p.age, p.pos, p.role, r.acc,
                    r.composite_score, r.ceiling_score, r.true_ceiling,
-                   r.int_, r.wrk_ethic, r.lead, r.loy, r.greed
+                   r.int_, r.wrk_ethic, r.lead, r.loy, r.greed, r.adaptability, r.personality_type
             FROM rule5_eligible re
             JOIN players p ON p.player_id = re.player_id
             LEFT JOIN latest_ratings r ON p.player_id = r.player_id
@@ -522,17 +522,18 @@ def _rule5_all_players(conn):
         return {}
 
     players = []
-    for pid, name, age, pos, role, acc, comp, ceil_score, true_ceil, intel, wrk_ethic, lead, loy, greed in rows:
+    for (pid, name, age, pos, role, acc, comp, ceil_score, true_ceil,
+         intel, wrk_ethic, lead, loy, greed, adaptability, ptype) in rows:
         group, is_pitcher = _pos_group(pos, role)
         if group is None:
             continue
         potential = true_ceil if true_ceil is not None else ceil_score
-        buffs, concerns = _personality_notes(intel, wrk_ethic, lead, loy, greed)
+        _pers = _personality_fields(intel, wrk_ethic, lead, loy, greed, adaptability, ptype)
         players.append({"pid": pid, "name": name, "age": age, "group": group,
                          "composite_score": comp, "potential": potential, "acc": acc,
                          "surplus": None, "good_pick": False, "newly_confirmed": False,
                          "is_mine": False, "roster_tag": None,
-                         "buffs": buffs, "concerns": concerns})
+                         **_pers})
 
     by_group = {}
     for p in players:
@@ -621,7 +622,7 @@ def _rule5_mine(conn, team_id, scope):
         rows = conn.execute(f"""
             SELECT p.player_id, p.name, p.age, p.pos, p.role, r.acc,
                    r.composite_score, r.ceiling_score, r.true_ceiling, p.level,
-                   r.int_, r.wrk_ethic, r.lead, r.loy, r.greed
+                   r.int_, r.wrk_ethic, r.lead, r.loy, r.greed, r.adaptability, r.personality_type
             FROM rule5_eligible re
             JOIN players p ON p.player_id = re.player_id
             LEFT JOIN latest_ratings r ON p.player_id = r.player_id
@@ -631,17 +632,18 @@ def _rule5_mine(conn, team_id, scope):
         return {}
 
     out = {}
-    for pid, name, age, pos, role, acc, comp, ceil_score, true_ceil, level, intel, wrk_ethic, lead, loy, greed in rows:
+    for (pid, name, age, pos, role, acc, comp, ceil_score, true_ceil, level,
+         intel, wrk_ethic, lead, loy, greed, adaptability, ptype) in rows:
         group, is_pitcher = _pos_group(pos, role)
         if group is None:
             continue
         potential = true_ceil if true_ceil is not None else ceil_score
-        buffs, concerns = _personality_notes(intel, wrk_ethic, lead, loy, greed)
+        _pers = _personality_fields(intel, wrk_ethic, lead, loy, greed, adaptability, ptype)
         entry = {"pid": pid, "name": name, "age": age, "group": group,
                  "composite_score": comp, "potential": potential, "acc": acc,
                  "surplus": None, "good_pick": False, "newly_confirmed": False,
                  "is_mine": True, "roster_tag": level_map().get(str(level), str(level)),
-                 "buffs": buffs, "concerns": concerns}
+                 **_pers}
         out.setdefault(group, []).append(entry)
     for group in out:
         out[group].sort(key=lambda p: -(p["composite_score"] or 0))

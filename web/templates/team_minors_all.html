@@ -48,8 +48,26 @@
     </div>
     <div class="filter-group">
       <label style="font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px">&nbsp;</label>
-      <label style="font-size:12px; color:var(--text); cursor:pointer; display:flex; align-items:center; gap:4px; margin-top:3px" title="Dims (doesn't hide) rows with a Low Work Ethic, Low Intelligence, Low Leadership, Low Loyalty, or Greedy flag.">
+      <label style="font-size:12px; color:var(--text); cursor:pointer; display:flex; align-items:center; gap:4px; margin-top:3px" title="Dims rows whose personality Type is Selfish, Outspoken, Unmotivated, or Disruptive.">
         <input type="checkbox" id="negpers-filter" onchange="applyFilters()"> Dim bad personalities
+      </label>
+    </div>
+    <div class="filter-group">
+      <label style="font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px">&nbsp;</label>
+      <label style="font-size:12px; color:var(--text); cursor:pointer; display:flex; align-items:center; gap:4px; margin-top:3px" title="Bolds rows whose personality Type is Fan Fav, Sparkplug, Captain, Humble, or Prankster.">
+        <input type="checkbox" id="pospers-filter" onchange="applyFilters()"> Show positive personalities
+      </label>
+    </div>
+    <div class="filter-group">
+      <label style="font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px">&nbsp;</label>
+      <label style="font-size:12px; color:var(--text); cursor:pointer; display:flex; align-items:center; gap:4px; margin-top:3px" title="Bolds rows with a high Work Ethic, Baseball IQ, or Adaptability.">
+        <input type="checkbox" id="devgood-filter" onchange="applyFilters()"> Show good development
+      </label>
+    </div>
+    <div class="filter-group">
+      <label style="font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px">&nbsp;</label>
+      <label style="font-size:12px; color:var(--text); cursor:pointer; display:flex; align-items:center; gap:4px; margin-top:3px" title="Dims rows with a low Work Ethic, Baseball IQ, or Adaptability.">
+        <input type="checkbox" id="devbad-filter" onchange="applyFilters()"> Dim bad development
       </label>
     </div>
     <div class="filter-group" style="display:flex; align-items:flex-end">
@@ -88,12 +106,13 @@
         <th data-sort="num" title="-100 to 100: how well this player's skills match your home park's factors, scored on POTENTIAL tools since every player here is a minor leaguer.">Park Fit</th>
         <th data-sort="num" title="Estimated $ swing in Long-Term Surplus from park fit alone">Park Value</th>
         <th data-sort="str">Promo</th>
-        <th class="left">Personality</th>
+        <th class="left">Type</th>
+        <th class="left">Notes</th>
       </tr>
     </thead>
     <tbody>
       {% for p in roster.hitters %}
-      <tr data-level="{{ p.level_num }}" data-pos="{{ p.pos }}" data-40man="{{ '1' if p.on_40man else '0' }}" data-pers="{{ 'neg' if p.concerns else '' }}">
+      <tr data-level="{{ p.level_num }}" data-pos="{{ p.pos }}" data-40man="{{ '1' if p.on_40man else '0' }}" data-ptype="{{ p.personality_type_class }}" data-dev-good="{{ '1' if p.dev_good else '' }}" data-dev-bad="{{ '1' if p.dev_bad else '' }}">
         <td data-sort-value="{{ p.level_num }}"><span class="level-badge level-{{ p.level|lower|replace('-','') }}">{{ p.level }}</span></td>
         <td class="left" data-sort-value="{{ p._pos_sort }}">{{ p.pos }}</td>
         <td class="left">
@@ -118,10 +137,11 @@
         <td class="{{ 'pos' if p.park_fit and p.park_fit > 0 else 'neg' if p.park_fit and p.park_fit < 0 else '' }}">{{ p.park_fit if p.park_fit is not none else '—' }}</td>
         <td class="{{ 'pos' if p.park_value and p.park_value > 0 else 'neg' if p.park_value and p.park_value < 0 else '' }}">{{ '$' + p.park_value|string + money_unit if p.park_value is not none else '—' }}</td>
         <td>{% if p.promo and p.promo.tier in ('ready', 'knocking') %}<span class="promo-badge promo-{{ p.promo.tier }}" title="{{ p.promo.reasons|join('; ') }}">{{ p.promo.label }}</span>{% elif p.demotion %}<span class="promo-badge promo-{{ p.demotion.tier }}" title="{{ p.demotion.reasons|join('; ') }}">{{ p.demotion.label }}</span>{% else %}{% endif %}</td>
-        <td class="left" style="font-size:12px">
-          {%- if p.buffs %}<span style="color:#4caf50">{{ p.buffs|join(", ") }}</span>{% endif -%}
+        <td class="left"><span class="ptype-{{ p.personality_type_class }}">{{ p.personality_type }}</span></td>
+        <td class="left pers-notes" style="font-size:12px">
+          {%- if p.buffs %}<span class="buff">{{ p.buffs|join(", ") }}</span>{% endif -%}
           {%- if p.buffs and p.concerns %}<br>{% endif -%}
-          {%- if p.concerns %}<span style="color:#f44336">{{ p.concerns|join(", ") }}</span>{% endif -%}
+          {%- if p.concerns %}<span class="concern">{{ p.concerns|join(", ") }}</span>{% endif -%}
           {%- if not p.buffs and not p.concerns %}<span style="color:var(--text-dim)">—</span>{% endif -%}
         </td>
       </tr>
@@ -152,12 +172,13 @@
         <th data-sort="num" title="-100 to 100: how well this player's skills match your home park's factors. Real observed GB%/K%/BB% when available (150+ BF), scouting tools (on POTENTIAL, since every player here is a minor leaguer) otherwise.">Park Fit</th>
         <th data-sort="num" title="Estimated $ swing in Long-Term Surplus from park fit alone">Park Value</th>
         <th data-sort="str">Promo</th>
-        <th class="left">Personality</th>
+        <th class="left">Type</th>
+        <th class="left">Notes</th>
       </tr>
     </thead>
     <tbody>
       {% for p in roster.pitchers %}
-      <tr data-level="{{ p.level_num }}" data-pos="{{ p.pos }}" data-40man="{{ '1' if p.on_40man else '0' }}" data-pers="{{ 'neg' if p.concerns else '' }}">
+      <tr data-level="{{ p.level_num }}" data-pos="{{ p.pos }}" data-40man="{{ '1' if p.on_40man else '0' }}" data-ptype="{{ p.personality_type_class }}" data-dev-good="{{ '1' if p.dev_good else '' }}" data-dev-bad="{{ '1' if p.dev_bad else '' }}">
         <td data-sort-value="{{ p.level_num }}"><span class="level-badge level-{{ p.level|lower|replace('-','') }}">{{ p.level }}</span></td>
         <td class="left" data-sort-value="{{ p._pos_sort }}">{{ p.pos }}</td>
         <td class="left">
@@ -180,10 +201,11 @@
         <td class="{{ 'pos' if p.park_fit and p.park_fit > 0 else 'neg' if p.park_fit and p.park_fit < 0 else '' }}">{{ p.park_fit if p.park_fit is not none else '—' }}</td>
         <td class="{{ 'pos' if p.park_value and p.park_value > 0 else 'neg' if p.park_value and p.park_value < 0 else '' }}">{{ '$' + p.park_value|string + money_unit if p.park_value is not none else '—' }}</td>
         <td>{% if p.promo and p.promo.tier in ('ready', 'knocking') %}<span class="promo-badge promo-{{ p.promo.tier }}" title="{{ p.promo.reasons|join('; ') }}">{{ p.promo.label }}</span>{% elif p.demotion %}<span class="promo-badge promo-{{ p.demotion.tier }}" title="{{ p.demotion.reasons|join('; ') }}">{{ p.demotion.label }}</span>{% else %}{% endif %}</td>
-        <td class="left" style="font-size:12px">
-          {%- if p.buffs %}<span style="color:#4caf50">{{ p.buffs|join(", ") }}</span>{% endif -%}
+        <td class="left"><span class="ptype-{{ p.personality_type_class }}">{{ p.personality_type }}</span></td>
+        <td class="left pers-notes" style="font-size:12px">
+          {%- if p.buffs %}<span class="buff">{{ p.buffs|join(", ") }}</span>{% endif -%}
           {%- if p.buffs and p.concerns %}<br>{% endif -%}
-          {%- if p.concerns %}<span style="color:#f44336">{{ p.concerns|join(", ") }}</span>{% endif -%}
+          {%- if p.concerns %}<span class="concern">{{ p.concerns|join(", ") }}</span>{% endif -%}
           {%- if not p.buffs and not p.concerns %}<span style="color:var(--text-dim)">—</span>{% endif -%}
         </td>
       </tr>
@@ -231,7 +253,6 @@
 .filter-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 .age-young { color: #4caf50; font-weight: 600; }
 .age-old { color: #f44336; font-weight: 600; }
-tr.milb-dimmed { opacity: 0.4; }
 </style>
 
 <script>
@@ -291,13 +312,13 @@ function filterLevel(btn) {
 function applyFilters() {
   var posFilter = document.getElementById('pos-filter').value;
   var fortyOnly = document.getElementById('forty-man-filter').checked;
-  var dimPers = document.getElementById('negpers-filter').checked;
   var visibleCount = 0;
 
   // Dimming applies to every row, including whichever tab isn't currently
   // shown, so it's already correct the moment you switch tabs.
-  document.querySelectorAll('.roster-tab-table tbody tr').forEach(function(tr) {
-    tr.classList.toggle('milb-dimmed', dimPers && tr.dataset.pers === 'neg');
+  applyPersDevFilters('.roster-tab-table tbody tr', {
+    negId: 'negpers-filter', posId: 'pospers-filter',
+    devGoodId: 'devgood-filter', devBadId: 'devbad-filter',
   });
 
   // Get the currently visible table

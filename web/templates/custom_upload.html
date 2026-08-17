@@ -98,9 +98,21 @@
       <input type="checkbox" id="cu-vsleft-filter" onchange="cuFilterResults()">
       Significantly stronger vs LHP/LHB
     </label>
-    <label style="font-size:13px" title="Dims (doesn't hide) players with a negative personality type: Unmotivated, Selfish, Outspoken, Disruptive.">
+    <label style="font-size:13px" title="Dims (doesn't hide) players with a negative personality type: Selfish, Outspoken, Unmotivated, Disruptive.">
       <input type="checkbox" id="cu-negpers-filter" onchange="cuFilterResults()">
       Dim negative personalities
+    </label>
+    <label style="font-size:13px" title="Bolds players with a positive personality type: Fan Fav, Sparkplug, Captain, Humble, Prankster.">
+      <input type="checkbox" id="cu-pospers-filter" onchange="cuFilterResults()">
+      Show positive personalities
+    </label>
+    <label style="font-size:13px" title="Bolds players with a high Work Ethic, Baseball IQ, or Adaptability.">
+      <input type="checkbox" id="cu-devgood-filter" onchange="cuFilterResults()">
+      Show good development
+    </label>
+    <label style="font-size:13px" title="Dims players with a low Work Ethic, Baseball IQ, or Adaptability.">
+      <input type="checkbox" id="cu-devbad-filter" onchange="cuFilterResults()">
+      Dim bad development
     </label>
     <label style="font-size:13px" title="Specialist/Generalist score (0-100) measures the spread between a player's best and worst core tool — 0 = perfectly balanced, 100 = one standout carrying tool. Specialist is 50+.">
       Skill profile:
@@ -138,7 +150,8 @@
         <th data-sort="num" title="Value minus expected contract cost for next season">Next Yr Surplus</th>
         <th data-sort="num" title="Summed value minus expected cost across the next 3 seasons (years 1-3 ahead)">3-Yr Surplus</th>
         <th data-sort="num" title="Best single projected year at his expected grade — quality independent of remaining runway">Peak Yr Surplus</th>
-        <th data-sort="str">Personality</th>
+        <th data-sort="str">Type</th>
+        <th data-sort="str" class="left">Notes</th>
         <th data-sort="str">Best Pos</th>
         <th data-sort="num">Grade</th>
         <th data-sort="str">Platoon</th>
@@ -149,7 +162,7 @@
     </thead>
     <tbody>
       {% for p in results %}
-      <tr class="cu-row" data-pid="{{ p.pid }}" data-pos="{{ p.bucket }}" data-org="{{ p.org }}" data-type="{{ 'pitcher' if p.is_pitcher else 'hitter' }}" data-r5="{{ 'yes' if p.rule5_eligible else 'no' }}" data-fa="{{ 'yes' if p.is_free_agent else 'no' }}" data-waivers="{{ 'yes' if p.on_waivers else 'no' }}" data-platoon="{{ p.platoon_strong_side or '' }}" data-pers="{{ p.personality_class }}" data-spec="{{ p.specialist_label }}">
+      <tr class="cu-row" data-pid="{{ p.pid }}" data-pos="{{ p.bucket }}" data-org="{{ p.org }}" data-type="{{ 'pitcher' if p.is_pitcher else 'hitter' }}" data-r5="{{ 'yes' if p.rule5_eligible else 'no' }}" data-fa="{{ 'yes' if p.is_free_agent else 'no' }}" data-waivers="{{ 'yes' if p.on_waivers else 'no' }}" data-platoon="{{ p.platoon_strong_side or '' }}" data-ptype="{{ p.personality_class }}" data-dev-good="{{ '1' if p.dev_good else '' }}" data-dev-bad="{{ '1' if p.dev_bad else '' }}" data-spec="{{ p.specialist_label }}">
         <td><input type="checkbox" class="cu-checkbox" data-pid="{{ p.pid }}"></td>
         <td class="left cu-name">{{ p.name }}</td>
         <td>{{ p.bucket }}</td>
@@ -171,7 +184,13 @@
         <td class="{{ 'pos' if p.next_year_surplus and p.next_year_surplus > 0 else 'neg' if p.next_year_surplus and p.next_year_surplus < 0 else '' }}">{{ '$' + (p.next_year_surplus / money_divisor)|round(1)|string + money_unit if p.next_year_surplus is not none else '-' }}</td>
         <td class="{{ 'pos' if p.three_year_surplus and p.three_year_surplus > 0 else 'neg' if p.three_year_surplus and p.three_year_surplus < 0 else '' }}">{{ '$' + (p.three_year_surplus / money_divisor)|round(1)|string + money_unit if p.three_year_surplus is not none else '-' }}</td>
         <td class="{{ 'pos' if p.peak_surplus and p.peak_surplus > 0 else 'neg' if p.peak_surplus and p.peak_surplus < 0 else '' }}" title="{{ 'Age ' + p.peak_age|string if p.peak_age is not none else '' }}">{{ '$' + (p.peak_surplus / money_divisor)|round(1)|string + money_unit if p.peak_surplus is not none else '-' }}</td>
-        <td style="color:{% if p.personality_class == 'pos' %}#4caf50{% elif p.personality_class == 'neg' %}#f44336{% else %}var(--text-dim){% endif %}">{{ p.personality_type or '-' }}</td>
+        <td><span class="ptype-{{ p.personality_class }}">{{ p.personality_type }}</span></td>
+        <td class="left pers-notes">
+          {%- if p.buffs %}<span class="buff">{{ p.buffs|join(", ") }}</span>{% endif -%}
+          {%- if p.buffs and p.concerns %}<br>{% endif -%}
+          {%- if p.concerns %}<span class="concern">{{ p.concerns|join(", ") }}</span>{% endif -%}
+          {%- if not p.buffs and not p.concerns %}<span style="color:var(--text-dim)">—</span>{% endif -%}
+        </td>
         <td>{{ p.best_position or '' }}</td>
         <td>{{ p.best_position_grade if p.best_position_grade is not none else '' }}</td>
         <td>{{ p.platoon_strong_side or '' }}</td>
@@ -213,7 +232,10 @@ function cuFilterResults() {
       && (!specFilter || tr.dataset.spec === specFilter);
     tr.style.display = match ? '' : 'none';
     if (match) shown++;
-    tr.classList.toggle('cu-dimmed', dimNegPers && tr.dataset.pers === 'neg');
+  });
+  applyPersDevFilters('#custom-upload-table tbody tr', {
+    negId: 'cu-negpers-filter', posId: 'cu-pospers-filter',
+    devGoodId: 'cu-devgood-filter', devBadId: 'cu-devbad-filter',
   });
   var parts = [];
   if (pos) parts.push(pos);
@@ -234,7 +256,6 @@ function cuFilterResults() {
 <style>
 .cu-row.cu-marked .cu-name { color: var(--text-dim); text-decoration: line-through; }
 .cu-row.cu-marked td { opacity: 0.5; }
-.cu-row.cu-dimmed { opacity: 0.4; }
 </style>
 
 <script>

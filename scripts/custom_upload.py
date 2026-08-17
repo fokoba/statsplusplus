@@ -67,6 +67,44 @@ _LEVEL_KEY_BY_ABBR = {
 _PERSONALITY_TYPE_POSITIVE = {"Fan Fav", "Sparkplug", "Captain", "Humble", "Prankster"}
 _PERSONALITY_TYPE_NEGATIVE = {"Unmotivated", "Selfish", "Outspoken", "Disruptive"}
 
+# Mirrors team_queries.py's _personality_type_info() / _personality_notes()
+# so Custom Upload's dim/highlight matches the rest of the site exactly —
+# duplicated (not imported) since this module is deliberately DB-free.
+_TRAIT_NOTE_MAP = {
+    "wrk_ethic":    {"H": ("buff", "Hard Worker"), "L": ("concern", "Low Work Ethic")},
+    "int_":         {"H": ("buff", "High IQ"), "L": ("concern", "Low IQ")},
+    "lead":         {"H": ("buff", "Leader"), "L": ("concern", "Low Leadership")},
+    "loy":          {"H": ("buff", "Loyal"), "L": ("concern", "Low Loyalty")},
+    "greed":        {"H": ("concern", "Greedy"), "L": ("buff", "Not Greedy")},
+    "adaptability": {"H": ("buff", "Adaptable"), "L": ("concern", "Low Adaptability")},
+}
+
+
+def _trait_notes(wrk_ethic, intel, lead, loy, greed, adaptability):
+    buffs, concerns = [], []
+    for field, value in (("wrk_ethic", wrk_ethic), ("int_", intel), ("lead", lead),
+                         ("loy", loy), ("greed", greed), ("adaptability", adaptability)):
+        note = _TRAIT_NOTE_MAP.get(field, {}).get(value)
+        if not note:
+            continue
+        kind, label = note
+        (buffs if kind == "buff" else concerns).append(label)
+    return buffs, concerns
+
+
+def _personality_type_class(ptype):
+    if not ptype:
+        return "unscouted"
+    if ptype == "Normal":
+        return "neutral"
+    if ptype == "Unknown":
+        return "unknown"
+    if ptype in _PERSONALITY_TYPE_POSITIVE:
+        return "pos"
+    if ptype in _PERSONALITY_TYPE_NEGATIVE:
+        return "neg"
+    return "neutral"
+
 
 def _dedupe_header(header: list[str]) -> list[str]:
     """OOTP's export repeats several column names (TM, ORG, LG, Lev, B, T,
@@ -459,13 +497,15 @@ def evaluate_row(d: dict, league_dir=None) -> dict | None:
     acc = _ACC_MAP.get((d.get("SctAcc") or "").strip(), "A")
     wrk_ethic = (d.get("WE") or "N").strip()
     intel = (d.get("INT") or "N").strip()
+    lead = (d.get("LEA") or "N").strip()
+    loy = (d.get("LOY") or "N").strip()
+    greed = (d.get("FIN") or "N").strip()
+    adaptability = (d.get("AD") or "N").strip()
     personality_type = (d.get("Type") or "").strip()
-    if personality_type in _PERSONALITY_TYPE_POSITIVE:
-        personality_class = "pos"
-    elif personality_type in _PERSONALITY_TYPE_NEGATIVE:
-        personality_class = "neg"
-    else:
-        personality_class = "neutral"
+    personality_class = _personality_type_class(personality_type)
+    buffs, concerns = _trait_notes(wrk_ethic, intel, lead, loy, greed, adaptability)
+    dev_good = "H" in (wrk_ethic, intel, adaptability)
+    dev_bad = "L" in (wrk_ethic, intel, adaptability)
     level_abbr = (_dup(d, "Lev") or "MLB").strip().upper()
     level_key = _LEVEL_KEY_BY_ABBR.get(level_abbr, "mlb")
 
@@ -611,7 +651,8 @@ def evaluate_row(d: dict, league_dir=None) -> dict | None:
         "best_position": best_position, "best_position_grade": best_position_grade,
         "is_free_agent": is_free_agent, "on_waivers": on_waivers,
         "platoon_gap": platoon_gap, "platoon_strong_side": platoon_strong_side,
-        "personality_type": personality_type, "personality_class": personality_class,
+        "personality_type": personality_type or "Never Scouted", "personality_class": personality_class,
+        "buffs": buffs, "concerns": concerns, "dev_good": dev_good, "dev_bad": dev_bad,
     }
 
 
@@ -742,6 +783,8 @@ _RATINGS_SYNC_MAP = [
     ("lead", lambda d: (d.get("LEA") or "").strip() or None),
     ("prone", lambda d: (d.get("Prone") or "").strip() or None),
     ("acc", lambda d: _ACC_MAP.get((d.get("SctAcc") or "").strip())),
+    ("personality_type", lambda d: (d.get("Type") or "").strip() or None),
+    ("adaptability", lambda d: (d.get("AD") or "").strip() or None),
     ("bats", lambda d: _bats_throws_letter(d.get("B"))),
     ("throws", lambda d: _bats_throws_letter(d.get("T"))),
 ]

@@ -28,7 +28,7 @@
     <thead><tr><th></th><th class="left">Name</th><th>Pos</th><th>Age</th><th>Ovr</th></tr></thead>
     <tbody>
       {% for p in newly %}
-      <tr data-pers="{{ 'neg' if p.concerns else '' }}" data-milc="{{ 'yes' if p.is_milc else 'no' }}">
+      <tr data-ptype="{{ p.personality_type_class }}" data-dev-good="{{ '1' if p.dev_good else '' }}" data-dev-bad="{{ '1' if p.dev_bad else '' }}" data-milc="{{ 'yes' if p.is_milc else 'no' }}">
         <td><input type="checkbox" class="scout-checkbox" data-pid="{{ p.pid }}" data-page="best_available"></td>
         <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
         <td>{{ p.group }}</td>
@@ -54,11 +54,23 @@
     <label><input type="radio" name="roster-view" value="mlb" {% if roster_view == 'mlb' %}checked{% endif %} onchange="scoutSetRoster(this)"> My MLB Team</label>
     <label><input type="radio" name="roster-view" value="org" {% if roster_view == 'org' %}checked{% endif %} onchange="scoutSetRoster(this)"> My Whole Org</label>
   </div>
-  <label style="font-size:13px" title="Dims (doesn't hide) rows with a Low Work Ethic, Low Intelligence, Low Leadership, Low Loyalty, or Greedy flag.">
+  <label style="font-size:13px" title="Dims rows whose personality Type is Selfish, Outspoken, Unmotivated, or Disruptive.">
     <input type="checkbox" id="negpers-filter" onchange="filterPers()">
     Dim bad personalities
   </label>
-  <label style="font-size:13px" title="Highlights free agents with no asking price on file — no demand reported usually means they'd sign for a minor-league deal. Doesn't apply to Rule 5 rows (not free agents). A negative-personality row stays dimmed instead of highlighted whenever Dim bad personalities is also on.">
+  <label style="font-size:13px" title="Bolds rows whose personality Type is Fan Fav, Sparkplug, Captain, Humble, or Prankster.">
+    <input type="checkbox" id="pospers-filter" onchange="filterPers()">
+    Show positive personalities
+  </label>
+  <label style="font-size:13px" title="Bolds rows with a high Work Ethic, Baseball IQ, or Adaptability.">
+    <input type="checkbox" id="devgood-filter" onchange="filterPers()">
+    Show good development
+  </label>
+  <label style="font-size:13px" title="Dims rows with a low Work Ethic, Baseball IQ, or Adaptability.">
+    <input type="checkbox" id="devbad-filter" onchange="filterPers()">
+    Dim bad development
+  </label>
+  <label style="font-size:13px" title="Highlights free agents with no asking price on file — no demand reported usually means they'd sign for a minor-league deal. Doesn't apply to Rule 5 rows (not free agents). A dimmed row (bad personality/development) stays dimmed instead of highlighted.">
     <input type="checkbox" id="milc-filter" onchange="filterMilc()">
     Highlight MiLC opportunities
   </label>
@@ -83,12 +95,12 @@
         <th></th><th class="left">Name</th><th>Age</th><th>Ovr</th>
         {% if value_key %}<th>{{ value_label }}</th>{% endif %}
         <th title="Long-Term Surplus">Surp</th>
-        <th>Acc</th>
+        <th>Acc</th><th class="pers-type-col">Type</th><th class="pers-type-col">Notes</th>
       </tr>
     </thead>
     <tbody>
       {% for p in players %}
-      <tr{% if p.is_mine %} class="scout-mine-row"{% endif %} data-pers="{{ 'neg' if p.concerns else '' }}" data-milc="{{ 'yes' if (p.is_milc and not p.is_mine) else 'no' }}">
+      <tr{% if p.is_mine %} class="scout-mine-row"{% endif %} data-ptype="{{ p.personality_type_class }}" data-dev-good="{{ '1' if p.dev_good else '' }}" data-dev-bad="{{ '1' if p.dev_bad else '' }}" data-milc="{{ 'yes' if (p.is_milc and not p.is_mine) else 'no' }}">
         <td><input type="checkbox" class="scout-checkbox" data-pid="{{ p.pid }}" data-page="{{ page_key }}"></td>
         <td class="left">{% if p.is_mine %}<span class="scout-mine-tag">{{ p.roster_tag }}</span>{% endif %}{% if p.good_pick %}<span title="Both a good Park Fit (20+) and a positive Long-Term Surplus — a high-confidence add">⭐</span>{% endif %}<a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
         <td>{{ p.age if p.age is not none else '-' }}</td>
@@ -102,6 +114,12 @@
           {{ p.surplus if p.surplus is not none else '-' }}
         </td>
         <td>{{ p.acc or '-' }}</td>
+        <td class="pers-type-col"><span class="ptype-{{ p.personality_type_class }}" style="font-size:11px">{{ p.personality_type }}</span></td>
+        <td class="pers-type-col pers-notes" style="font-size:11px">
+          {%- if p.buffs %}<span class="buff">{{ p.buffs|join(", ") }}</span>{% endif -%}
+          {%- if p.concerns %}<span class="concern">{{ p.concerns|join(", ") }}</span>{% endif -%}
+          {%- if not p.buffs and not p.concerns %}—{% endif -%}
+        </td>
       </tr>
       {% endfor %}
     </tbody>
@@ -237,10 +255,12 @@
 .scout-mini-table th.left, .scout-mini-table td.left {
   width: 42%; max-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.scout-mini-table th.pers-type-col, .scout-mini-table td.pers-type-col {
+  width: 12%; max-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left;
+}
 .scout-mini-table th:first-child, .scout-mini-table td:first-child { width: 18px; }
 tr.scout-marked .player-link { color: var(--text-dim); text-decoration: line-through; }
 tr.scout-mine-row { background: rgba(76, 175, 80, 0.12); }
-tr[data-pers="neg"].scout-dimmed { opacity: 0.4; }
 tr.scout-milc-row { background: rgba(255, 122, 26, 0.14); }
 .scout-mine-tag {
   display: inline-block; font-size: 9px; font-weight: 700; color: #4caf50;
@@ -262,15 +282,16 @@ function scoutSetRoster(radio) {
   window.location.href = url.toString();
 }
 function applyRowHighlights() {
-  var dim = document.getElementById('negpers-filter').checked;
+  applyPersDevFilters('.scout-mini-table tbody tr', {
+    negId: 'negpers-filter', posId: 'pospers-filter',
+    devGoodId: 'devgood-filter', devBadId: 'devbad-filter',
+  });
   var milc = document.getElementById('milc-filter').checked;
   document.querySelectorAll('.scout-mini-table tbody tr').forEach(function(tr) {
-    var isNeg = tr.dataset.pers === 'neg';
-    var dimmed = dim && isNeg;
-    tr.classList.toggle('scout-dimmed', dimmed);
-    // A dimmed row (bad personality, with the dim filter on) never also
-    // gets the MiLC highlight — dimmed always wins, even if that same
+    // A dimmed row (bad personality/development, with that filter on) never
+    // also gets the MiLC highlight — dimmed always wins, even if that same
     // player would otherwise qualify as a MiLC opportunity.
+    var dimmed = tr.classList.contains('row-dim');
     tr.classList.toggle('scout-milc-row', milc && tr.dataset.milc === 'yes' && !dimmed);
   });
 }

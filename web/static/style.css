@@ -10,7 +10,26 @@
   --highlight: #2a1608;
   --green: #2ecc71;
   --red: #ff3b5c;
+  --yellow: #e8c547;
 }
+
+/* Personality Type column — OOTP's archetype (Fan Fav, Selfish, etc.),
+   distinct from the Personality Notes column (WE/INT/Lead/Loy/Greed/
+   Adaptability trait text). Drives dim/highlight app-wide. */
+.ptype-pos { color: var(--green); font-weight: 700; }
+.ptype-neg { color: var(--red); }
+.ptype-neutral { color: var(--text); }
+.ptype-unknown { color: var(--yellow); }
+.ptype-unscouted { color: var(--text-dim); font-style: italic; }
+
+.pers-notes .buff { color: var(--green); margin-right: 6px; white-space: nowrap; }
+.pers-notes .concern { color: var(--red); margin-right: 6px; white-space: nowrap; }
+
+/* Row-level dim/highlight — shared by "dim negative personality",
+   "dim bad development", "highlight positive personality", and "highlight
+   good development" checkboxes across every roster table in the app. */
+tr.row-dim { opacity: 0.4; }
+tr.row-bold, tr.row-bold td { font-weight: 700; }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 

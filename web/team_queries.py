@@ -1120,26 +1120,94 @@ def get_cut_candidates(team_id=None):
 
 # Personality trait -> {value: (kind, label)}. "kind" is "buff" or "concern".
 # Greed is inverted vs. the others: high greed is the concern, low is the buff.
+# This "Notes" column is purely informational text now — it no longer drives
+# any dimming/highlighting decision (see _personality_type_info below, which
+# owns that job via OOTP's own "Type" personality archetype instead).
 _TRAIT_NOTES = {
-    "wrk_ethic": {"H": ("buff", "Hard Worker"), "L": ("concern", "Low Work Ethic")},
-    "int_":      {"H": ("buff", "High IQ"), "L": ("concern", "Low IQ")},
-    "lead":      {"H": ("buff", "Leader"), "L": ("concern", "Low Leadership")},
-    "loy":       {"H": ("buff", "Loyal"), "L": ("concern", "Low Loyalty")},
-    "greed":     {"H": ("concern", "Greedy"), "L": ("buff", "Not Greedy")},
+    "wrk_ethic":    {"H": ("buff", "Hard Worker"), "L": ("concern", "Low Work Ethic")},
+    "int_":         {"H": ("buff", "High IQ"), "L": ("concern", "Low IQ")},
+    "lead":         {"H": ("buff", "Leader"), "L": ("concern", "Low Leadership")},
+    "loy":          {"H": ("buff", "Loyal"), "L": ("concern", "Low Loyalty")},
+    "greed":        {"H": ("concern", "Greedy"), "L": ("buff", "Not Greedy")},
+    "adaptability": {"H": ("buff", "Adaptable"), "L": ("concern", "Low Adaptability")},
 }
 
 
-def _personality_notes(intel, wrk_ethic, lead, loy, greed):
-    """Return (buffs, concerns) label lists from the five personality traits."""
+def _personality_notes(intel, wrk_ethic, lead, loy, greed, adaptability=None):
+    """Return (buffs, concerns) label lists from the six personality traits.
+
+    Purely informational — displayed in the "Personality Notes" column,
+    separate from (and no longer driving) the dim/highlight decision, which
+    is owned by _personality_type_info() instead.
+    """
     buffs, concerns = [], []
     for field, value in (("wrk_ethic", wrk_ethic), ("int_", intel),
-                         ("lead", lead), ("loy", loy), ("greed", greed)):
+                         ("lead", lead), ("loy", loy), ("greed", greed),
+                         ("adaptability", adaptability)):
         note = _TRAIT_NOTES.get(field, {}).get(value)
         if not note:
             continue
         kind, label = note
         (buffs if kind == "buff" else concerns).append(label)
     return buffs, concerns
+
+
+# OOTP's "Type" column — personality archetype, distinct from the WE/INT/
+# Lead/Loy/Greed trait ratings above. This is now the sole driver of
+# dim-negative/highlight-positive-personality across the site (replacing
+# the old trait-concern-based dimming) — confirmed against real exports:
+# Unknown, Normal, Sparkplug, Humble, Captain, Selfish, Outspoken,
+# Unmotivated, Prankster, Fan Fav, Disruptive.
+_PERSONALITY_TYPE_POSITIVE = {"Fan Fav", "Sparkplug", "Captain", "Humble", "Prankster"}
+_PERSONALITY_TYPE_NEGATIVE = {"Selfish", "Outspoken", "Unmotivated", "Disruptive"}
+
+
+def _personality_type_info(ptype):
+    """Classify a raw personality_type value for display + dim/highlight.
+
+    Returns {"label", "class"} where class is one of:
+      "pos"       - positive archetype (bold/highlight candidate)
+      "neg"       - negative archetype (dim candidate)
+      "neutral"   - "Normal", genuinely no personality quirk
+      "unknown"   - OOTP itself hasn't determined a type yet ("Unknown")
+      "unscouted" - this app has never synced a Type for this player at all
+                    (NULL/blank — distinct from OOTP's own "Unknown", since
+                    once a CSV sync covers them we'll know which it is)
+    """
+    if not ptype:
+        return {"label": "Never Scouted", "class": "unscouted"}
+    if ptype == "Normal":
+        return {"label": "Normal", "class": "neutral"}
+    if ptype == "Unknown":
+        return {"label": "Unknown", "class": "unknown"}
+    if ptype in _PERSONALITY_TYPE_POSITIVE:
+        return {"label": ptype, "class": "pos"}
+    if ptype in _PERSONALITY_TYPE_NEGATIVE:
+        return {"label": ptype, "class": "neg"}
+    return {"label": ptype, "class": "neutral"}
+
+
+def _development_flags(wrk_ethic, intel, adaptability):
+    """(good, bad) booleans for the "development" checkboxes — any of Work
+    Ethic/Baseball IQ/Adaptability at H makes it "good", any at L makes it
+    "bad" (both can be true at once for a mixed profile)."""
+    values = (wrk_ethic, intel, adaptability)
+    return ("H" in values, "L" in values)
+
+
+def _personality_fields(intel, wrk_ethic, lead, loy, greed, adaptability, ptype):
+    """One-call bundle of every personality-derived display/dim field an
+    entry needs — buffs/concerns (Notes column text), personality_type/
+    personality_type_class (Type column + dim/highlight driver), and
+    dev_good/dev_bad (the separate development dim/highlight driver)."""
+    buffs, concerns = _personality_notes(intel, wrk_ethic, lead, loy, greed, adaptability)
+    type_info = _personality_type_info(ptype)
+    dev_good, dev_bad = _development_flags(wrk_ethic, intel, adaptability)
+    return {
+        "buffs": buffs, "concerns": concerns,
+        "personality_type": type_info["label"], "personality_type_class": type_info["class"],
+        "dev_good": dev_good, "dev_bad": dev_bad,
+    }
 
 
 def _bucket_for_display(pf_bucket, role, pos):
@@ -1222,7 +1290,8 @@ def get_waiver_candidates(team_id=None):
                pf.fv, pf.fv_str, pf.bucket, t.name, ps.surplus, pf.prospect_surplus,
                pf.fv_continuous,
                r.cntct, r.gap, r.pow, r.eye, r.stf, r.mov, r.ctrl, r.bats,
-               r.pot_cntct, r.pot_gap, r.pot_pow, r.pot_stf, r.pot_mov, r.pot_ctrl
+               r.pot_cntct, r.pot_gap, r.pot_pow, r.pot_stf, r.pot_mov, r.pot_ctrl,
+               r.adaptability, r.personality_type
         FROM players p
         LEFT JOIN latest_ratings r ON p.player_id = r.player_id
         LEFT JOIN prospect_fv pf ON pf.player_id = p.player_id AND pf.eval_date = ?
@@ -1274,10 +1343,11 @@ def get_waiver_candidates(team_id=None):
          greed, acc, comp, ceil_score, true_ceil, fv, fv_str, pf_bucket, cur_name,
          surplus_raw, prospect_surplus_raw, fv_continuous,
          cntct, gap, pow_, eye, stf, mov, ctrl, bats,
-         pot_cntct, pot_gap, pot_pow, pot_stf, pot_mov, pot_ctrl) = r
+         pot_cntct, pot_gap, pot_pow, pot_stf, pot_mov, pot_ctrl,
+         adaptability, ptype) = r
         bucket = _bucket_for_display(pf_bucket, role, pos)
         potential = true_ceil if true_ceil is not None else ceil_score
-        buffs, concerns = _personality_notes(intel, wrk_ethic, lead, loy, greed)
+        _pers = _personality_fields(intel, wrk_ethic, lead, loy, greed, adaptability, ptype)
         level_disp = level_map().get(str(level)) or ("FA" if str(level)=="0" else str(level))
         is_pitcher = role in ROLE_MAP
 
@@ -1334,7 +1404,7 @@ def get_waiver_candidates(team_id=None):
             "bucket": bucket,
             "cur_team_id": cur_tid, "cur_team_name": cur_name or str(cur_tid),
             "composite_score": comp, "potential": potential, "fv_str": fv_str,
-            "acc": acc, "buffs": buffs, "concerns": concerns,
+            "acc": acc, **_pers,
             "fit": _fit_position(bucket, weak_positions),
             "park_fit": park_fit, "park_value": park_value,
             "surplus": round((surplus_raw if surplus_raw is not None else prospect_surplus_raw) / _money_divisor(), 1)
@@ -1464,7 +1534,8 @@ def get_free_agent_candidates(team_id=None):
                pf.fv, pf.fv_str, pf.bucket, ps.surplus, pf.prospect_surplus,
                pf.fv_continuous, fap.ask_raw,
                r.cntct, r.gap, r.pow, r.eye, r.stf, r.mov, r.ctrl, r.bats,
-               r.pot_cntct, r.pot_gap, r.pot_pow, r.pot_stf, r.pot_mov, r.pot_ctrl
+               r.pot_cntct, r.pot_gap, r.pot_pow, r.pot_stf, r.pot_mov, r.pot_ctrl,
+               r.adaptability, r.personality_type
         FROM players p
         LEFT JOIN latest_ratings r ON p.player_id = r.player_id
         LEFT JOIN prospect_fv pf ON pf.player_id = p.player_id AND pf.eval_date = ?
@@ -1522,10 +1593,11 @@ def get_free_agent_candidates(team_id=None):
          acc, comp, ceil_score, true_ceil, fv, fv_str, pf_bucket, surplus_raw,
          prospect_surplus_raw, fv_continuous, ask_raw,
          cntct, gap, pow_, eye, stf, mov, ctrl, bats,
-         pot_cntct, pot_gap, pot_pow, pot_stf, pot_mov, pot_ctrl) = r
+         pot_cntct, pot_gap, pot_pow, pot_stf, pot_mov, pot_ctrl,
+         adaptability, ptype) = r
         bucket = _bucket_for_display(pf_bucket, role, pos)
         potential = true_ceil if true_ceil is not None else ceil_score
-        buffs, concerns = _personality_notes(intel, wrk_ethic, lead, loy, greed)
+        _pers = _personality_fields(intel, wrk_ethic, lead, loy, greed, adaptability, ptype)
         level_disp = level_map().get(str(level)) or ("FA" if str(level)=="0" else str(level))
         is_pitcher = role in ROLE_MAP
         if is_pitcher:
@@ -1586,7 +1658,7 @@ def get_free_agent_candidates(team_id=None):
             "pid": pid, "name": name, "age": age,
             "level": level_disp,
             "bucket": bucket, "composite_score": comp, "potential": potential,
-            "fv": fv, "fv_str": fv_str, "acc": acc, "buffs": buffs, "concerns": concerns,
+            "fv": fv, "fv_str": fv_str, "acc": acc, **_pers,
             "fit": _fit_position(bucket, weak_positions),
             "surplus": round((surplus_raw if surplus_raw is not None else prospect_surplus_raw) / _money_divisor(), 1)
                        if (surplus_raw is not None or prospect_surplus_raw is not None) else None,
@@ -1622,10 +1694,12 @@ def get_free_agent_candidates(team_id=None):
 
     young_hitters = [e for e in hitters if e["age"] is not None and e["age"] <= _FA_PROSPECT_AGE_MAX]
     young_pitchers = [e for e in pitchers if e["age"] is not None and e["age"] <= _FA_PROSPECT_AGE_MAX]
-    clean_hitters = [e for e in hitters if not e["concerns"]]
-    clean_pitchers = [e for e in pitchers if not e["concerns"]]
-    clean_young_hitters = [e for e in young_hitters if not e["concerns"]]
-    clean_young_pitchers = [e for e in young_pitchers if not e["concerns"]]
+    # "Clean" = not a negative personality Type (the site-wide dim signal),
+    # not the old trait-concerns text.
+    clean_hitters = [e for e in hitters if e["personality_type_class"] != "neg"]
+    clean_pitchers = [e for e in pitchers if e["personality_type_class"] != "neg"]
+    clean_young_hitters = [e for e in young_hitters if e["personality_type_class"] != "neg"]
+    clean_young_pitchers = [e for e in young_pitchers if e["personality_type_class"] != "neg"]
 
     def _fv_min(pool):
         qualifying = [e for e in pool if e["fv"] is not None and e["fv"] >= _FA_PROSPECT_MIN_FV]
@@ -3519,7 +3593,8 @@ def get_org_minor_league_roster(parent_team_id):
                r.cir_chg, r.scr, r.frk, r.kncrv, r.knbl,
                pf.fv, pf.fv_str, pf.risk, pf.prospect_surplus, pf.bucket,
                ps.surplus, pf.fv_continuous, r.acc,
-               r.int_, r.wrk_ethic, r.lead, r.loy, r.greed
+               r.int_, r.wrk_ethic, r.lead, r.loy, r.greed,
+               r.adaptability, r.personality_type
         FROM players p
         LEFT JOIN latest_ratings r ON p.player_id = r.player_id
         LEFT JOIN prospect_fv pf ON p.player_id = pf.player_id
@@ -3610,6 +3685,7 @@ def get_org_minor_league_roster(parent_team_id):
         fv_continuous = r[55]
         acc = r[56]
         intel, wrk_ethic, lead, loy, greed = r[57:62]
+        adaptability, ptype = r[62:64]
 
         ceiling = true_ceil or ceil_score
         is_pitcher = role in (11, 12, 13)
@@ -3632,7 +3708,7 @@ def get_org_minor_league_roster(parent_team_id):
         else:
             display_p = _pm.get(pos, "?")
 
-        buffs, concerns = _personality_notes(intel, wrk_ethic, lead, loy, greed)
+        _pers = _personality_fields(intel, wrk_ethic, lead, loy, greed, adaptability, ptype)
         base = {
             "pid": pid, "name": name, "age": age,
             "pos": display_p, "bt": bt,
@@ -3643,7 +3719,7 @@ def get_org_minor_league_roster(parent_team_id):
                        if (prospect_surplus is not None or mlb_surplus is not None) else None,
             "peak_surplus": _peak_surplus(fv_continuous, age, level_name, bucket, ovr=composite, pot=potential),
             "on_40man": bool(on_40man),
-            "acc": acc, "buffs": buffs, "concerns": concerns,
+            "acc": acc, **_pers,
         }
 
         # Park fit/value against your own home park — always scored on
@@ -3789,7 +3865,7 @@ def _defense_ratings_rows(conn, team_id, composites):
         SELECT p.player_id, p.name, p.age, p.pos, r.bats, r.throws,
                r.c, r.first_b, r.second_b, r.third_b, r.ss, r.lf, r.cf, r.rf,
                r.c_arm, r.c_blk, r.c_frm, r.ifr, r.ife, r.ifa, r.tdp, r.ofr, r.ofe, r.ofa,
-               r.int_, r.wrk_ethic, r.lead, r.loy, r.greed
+               r.int_, r.wrk_ethic, r.lead, r.loy, r.greed, r.adaptability, r.personality_type
         FROM players p
         LEFT JOIN latest_ratings r ON p.player_id = r.player_id
         WHERE p.team_id=? AND p.level='1' AND COALESCE(p.role,0) NOT IN (11,12,13)
@@ -3800,15 +3876,16 @@ def _defense_ratings_rows(conn, team_id, composites):
                "c_arm", "c_blk", "c_frm", "ifr", "ife", "ifa", "tdp", "ofr", "ofe", "ofa"]
     out = []
     for r in rows:
-        (pid, name, age, pos, bats, throws, *vals, intel, wrk_ethic, lead, loy, greed) = r
+        (pid, name, age, pos, bats, throws, *vals, intel, wrk_ethic, lead, loy, greed,
+         adaptability, ptype) = r
         _dp = _pm.get(pos, "?")
-        buffs, concerns = _personality_notes(intel, wrk_ethic, lead, loy, greed)
+        _pers = _personality_fields(intel, wrk_ethic, lead, loy, greed, adaptability, ptype)
         comp = composites.get(pid, {})
         row = {
             "pid": pid, "name": name, "age": age, "pos": _dp, "pos_sort": pos_order().get(_dp, 99),
             "bt": f"{bats}/{throws}" if bats and throws else (bats or ""),
             "composite": comp.get("composite"), "vr": comp.get("vr"), "vl": comp.get("vl"),
-            "buffs": buffs, "concerns": concerns,
+            **_pers,
         }
         for field, v in zip(_fields, vals):
             row[field] = v
@@ -3843,7 +3920,7 @@ def _defense_potential_rows(conn, team_id, scope, composites):
                r.c, r.pot_c, r.first_b, r.pot_first_b, r.second_b, r.pot_second_b,
                r.third_b, r.pot_third_b, r.ss, r.pot_ss,
                r.lf, r.pot_lf, r.cf, r.pot_cf, r.rf, r.pot_rf,
-               r.int_, r.wrk_ethic, r.lead, r.loy, r.greed
+               r.int_, r.wrk_ethic, r.lead, r.loy, r.greed, r.adaptability, r.personality_type
         FROM players p
         LEFT JOIN latest_ratings r ON p.player_id = r.player_id
         WHERE {where} AND COALESCE(p.role,0) NOT IN (11,12,13)
@@ -3855,7 +3932,7 @@ def _defense_potential_rows(conn, team_id, scope, composites):
     for r in rows:
         pid, name, age, level, pos = r[0:5]
         pairs = r[5:21]
-        intel, wrk_ethic, lead, loy, greed = r[21:26]
+        intel, wrk_ethic, lead, loy, greed, adaptability, ptype = r[21:28]
         positions = {}
         any_learnable = False
         for i, (lbl, _cur_col, _pot_col) in enumerate(_DEF_POS_COLS):
@@ -3869,13 +3946,13 @@ def _defense_potential_rows(conn, team_id, scope, composites):
         if not any_learnable:
             continue
         _dp = _pm.get(pos, "?")
-        buffs, concerns = _personality_notes(intel, wrk_ethic, lead, loy, greed)
+        _pers = _personality_fields(intel, wrk_ethic, lead, loy, greed, adaptability, ptype)
         comp = composites.get(pid, {})
         out.append({
             "pid": pid, "name": name, "age": age,
             "level": _def_level_disp(level, lmap), "pos": _dp, "pos_sort": pos_order().get(_dp, 99),
             "composite": comp.get("composite"), "vr": comp.get("vr"), "vl": comp.get("vl"),
-            "buffs": buffs, "concerns": concerns,
+            **_pers,
             "positions": positions,
         })
     out.sort(key=lambda p: (pos_order().get(p["pos"], 99), p["name"]))
@@ -3900,7 +3977,7 @@ def _defense_observed_rows(conn, team_id, year, scope, composites):
     rows = conn.execute(f"""
         SELECT p.player_id, p.name, p.level, f.position, f.g, f.gs, f.ip,
                f.tc, f.a, f.po, f.e, f.dp, f.pb, f.sba, f.rto, f.zr,
-               r.int_, r.wrk_ethic, r.lead, r.loy, r.greed
+               r.int_, r.wrk_ethic, r.lead, r.loy, r.greed, r.adaptability, r.personality_type
         FROM fielding_stats f
         JOIN players p ON p.player_id = f.player_id
         LEFT JOIN latest_ratings r ON r.player_id = p.player_id
@@ -3912,20 +3989,20 @@ def _defense_observed_rows(conn, team_id, year, scope, composites):
     out = []
     for r in rows:
         (pid, name, level, fpos, gp, gs, ip, tc, a, po, e, dp, pb, sba, rto, zr,
-         intel, wrk_ethic, lead, loy, greed) = r
+         intel, wrk_ethic, lead, loy, greed, adaptability, ptype) = r
         lbl = _DEF_FIELD_POS_CODES.get(fpos)
         if not lbl:
             continue
         fpct = round((po + a) / tc, 3) if tc else None
         range_factor = round((po + a) / gp, 2) if gp else None
         cs_pct = round(100 * rto / sba, 1) if sba else None
-        buffs, concerns = _personality_notes(intel, wrk_ethic, lead, loy, greed)
+        _pers = _personality_fields(intel, wrk_ethic, lead, loy, greed, adaptability, ptype)
         comp = composites.get(pid, {})
         out.append({
             "pid": pid, "name": name, "level": _def_level_disp(level, lmap),
             "pos": lbl, "pos_sort": pos_order().get(lbl, 99),
             "composite": comp.get("composite"), "vr": comp.get("vr"), "vl": comp.get("vl"),
-            "buffs": buffs, "concerns": concerns,
+            **_pers,
             "g": gp, "gs": gs, "ip": ip, "e": e or 0, "dp": dp or 0,
             "zr": round(zr, 1) if zr is not None else None,
             "fpct": fpct, "range_factor": range_factor,

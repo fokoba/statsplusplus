@@ -855,10 +855,26 @@
     <button class="split-btn" onclick="defSwitchSubtab(this, 'ratings-norm')">Ratings (20-80)</button>
     <button class="split-btn" onclick="defSwitchSubtab(this, 'potential')">Fielding Potential</button>
     <button class="split-btn" onclick="defSwitchSubtab(this, 'observed')">Observed</button>
-    <label id="def-negpers-wrap" style="margin-left:auto; font-size:12px; color:var(--text-dim)" title="Dims (doesn't hide) rows with a Low Work Ethic, Low Intelligence, Low Leadership, Low Loyalty, or Greedy flag.">
-      <input type="checkbox" id="def-negpers-filter" onchange="defFilterPers()"> Dim bad personalities
-    </label>
+    <span style="margin-left:auto; display:flex; align-items:center; gap:12px; font-size:12px; color:var(--text-dim)">
+      <label title="Dims rows whose personality Type is Selfish, Outspoken, Unmotivated, or Disruptive.">
+        <input type="checkbox" id="def-negpers-filter" onchange="defFilterPers()"> Dim bad personalities
+      </label>
+      <label title="Bolds rows whose personality Type is Fan Fav, Sparkplug, Captain, Humble, or Prankster.">
+        <input type="checkbox" id="def-pospers-filter" onchange="defFilterPers()"> Show positive personalities
+      </label>
+      <label title="Bolds rows with a high Work Ethic, Baseball IQ, or Adaptability.">
+        <input type="checkbox" id="def-devgood-filter" onchange="defFilterPers()"> Show good development
+      </label>
+      <label title="Dims rows with a low Work Ethic, Baseball IQ, or Adaptability.">
+        <input type="checkbox" id="def-devbad-filter" onchange="defFilterPers()"> Dim bad development
+      </label>
+    </span>
   </div>
+
+  {% macro def_pers_cells(p) %}
+  <td><span class="ptype-{{ p.personality_type_class }}">{{ p.personality_type }}</span></td>
+  <td class="pers-notes">{% for b in p.buffs %}<span class="buff">{{ b }}</span>{% endfor %}{% for c in p.concerns %}<span class="concern">{{ c }}</span>{% endfor %}{% if not p.buffs and not p.concerns %}—{% endif %}</td>
+  {% endmacro %}
 
   {% macro def_comp_cells(p) %}
   <td><span class="ovr-color" data-g="{{ p.composite }}">{{ p.composite if p.composite is not none else '—' }}</span></td>
@@ -878,6 +894,8 @@
       <thead>
         <tr>
           <th class="left" data-sort="str">Name</th>
+          <th class="left" data-sort="str">Type</th>
+          <th class="left" data-sort="str">Notes</th>
           <th data-sort="num" class="col-sep" title="Overall composite score">Comp</th>
           <th data-sort="num" title="vR composite">vR</th>
           <th data-sort="num" title="vL composite">vL</th>
@@ -906,8 +924,9 @@
       </thead>
       <tbody>
         {% for p in rows %}
-        <tr data-pers="{{ 'neg' if p.concerns else '' }}">
+        <tr data-ptype="{{ p.personality_type_class }}" data-dev-good="{{ '1' if p.dev_good else '' }}" data-dev-bad="{{ '1' if p.dev_bad else '' }}">
           <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
+          {{ def_pers_cells(p) }}
           {{ def_comp_cells(p) }}
           <td class="col-sep">{{ p.age }}</td>
           <td class="left" data-sort-value="{{ p.pos_sort }}">{{ p.pos }}</td>
@@ -939,6 +958,8 @@
     <thead>
       <tr>
         <th class="left" data-sort="str">Name</th>
+        <th class="left" data-sort="str">Type</th>
+        <th class="left" data-sort="str">Notes</th>
         <th data-sort="num" class="col-sep" title="Overall composite score">Comp</th>
         <th data-sort="num" title="vR composite">vR</th>
         <th data-sort="num" title="vL composite">vL</th>
@@ -952,8 +973,9 @@
     </thead>
     <tbody>
       {% for p in rows %}
-      <tr data-pers="{{ 'neg' if p.concerns else '' }}">
+      <tr data-ptype="{{ p.personality_type_class }}" data-dev-good="{{ '1' if p.dev_good else '' }}" data-dev-bad="{{ '1' if p.dev_bad else '' }}">
         <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
+        {{ def_pers_cells(p) }}
         {{ def_comp_cells(p) }}
         <td class="col-sep">{{ p.age }}</td>
         <td>{{ p.level }}</td>
@@ -1004,6 +1026,8 @@
     <thead>
       <tr>
         <th class="left" data-sort="str">Name</th>
+        <th class="left" data-sort="str">Type</th>
+        <th class="left" data-sort="str">Notes</th>
         <th data-sort="num" class="col-sep" title="Overall composite score">Comp</th>
         <th data-sort="num" title="vR composite">vR</th>
         <th data-sort="num" title="vL composite">vL</th>
@@ -1023,8 +1047,9 @@
     </thead>
     <tbody>
       {% for p in rows %}
-      <tr data-def-pos="{{ p.pos }}" data-pers="{{ 'neg' if p.concerns else '' }}">
+      <tr data-def-pos="{{ p.pos }}" data-ptype="{{ p.personality_type_class }}" data-dev-good="{{ '1' if p.dev_good else '' }}" data-dev-bad="{{ '1' if p.dev_bad else '' }}">
         <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
+        {{ def_pers_cells(p) }}
         {{ def_comp_cells(p) }}
         <td class="col-sep">{{ p.level }}</td>
         <td class="left" data-sort-value="{{ p.pos_sort }}">{{ p.pos }}</td>
@@ -1077,7 +1102,6 @@
 </div>
 
 <style>
-#tab-defense tr[data-pers="neg"].def-dimmed { opacity: 0.4; }
 </style>
 
 <script>
@@ -1110,9 +1134,9 @@ function defFilterObservedPos() {
   });
 }
 function defFilterPers() {
-  var dim = document.getElementById('def-negpers-filter').checked;
-  document.querySelectorAll('#tab-defense tr[data-pers]').forEach(function(tr) {
-    tr.classList.toggle('def-dimmed', dim && tr.dataset.pers === 'neg');
+  applyPersDevFilters('#tab-defense tr[data-ptype]', {
+    negId: 'def-negpers-filter', posId: 'def-pospers-filter',
+    devGoodId: 'def-devgood-filter', devBadId: 'def-devbad-filter',
   });
 }
 </script>
@@ -1482,12 +1506,13 @@ function defFilterPers() {
         {% if show_park_value %}
         <th data-sort="num" title="Estimated $ swing in Long-Term Surplus from park fit alone — Park Fit quantified into dollars. Deliberately NOT included in Long-Term Surplus or Rec. Bid above; this is a discovery signal on top of them, not a correction to them.">Park Value</th>
         {% endif %}
-        <th class="left">Personality</th>
+        <th class="left">Type</th>
+        <th class="left">Notes</th>
       </tr>
     </thead>
     <tbody>
       {% for p in rows %}
-      <tr class="add-row" data-pid="{{ p.pid }}" data-pers="{{ 'neg' if p.concerns else '' }}"{% if show_spec %} data-spec="{{ p.specialist_label }}"{% endif %}>
+      <tr class="add-row" data-pid="{{ p.pid }}" data-ptype="{{ p.personality_type_class }}" data-dev-good="{{ '1' if p.dev_good else '' }}" data-dev-bad="{{ '1' if p.dev_bad else '' }}"{% if show_spec %} data-spec="{{ p.specialist_label }}"{% endif %}>
         <td><input type="checkbox" class="add-checkbox" data-pid="{{ p.pid }}"></td>
         <td class="left"><a class="player-link add-name" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
         <td>{{ p.bucket }}</td>
@@ -1519,10 +1544,11 @@ function defFilterPers() {
         {% if show_park_value %}
         <td class="{{ 'pos' if p.park_value and p.park_value > 0 else 'neg' if p.park_value and p.park_value < 0 else '' }}">{{ '$' + p.park_value|string + money_unit if p.park_value is not none else '-' }}</td>
         {% endif %}
-        <td class="left" style="font-size:12px">
-          {%- if p.buffs %}<span style="color:#4caf50">{{ p.buffs|join(", ") }}</span>{% endif -%}
+        <td class="left"><span class="ptype-{{ p.personality_type_class }}">{{ p.personality_type }}</span></td>
+        <td class="left pers-notes" style="font-size:12px">
+          {%- if p.buffs %}<span class="buff">{{ p.buffs|join(", ") }}</span>{% endif -%}
           {%- if p.buffs and p.concerns %}<br>{% endif -%}
-          {%- if p.concerns %}<span style="color:#f44336">{{ p.concerns|join(", ") }}</span>{% endif -%}
+          {%- if p.concerns %}<span class="concern">{{ p.concerns|join(", ") }}</span>{% endif -%}
           {%- if not p.buffs and not p.concerns %}<span style="color:var(--text-dim)">—</span>{% endif -%}
         </td>
       </tr>
@@ -1541,10 +1567,22 @@ function defFilterPers() {
   {{ add_table(unconfirmed, table_id + '-unconf', cur_team_col, show_ask, show_spec, show_park, show_bid, show_park_value) }}
   {% endmacro %}
 
-  <div style="margin-bottom:16px">
-    <label style="font-size:13px" title="Dims (doesn't hide) rows with a Low Work Ethic, Low Intelligence, Low Leadership, Low Loyalty, or Greedy flag — same flags shown in each row's Personality column.">
+  <div style="margin-bottom:16px; display:flex; gap:16px; flex-wrap:wrap">
+    <label style="font-size:13px" title="Dims rows whose personality Type is Selfish, Outspoken, Unmotivated, or Disruptive.">
       <input type="checkbox" id="adds-negpers-filter" onchange="addsFilterPers()">
       Dim bad personalities
+    </label>
+    <label style="font-size:13px" title="Bolds rows whose personality Type is Fan Fav, Sparkplug, Captain, Humble, or Prankster.">
+      <input type="checkbox" id="adds-pospers-filter" onchange="addsFilterPers()">
+      Show positive personalities
+    </label>
+    <label style="font-size:13px" title="Bolds rows with a high Work Ethic, Baseball IQ, or Adaptability.">
+      <input type="checkbox" id="adds-devgood-filter" onchange="addsFilterPers()">
+      Show good development
+    </label>
+    <label style="font-size:13px" title="Dims rows with a low Work Ethic, Baseball IQ, or Adaptability.">
+      <input type="checkbox" id="adds-devbad-filter" onchange="addsFilterPers()">
+      Dim bad development
     </label>
   </div>
 
@@ -1662,14 +1700,13 @@ function defFilterPers() {
 <style>
 .cut-row.cut-marked .cut-name { color: var(--text-dim); text-decoration: line-through; }
 .cut-row.cut-marked td { opacity: 0.5; }
-.add-row.add-dimmed { opacity: 0.4; }
 </style>
 
 <script>
 function addsFilterPers() {
-  var dim = document.getElementById('adds-negpers-filter').checked;
-  document.querySelectorAll('#tab-adds .add-row').forEach(function(tr) {
-    tr.classList.toggle('add-dimmed', dim && tr.dataset.pers === 'neg');
+  applyPersDevFilters('#tab-adds .add-row', {
+    negId: 'adds-negpers-filter', posId: 'adds-pospers-filter',
+    devGoodId: 'adds-devgood-filter', devBadId: 'adds-devbad-filter',
   });
 }
 </script>

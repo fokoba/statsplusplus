@@ -101,11 +101,13 @@
   <div style="font-size:12px; color:var(--text-dim); margin-bottom:10px">
     Built from the players already picked above, using the same batting-order construction (composite/speed
     weighting and slotting rules) established for this team, now with park factored into each hitter's composite.
-    Not a pure composite sort: the two fastest hitters anchor the top and bottom of the order — turning the bottom
-    into a second leadoff spot — the best remaining speed+bat combo hits 2nd, the three best composites hit 3-4-5,
-    and the next two best hit 6-7.
+    Not a pure composite sort: the fastest hitter leads off regardless of bat, the best remaining speed+bat combo
+    hits 2nd, the three best composites hit 3-4-5, and the next best hit 6-7(-8). The last real slot before the
+    pitcher only goes to a speed pick — the fastest player who's also a below-average bat — as a "second leadoff";
+    if no such weak-bat speedster exists, that slot fills by composite like everything else and the pitcher stays
+    in his normal spot.
     {% if not has_dh %}Your league has no DH, so this models the 8 real position players only; the actual pitcher's
-    spot (traditionally 9th, batting behind the held-back speed threat at 8th) isn't chosen here.{% endif %}
+    spot (9th, or 8th if a real second-leadoff speedster exists) isn't chosen here.{% endif %}
   </div>
   <div style="overflow-x:auto">
   <table>

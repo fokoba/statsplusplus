@@ -26,6 +26,11 @@ _PARK_DELTA_CAP = 5
 # Def rating (20-80, same scale as Viable Positions on the minors page)
 # required at a position before a player is even considered for that slot.
 _DEF_FLOOR = 65
+# Catcher defense grades run lower league-wide than other positions (it's
+# a specialized skill, not directly comparable to a corner infielder's
+# range/arm grade) — the flat 65 floor was excluding legitimately-better-
+# hitting backstops who'd never clear that bar at any level of the league.
+_DEF_FLOOR_BY_GROUP = {"C": 50}
 
 
 def _park_delta(park_fit):
@@ -74,18 +79,31 @@ def _speed_score(speed, steal):
     return round(speed * _SPEED_W[0] + steal * _SPEED_W[1], 1)
 
 
-def _build_batting_order(starters, tools_key, has_dh):
-    """9-slot batting order (1-indexed slots as a 0-indexed list) via the
-    "bat the pitcher 8th" construction: the two fastest hitters anchor the
-    top and bottom of the real lineup (turning the bottom of the order into
-    a second leadoff spot), the best remaining speed+bat combo hits 2nd,
-    the three best composites hit 3-4-5, and the next two best hit 6-7.
+_WEAK_BAT_THRESHOLD = 50
 
-    In a DH league all 9 slots are real hitters, so whoever's left after
-    6-7 simply bats 8th. In a No-DH league there are only 8 real position
-    players — the second-fastest hitter (who'd otherwise anchor slot 9)
-    bats 8th instead, right in front of the actual pitcher's spot, which
-    this function doesn't model (no specific starter is chosen here).
+
+def _build_batting_order(starters, tools_key, has_dh):
+    """9-slot batting order (1-indexed slots as a 0-indexed list).
+
+    Leadoff is simply the fastest hitter, regardless of bat — a speed/OBP
+    leadoff type is the normal case, not something that needs a weak-bat
+    qualifier. The bottom-of-order "second leadoff" (turning the last real
+    slot before the pitcher's spot into a table-setter) is a genuinely
+    different move: it only makes sense as a way to hide a real weakness,
+    so it's only used when the fastest REMAINING player is also a below-
+    average bat (GM composite under _WEAK_BAT_THRESHOLD). A fast player
+    who can also hit belongs wherever his composite already ranks him —
+    bumping him to the bottom of the order for being quick would be
+    burying a good bat for no reason. When no such weak-bat speedster
+    exists, the last real slot just fills by composite like every other
+    slot, and (No-DH only) the pitcher stays in his normal 9-hole.
+
+    2-hole is the best composite+speed blend from what's left, 3 through
+    the last real slot fill by composite, descending.
+
+    DH leagues have 9 real hitters, so "the last real slot" is 9. No-DH
+    leagues have 8 real position players — the last real slot is 8, and
+    slot 9 (the actual pitcher) isn't modeled here at all.
     """
     pool = []
     for p in starters:
@@ -96,43 +114,39 @@ def _build_batting_order(starters, tools_key, has_dh):
         pool.append({"p": p, "gm": gm, "speed": spd if spd is not None else -1})
 
     order = [None] * 9
+    last_real_slot = 8 if has_dh else 7  # 0-indexed: batting "9" or "8"
 
     def _place(slot, e):
         order[slot] = dict(e["p"], gm_composite=e["gm"],
                             speed_score=e["speed"] if e["speed"] != -1 else None)
 
     by_speed = sorted(pool, key=lambda e: (-e["speed"], -e["gm"]))
-    speed_picks = by_speed[:2]
-    for e in speed_picks:
-        pool.remove(e)
-    leadoff = speed_picks[0] if len(speed_picks) >= 1 else None
-    bottom = speed_picks[1] if len(speed_picks) >= 2 else None
+    leadoff = by_speed[0] if by_speed else None
     if leadoff:
+        pool.remove(leadoff)
         _place(0, leadoff)
+
+    # Look for the fastest player who's ALSO a weak bat, not just whether
+    # the single fastest remaining player happens to qualify — a burner
+    # further down the speed list can still be the right "second leadoff"
+    # even if someone faster but better-hitting (like Lacefield) is ahead
+    # of him in raw speed.
+    weak_speedsters = [e for e in pool if e["gm"] < _WEAK_BAT_THRESHOLD]
+    bottom = max(weak_speedsters, key=lambda e: e["speed"]) if weak_speedsters else None
+    if bottom:
+        pool.remove(bottom)
+        _place(last_real_slot, bottom)
 
     two_hole = None
     if pool:
         two_hole = max(pool, key=lambda e: e["gm"] * 0.7 + e["speed"] * 0.3)
         pool.remove(two_hole)
-    if two_hole:
         _place(1, two_hole)
 
     pool.sort(key=lambda e: -e["gm"])
-    for slot, e in zip((2, 3, 4), pool[:3]):
+    fill_slots = [s for s in range(2, last_real_slot + 1) if order[s] is None]
+    for slot, e in zip(fill_slots, pool):
         _place(slot, e)
-    pool = pool[3:]
-    for slot, e in zip((5, 6), pool[:2]):
-        _place(slot, e)
-    pool = pool[2:]
-
-    if has_dh:
-        if pool:
-            _place(7, pool[0])
-        if bottom:
-            _place(8, bottom)
-    else:
-        if bottom:
-            _place(7, bottom)
 
     return order
 
@@ -233,17 +247,19 @@ def get_lineup_optimizer(opponent_id=None, is_home=True):
         ))
         return candidates[0]
 
-    def _def_qualified(pool):
-        """Only players grading _DEF_FLOOR+ at this position — falls back
-        to the full pool if nobody clears it, so a thin position never
-        goes empty just because no one's a plus defender there yet."""
-        qualified = [p for p in pool if p["def_rating"] is not None and p["def_rating"] >= _DEF_FLOOR]
+    def _def_qualified(pool, group):
+        """Only players grading at or above this position's defense floor
+        — falls back to the full pool if nobody clears it, so a thin
+        position never goes empty just because no one's a plus defender
+        there yet."""
+        floor = _DEF_FLOOR_BY_GROUP.get(group, _DEF_FLOOR)
+        qualified = [p for p in pool if p["def_rating"] is not None and p["def_rating"] >= floor]
         return qualified if qualified else pool
 
     lineup = []
     used_pids = set()
     for group in _HITTER_ORDER:
-        pool = _def_qualified(by_group.get(group, []))
+        pool = _def_qualified(by_group.get(group, []), group)
         vr_pick = _best(pool, "vr_score")
         vl_pick = _best(pool, "vl_score")
         lineup.append({"group": group, "vr": vr_pick, "vl": vl_pick})

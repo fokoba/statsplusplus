@@ -3536,6 +3536,45 @@ def get_org_minor_league_roster(parent_team_id):
     ).fetchall():
         forty_man_pids.add(r[0])
 
+    from statsplusplus.config.ratings import norm_continuous as _normc
+    from statsplusplus.evaluation.park_fit import (
+        load_park_factors, compute_batter_park_fit, compute_batter_park_value_pct,
+        compute_pitcher_park_fit_from_stats, compute_pitcher_park_fit_from_tools,
+        compute_pitcher_park_value_pct_from_stats, compute_pitcher_park_value_pct_from_tools,
+    )
+    _rscale_c = get_cfg().ratings_scale
+    park = load_park_factors(get_cfg().league_dir)
+    hitter_weights_by_bucket = load_tool_weights(get_cfg().league_dir).get("hitter", {}) if park else {}
+
+    # Real observed GB%/K%/BB% (all levels — this is exclusively a minor
+    # league roster) for every org pitcher with a real track record,
+    # preferred over the scouting-tool proxy — same convention as the free
+    # agent/waiver pools.
+    _PARK_FIT_BF_THRESHOLD = 150
+    org_pids = [r[0] for r in rows]
+    pitcher_stats = {}
+    lg_gb_pct = lg_k_pct = lg_bb_pct = None
+    if park and org_pids:
+        pid_qs = ",".join("?" * len(org_pids))
+        for row in conn.execute(
+            f"SELECT player_id, SUM(gb), SUM(fb), SUM(k), SUM(bb), SUM(bf) "
+            f"FROM pitching_stats WHERE player_id IN ({pid_qs}) GROUP BY player_id",
+            org_pids,
+        ).fetchall():
+            p_pid, s_gb, s_fb, s_k, s_bb, s_bf = row
+            if s_bf and s_bf >= _PARK_FIT_BF_THRESHOLD:
+                pitcher_stats[p_pid] = {
+                    "gb_pct": s_gb / (s_gb + s_fb) if (s_gb or 0) + (s_fb or 0) > 0 else None,
+                    "k_pct": s_k / s_bf, "bb_pct": s_bb / s_bf,
+                }
+        lg = conn.execute(
+            "SELECT SUM(gb), SUM(fb), SUM(k), SUM(bb), SUM(bf) FROM mlb_pitching_stats"
+        ).fetchone()
+        if lg and lg[4]:
+            lg_gb, lg_fb, lg_k, lg_bb, lg_bf = lg
+            lg_gb_pct = lg_gb / (lg_gb + lg_fb) if (lg_gb or 0) + (lg_fb or 0) > 0 else None
+            lg_k_pct, lg_bb_pct = lg_k / lg_bf, lg_bb / lg_bf
+
     # This function hardcoded scale="1-100" (norm()'s default) regardless of
     # the league's actual ratings_scale — silently wrong for any "20-80"
     # league (PPL): a raw value that's already a 20-80 grade (e.g. 80) was
@@ -3606,6 +3645,39 @@ def get_org_minor_league_roster(parent_team_id):
             "on_40man": bool(on_40man),
             "acc": acc, "buffs": buffs, "concerns": concerns,
         }
+
+        # Park fit/value against your own home park — always scored on
+        # POTENTIAL tools, never current, since every player on this page
+        # is a minor leaguer by definition (this reflects who they'll grow
+        # into, not their barely-developed current tools).
+        park_fit = None
+        park_value = None
+        if park:
+            if is_pitcher:
+                _park_tools = {"stuff": _normc(pot_stf, _rscale_c), "movement": _normc(pot_mov, _rscale_c),
+                               "control": _normc(pot_ctrl, _rscale_c)}
+                obs = pitcher_stats.get(pid)
+                if obs and obs["gb_pct"] is not None and lg_gb_pct is not None:
+                    park_fit = compute_pitcher_park_fit_from_stats(
+                        obs["gb_pct"], obs["k_pct"], obs["bb_pct"],
+                        lg_gb_pct, lg_k_pct, lg_bb_pct, park)
+                    _value_pct = compute_pitcher_park_value_pct_from_stats(
+                        obs["gb_pct"], obs["k_pct"], obs["bb_pct"],
+                        lg_gb_pct, lg_k_pct, lg_bb_pct, park)
+                else:
+                    park_fit = compute_pitcher_park_fit_from_tools(_park_tools, park)
+                    _value_pct = compute_pitcher_park_value_pct_from_tools(_park_tools, park)
+            else:
+                _park_tools = {"contact": _normc(pot_cntct, _rscale_c), "gap": _normc(pot_gap, _rscale_c),
+                               "power": _normc(pot_pw, _rscale_c)}
+                _hw = hitter_weights_by_bucket.get(display_p, hitter_weights_by_bucket.get("COF", {}))
+                park_fit = compute_batter_park_fit(_park_tools, bats, _hw, park)
+                _value_pct = compute_batter_park_value_pct(_park_tools, bats, _hw, park)
+            _park_val_basis = prospect_surplus if prospect_surplus is not None else mlb_surplus
+            if _value_pct is not None and _park_val_basis is not None:
+                park_value = round((_park_val_basis * _value_pct) / _money_divisor(), 1)
+        base["park_fit"] = park_fit
+        base["park_value"] = park_value
 
         if is_pitcher:
             num_pitches = sum(1 for p in pitches_raw if p and (n(p) or 0) >= 30)

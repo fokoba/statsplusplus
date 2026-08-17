@@ -85,6 +85,8 @@
         <th class="left" title="Every position this player currently grades 65/80 or higher at — a quick check for who can play the field vs. who's a DH-only bat.">Viable Positions</th>
         <th data-sort="num">Surplus</th>
         <th data-sort="num" title="Best single projected year at expected grade — quality independent of remaining runway">Peak Yr</th>
+        <th data-sort="num" title="-100 to 100: how well this player's skills match your home park's factors, scored on POTENTIAL tools since every player here is a minor leaguer.">Park Fit</th>
+        <th data-sort="num" title="Estimated $ swing in Long-Term Surplus from park fit alone">Park Value</th>
         <th data-sort="str">Promo</th>
         <th class="left">Personality</th>
       </tr>
@@ -113,6 +115,8 @@
         <td class="left" style="font-size:12px">{{ p.viable_positions|join(", ") if p.viable_positions else '—' }}</td>
         <td>{% if p.surplus is not none and p.surplus > 0 %}${{ p.surplus }}{{ money_unit }}{% else %}—{% endif %}</td>
         <td>{% if p.peak_surplus is not none and p.peak_surplus > 0 %}${{ p.peak_surplus }}{{ money_unit }}{% else %}—{% endif %}</td>
+        <td class="{{ 'pos' if p.park_fit and p.park_fit > 0 else 'neg' if p.park_fit and p.park_fit < 0 else '' }}">{{ p.park_fit if p.park_fit is not none else '—' }}</td>
+        <td class="{{ 'pos' if p.park_value and p.park_value > 0 else 'neg' if p.park_value and p.park_value < 0 else '' }}">{{ '$' + p.park_value|string + money_unit if p.park_value is not none else '—' }}</td>
         <td>{% if p.promo and p.promo.tier in ('ready', 'knocking') %}<span class="promo-badge promo-{{ p.promo.tier }}" title="{{ p.promo.reasons|join('; ') }}">{{ p.promo.label }}</span>{% elif p.demotion %}<span class="promo-badge promo-{{ p.demotion.tier }}" title="{{ p.demotion.reasons|join('; ') }}">{{ p.demotion.label }}</span>{% else %}{% endif %}</td>
         <td class="left" style="font-size:12px">
           {%- if p.buffs %}<span style="color:#4caf50">{{ p.buffs|join(", ") }}</span>{% endif -%}
@@ -145,6 +149,8 @@
         <th data-sort="num">Pit</th>
         <th data-sort="num">Surplus</th>
         <th data-sort="num" title="Best single projected year at expected grade — quality independent of remaining runway">Peak Yr</th>
+        <th data-sort="num" title="-100 to 100: how well this player's skills match your home park's factors. Real observed GB%/K%/BB% when available (150+ BF), scouting tools (on POTENTIAL, since every player here is a minor leaguer) otherwise.">Park Fit</th>
+        <th data-sort="num" title="Estimated $ swing in Long-Term Surplus from park fit alone">Park Value</th>
         <th data-sort="str">Promo</th>
         <th class="left">Personality</th>
       </tr>
@@ -171,6 +177,8 @@
         <td>{{ p.pitches or '—' }}</td>
         <td>{% if p.surplus is not none and p.surplus > 0 %}${{ p.surplus }}{{ money_unit }}{% else %}—{% endif %}</td>
         <td>{% if p.peak_surplus is not none and p.peak_surplus > 0 %}${{ p.peak_surplus }}{{ money_unit }}{% else %}—{% endif %}</td>
+        <td class="{{ 'pos' if p.park_fit and p.park_fit > 0 else 'neg' if p.park_fit and p.park_fit < 0 else '' }}">{{ p.park_fit if p.park_fit is not none else '—' }}</td>
+        <td class="{{ 'pos' if p.park_value and p.park_value > 0 else 'neg' if p.park_value and p.park_value < 0 else '' }}">{{ '$' + p.park_value|string + money_unit if p.park_value is not none else '—' }}</td>
         <td>{% if p.promo and p.promo.tier in ('ready', 'knocking') %}<span class="promo-badge promo-{{ p.promo.tier }}" title="{{ p.promo.reasons|join('; ') }}">{{ p.promo.label }}</span>{% elif p.demotion %}<span class="promo-badge promo-{{ p.demotion.tier }}" title="{{ p.demotion.reasons|join('; ') }}">{{ p.demotion.label }}</span>{% else %}{% endif %}</td>
         <td class="left" style="font-size:12px">
           {%- if p.buffs %}<span style="color:#4caf50">{{ p.buffs|join(", ") }}</span>{% endif -%}

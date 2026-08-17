@@ -3737,54 +3737,94 @@ _DEF_POS_COLS = [
     ("LF", "lf", "pot_lf"), ("CF", "cf", "pot_cf"), ("RF", "rf", "pot_rf"),
 ]
 _DEF_FIELD_POS_CODES = {2: "C", 3: "1B", 4: "2B", 5: "3B", 6: "SS", 7: "LF", 8: "CF", 9: "RF"}
-# "Worth learning" bar for the Potential chart — a below-40 potential grade
-# isn't a real projection, just noise from a position the player will
-# never realistically play.
-_DEF_POT_FLOOR = 40
 
 
-def _defense_ratings_rows(conn, team_id, normalize):
-    """Every MLB position player's ratings at all 8 positions, plus their
-    catcher/infield/outfield specialty sub-ratings — raw (native scale) if
-    normalize=False, 20-80 if True. One row per player.
+def _def_level_disp(level, lmap):
+    """level_map() has no "0" entry (free agent / released, not an actual
+    minor-league level) — without this fallback a released player shows
+    the literal string "0" instead of "FA"."""
+    disp = lmap.get(str(level))
+    if disp:
+        return disp
+    return "FA" if str(level) == "0" else str(level)
+
+
+def _defense_hit_composites(conn, team_id):
+    """{pid: {"composite":, "vr":, "vl":, "buffs":, "concerns":}} for
+    every position player in the whole org (MLB + every affiliate) — reuses
+    the exact same vR/vL composite computation as Best Available/Lineup
+    Optimizer (scouting_queries._build_entries()) rather than a second,
+    possibly-diverging implementation. Imported locally: scouting_queries
+    already imports several names from this module at load time, so a
+    module-level import here would be circular.
+    """
+    from scouting_queries import _fetch_rows, _org_where, _build_entries
+    ratings_scale = get_cfg().ratings_scale
+    all_weights = load_tool_weights(get_cfg().league_dir)
+    ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
+    ed_surplus = conn.execute("SELECT MAX(eval_date) FROM player_surplus").fetchone()[0]
+    where, params = _org_where(team_id, "org")
+    rows = _fetch_rows(conn, where, params, ed, ed_surplus)
+    entries = _build_entries(rows, ratings_scale, None, all_weights.get("hitter", {}),
+                              all_weights.get("pitcher", {}), set(), is_mine=True)
+    return {
+        e["pid"]: {"composite": e["composite_score"], "vr": e["vr_score"], "vl": e["vl_score"],
+                   "buffs": e["buffs"], "concerns": e["concerns"]}
+        for e in entries if not e["is_pitcher"]
+    }
+
+
+def _defense_ratings_rows(conn, team_id, composites):
+    """Every MLB position player's ratings at all 8 positions (raw AND
+    20-80-normalized together, since the Ratings tab displays raw numbers
+    but still colors them on the 20-80 tier scale for visual consistency
+    with the rest of the app), plus their catcher/infield/outfield
+    specialty sub-ratings. One row per player.
     """
     from statsplusplus.config.ratings import norm as _norm_rating
     rscale = get_cfg().ratings_scale
-    g = (lambda v: _norm_rating(v, rscale)) if normalize else (lambda v: v)
+    n = lambda v: _norm_rating(v, rscale)
 
     rows = conn.execute("""
         SELECT p.player_id, p.name, p.age, p.pos, r.bats, r.throws,
                r.c, r.first_b, r.second_b, r.third_b, r.ss, r.lf, r.cf, r.rf,
-               r.c_arm, r.c_blk, r.c_frm, r.ifr, r.ife, r.ifa, r.tdp, r.ofr, r.ofe, r.ofa
+               r.c_arm, r.c_blk, r.c_frm, r.ifr, r.ife, r.ifa, r.tdp, r.ofr, r.ofe, r.ofa,
+               r.int_, r.wrk_ethic, r.lead, r.loy, r.greed
         FROM players p
         LEFT JOIN latest_ratings r ON p.player_id = r.player_id
         WHERE p.team_id=? AND p.level='1' AND COALESCE(p.role,0) NOT IN (11,12,13)
     """, (team_id,)).fetchall()
 
     _pm = pos_map()
+    _fields = ["c", "first_b", "second_b", "third_b", "ss", "lf", "cf", "rf",
+               "c_arm", "c_blk", "c_frm", "ifr", "ife", "ifa", "tdp", "ofr", "ofe", "ofa"]
     out = []
     for r in rows:
-        (pid, name, age, pos, bats, throws, c, first_b, second_b, third_b, ss, lf, cf, rf,
-         c_arm, c_blk, c_frm, ifr, ife, ifa, tdp, ofr, ofe, ofa) = r
+        (pid, name, age, pos, bats, throws, *vals, intel, wrk_ethic, lead, loy, greed) = r
         _dp = _pm.get(pos, "?")
-        out.append({
+        buffs, concerns = _personality_notes(intel, wrk_ethic, lead, loy, greed)
+        comp = composites.get(pid, {})
+        row = {
             "pid": pid, "name": name, "age": age, "pos": _dp, "pos_sort": pos_order().get(_dp, 99),
             "bt": f"{bats}/{throws}" if bats and throws else (bats or ""),
-            "c": g(c), "first_b": g(first_b), "second_b": g(second_b), "third_b": g(third_b),
-            "ss": g(ss), "lf": g(lf), "cf": g(cf), "rf": g(rf),
-            "c_arm": g(c_arm), "c_blk": g(c_blk), "c_frm": g(c_frm),
-            "ifr": g(ifr), "ife": g(ife), "ifa": g(ifa), "tdp": g(tdp),
-            "ofr": g(ofr), "ofe": g(ofe), "ofa": g(ofa),
-        })
+            "composite": comp.get("composite"), "vr": comp.get("vr"), "vl": comp.get("vl"),
+            "buffs": buffs, "concerns": concerns,
+        }
+        for field, v in zip(_fields, vals):
+            row[field] = v
+            row[field + "_g"] = n(v)  # normalized companion, for data-g coloring only
+        out.append(row)
     out.sort(key=lambda p: (pos_order().get(p["pos"], 99), p["name"]))
     return out
 
 
-def _defense_potential_rows(conn, team_id, scope):
-    """cur/pot pairs at every position worth learning (pot >= _DEF_POT_FLOOR
-    on the normalized scale), for every position player in `scope`
-    ("mlb", "milb", or "both") — the raw material for the Fielding
-    Potential chart's per-position cur/checkmark cells.
+def _defense_potential_rows(conn, team_id, scope, composites):
+    """cur/pot pairs at every position with any real potential rating at
+    all (a raw value of 0 means "never evaluated there," which norm()
+    already maps to None — anything else, however low, counts), for every
+    position player in `scope` ("mlb", "milb", or "both") — the raw
+    material for the Fielding Potential chart's per-position cur/
+    checkmark cells.
     """
     from statsplusplus.config.ratings import norm as _norm_rating
     rscale = get_cfg().ratings_scale
@@ -3802,7 +3842,8 @@ def _defense_potential_rows(conn, team_id, scope):
         SELECT p.player_id, p.name, p.age, p.level, p.pos,
                r.c, r.pot_c, r.first_b, r.pot_first_b, r.second_b, r.pot_second_b,
                r.third_b, r.pot_third_b, r.ss, r.pot_ss,
-               r.lf, r.pot_lf, r.cf, r.pot_cf, r.rf, r.pot_rf
+               r.lf, r.pot_lf, r.cf, r.pot_cf, r.rf, r.pot_rf,
+               r.int_, r.wrk_ethic, r.lead, r.loy, r.greed
         FROM players p
         LEFT JOIN latest_ratings r ON p.player_id = r.player_id
         WHERE {where} AND COALESCE(p.role,0) NOT IN (11,12,13)
@@ -3814,12 +3855,13 @@ def _defense_potential_rows(conn, team_id, scope):
     for r in rows:
         pid, name, age, level, pos = r[0:5]
         pairs = r[5:21]
+        intel, wrk_ethic, lead, loy, greed = r[21:26]
         positions = {}
         any_learnable = False
         for i, (lbl, _cur_col, _pot_col) in enumerate(_DEF_POS_COLS):
             cur_raw, pot_raw = pairs[i * 2], pairs[i * 2 + 1]
             cur, pot = n(cur_raw), n(pot_raw)
-            if pot is None or pot < _DEF_POT_FLOOR:
+            if pot is None:
                 positions[lbl] = None
                 continue
             any_learnable = True
@@ -3827,16 +3869,20 @@ def _defense_potential_rows(conn, team_id, scope):
         if not any_learnable:
             continue
         _dp = _pm.get(pos, "?")
+        buffs, concerns = _personality_notes(intel, wrk_ethic, lead, loy, greed)
+        comp = composites.get(pid, {})
         out.append({
             "pid": pid, "name": name, "age": age,
-            "level": lmap.get(str(level), str(level)), "pos": _dp, "pos_sort": pos_order().get(_dp, 99),
+            "level": _def_level_disp(level, lmap), "pos": _dp, "pos_sort": pos_order().get(_dp, 99),
+            "composite": comp.get("composite"), "vr": comp.get("vr"), "vl": comp.get("vl"),
+            "buffs": buffs, "concerns": concerns,
             "positions": positions,
         })
     out.sort(key=lambda p: (pos_order().get(p["pos"], 99), p["name"]))
     return out
 
 
-def _defense_observed_rows(conn, team_id, year, scope):
+def _defense_observed_rows(conn, team_id, year, scope, composites):
     """Real fielding stats (ZR, Fielding %, Errors, Range Factor, and
     catcher/infield extras) for `scope` ("mlb", "milb", or "both") — one
     row per player per position actually played that season.
@@ -3853,9 +3899,11 @@ def _defense_observed_rows(conn, team_id, year, scope):
 
     rows = conn.execute(f"""
         SELECT p.player_id, p.name, p.level, f.position, f.g, f.gs, f.ip,
-               f.tc, f.a, f.po, f.e, f.dp, f.pb, f.sba, f.rto, f.zr
+               f.tc, f.a, f.po, f.e, f.dp, f.pb, f.sba, f.rto, f.zr,
+               r.int_, r.wrk_ethic, r.lead, r.loy, r.greed
         FROM fielding_stats f
         JOIN players p ON p.player_id = f.player_id
+        LEFT JOIN latest_ratings r ON r.player_id = p.player_id
         WHERE f.year=? AND {where} AND f.g > 0
         ORDER BY f.position, f.g DESC
     """, (year, *params)).fetchall()
@@ -3863,16 +3911,21 @@ def _defense_observed_rows(conn, team_id, year, scope):
     lmap = level_map()
     out = []
     for r in rows:
-        (pid, name, level, fpos, gp, gs, ip, tc, a, po, e, dp, pb, sba, rto, zr) = r
+        (pid, name, level, fpos, gp, gs, ip, tc, a, po, e, dp, pb, sba, rto, zr,
+         intel, wrk_ethic, lead, loy, greed) = r
         lbl = _DEF_FIELD_POS_CODES.get(fpos)
         if not lbl:
             continue
         fpct = round((po + a) / tc, 3) if tc else None
         range_factor = round((po + a) / gp, 2) if gp else None
         cs_pct = round(100 * rto / sba, 1) if sba else None
+        buffs, concerns = _personality_notes(intel, wrk_ethic, lead, loy, greed)
+        comp = composites.get(pid, {})
         out.append({
-            "pid": pid, "name": name, "level": lmap.get(str(level), str(level)),
+            "pid": pid, "name": name, "level": _def_level_disp(level, lmap),
             "pos": lbl, "pos_sort": pos_order().get(lbl, 99),
+            "composite": comp.get("composite"), "vr": comp.get("vr"), "vl": comp.get("vl"),
+            "buffs": buffs, "concerns": concerns,
             "g": gp, "gs": gs, "ip": ip, "e": e or 0, "dp": dp or 0,
             "zr": round(zr, 1) if zr is not None else None,
             "fpct": fpct, "range_factor": range_factor,
@@ -3884,26 +3937,26 @@ def _defense_observed_rows(conn, team_id, year, scope):
 
 def get_defense_page(team_id=None):
     """Everything defensive in one place: current ratings at every
-    position (raw and 20-80), a Fielding Potential chart (who could still
-    learn a new position), and real observed defensive stats — see the
-    three _defense_*_rows() helpers above for each section's exact scope.
+    position (raw, color-coded to the same 20-80 tiers as everywhere
+    else), a Fielding Potential chart (who could still learn a new
+    position), and real observed defensive stats — see the three
+    _defense_*_rows() helpers above for each section's exact scope.
     """
     conn = get_db()
     tid = team_id or my_team_id()
     state = _get_state()
     year = state.get("stats_year", state["year"])
+    composites = _defense_hit_composites(conn, tid)
 
     return {
-        "ratings_raw": _defense_ratings_rows(conn, tid, normalize=False),
-        "ratings_norm": _defense_ratings_rows(conn, tid, normalize=True),
-        "potential_mlb": _defense_potential_rows(conn, tid, "mlb"),
-        "potential_milb": _defense_potential_rows(conn, tid, "milb"),
-        "potential_both": _defense_potential_rows(conn, tid, "both"),
-        "observed_mlb": _defense_observed_rows(conn, tid, year, "mlb"),
-        "observed_milb": _defense_observed_rows(conn, tid, year, "milb"),
-        "observed_both": _defense_observed_rows(conn, tid, year, "both"),
+        "ratings": _defense_ratings_rows(conn, tid, composites),
+        "potential_mlb": _defense_potential_rows(conn, tid, "mlb", composites),
+        "potential_milb": _defense_potential_rows(conn, tid, "milb", composites),
+        "potential_both": _defense_potential_rows(conn, tid, "both", composites),
+        "observed_mlb": _defense_observed_rows(conn, tid, year, "mlb", composites),
+        "observed_milb": _defense_observed_rows(conn, tid, year, "milb", composites),
+        "observed_both": _defense_observed_rows(conn, tid, year, "both", composites),
         "stats_year": year,
-        "def_pot_floor": _DEF_POT_FLOOR,
     }
 
 

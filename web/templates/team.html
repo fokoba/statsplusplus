@@ -855,21 +855,33 @@
     <button class="split-btn" onclick="defSwitchSubtab(this, 'ratings-norm')">Ratings (20-80)</button>
     <button class="split-btn" onclick="defSwitchSubtab(this, 'potential')">Fielding Potential</button>
     <button class="split-btn" onclick="defSwitchSubtab(this, 'observed')">Observed</button>
+    <label id="def-negpers-wrap" style="margin-left:auto; font-size:12px; color:var(--text-dim)" title="Dims (doesn't hide) rows with a Low Work Ethic, Low Intelligence, Low Leadership, Low Loyalty, or Greedy flag.">
+      <input type="checkbox" id="def-negpers-filter" onchange="defFilterPers()"> Dim bad personalities
+    </label>
   </div>
 
-  {% macro def_ratings_table(rows, table_id, colorize) %}
+  {% macro def_comp_cells(p) %}
+  <td><span class="ovr-color" data-g="{{ p.composite }}">{{ p.composite if p.composite is not none else '—' }}</span></td>
+  <td><span class="ovr-color" data-g="{{ p.vr }}">{{ p.vr|round|int if p.vr is not none else '—' }}</span></td>
+  <td><span class="ovr-color" data-g="{{ p.vl }}">{{ p.vl|round|int if p.vl is not none else '—' }}</span></td>
+  {% endmacro %}
+
+  {% macro def_ratings_table(rows, table_id, use_norm_text) %}
   <div class="panel">
     <div style="font-size:12px; color:var(--text-dim); margin-bottom:10px">
       Every MLB position player's rating at all 8 positions, plus catcher (Arm/Blocking/Framing), infield
       (Range/Error/Arm/Turn Double Play), and outfield (Range/Error/Arm) specialty ratings.
-      {{ '20-80 scouting scale.' if colorize else "Native league rating scale, whatever this league's export uses." }}
+      {{ '20-80 scouting scale.' if use_norm_text else "Native league rating scale, whatever this league's export uses — colored on the same 20-80 tiers as everywhere else in the app." }}
     </div>
     <div style="overflow-x:auto">
     <table id="{{ table_id }}" class="sortable">
       <thead>
         <tr>
           <th class="left" data-sort="str">Name</th>
-          <th data-sort="num" data-sort-best="low">Age</th>
+          <th data-sort="num" class="col-sep" title="Overall composite score">Comp</th>
+          <th data-sort="num" title="vR composite">vR</th>
+          <th data-sort="num" title="vL composite">vL</th>
+          <th data-sort="num" data-sort-best="low" class="col-sep">Age</th>
           <th data-sort="pos" class="left">Pos</th>
           <th data-sort="str">B/T</th>
           <th data-sort="num" class="col-sep">C</th>
@@ -894,26 +906,20 @@
       </thead>
       <tbody>
         {% for p in rows %}
-        <tr>
+        <tr data-pers="{{ 'neg' if p.concerns else '' }}">
           <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
-          <td>{{ p.age }}</td>
+          {{ def_comp_cells(p) }}
+          <td class="col-sep">{{ p.age }}</td>
           <td class="left" data-sort-value="{{ p.pos_sort }}">{{ p.pos }}</td>
           <td>{{ p.bt }}</td>
-          {% for v in [p.c, p.first_b, p.second_b, p.third_b, p.ss, p.lf, p.cf, p.rf] %}
-          <td{% if loop.first %} class="col-sep"{% endif %}>{% if v is not none %}{% if colorize %}<span class="ovr-color" data-g="{{ v }}">{{ v }}</span>{% else %}{{ v }}{% endif %}{% else %}—{% endif %}</td>
-          {% endfor %}
-          {% for v in [p.c_arm, p.c_blk, p.c_frm] %}
-          <td{% if loop.first %} class="col-sep"{% endif %}>{% if v is not none %}{% if colorize %}<span class="ovr-color" data-g="{{ v }}">{{ v }}</span>{% else %}{{ v }}{% endif %}{% else %}—{% endif %}</td>
-          {% endfor %}
-          {% for v in [p.ifr, p.ife, p.ifa, p.tdp] %}
-          <td{% if loop.first %} class="col-sep"{% endif %}>{% if v is not none %}{% if colorize %}<span class="ovr-color" data-g="{{ v }}">{{ v }}</span>{% else %}{{ v }}{% endif %}{% else %}—{% endif %}</td>
-          {% endfor %}
-          {% for v in [p.ofr, p.ofe, p.ofa] %}
-          <td{% if loop.first %} class="col-sep"{% endif %}>{% if v is not none %}{% if colorize %}<span class="ovr-color" data-g="{{ v }}">{{ v }}</span>{% else %}{{ v }}{% endif %}{% else %}—{% endif %}</td>
+          {% for f in ['c','first_b','second_b','third_b','ss','lf','cf','rf','c_arm','c_blk','c_frm','ifr','ife','ifa','tdp','ofr','ofe','ofa'] %}
+          {% set v = p[f] %}
+          {% set g = p[f + '_g'] %}
+          <td{% if f in ['c','c_arm','ifr','ofr'] %} class="col-sep"{% endif %}>{% if g is not none %}<span class="ovr-color" data-g="{{ g }}">{{ g if use_norm_text else v }}</span>{% else %}—{% endif %}</td>
           {% endfor %}
         </tr>
         {% endfor %}
-        {% if not rows %}<tr><td colspan="22" class="text-dim">No position players on the active roster.</td></tr>{% endif %}
+        {% if not rows %}<tr><td colspan="25" class="text-dim">No position players on the active roster.</td></tr>{% endif %}
       </tbody>
     </table>
     </div>
@@ -921,10 +927,10 @@
   {% endmacro %}
 
   <div class="def-subtab active" data-def-subtab="ratings">
-    {{ def_ratings_table(defense.ratings_raw, "def-ratings-table", false) }}
+    {{ def_ratings_table(defense.ratings, "def-ratings-table", false) }}
   </div>
   <div class="def-subtab" data-def-subtab="ratings-norm" style="display:none">
-    {{ def_ratings_table(defense.ratings_norm, "def-ratings-norm-table", true) }}
+    {{ def_ratings_table(defense.ratings, "def-ratings-norm-table", true) }}
   </div>
 
   {% macro def_potential_table(rows, table_id) %}
@@ -933,7 +939,10 @@
     <thead>
       <tr>
         <th class="left" data-sort="str">Name</th>
-        <th data-sort="num" data-sort-best="low">Age</th>
+        <th data-sort="num" class="col-sep" title="Overall composite score">Comp</th>
+        <th data-sort="num" title="vR composite">vR</th>
+        <th data-sort="num" title="vL composite">vL</th>
+        <th data-sort="num" data-sort-best="low" class="col-sep">Age</th>
         <th data-sort="str">Level</th>
         <th data-sort="pos" class="left">Pos</th>
         {% for lbl in ['C','1B','2B','3B','SS','LF','CF','RF'] %}
@@ -943,9 +952,10 @@
     </thead>
     <tbody>
       {% for p in rows %}
-      <tr>
+      <tr data-pers="{{ 'neg' if p.concerns else '' }}">
         <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
-        <td>{{ p.age }}</td>
+        {{ def_comp_cells(p) }}
+        <td class="col-sep">{{ p.age }}</td>
         <td>{{ p.level }}</td>
         <td class="left" data-sort-value="{{ p.pos_sort }}">{{ p.pos }}</td>
         {% for lbl in ['C','1B','2B','3B','SS','LF','CF','RF'] %}
@@ -954,9 +964,9 @@
           {%- if not cell -%}
           —
           {%- elif cell.reached -%}
-          <span style="color:#4caf50" title="Reached full potential at {{ lbl }} ({{ cell.pot }})">{{ cell.cur }} ✓</span>
+          <span class="ovr-color" data-g="{{ cell.cur }}" title="Reached full potential at {{ lbl }} ({{ cell.pot }})">{{ cell.cur }} ✓</span>
           {%- else -%}
-          <span title="Currently {{ cell.cur if cell.cur is not none else 'unrated' }}, could develop to {{ cell.pot }}">{{ cell.cur if cell.cur is not none else '—' }} → {{ cell.pot }}</span>
+          <span title="Currently {{ cell.cur if cell.cur is not none else 'unrated' }}, could develop to {{ cell.pot }}"><span class="ovr-color" data-g="{{ cell.cur }}">{{ cell.cur if cell.cur is not none else '—' }}</span> → <span class="ovr-color" data-g="{{ cell.pot }}">{{ cell.pot }}</span></span>
           {%- endif -%}
         </td>
         {% endfor %}
@@ -972,9 +982,9 @@
   <div class="def-subtab" data-def-subtab="potential" style="display:none">
     <div class="panel">
       <div style="font-size:12px; color:var(--text-dim); margin-bottom:10px">
-        Every position a player could realistically still learn ({{ defense.def_pot_floor }}/80+ potential) but
-        hasn't fully reached yet — current → potential, or a green checkmark once current catches up to potential.
-        Positions with no real long-term projection there are blank.
+        Every position a player has any real potential rating at (excluding pitcher) but hasn't fully reached yet —
+        current → potential, or a green checkmark once current catches up to potential. Positions never evaluated
+        for that player are blank.
       </div>
       <div class="level-filter-btns" style="display:flex; gap:2px; margin-bottom:10px">
         <button class="filter-btn active" onclick="defSwitchPotentialScope(this, 'mlb')">MLB</button>
@@ -994,7 +1004,10 @@
     <thead>
       <tr>
         <th class="left" data-sort="str">Name</th>
-        <th data-sort="str">Level</th>
+        <th data-sort="num" class="col-sep" title="Overall composite score">Comp</th>
+        <th data-sort="num" title="vR composite">vR</th>
+        <th data-sort="num" title="vL composite">vL</th>
+        <th data-sort="str" class="col-sep">Level</th>
         <th data-sort="pos" class="left">Pos</th>
         <th data-sort="num" class="col-sep">G</th>
         <th data-sort="num">GS</th>
@@ -1010,9 +1023,10 @@
     </thead>
     <tbody>
       {% for p in rows %}
-      <tr data-def-pos="{{ p.pos }}">
+      <tr data-def-pos="{{ p.pos }}" data-pers="{{ 'neg' if p.concerns else '' }}">
         <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
-        <td>{{ p.level }}</td>
+        {{ def_comp_cells(p) }}
+        <td class="col-sep">{{ p.level }}</td>
         <td class="left" data-sort-value="{{ p.pos_sort }}">{{ p.pos }}</td>
         <td class="col-sep">{{ p.g }}</td>
         <td>{{ p.gs }}</td>
@@ -1026,7 +1040,7 @@
         <td>{{ p.cs_pct if p.cs_pct is not none else '—' }}</td>
       </tr>
       {% endfor %}
-      {% if not rows %}<tr><td colspan="13" class="text-dim">No fielding stats this season in this scope.</td></tr>{% endif %}
+      {% if not rows %}<tr><td colspan="16" class="text-dim">No fielding stats this season in this scope.</td></tr>{% endif %}
     </tbody>
   </table>
   {% endmacro %}
@@ -1062,6 +1076,10 @@
   </div>
 </div>
 
+<style>
+#tab-defense tr[data-pers="neg"].def-dimmed { opacity: 0.4; }
+</style>
+
 <script>
 function defSwitchSubtab(btn, tab) {
   btn.parentNode.querySelectorAll('.split-btn').forEach(function(b) { b.classList.remove('active'); });
@@ -1089,6 +1107,12 @@ function defFilterObservedPos() {
   var pos = document.getElementById('def-observed-pos-filter').value;
   document.querySelectorAll('[data-def-subtab="observed"] [data-obs-scope]:not([style*="display: none"]) tbody tr').forEach(function(tr) {
     tr.style.display = (pos === 'all' || tr.dataset.defPos === pos) ? '' : 'none';
+  });
+}
+function defFilterPers() {
+  var dim = document.getElementById('def-negpers-filter').checked;
+  document.querySelectorAll('#tab-defense tr[data-pers]').forEach(function(tr) {
+    tr.classList.toggle('def-dimmed', dim && tr.dataset.pers === 'neg');
   });
 }
 </script>

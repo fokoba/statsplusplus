@@ -3429,7 +3429,8 @@ def get_org_minor_league_roster(parent_team_id):
                r.fst, r.snk, r.crv, r.sld, r.chg, r.splt, r.cutt,
                r.cir_chg, r.scr, r.frk, r.kncrv, r.knbl,
                pf.fv, pf.fv_str, pf.risk, pf.prospect_surplus, pf.bucket,
-               ps.surplus, pf.fv_continuous
+               ps.surplus, pf.fv_continuous, r.acc,
+               r.int_, r.wrk_ethic, r.lead, r.loy, r.greed
         FROM players p
         LEFT JOIN latest_ratings r ON p.player_id = r.player_id
         LEFT JOIN prospect_fv pf ON p.player_id = pf.player_id
@@ -3446,13 +3447,22 @@ def get_org_minor_league_roster(parent_team_id):
     ).fetchall():
         forty_man_pids.add(r[0])
 
-    n = _norm_rating
+    # This function hardcoded scale="1-100" (norm()'s default) regardless of
+    # the league's actual ratings_scale — silently wrong for any "20-80"
+    # league (PPL): a raw value that's already a 20-80 grade (e.g. 80) was
+    # being re-normalized as if it were a 1-100 raw score, understating it
+    # (norm(80, "1-100") -> 70). Every grade on this page was affected, not
+    # just the new Viable Positions column below.
+    _rscale = get_cfg().ratings_scale
+    n = lambda v: _norm_rating(v, _rscale)
     _pm = pos_map()
     lmap = level_map()
     _role_pos = {11: "SP", 12: "SP", 13: "RP"}
     _pos_order = {"C": 1, "1B": 2, "2B": 3, "3B": 4, "SS": 5, "LF": 6, "CF": 7, "RF": 8, "OF": 9, "DH": 10}
     _role_order = {"SP": 1, "RP": 2}
     _level_order = {"2": 1, "3": 2, "4": 3, "5": 4, "6": 5, "8": 6, "0": 7}
+    _VIABLE_POS_THRESHOLD = 65
+    _VIABLE_POS_ORDER = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF"]
 
     hitters = []
     pitchers = []
@@ -3470,6 +3480,8 @@ def get_org_minor_league_roster(parent_team_id):
         fv, fv_str, risk, prospect_surplus, bucket = r[49:54]
         mlb_surplus = r[54]
         fv_continuous = r[55]
+        acc = r[56]
+        intel, wrk_ethic, lead, loy, greed = r[57:62]
 
         ceiling = true_ceil or ceil_score
         is_pitcher = role in (11, 12, 13)
@@ -3492,6 +3504,7 @@ def get_org_minor_league_roster(parent_team_id):
         else:
             display_p = _pm.get(pos, "?")
 
+        buffs, concerns = _personality_notes(intel, wrk_ethic, lead, loy, greed)
         base = {
             "pid": pid, "name": name, "age": age,
             "pos": display_p, "bt": bt,
@@ -3502,6 +3515,7 @@ def get_org_minor_league_roster(parent_team_id):
                        if (prospect_surplus is not None or mlb_surplus is not None) else None,
             "peak_surplus": _peak_surplus(fv_continuous, age, level_name, bucket, ovr=composite, pot=potential),
             "on_40man": bool(on_40man),
+            "acc": acc, "buffs": buffs, "concerns": concerns,
         }
 
         if is_pitcher:
@@ -3522,12 +3536,17 @@ def get_org_minor_league_roster(parent_team_id):
                             "1B": first_b, "LF": lf, "CF": cf, "RF": rf}
             pos_def = _pos_def_map.get(display_p)
             lvl_sort = _level_order.get(str(level), 99)
+            viable_positions = [
+                vp for vp in _VIABLE_POS_ORDER
+                if (n(_pos_def_map.get(vp)) or 0) >= _VIABLE_POS_THRESHOLD
+            ]
             base.update({
                 "con": n(cntct), "pot_con": n(pot_cntct),
                 "gap": n(gap), "pot_gap": n(pot_gap),
                 "pow": n(pw), "pot_pow": n(pot_pw),
                 "eye": n(eye), "pot_eye": n(pot_eye),
                 "spd": n(speed), "def": n(pos_def) if pos_def else None,
+                "viable_positions": viable_positions,
                 "_sort": (lvl_sort, _pos_order.get(display_p, 99), -(composite or 0)),
                 "_pos_sort": _pos_order.get(display_p, 99),
             })

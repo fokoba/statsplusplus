@@ -46,6 +46,12 @@
         <input type="checkbox" id="forty-man-filter" onchange="applyFilters()"> 40-man only
       </label>
     </div>
+    <div class="filter-group">
+      <label style="font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px">&nbsp;</label>
+      <label style="font-size:12px; color:var(--text); cursor:pointer; display:flex; align-items:center; gap:4px; margin-top:3px" title="Dims (doesn't hide) rows with a Low Work Ethic, Low Intelligence, Low Leadership, Low Loyalty, or Greedy flag.">
+        <input type="checkbox" id="negpers-filter" onchange="applyFilters()"> Dim bad personalities
+      </label>
+    </div>
     <div class="filter-group" style="display:flex; align-items:flex-end">
       <span id="filter-count" style="font-size:11px; color:var(--text-dim); margin-top:3px"></span>
     </div>
@@ -69,20 +75,23 @@
         <th data-sort="num">Comp</th>
         <th data-sort="num">Ceil</th>
         <th data-sort="str" data-sort-best="high">FV</th>
+        <th data-sort="str" title="Scouting accuracy grade for this player's ratings">Acc</th>
         <th data-sort="num">Con</th>
         <th data-sort="num">Gap</th>
         <th data-sort="num">Pow</th>
         <th data-sort="num">Eye</th>
         <th data-sort="num">Spd</th>
         <th data-sort="num">Def</th>
+        <th class="left" title="Every position this player currently grades 65/80 or higher at — a quick check for who can play the field vs. who's a DH-only bat.">Viable Positions</th>
         <th data-sort="num">Surplus</th>
         <th data-sort="num" title="Best single projected year at expected grade — quality independent of remaining runway">Peak Yr</th>
         <th data-sort="str">Promo</th>
+        <th class="left">Personality</th>
       </tr>
     </thead>
     <tbody>
       {% for p in roster.hitters %}
-      <tr data-level="{{ p.level_num }}" data-pos="{{ p.pos }}" data-40man="{{ '1' if p.on_40man else '0' }}">
+      <tr data-level="{{ p.level_num }}" data-pos="{{ p.pos }}" data-40man="{{ '1' if p.on_40man else '0' }}" data-pers="{{ 'neg' if p.concerns else '' }}">
         <td data-sort-value="{{ p.level_num }}"><span class="level-badge level-{{ p.level|lower|replace('-','') }}">{{ p.level }}</span></td>
         <td class="left" data-sort-value="{{ p._pos_sort }}">{{ p.pos }}</td>
         <td class="left">
@@ -94,15 +103,23 @@
         <td>{% if p.composite %}<span class="ovr-color" data-g="{{ p.composite }}">{{ p.composite }}</span>{% else %}—{% endif %}</td>
         <td>{% if p.ceiling %}<span class="ovr-color" data-g="{{ p.ceiling }}">{{ p.ceiling }}</span>{% else %}—{% endif %}</td>
         <td>{{ p.fv_str or '—' }}{% if p.risk %} <span style="font-size:10px;color:{% if p.risk == 'Low' %}#4caf50{% elif p.risk == 'Medium' %}#ffc107{% elif p.risk == 'High' %}#ff9800{% else %}#f44336{% endif %}">{{ p.risk[0] }}</span>{% endif %}</td>
+        <td>{{ p.acc or '—' }}</td>
         <td>{% if p.con %}<span class="ovr-color" data-g="{{ p.con }}">{{ p.con }}</span>{% if p.pot_con and p.pot_con != p.con %}/<span class="ovr-color" data-g="{{ p.pot_con }}">{{ p.pot_con }}</span>{% endif %}{% else %}—{% endif %}</td>
         <td>{% if p.gap %}<span class="ovr-color" data-g="{{ p.gap }}">{{ p.gap }}</span>{% if p.pot_gap and p.pot_gap != p.gap %}/<span class="ovr-color" data-g="{{ p.pot_gap }}">{{ p.pot_gap }}</span>{% endif %}{% else %}—{% endif %}</td>
         <td>{% if p.pow %}<span class="ovr-color" data-g="{{ p.pow }}">{{ p.pow }}</span>{% if p.pot_pow and p.pot_pow != p.pow %}/<span class="ovr-color" data-g="{{ p.pot_pow }}">{{ p.pot_pow }}</span>{% endif %}{% else %}—{% endif %}</td>
         <td>{% if p.eye %}<span class="ovr-color" data-g="{{ p.eye }}">{{ p.eye }}</span>{% if p.pot_eye and p.pot_eye != p.eye %}/<span class="ovr-color" data-g="{{ p.pot_eye }}">{{ p.pot_eye }}</span>{% endif %}{% else %}—{% endif %}</td>
         <td>{% if p.spd %}<span class="ovr-color" data-g="{{ p.spd }}">{{ p.spd }}</span>{% else %}—{% endif %}</td>
         <td>{% if p.def %}<span class="ovr-color" data-g="{{ p.def }}">{{ p.def }}</span>{% else %}—{% endif %}</td>
+        <td class="left" style="font-size:12px">{{ p.viable_positions|join(", ") if p.viable_positions else '—' }}</td>
         <td>{% if p.surplus is not none and p.surplus > 0 %}${{ p.surplus }}{{ money_unit }}{% else %}—{% endif %}</td>
         <td>{% if p.peak_surplus is not none and p.peak_surplus > 0 %}${{ p.peak_surplus }}{{ money_unit }}{% else %}—{% endif %}</td>
         <td>{% if p.promo and p.promo.tier in ('ready', 'knocking') %}<span class="promo-badge promo-{{ p.promo.tier }}" title="{{ p.promo.reasons|join('; ') }}">{{ p.promo.label }}</span>{% elif p.demotion %}<span class="promo-badge promo-{{ p.demotion.tier }}" title="{{ p.demotion.reasons|join('; ') }}">{{ p.demotion.label }}</span>{% else %}{% endif %}</td>
+        <td class="left" style="font-size:12px">
+          {%- if p.buffs %}<span style="color:#4caf50">{{ p.buffs|join(", ") }}</span>{% endif -%}
+          {%- if p.buffs and p.concerns %}<br>{% endif -%}
+          {%- if p.concerns %}<span style="color:#f44336">{{ p.concerns|join(", ") }}</span>{% endif -%}
+          {%- if not p.buffs and not p.concerns %}<span style="color:var(--text-dim)">—</span>{% endif -%}
+        </td>
       </tr>
       {% endfor %}
     </tbody>
@@ -120,6 +137,7 @@
         <th data-sort="num">Comp</th>
         <th data-sort="num">Ceil</th>
         <th data-sort="str" data-sort-best="high">FV</th>
+        <th data-sort="str" title="Scouting accuracy grade for this player's ratings">Acc</th>
         <th data-sort="num">Stf</th>
         <th data-sort="num">Mov</th>
         <th data-sort="num">Ctrl</th>
@@ -128,11 +146,12 @@
         <th data-sort="num">Surplus</th>
         <th data-sort="num" title="Best single projected year at expected grade — quality independent of remaining runway">Peak Yr</th>
         <th data-sort="str">Promo</th>
+        <th class="left">Personality</th>
       </tr>
     </thead>
     <tbody>
       {% for p in roster.pitchers %}
-      <tr data-level="{{ p.level_num }}" data-pos="{{ p.pos }}" data-40man="{{ '1' if p.on_40man else '0' }}">
+      <tr data-level="{{ p.level_num }}" data-pos="{{ p.pos }}" data-40man="{{ '1' if p.on_40man else '0' }}" data-pers="{{ 'neg' if p.concerns else '' }}">
         <td data-sort-value="{{ p.level_num }}"><span class="level-badge level-{{ p.level|lower|replace('-','') }}">{{ p.level }}</span></td>
         <td class="left" data-sort-value="{{ p._pos_sort }}">{{ p.pos }}</td>
         <td class="left">
@@ -144,6 +163,7 @@
         <td>{% if p.composite %}<span class="ovr-color" data-g="{{ p.composite }}">{{ p.composite }}</span>{% else %}—{% endif %}</td>
         <td>{% if p.ceiling %}<span class="ovr-color" data-g="{{ p.ceiling }}">{{ p.ceiling }}</span>{% else %}—{% endif %}</td>
         <td>{{ p.fv_str or '—' }}{% if p.risk %} <span style="font-size:10px;color:{% if p.risk == 'Low' %}#4caf50{% elif p.risk == 'Medium' %}#ffc107{% elif p.risk == 'High' %}#ff9800{% else %}#f44336{% endif %}">{{ p.risk[0] }}</span>{% endif %}</td>
+        <td>{{ p.acc or '—' }}</td>
         <td>{% if p.stf %}<span class="ovr-color" data-g="{{ p.stf }}">{{ p.stf }}</span>{% if p.pot_stf and p.pot_stf != p.stf %}/<span class="ovr-color" data-g="{{ p.pot_stf }}">{{ p.pot_stf }}</span>{% endif %}{% else %}—{% endif %}</td>
         <td>{% if p.mov %}<span class="ovr-color" data-g="{{ p.mov }}">{{ p.mov }}</span>{% if p.pot_mov and p.pot_mov != p.mov %}/<span class="ovr-color" data-g="{{ p.pot_mov }}">{{ p.pot_mov }}</span>{% endif %}{% else %}—{% endif %}</td>
         <td>{% if p.ctrl %}<span class="ovr-color" data-g="{{ p.ctrl }}">{{ p.ctrl }}</span>{% if p.pot_ctrl and p.pot_ctrl != p.ctrl %}/<span class="ovr-color" data-g="{{ p.pot_ctrl }}">{{ p.pot_ctrl }}</span>{% endif %}{% else %}—{% endif %}</td>
@@ -152,6 +172,12 @@
         <td>{% if p.surplus is not none and p.surplus > 0 %}${{ p.surplus }}{{ money_unit }}{% else %}—{% endif %}</td>
         <td>{% if p.peak_surplus is not none and p.peak_surplus > 0 %}${{ p.peak_surplus }}{{ money_unit }}{% else %}—{% endif %}</td>
         <td>{% if p.promo and p.promo.tier in ('ready', 'knocking') %}<span class="promo-badge promo-{{ p.promo.tier }}" title="{{ p.promo.reasons|join('; ') }}">{{ p.promo.label }}</span>{% elif p.demotion %}<span class="promo-badge promo-{{ p.demotion.tier }}" title="{{ p.demotion.reasons|join('; ') }}">{{ p.demotion.label }}</span>{% else %}{% endif %}</td>
+        <td class="left" style="font-size:12px">
+          {%- if p.buffs %}<span style="color:#4caf50">{{ p.buffs|join(", ") }}</span>{% endif -%}
+          {%- if p.buffs and p.concerns %}<br>{% endif -%}
+          {%- if p.concerns %}<span style="color:#f44336">{{ p.concerns|join(", ") }}</span>{% endif -%}
+          {%- if not p.buffs and not p.concerns %}<span style="color:var(--text-dim)">—</span>{% endif -%}
+        </td>
       </tr>
       {% endfor %}
     </tbody>
@@ -197,6 +223,7 @@
 .filter-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 .age-young { color: #4caf50; font-weight: 600; }
 .age-old { color: #f44336; font-weight: 600; }
+tr.milb-dimmed { opacity: 0.4; }
 </style>
 
 <script>
@@ -256,7 +283,14 @@ function filterLevel(btn) {
 function applyFilters() {
   var posFilter = document.getElementById('pos-filter').value;
   var fortyOnly = document.getElementById('forty-man-filter').checked;
+  var dimPers = document.getElementById('negpers-filter').checked;
   var visibleCount = 0;
+
+  // Dimming applies to every row, including whichever tab isn't currently
+  // shown, so it's already correct the moment you switch tabs.
+  document.querySelectorAll('.roster-tab-table tbody tr').forEach(function(tr) {
+    tr.classList.toggle('milb-dimmed', dimPers && tr.dataset.pers === 'neg');
+  });
 
   // Get the currently visible table
   document.querySelectorAll('.roster-tab-table').forEach(function(table) {

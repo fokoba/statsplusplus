@@ -261,6 +261,7 @@ def team(tid):
     cut_candidates = queries.get_cut_candidates(tid)
     waiver_candidates = queries.get_waiver_candidates(tid)
     fa_candidates = queries.get_free_agent_candidates(tid)
+    defense = queries.get_defense_page(tid)
     return render_template("team.html",
                            tid=tid, team_name=name,
                            breadcrumbs=[{"label": cfg.settings.get("league", "League"), "url": "/league"},
@@ -284,7 +285,8 @@ def team(tid):
                            affiliates=affiliates,
                            cut_candidates=cut_candidates,
                            waiver_candidates=waiver_candidates,
-                           fa_candidates=fa_candidates)
+                           fa_candidates=fa_candidates,
+                           defense=defense)
 
 
 @app.route("/team/<int:tid>/minors")

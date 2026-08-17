@@ -3729,6 +3729,184 @@ def get_org_minor_league_roster(parent_team_id):
     return {"hitters": hitters, "pitchers": pitchers}
 
 
+# Position label -> (current-rating column, potential-rating column) in
+# `ratings`. Shared by every section of the Defense page.
+_DEF_POS_COLS = [
+    ("C", "c", "pot_c"), ("1B", "first_b", "pot_first_b"), ("2B", "second_b", "pot_second_b"),
+    ("3B", "third_b", "pot_third_b"), ("SS", "ss", "pot_ss"),
+    ("LF", "lf", "pot_lf"), ("CF", "cf", "pot_cf"), ("RF", "rf", "pot_rf"),
+]
+_DEF_FIELD_POS_CODES = {2: "C", 3: "1B", 4: "2B", 5: "3B", 6: "SS", 7: "LF", 8: "CF", 9: "RF"}
+# "Worth learning" bar for the Potential chart — a below-40 potential grade
+# isn't a real projection, just noise from a position the player will
+# never realistically play.
+_DEF_POT_FLOOR = 40
+
+
+def _defense_ratings_rows(conn, team_id, normalize):
+    """Every MLB position player's ratings at all 8 positions, plus their
+    catcher/infield/outfield specialty sub-ratings — raw (native scale) if
+    normalize=False, 20-80 if True. One row per player.
+    """
+    from statsplusplus.config.ratings import norm as _norm_rating
+    rscale = get_cfg().ratings_scale
+    g = (lambda v: _norm_rating(v, rscale)) if normalize else (lambda v: v)
+
+    rows = conn.execute("""
+        SELECT p.player_id, p.name, p.age, p.pos, r.bats, r.throws,
+               r.c, r.first_b, r.second_b, r.third_b, r.ss, r.lf, r.cf, r.rf,
+               r.c_arm, r.c_blk, r.c_frm, r.ifr, r.ife, r.ifa, r.tdp, r.ofr, r.ofe, r.ofa
+        FROM players p
+        LEFT JOIN latest_ratings r ON p.player_id = r.player_id
+        WHERE p.team_id=? AND p.level='1' AND COALESCE(p.role,0) NOT IN (11,12,13)
+    """, (team_id,)).fetchall()
+
+    _pm = pos_map()
+    out = []
+    for r in rows:
+        (pid, name, age, pos, bats, throws, c, first_b, second_b, third_b, ss, lf, cf, rf,
+         c_arm, c_blk, c_frm, ifr, ife, ifa, tdp, ofr, ofe, ofa) = r
+        _dp = _pm.get(pos, "?")
+        out.append({
+            "pid": pid, "name": name, "age": age, "pos": _dp, "pos_sort": pos_order().get(_dp, 99),
+            "bt": f"{bats}/{throws}" if bats and throws else (bats or ""),
+            "c": g(c), "first_b": g(first_b), "second_b": g(second_b), "third_b": g(third_b),
+            "ss": g(ss), "lf": g(lf), "cf": g(cf), "rf": g(rf),
+            "c_arm": g(c_arm), "c_blk": g(c_blk), "c_frm": g(c_frm),
+            "ifr": g(ifr), "ife": g(ife), "ifa": g(ifa), "tdp": g(tdp),
+            "ofr": g(ofr), "ofe": g(ofe), "ofa": g(ofa),
+        })
+    out.sort(key=lambda p: (pos_order().get(p["pos"], 99), p["name"]))
+    return out
+
+
+def _defense_potential_rows(conn, team_id, scope):
+    """cur/pot pairs at every position worth learning (pot >= _DEF_POT_FLOOR
+    on the normalized scale), for every position player in `scope`
+    ("mlb", "milb", or "both") — the raw material for the Fielding
+    Potential chart's per-position cur/checkmark cells.
+    """
+    from statsplusplus.config.ratings import norm as _norm_rating
+    rscale = get_cfg().ratings_scale
+    n = lambda v: _norm_rating(v, rscale)
+
+    where = "p.team_id=? AND p.level='1'"
+    params = [team_id]
+    if scope == "milb":
+        where = "p.parent_team_id=? AND p.level != '1'"
+    elif scope == "both":
+        where = "(p.team_id=? AND p.level='1') OR p.parent_team_id=?"
+        params = [team_id, team_id]
+
+    rows = conn.execute(f"""
+        SELECT p.player_id, p.name, p.age, p.level, p.pos,
+               r.c, r.pot_c, r.first_b, r.pot_first_b, r.second_b, r.pot_second_b,
+               r.third_b, r.pot_third_b, r.ss, r.pot_ss,
+               r.lf, r.pot_lf, r.cf, r.pot_cf, r.rf, r.pot_rf
+        FROM players p
+        LEFT JOIN latest_ratings r ON p.player_id = r.player_id
+        WHERE {where} AND COALESCE(p.role,0) NOT IN (11,12,13)
+    """, params).fetchall()
+
+    lmap = level_map()
+    _pm = pos_map()
+    out = []
+    for r in rows:
+        pid, name, age, level, pos = r[0:5]
+        pairs = r[5:21]
+        positions = {}
+        any_learnable = False
+        for i, (lbl, _cur_col, _pot_col) in enumerate(_DEF_POS_COLS):
+            cur_raw, pot_raw = pairs[i * 2], pairs[i * 2 + 1]
+            cur, pot = n(cur_raw), n(pot_raw)
+            if pot is None or pot < _DEF_POT_FLOOR:
+                positions[lbl] = None
+                continue
+            any_learnable = True
+            positions[lbl] = {"cur": cur, "pot": pot, "reached": cur is not None and cur >= pot}
+        if not any_learnable:
+            continue
+        _dp = _pm.get(pos, "?")
+        out.append({
+            "pid": pid, "name": name, "age": age,
+            "level": lmap.get(str(level), str(level)), "pos": _dp, "pos_sort": pos_order().get(_dp, 99),
+            "positions": positions,
+        })
+    out.sort(key=lambda p: (pos_order().get(p["pos"], 99), p["name"]))
+    return out
+
+
+def _defense_observed_rows(conn, team_id, year, scope):
+    """Real fielding stats (ZR, Fielding %, Errors, Range Factor, and
+    catcher/infield extras) for `scope` ("mlb", "milb", or "both") — one
+    row per player per position actually played that season.
+    """
+    where = "f.team_id=?"
+    params = [team_id]
+    if scope == "milb":
+        where = "p.parent_team_id=? AND f.league_id IS NOT NULL"
+    elif scope == "both":
+        where = "(f.team_id=?) OR (p.parent_team_id=? AND f.league_id IS NOT NULL)"
+        params = [team_id, team_id]
+    else:
+        where = "f.team_id=? AND f.league_id IS NULL"
+
+    rows = conn.execute(f"""
+        SELECT p.player_id, p.name, p.level, f.position, f.g, f.gs, f.ip,
+               f.tc, f.a, f.po, f.e, f.dp, f.pb, f.sba, f.rto, f.zr
+        FROM fielding_stats f
+        JOIN players p ON p.player_id = f.player_id
+        WHERE f.year=? AND {where} AND f.g > 0
+        ORDER BY f.position, f.g DESC
+    """, (year, *params)).fetchall()
+
+    lmap = level_map()
+    out = []
+    for r in rows:
+        (pid, name, level, fpos, gp, gs, ip, tc, a, po, e, dp, pb, sba, rto, zr) = r
+        lbl = _DEF_FIELD_POS_CODES.get(fpos)
+        if not lbl:
+            continue
+        fpct = round((po + a) / tc, 3) if tc else None
+        range_factor = round((po + a) / gp, 2) if gp else None
+        cs_pct = round(100 * rto / sba, 1) if sba else None
+        out.append({
+            "pid": pid, "name": name, "level": lmap.get(str(level), str(level)),
+            "pos": lbl, "pos_sort": pos_order().get(lbl, 99),
+            "g": gp, "gs": gs, "ip": ip, "e": e or 0, "dp": dp or 0,
+            "zr": round(zr, 1) if zr is not None else None,
+            "fpct": fpct, "range_factor": range_factor,
+            "pb": pb or 0 if lbl == "C" else None,
+            "cs_pct": cs_pct if lbl == "C" else None,
+        })
+    return out
+
+
+def get_defense_page(team_id=None):
+    """Everything defensive in one place: current ratings at every
+    position (raw and 20-80), a Fielding Potential chart (who could still
+    learn a new position), and real observed defensive stats — see the
+    three _defense_*_rows() helpers above for each section's exact scope.
+    """
+    conn = get_db()
+    tid = team_id or my_team_id()
+    state = _get_state()
+    year = state.get("stats_year", state["year"])
+
+    return {
+        "ratings_raw": _defense_ratings_rows(conn, tid, normalize=False),
+        "ratings_norm": _defense_ratings_rows(conn, tid, normalize=True),
+        "potential_mlb": _defense_potential_rows(conn, tid, "mlb"),
+        "potential_milb": _defense_potential_rows(conn, tid, "milb"),
+        "potential_both": _defense_potential_rows(conn, tid, "both"),
+        "observed_mlb": _defense_observed_rows(conn, tid, year, "mlb"),
+        "observed_milb": _defense_observed_rows(conn, tid, year, "milb"),
+        "observed_both": _defense_observed_rows(conn, tid, year, "both"),
+        "stats_year": year,
+        "def_pot_floor": _DEF_POT_FLOOR,
+    }
+
+
 def get_minor_league_notables(team_id):
     """Notable players on a minor league team: prospects + worth-tracking players."""
     conn = get_db()

@@ -106,6 +106,7 @@
   <button class="tab" data-tab="org">Organization</button>
   <button class="tab" data-tab="hitters">Hitters</button>
   <button class="tab" data-tab="pitchers">Pitchers</button>
+  <button class="tab" data-tab="defense">Defense</button>
   <button class="tab" data-tab="finances">Finances</button>
   <button class="tab" data-tab="contracts">Contracts</button>
   <button class="tab" data-tab="dev">Player Development</button>
@@ -846,6 +847,251 @@
     </div>
   </div>
 </div>
+
+{# ══════ Defense ══════ #}
+<div class="tab-content" id="tab-defense">
+  <div class="roster-controls">
+    <button class="split-btn active" onclick="defSwitchSubtab(this, 'ratings')">Ratings</button>
+    <button class="split-btn" onclick="defSwitchSubtab(this, 'ratings-norm')">Ratings (20-80)</button>
+    <button class="split-btn" onclick="defSwitchSubtab(this, 'potential')">Fielding Potential</button>
+    <button class="split-btn" onclick="defSwitchSubtab(this, 'observed')">Observed</button>
+  </div>
+
+  {% macro def_ratings_table(rows, table_id, colorize) %}
+  <div class="panel">
+    <div style="font-size:12px; color:var(--text-dim); margin-bottom:10px">
+      Every MLB position player's rating at all 8 positions, plus catcher (Arm/Blocking/Framing), infield
+      (Range/Error/Arm/Turn Double Play), and outfield (Range/Error/Arm) specialty ratings.
+      {{ '20-80 scouting scale.' if colorize else "Native league rating scale, whatever this league's export uses." }}
+    </div>
+    <div style="overflow-x:auto">
+    <table id="{{ table_id }}" class="sortable">
+      <thead>
+        <tr>
+          <th class="left" data-sort="str">Name</th>
+          <th data-sort="num" data-sort-best="low">Age</th>
+          <th data-sort="pos" class="left">Pos</th>
+          <th data-sort="str">B/T</th>
+          <th data-sort="num" class="col-sep">C</th>
+          <th data-sort="num">1B</th>
+          <th data-sort="num">2B</th>
+          <th data-sort="num">3B</th>
+          <th data-sort="num">SS</th>
+          <th data-sort="num">LF</th>
+          <th data-sort="num">CF</th>
+          <th data-sort="num">RF</th>
+          <th data-sort="num" class="col-sep" title="Catcher arm">C Arm</th>
+          <th data-sort="num" title="Catcher blocking">C Blk</th>
+          <th data-sort="num" title="Catcher framing">C Frm</th>
+          <th data-sort="num" class="col-sep" title="Infield range">IF Rng</th>
+          <th data-sort="num" title="Infield error avoidance">IF Err</th>
+          <th data-sort="num" title="Infield arm">IF Arm</th>
+          <th data-sort="num" title="Turn double play">TDP</th>
+          <th data-sort="num" class="col-sep" title="Outfield range">OF Rng</th>
+          <th data-sort="num" title="Outfield error avoidance">OF Err</th>
+          <th data-sort="num" title="Outfield arm">OF Arm</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in rows %}
+        <tr>
+          <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
+          <td>{{ p.age }}</td>
+          <td class="left" data-sort-value="{{ p.pos_sort }}">{{ p.pos }}</td>
+          <td>{{ p.bt }}</td>
+          {% for v in [p.c, p.first_b, p.second_b, p.third_b, p.ss, p.lf, p.cf, p.rf] %}
+          <td{% if loop.first %} class="col-sep"{% endif %}>{% if v is not none %}{% if colorize %}<span class="ovr-color" data-g="{{ v }}">{{ v }}</span>{% else %}{{ v }}{% endif %}{% else %}—{% endif %}</td>
+          {% endfor %}
+          {% for v in [p.c_arm, p.c_blk, p.c_frm] %}
+          <td{% if loop.first %} class="col-sep"{% endif %}>{% if v is not none %}{% if colorize %}<span class="ovr-color" data-g="{{ v }}">{{ v }}</span>{% else %}{{ v }}{% endif %}{% else %}—{% endif %}</td>
+          {% endfor %}
+          {% for v in [p.ifr, p.ife, p.ifa, p.tdp] %}
+          <td{% if loop.first %} class="col-sep"{% endif %}>{% if v is not none %}{% if colorize %}<span class="ovr-color" data-g="{{ v }}">{{ v }}</span>{% else %}{{ v }}{% endif %}{% else %}—{% endif %}</td>
+          {% endfor %}
+          {% for v in [p.ofr, p.ofe, p.ofa] %}
+          <td{% if loop.first %} class="col-sep"{% endif %}>{% if v is not none %}{% if colorize %}<span class="ovr-color" data-g="{{ v }}">{{ v }}</span>{% else %}{{ v }}{% endif %}{% else %}—{% endif %}</td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+        {% if not rows %}<tr><td colspan="22" class="text-dim">No position players on the active roster.</td></tr>{% endif %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+  {% endmacro %}
+
+  <div class="def-subtab active" data-def-subtab="ratings">
+    {{ def_ratings_table(defense.ratings_raw, "def-ratings-table", false) }}
+  </div>
+  <div class="def-subtab" data-def-subtab="ratings-norm" style="display:none">
+    {{ def_ratings_table(defense.ratings_norm, "def-ratings-norm-table", true) }}
+  </div>
+
+  {% macro def_potential_table(rows, table_id) %}
+  {% if rows %}
+  <table id="{{ table_id }}" class="sortable">
+    <thead>
+      <tr>
+        <th class="left" data-sort="str">Name</th>
+        <th data-sort="num" data-sort-best="low">Age</th>
+        <th data-sort="str">Level</th>
+        <th data-sort="pos" class="left">Pos</th>
+        {% for lbl in ['C','1B','2B','3B','SS','LF','CF','RF'] %}
+        <th data-sort="str"{% if loop.first %} class="col-sep"{% endif %}>{{ lbl }}</th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in rows %}
+      <tr>
+        <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
+        <td>{{ p.age }}</td>
+        <td>{{ p.level }}</td>
+        <td class="left" data-sort-value="{{ p.pos_sort }}">{{ p.pos }}</td>
+        {% for lbl in ['C','1B','2B','3B','SS','LF','CF','RF'] %}
+        {% set cell = p.positions[lbl] %}
+        <td{% if loop.first %} class="col-sep"{% endif %}>
+          {%- if not cell -%}
+          —
+          {%- elif cell.reached -%}
+          <span style="color:#4caf50" title="Reached full potential at {{ lbl }} ({{ cell.pot }})">{{ cell.cur }} ✓</span>
+          {%- else -%}
+          <span title="Currently {{ cell.cur if cell.cur is not none else 'unrated' }}, could develop to {{ cell.pot }}">{{ cell.cur if cell.cur is not none else '—' }} → {{ cell.pot }}</span>
+          {%- endif -%}
+        </td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="text-dim" style="padding:12px 0">No players with a learnable position in this scope.</div>
+  {% endif %}
+  {% endmacro %}
+
+  <div class="def-subtab" data-def-subtab="potential" style="display:none">
+    <div class="panel">
+      <div style="font-size:12px; color:var(--text-dim); margin-bottom:10px">
+        Every position a player could realistically still learn ({{ defense.def_pot_floor }}/80+ potential) but
+        hasn't fully reached yet — current → potential, or a green checkmark once current catches up to potential.
+        Positions with no real long-term projection there are blank.
+      </div>
+      <div class="level-filter-btns" style="display:flex; gap:2px; margin-bottom:10px">
+        <button class="filter-btn active" onclick="defSwitchPotentialScope(this, 'mlb')">MLB</button>
+        <button class="filter-btn" onclick="defSwitchPotentialScope(this, 'milb')">All MiLB</button>
+        <button class="filter-btn" onclick="defSwitchPotentialScope(this, 'both')">Both</button>
+      </div>
+      <div style="overflow-x:auto">
+      <div data-pot-scope="mlb">{{ def_potential_table(defense.potential_mlb, "def-potential-mlb-table") }}</div>
+      <div data-pot-scope="milb" style="display:none">{{ def_potential_table(defense.potential_milb, "def-potential-milb-table") }}</div>
+      <div data-pot-scope="both" style="display:none">{{ def_potential_table(defense.potential_both, "def-potential-both-table") }}</div>
+      </div>
+    </div>
+  </div>
+
+  {% macro def_observed_table(rows, table_id) %}
+  <table id="{{ table_id }}" class="sortable">
+    <thead>
+      <tr>
+        <th class="left" data-sort="str">Name</th>
+        <th data-sort="str">Level</th>
+        <th data-sort="pos" class="left">Pos</th>
+        <th data-sort="num" class="col-sep">G</th>
+        <th data-sort="num">GS</th>
+        <th data-sort="num">IP</th>
+        <th data-sort="num" class="col-sep" title="Zone Rating">ZR</th>
+        <th data-sort="num" title="Fielding %">FP</th>
+        <th data-sort="num" data-sort-best="low">E</th>
+        <th data-sort="num" title="(PO+A)/G">Range Factor</th>
+        <th data-sort="num" title="Double plays turned">DP</th>
+        <th data-sort="num" title="Passed balls (catchers only)">PB</th>
+        <th data-sort="num" title="Caught stealing % (catchers only)">CS%</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in rows %}
+      <tr data-def-pos="{{ p.pos }}">
+        <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
+        <td>{{ p.level }}</td>
+        <td class="left" data-sort-value="{{ p.pos_sort }}">{{ p.pos }}</td>
+        <td class="col-sep">{{ p.g }}</td>
+        <td>{{ p.gs }}</td>
+        <td>{{ '%.1f'|format(p.ip) if p.ip is not none else '—' }}</td>
+        <td class="col-sep">{{ p.zr if p.zr is not none else '—' }}</td>
+        <td>{{ '%.3f'|format(p.fpct)|replace('0.', '.') if p.fpct is not none else '—' }}</td>
+        <td class="{{ 'neg' if p.e and p.e > 0 else '' }}">{{ p.e }}</td>
+        <td>{{ p.range_factor if p.range_factor is not none else '—' }}</td>
+        <td>{{ p.dp }}</td>
+        <td>{{ p.pb if p.pb is not none else '—' }}</td>
+        <td>{{ p.cs_pct if p.cs_pct is not none else '—' }}</td>
+      </tr>
+      {% endfor %}
+      {% if not rows %}<tr><td colspan="13" class="text-dim">No fielding stats this season in this scope.</td></tr>{% endif %}
+    </tbody>
+  </table>
+  {% endmacro %}
+
+  <div class="def-subtab" data-def-subtab="observed" style="display:none">
+    <div class="panel">
+      <div style="font-size:12px; color:var(--text-dim); margin-bottom:10px">
+        Real observed defensive performance for {{ defense.stats_year }} — Zone Rating, Fielding %, and Errors
+        first as asked, plus Range Factor, double plays, and catcher passed balls/caught-stealing % alongside them.
+      </div>
+      <div style="display:flex; flex-wrap:wrap; gap:16px; align-items:center; margin-bottom:10px">
+        <div class="level-filter-btns" style="display:flex; gap:2px">
+          <button class="filter-btn active" onclick="defSwitchObservedScope(this, 'mlb')">MLB</button>
+          <button class="filter-btn" onclick="defSwitchObservedScope(this, 'milb')">All MiLB</button>
+          <button class="filter-btn" onclick="defSwitchObservedScope(this, 'both')">Both</button>
+        </div>
+        <label style="font-size:12px">
+          Position:
+          <select id="def-observed-pos-filter" onchange="defFilterObservedPos()">
+            <option value="all">All</option>
+            <option value="C">C</option><option value="1B">1B</option><option value="2B">2B</option>
+            <option value="3B">3B</option><option value="SS">SS</option><option value="LF">LF</option>
+            <option value="CF">CF</option><option value="RF">RF</option>
+          </select>
+        </label>
+      </div>
+      <div style="overflow-x:auto">
+      <div data-obs-scope="mlb">{{ def_observed_table(defense.observed_mlb, "def-observed-mlb-table") }}</div>
+      <div data-obs-scope="milb" style="display:none">{{ def_observed_table(defense.observed_milb, "def-observed-milb-table") }}</div>
+      <div data-obs-scope="both" style="display:none">{{ def_observed_table(defense.observed_both, "def-observed-both-table") }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function defSwitchSubtab(btn, tab) {
+  btn.parentNode.querySelectorAll('.split-btn').forEach(function(b) { b.classList.remove('active'); });
+  btn.classList.add('active');
+  document.querySelectorAll('#tab-defense .def-subtab').forEach(function(s) {
+    s.style.display = s.dataset.defSubtab === tab ? '' : 'none';
+  });
+}
+function defSwitchPotentialScope(btn, scope) {
+  btn.parentNode.querySelectorAll('.filter-btn').forEach(function(b) { b.classList.remove('active'); });
+  btn.classList.add('active');
+  document.querySelectorAll('[data-def-subtab="potential"] [data-pot-scope]').forEach(function(d) {
+    d.style.display = d.dataset.potScope === scope ? '' : 'none';
+  });
+}
+function defSwitchObservedScope(btn, scope) {
+  btn.parentNode.querySelectorAll('.filter-btn').forEach(function(b) { b.classList.remove('active'); });
+  btn.classList.add('active');
+  document.querySelectorAll('[data-def-subtab="observed"] [data-obs-scope]').forEach(function(d) {
+    d.style.display = d.dataset.obsScope === scope ? '' : 'none';
+  });
+  defFilterObservedPos();
+}
+function defFilterObservedPos() {
+  var pos = document.getElementById('def-observed-pos-filter').value;
+  document.querySelectorAll('[data-def-subtab="observed"] [data-obs-scope]:not([style*="display: none"]) tbody tr').forEach(function(tr) {
+    tr.style.display = (pos === 'all' || tr.dataset.defPos === pos) ? '' : 'none';
+  });
+}
+</script>
 
 {# ══════ Intl Complex ══════ #}
 <div class="tab-content" id="tab-intl">

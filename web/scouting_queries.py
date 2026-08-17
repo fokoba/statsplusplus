@@ -445,14 +445,24 @@ def get_scouting_targets(high_confidence=False, team_id=None, roster_view=None):
     best_rule5_youth = _rule5_youth_targets(conn, high_confidence)
     rule5_mine = _rule5_mine(conn, team_id, "org") if team_id else {}
     for group, gp in rule5_mine.items():
-        merged = best_rule5.get(group, []) + gp
+        # _rule5_targets()'s general pool doesn't exclude this org, so a
+        # player of yours who also clears its quality/accuracy gate would
+        # otherwise appear twice — once from the general pool, once from
+        # this "mine" merge. rule5_mine is the complete, authoritative
+        # list of your own exposed players regardless of that gate, so
+        # drop any pid it already covers from the general side first.
+        mine_pids = {p["pid"] for p in gp}
+        general = [p for p in best_rule5.get(group, []) if p["pid"] not in mine_pids]
+        merged = general + gp
         merged.sort(key=lambda p: -(p["composite_score"] if p["composite_score"] is not None else -999))
         best_rule5[group] = merged
     for group, gp in rule5_mine.items():
         young = [p for p in gp if p["age"] is not None and p["age"] <= 24]
         if not young:
             continue
-        merged = best_rule5_youth.get(group, []) + young
+        young_pids = {p["pid"] for p in young}
+        general = [p for p in best_rule5_youth.get(group, []) if p["pid"] not in young_pids]
+        merged = general + young
         merged.sort(key=lambda p: -(p["potential"] if p["potential"] is not None else -999))
         best_rule5_youth[group] = merged
 

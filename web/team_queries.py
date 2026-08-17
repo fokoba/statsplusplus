@@ -564,6 +564,26 @@ def get_roster_hitters(team_id=None):
             denom = (s_ab or 0) - (s_k or 0) - (s_hr or 0) + (s_sf or 0)
             career_babip[pid] = (s_h - s_hr) / denom if denom > 0 else None
 
+    # Career BB%/K% — diagnostic only, shown alongside BABIP but not tiered
+    # or folded into All-Up Luck: unlike BABIP, a hitter walking or striking
+    # out more than his career rate isn't cleanly "lucky" or "unlucky" (could
+    # be an approach change, aging, or how he's being pitched), so there's no
+    # honest polarity to assign it.
+    career_pct = {}
+    if roster_pids:
+        qs = ",".join("?" * len(roster_pids))
+        for r in conn.execute(f"""
+            SELECT player_id, SUM(bb), SUM(k), SUM(pa)
+            FROM mlb_batting_stats WHERE split_id=1 AND player_id IN ({qs})
+            GROUP BY player_id
+        """, roster_pids):
+            pid, s_bb, s_k, s_pa = r
+            s_pa = s_pa or 0
+            career_pct[pid] = (
+                round(100 * (s_bb or 0) / s_pa, 1) if s_pa else None,
+                round(100 * (s_k or 0) / s_pa, 1) if s_pa else None,
+            )
+
     result = []
     team_g, dpw, salaries = _pap_context(conn, tid, year)
     for p in players:
@@ -583,6 +603,7 @@ def get_roster_hitters(team_id=None):
         _luck_gap = (_cur_babip - _c_babip) if (_cur_babip is not None and _c_babip is not None
                                                   and _cur_pa >= _BABIP_MIN_PA) else None
         _babip_luck_tag = _babip_luck(_luck_gap)
+        _c_bb_pct, _c_k_pct = career_pct.get(pid, (None, None))
         result.append({
             "pid": pid, "name": p["name"], "age": p["age"],
             "ovr": _display_ovr, "pos": pos,
@@ -591,6 +612,7 @@ def get_roster_hitters(team_id=None):
             "pap": calc_pap(war, salaries.get(pid, 0), team_g, dpw),
             "is_two_way": pid in twp_pids,
             "career_babip": _r3(_c_babip), "babip_diff": _r3(_luck_gap), "luck": _babip_luck_tag,
+            "career_bb_pct": _c_bb_pct, "career_k_pct": _c_k_pct,
             "all_up_luck": _all_up_luck(_babip_luck_tag),
             "status": "DL" if (p["is_on_dl"] or p["is_on_dl60"]) else
                       ("INJ" if p["injury_is_injured"] else
@@ -650,6 +672,14 @@ def get_roster_pitchers(team_id=None):
             twp_pids.add(r["player_id"])
 
 
+    # FIP constant (league-wide, same formula/convention used on player.html)
+    # so current-season FIP is on the same scale as ERA.
+    _tp = conn.execute(
+        "SELECT SUM(era*ip)/SUM(ip), SUM(hra), SUM(bb), SUM(k), SUM(ip) "
+        "FROM team_pitching_stats WHERE split_id=1"
+    ).fetchone()
+    _fip_const = (_tp[0] - ((13 * _tp[1] + 3 * _tp[2] - 2 * _tp[3]) / _tp[4])) if _tp and _tp[4] else 3.10
+
     def _fmt_split(s):
         if not s:
             return None
@@ -667,6 +697,7 @@ def get_roster_pitchers(team_id=None):
         hr_fb = hra / fb if fb > 0 else None
         lob_denom = (ha + bb + hp) - 1.4 * hra
         lob_pct = ((ha + bb + hp) - runs) / lob_denom if lob_denom > 0 else None
+        fip = (13 * hra + 3 * (bb + hp) - 2 * k) / ip + _fip_const if ip else None
         return {
             "ip": ip, "g": s["g"] or 0, "gs": gs,
             "w": s["w"] or 0, "l": s["l"] or 0, "sv": s["sv"] or 0,
@@ -680,7 +711,7 @@ def get_roster_pitchers(team_id=None):
             "hld": s["hld"] or 0, "bs": s["bs"] or 0,
             "qs": s["qs"] or 0, "qs_pct": round(100 * (s["qs"] or 0) / gs, 1) if gs else None,
             "irs_pct": irs_pct, "babip": _r3(babip),
-            "hr_fb": _r3(hr_fb), "lob_pct": _r3(lob_pct),
+            "hr_fb": _r3(hr_fb), "lob_pct": _r3(lob_pct), "fip": round(fip, 2) if fip is not None else None,
         }
 
     # Career MLB rates (all years, split_id=1) — the baseline the current
@@ -716,7 +747,17 @@ def get_roster_pitchers(team_id=None):
         _display_ovr = p["composite_score"] if p["composite_score"] is not None else (p["ovr"] or 0)
         _cur_fmt = _fmt_split(s1) if s1 else None
         _cur_bf = (s1["bf"] or 0) if s1 else 0
-        _sample_ok = _cur_bf >= _BABIP_MIN_BF
+        # SP need the full 150 BF (~a starter's first month). RP/CL rarely
+        # reach that in a season, so their bar rises with the team's games
+        # played so far instead of sitting at a fixed number — a reliever
+        # who's barely pitched shouldn't get a tag off 2 appearances in
+        # April, but by August the same 2 appearances still shouldn't count.
+        # Mirrors the existing get_pitcher_percentiles() RP-threshold pattern.
+        if role_str in ("RP", "CL"):
+            _min_bf = max(round(_RP_BF_PER_TEAM_GAME * team_g), _RP_BF_FLOOR)
+        else:
+            _min_bf = _BABIP_MIN_BF
+        _sample_ok = _cur_bf >= _min_bf
 
         _c_babip = career_babip.get(pid)
         _cur_babip = _cur_fmt["babip"] if _cur_fmt else None
@@ -739,6 +780,15 @@ def get_roster_pitchers(team_id=None):
         _lob_gap = (_cur_lob - _c_lob) if (_cur_lob is not None and _c_lob is not None and _sample_ok) else None
         _lob_luck_tag = _luck_tier(_lob_gap, _LOB_SOMEWHAT, _LOB_VERY)
 
+        # ERA vs FIP, both current-season — not a vs-career comparison like
+        # the other three, since that's not how this metric is normally
+        # used. Positive gap (FIP > ERA) means results have outrun the
+        # pitcher's fielding-independent skill level right now — luck.
+        _cur_era = _cur_fmt["era"] if _cur_fmt else None
+        _cur_fip = _cur_fmt["fip"] if _cur_fmt else None
+        _fip_gap = (_cur_fip - _cur_era) if (_cur_era is not None and _cur_fip is not None and _sample_ok) else None
+        _fip_luck_tag = _luck_tier(_fip_gap, _FIP_SOMEWHAT, _FIP_VERY)
+
         result.append({
             "pid": pid, "name": p["name"], "age": p["age"],
             "ovr": _display_ovr, "role": role_str,
@@ -749,7 +799,8 @@ def get_roster_pitchers(team_id=None):
             "career_babip": _r3(_c_babip), "babip_diff": _r3(_babip_gap), "luck": _babip_luck_tag,
             "career_hrfb": _r3(_c_hrfb), "hrfb_diff": _r3(_hrfb_gap), "hrfb_luck": _hrfb_luck_tag,
             "career_lob": _r3(_c_lob), "lob_diff": _r3(_lob_gap), "lob_luck": _lob_luck_tag,
-            "all_up_luck": _all_up_luck(_babip_luck_tag, _hrfb_luck_tag, _lob_luck_tag),
+            "fip_diff": _r3(_fip_gap), "fip_luck": _fip_luck_tag,
+            "all_up_luck": _all_up_luck(_babip_luck_tag, _hrfb_luck_tag, _lob_luck_tag, _fip_luck_tag),
             "status": "DL" if (p["is_on_dl"] or p["is_on_dl60"]) else
                       ("INJ" if p["injury_is_injured"] else
                        ("DFA" if p["designated_for_assignment"] else
@@ -808,6 +859,16 @@ _HRFB_SOMEWHAT, _HRFB_VERY = 0.03, 0.05
 # with single-season swings of +/-5-8 points common even for a true-talent-
 # neutral pitcher.
 _LOB_SOMEWHAT, _LOB_VERY = 0.05, 0.08
+# ERA-FIP gap is the one metric here with an established, calibrated scale
+# (not a rule of thumb): a 0.50 gap is a real signal, 1.00 is substantial.
+_FIP_SOMEWHAT, _FIP_VERY = 0.50, 1.00
+
+# Moving qualification bar for RP/CL luck tags, matching the existing
+# RP-threshold pattern in get_pitcher_percentiles() (percentiles.py) —
+# 0.35 IP per team game played so far, translated to ~1.5 BF/IP-equivalent,
+# with a floor so 1-2 outings in April never earn a tag.
+_RP_BF_PER_TEAM_GAME = 1.5
+_RP_BF_FLOOR = 20
 
 _LUCK_SCORE = {"Very Lucky": 2, "Somewhat Lucky": 1, "Neutral": 0, "Unlucky": -1, "Very Unlucky": -2}
 _SCORE_LUCK = {v: k for k, v in _LUCK_SCORE.items()}

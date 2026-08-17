@@ -747,7 +747,11 @@
           <th data-sort="num" title="Career MLB batting average on balls in play — the baseline BABIP is judged against">Career</th>
           <th data-sort="num" title="Current BABIP minus career BABIP">Diff</th>
           <th data-sort="str" title="How far this season's BABIP is running from the player's own career level — a hint at coming regression, not a value judgment. Blank until 80+ PA this season.">BABIP Luck</th>
-          <th data-sort="str" class="col-sep" title="Average of every available luck metric for this player, mapped back to the same 5-tier scale.">All-Up Luck</th>
+          <th data-sort="num" class="col-sep" title="Walk rate, this season">BB%</th>
+          <th data-sort="num" title="Career MLB walk rate — reference only, not tiered: walking more/less than career isn't cleanly lucky or unlucky, it could be approach, aging, or how he's being pitched.">Career BB%</th>
+          <th data-sort="num" data-sort-best="low" title="Strikeout rate, this season">K%</th>
+          <th data-sort="num" data-sort-best="low" title="Career MLB strikeout rate — reference only, not tiered, for the same reason as Career BB%.">Career K%</th>
+          <th data-sort="str" class="col-sep" title="Average of every available luck metric for this player, mapped back to the same 5-tier scale. BABIP only — BB%/K% are shown for reference but not scored, since deviation from career isn't cleanly lucky or unlucky.">All-Up Luck</th>
         </tr>
       </thead>
       <tbody></tbody>
@@ -796,13 +800,14 @@
   </div>
 
   <div class="panel" style="margin-top:16px">
-    <h2 style="font-size:14px; margin:0 0 8px">Luck &amp; Regression <span style="color:var(--text-dim); font-weight:400; font-size:12px">(Overall split only — season-long signal, 150+ BF)</span></h2>
+    <h2 style="font-size:14px; margin:0 0 8px">Luck &amp; Regression <span style="color:var(--text-dim); font-weight:400; font-size:12px">(Overall split only — season-long signal. SP need 150+ BF; RP/CL need a lower bar that rises through the season — see IP column for why a row is blank.)</span></h2>
     <div style="overflow-x:auto">
     <table id="pitchers-luck-table">
       <thead>
         <tr>
           <th data-sort="pos">Role</th>
           <th data-sort="str" class="left">Name</th>
+          <th data-sort="num" class="col-sep" title="Innings pitched, this season — luck tags need 150+ BF for starters, or a lower bar for relievers that rises as the season goes on (roughly 0.35 IP per team game played).">IP</th>
           <th data-sort="num" data-sort-best="low" class="col-sep" title="Batting average on balls in play allowed, this season">BABIP</th>
           <th data-sort="num" data-sort-best="low" title="Career MLB BABIP allowed">Career</th>
           <th data-sort="num" title="Career BABIP minus current BABIP (positive = pitcher's luck)">Diff</th>
@@ -815,6 +820,10 @@
           <th data-sort="num" title="Career MLB LOB%">Career</th>
           <th data-sort="num" title="Current LOB% minus career LOB% (positive = pitcher's luck)">Diff</th>
           <th data-sort="str" title="Stranding MORE runners than career norm is the pitcher's luck right now (expect ERA to regress up as it normalizes down); stranding fewer is bad luck.">LOB% Luck</th>
+          <th data-sort="num" data-sort-best="low" class="col-sep" title="Earned run average, this season">ERA</th>
+          <th data-sort="num" data-sort-best="low" title="Fielding-independent pitching, this season — what ERA would look like from K/BB/HR alone, stripping out defense and sequencing.">FIP</th>
+          <th data-sort="num" title="FIP minus ERA (positive = pitcher's luck). Unlike the other three metrics, this compares current ERA to current FIP, not to career — it's the one metric here with an established, calibrated scale.">Diff</th>
+          <th data-sort="str" title="ERA running below FIP is the pitcher's luck right now (expect ERA to regress up toward FIP); ERA above FIP is bad luck (expect ERA to regress down).">ERA/FIP Luck</th>
           <th data-sort="str" class="col-sep" title="Average of every available luck metric for this pitcher, mapped back to the same 5-tier scale.">All-Up Luck</th>
         </tr>
       </thead>
@@ -1663,6 +1672,10 @@
         '<td>' + (p.career_babip != null ? fmtAvg(p.career_babip) : '-') + '</td>' +
         '<td>' + fmtSigned(p.babip_diff, 3) + '</td>' +
         '<td class="' + luckCls(p.luck) + '">' + (p.luck || '-') + '</td>' +
+        '<td class="col-sep">' + (s ? fmtPct(s.bb_pct) : '-') + '</td>' +
+        '<td>' + (p.career_bb_pct != null ? fmtPct(p.career_bb_pct) : '-') + '</td>' +
+        '<td>' + (s ? fmtPct(s.k_pct) : '-') + '</td>' +
+        '<td>' + (p.career_k_pct != null ? fmtPct(p.career_k_pct) : '-') + '</td>' +
         '<td class="col-sep ' + luckCls(p.all_up_luck) + '">' + (p.all_up_luck || '-') + '</td>';
       tb.appendChild(tr);
     });
@@ -1731,6 +1744,7 @@
       tr.innerHTML =
         '<td data-sort-value="' + p.role_order + '">' + p.role + '</td>' +
         '<td class="left"><a class="player-link" href="/player/' + p.pid + '">' + p.name + '</a></td>' +
+        '<td class="col-sep">' + (s ? fmtIp(s.ip) : '-') + '</td>' +
         '<td class="col-sep">' + (s ? fmtAvg(s.babip) : '-') + '</td>' +
         '<td>' + (p.career_babip != null ? fmtAvg(p.career_babip) : '-') + '</td>' +
         '<td>' + fmtSigned(p.babip_diff, 3) + '</td>' +
@@ -1743,6 +1757,10 @@
         '<td>' + (p.career_lob != null ? fmtPct(p.career_lob * 100) : '-') + '</td>' +
         '<td>' + (p.lob_diff != null ? fmtSigned(p.lob_diff * 100, 1) : '-') + '</td>' +
         '<td class="' + luckCls(p.lob_luck) + '">' + (p.lob_luck || '-') + '</td>' +
+        '<td class="col-sep">' + (s ? fmtEra(s.era) : '-') + '</td>' +
+        '<td>' + (s && s.fip != null ? fmtEra(s.fip) : '-') + '</td>' +
+        '<td>' + (p.fip_diff != null ? fmtSigned(p.fip_diff, 2) : '-') + '</td>' +
+        '<td class="' + luckCls(p.fip_luck) + '">' + (p.fip_luck || '-') + '</td>' +
         '<td class="col-sep ' + luckCls(p.all_up_luck) + '">' + (p.all_up_luck || '-') + '</td>';
       tb.appendChild(tr);
     });

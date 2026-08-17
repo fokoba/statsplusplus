@@ -456,7 +456,7 @@
 <div class="panel">
   <h2>MLB Comps</h2>
   {% if p.comp_stats %}
-  <div class="comp-stats-summary" style="margin-bottom:1em;padding:0.6em 0.8em;background:var(--bg-alt,#1a1a2e);border-radius:4px;font-size:0.9em;">
+  <div class="comp-stats-summary" style="margin-bottom:1em;padding:0.6em 0.8em;background:var(--bg-alt,#0d0d0f);border-radius:4px;font-size:0.9em;">
     <strong>Ceiling Profile:</strong> MLB players with similar potential tools ({{ p.comp_stats.n }} seasons) produce
     median {{ "%.1f"|format(p.comp_stats.median) }} WAR/yr
     (P25–P75: {{ "%.1f"|format(p.comp_stats.p25) }}–{{ "%.1f"|format(p.comp_stats.p75) }})

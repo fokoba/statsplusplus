@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Stats++ · {{ league_name }}</title>
+  <title>OOTP DOMINATOR · {{ league_name }}</title>
   <link rel="icon" type="image/x-icon" href="/static/assets/favicon.ico">
   <link rel="icon" type="image/png" sizes="32x32" href="/static/assets/favicon-32.png">
   <link rel="apple-touch-icon" href="/static/assets/apple-touch-icon.png">
@@ -13,7 +13,7 @@
 <body>
   <header>
     <div class="header-inner">
-      <a href="/league" class="app-name"><img src="/static/assets/favicon-32.png" alt="" class="app-logo">Stats<span class="app-pp">++</span></a>
+      <a href="/league" class="app-name"><img src="/static/assets/favicon-32.png" alt="" class="app-logo">OOTP <span class="app-pp">DOMINATOR</span></a>
       <nav>
         {% if league_list|length > 1 %}
         <div class="nav-dropdown">
@@ -240,10 +240,10 @@
 
     function gradeColor(g) {
       if (g >= 70) return '#5ba4f5';
-      if (g >= 60) return '#4ecca3';
+      if (g >= 60) return 'var(--green)';
       if (g >= 50) return 'var(--text)';
-      if (g >= 40) return '#f0a050';
-      return '#e94560';
+      if (g >= 40) return '#c9915a';
+      return 'var(--red)';
     }
     function gradePair(arr) {
       if (!arr) return '-';

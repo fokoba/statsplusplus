@@ -702,7 +702,10 @@
     <button class="split-btn" data-split="2">vs L</button>
     <button class="split-btn" data-split="3">vs R</button>
     <span class="split-label"></span>
-    <button class="btn btn-sm" onclick="exportTableCSV('hitters-table', 'roster_hitters.csv')" title="Export as CSV" style="margin-left:auto">⬇ CSV</button>
+    <label id="tw-toggle-wrap" style="display:none; margin-left:auto; font-size:12px; color:var(--text-dim)">
+      <input type="checkbox" id="tw-toggle"> Show pitchers as hitters
+    </label>
+    <button class="btn btn-sm" onclick="exportTableCSV('hitters-table', 'roster_hitters.csv')" title="Export as CSV">⬇ CSV</button>
   </div>
   <div class="panel">
     <table id="hitters-table">
@@ -719,9 +722,6 @@
           <th data-sort="num" title="On-base percentage">OBP</th>
           <th data-sort="num" title="Slugging percentage">SLG</th>
           <th data-sort="num" title="On-base plus slugging">OPS</th>
-          <th data-sort="num" title="Batting average on balls in play, this season">BABIP</th>
-          <th data-sort="num" title="Career MLB batting average on balls in play — the baseline BABIP/Luck are judged against">Career BABIP</th>
-          <th data-sort="str" title="How far this season's BABIP is running from the player's own career level (Very Lucky/Somewhat Lucky/Neutral/Unlucky/Very Unlucky) — a hint at coming regression, not a value judgment. Blank until 80+ PA this season.">Luck</th>
           <th data-sort="num" title="Home runs" class="col-sep">HR</th>
           <th data-sort="num" title="Runs scored">R</th>
           <th data-sort="num" title="Runs batted in">RBI</th>
@@ -730,6 +730,24 @@
           <th data-sort="num" title="Walk rate (BB/PA)" class="col-sep">BB%</th>
           <th data-sort="num" data-sort-best="low" title="Strikeout rate (K/PA)">K%</th>
           <th data-sort="num" title="Payroll Adjusted Performance — current-season production efficiency (1–10, 5 = market neutral). Based on actual WAR pace vs. salary. May be volatile early in the season." class="col-sep">PAP</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div class="panel" style="margin-top:16px">
+    <h2 style="font-size:14px; margin:0 0 8px">Luck &amp; Regression <span style="color:var(--text-dim); font-weight:400; font-size:12px">(Overall split only — season-long signal)</span></h2>
+    <table id="hitters-luck-table">
+      <thead>
+        <tr>
+          <th data-sort="pos">Pos</th>
+          <th data-sort="str" class="left">Name</th>
+          <th data-sort="num" class="col-sep" title="Batting average on balls in play, this season">BABIP</th>
+          <th data-sort="num" title="Career MLB batting average on balls in play — the baseline BABIP is judged against">Career</th>
+          <th data-sort="num" title="Current BABIP minus career BABIP">Diff</th>
+          <th data-sort="str" title="How far this season's BABIP is running from the player's own career level — a hint at coming regression, not a value judgment. Blank until 80+ PA this season.">BABIP Luck</th>
+          <th data-sort="str" class="col-sep" title="Average of every available luck metric for this player, mapped back to the same 5-tier scale.">All-Up Luck</th>
         </tr>
       </thead>
       <tbody></tbody>
@@ -763,12 +781,11 @@
           <th data-sort="num" title="Strikeout rate (K/BF)">K%</th>
           <th data-sort="num" data-sort-best="low" title="Walk rate (BB/BF)">BB%</th>
           <th data-sort="num" title="Strikeout minus walk rate">K-BB%</th>
-          <th data-sort="num" data-sort-best="low" title="Batting average on balls in play allowed, this season">BABIP</th>
-          <th data-sort="num" data-sort-best="low" title="Career MLB batting average on balls in play allowed — the baseline BABIP/Luck are judged against">Career BABIP</th>
-          <th data-sort="str" title="How far this season's BABIP-against is running from the pitcher's own career level (Very Lucky/Somewhat Lucky/Neutral/Unlucky/Very Unlucky) — a LOWER current BABIP than career is the pitcher's luck (expect ERA to regress up), a HIGHER one is bad luck (expect ERA to regress down). Blank until 150+ BF this season.">Luck</th>
           <th data-sort="num" data-sort-best="low" title="Home runs allowed" class="col-sep">HR</th>
           <th data-sort="num" title="Win-loss record">W-L</th>
+          <th data-sort="num" title="Games started" class="col-sep">GS</th>
           <th data-sort="num" title="Quality starts (6+ IP, ≤3 ER)">QS</th>
+          <th data-sort="num" title="Quality starts as a % of games started">QS%</th>
           <th data-sort="num" title="Saves + holds">SV+H</th>
           <th data-sort="num" data-sort-best="low" title="Inherited runners scored % (lower is better)">IRS%</th>
           <th data-sort="num" title="Payroll Adjusted Performance — current-season production efficiency (1–10, 5 = market neutral). Based on actual WAR pace vs. salary. May be volatile early in the season." class="col-sep">PAP</th>
@@ -776,6 +793,34 @@
       </thead>
       <tbody></tbody>
     </table>
+  </div>
+
+  <div class="panel" style="margin-top:16px">
+    <h2 style="font-size:14px; margin:0 0 8px">Luck &amp; Regression <span style="color:var(--text-dim); font-weight:400; font-size:12px">(Overall split only — season-long signal, 150+ BF)</span></h2>
+    <div style="overflow-x:auto">
+    <table id="pitchers-luck-table">
+      <thead>
+        <tr>
+          <th data-sort="pos">Role</th>
+          <th data-sort="str" class="left">Name</th>
+          <th data-sort="num" data-sort-best="low" class="col-sep" title="Batting average on balls in play allowed, this season">BABIP</th>
+          <th data-sort="num" data-sort-best="low" title="Career MLB BABIP allowed">Career</th>
+          <th data-sort="num" title="Career BABIP minus current BABIP (positive = pitcher's luck)">Diff</th>
+          <th data-sort="str" title="A LOWER current BABIP than career is the pitcher's luck (expect ERA to regress up); a HIGHER one is bad luck (expect ERA to regress down).">BABIP Luck</th>
+          <th data-sort="num" data-sort-best="low" class="col-sep" title="Home runs per fly ball allowed, this season">HR/FB</th>
+          <th data-sort="num" data-sort-best="low" title="Career MLB HR/FB allowed">Career</th>
+          <th data-sort="num" title="Career HR/FB minus current HR/FB (positive = pitcher's luck)">Diff</th>
+          <th data-sort="str" title="Fewer current homers per fly ball than career is the pitcher's luck (expect HR rate to regress up); more is bad luck.">HR/FB Luck</th>
+          <th data-sort="num" class="col-sep" title="Left-on-base % (strand rate), this season">LOB%</th>
+          <th data-sort="num" title="Career MLB LOB%">Career</th>
+          <th data-sort="num" title="Current LOB% minus career LOB% (positive = pitcher's luck)">Diff</th>
+          <th data-sort="str" title="Stranding MORE runners than career norm is the pitcher's luck right now (expect ERA to regress up as it normalizes down); stranding fewer is bad luck.">LOB% Luck</th>
+          <th data-sort="str" class="col-sep" title="Average of every available luck metric for this pitcher, mapped back to the same 5-tier scale.">All-Up Luck</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    </div>
   </div>
 </div>
 
@@ -1517,6 +1562,11 @@
   }
   function papCls(v) { return v >= 7 ? 'pos' : v < 4 ? 'neg' : ''; }
   function fmtPap(v) { return v != null ? v.toFixed(1) : '-'; }
+  function fmtSigned(v, digits) {
+    if (v == null) return '-';
+    var s = v.toFixed(digits);
+    return (v > 0 ? '+' : '') + s;
+  }
 
   // League averages for conditional formatting
   var lgAvg = {{ league_avg | tojson }};
@@ -1538,13 +1588,22 @@
 
   var splitLabels = {'1': '', '2': 'Showing: vs LHP', '3': 'Showing: vs RHP'};
 
+  function twToggleShow() {
+    var cb = document.getElementById('tw-toggle');
+    return cb ? cb.checked : false;
+  }
+
   function renderHitters(split) {
     var tb = document.querySelector('#hitters-table tbody');
     var isOvr = split === '1';
     var lbl = document.querySelector('#tab-hitters .split-label');
     if (lbl) lbl.textContent = splitLabels[split];
     tb.innerHTML = '';
+    var showTw = twToggleShow();
+    var wrap = document.getElementById('tw-toggle-wrap');
+    if (wrap) wrap.style.display = hitData.some(function(p) { return p.is_two_way; }) ? '' : 'none';
     hitData.forEach(function(p) {
+      if (p.is_two_way && !showTw) return;
       var s = p.splits[split];
       var twBadge = p.is_two_way ? ' <span class="tw-badge" title="Two-way player">TW</span>' : '';
       var statusBadge = '';
@@ -1558,10 +1617,8 @@
           '<td data-sort-value="' + p.pos_order + '">' + p.pos + '</td>' +
           '<td class="left"><a class="player-link" href="/player/' + p.pid + '">' + p.name + '</a>' + twBadge + statusBadge + '</td>' +
           '<td>' + p.age + '</td><td>' + p.ovr + '</td>' +
-          '<td class="col-sep">-</td><td class="col-sep">-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td>' +
-          '<td>' + (p.career_babip != null ? fmtAvg(p.career_babip) : '-') + '</td>' +
-          '<td class="' + luckCls(p.luck) + '">' + (p.luck || '-') + '</td>' +
-          '<td class="col-sep">-</td><td>-</td><td>-</td><td>-</td><td>-</td><td class="col-sep">-</td><td>-</td>' +
+          '<td class="col-sep">-</td><td class="col-sep">-</td><td>-</td><td>-</td><td>-</td><td>-</td>' +
+          '<td>-</td><td class="col-sep">-</td><td>-</td><td>-</td><td>-</td><td>-</td><td class="col-sep">-</td><td>-</td>' +
           '<td class="col-sep ' + papCls(p.pap) + '">' + fmtPap(p.pap) + '</td>';
       } else {
         var L = lgAvg;
@@ -1577,9 +1634,6 @@
           td(s.obp, fmtAvg(s.obp), L.obp) +
           td(s.slg, fmtAvg(s.slg), L.slg) +
           td(s.ops, fmtAvg(s.ops), L.ops) +
-          '<td>' + fmtAvg(s.babip) + '</td>' +
-          '<td>' + (p.career_babip != null ? fmtAvg(p.career_babip) : '-') + '</td>' +
-          '<td class="' + luckCls(p.luck) + '">' + (isOvr ? (p.luck || '-') : '-') + '</td>' +
           td(null, s.hr, undefined, false, true) +
           '<td>' + (isOvr ? s.r : '-') + '</td>' +
           '<td>' + (isOvr ? s.rbi : '-') + '</td>' +
@@ -1589,6 +1643,27 @@
           td(s.k_pct, fmtPct(s.k_pct), L.k_pct, true) +
           '<td class="col-sep ' + papCls(p.pap) + '">' + fmtPap(p.pap) + '</td>';
       }
+      tb.appendChild(tr);
+    });
+  }
+
+  function renderHittersLuck() {
+    var tb = document.querySelector('#hitters-luck-table tbody');
+    if (!tb) return;
+    tb.innerHTML = '';
+    var showTw = twToggleShow();
+    hitData.forEach(function(p) {
+      if (p.is_two_way && !showTw) return;
+      var s = p.splits['1'];
+      var tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td data-sort-value="' + p.pos_order + '">' + p.pos + '</td>' +
+        '<td class="left"><a class="player-link" href="/player/' + p.pid + '">' + p.name + '</a></td>' +
+        '<td class="col-sep">' + (s ? fmtAvg(s.babip) : '-') + '</td>' +
+        '<td>' + (p.career_babip != null ? fmtAvg(p.career_babip) : '-') + '</td>' +
+        '<td>' + fmtSigned(p.babip_diff, 3) + '</td>' +
+        '<td class="' + luckCls(p.luck) + '">' + (p.luck || '-') + '</td>' +
+        '<td class="col-sep ' + luckCls(p.all_up_luck) + '">' + (p.all_up_luck || '-') + '</td>';
       tb.appendChild(tr);
     });
   }
@@ -1614,9 +1689,7 @@
           '<td class="left"><a class="player-link" href="/player/' + p.pid + '">' + p.name + '</a>' + twBadge + statusBadge + '</td>' +
           '<td>' + p.age + '</td><td>' + p.ovr + '</td>' +
           '<td class="col-sep">-</td><td class="col-sep">-</td><td>-</td><td>-</td><td class="col-sep">-</td><td>-</td><td>-</td><td>-</td><td>-</td>' +
-          '<td>-</td><td>' + (p.career_babip != null ? fmtAvg(p.career_babip) : '-') + '</td>' +
-          '<td class="' + luckCls(p.luck) + '">' + (p.luck || '-') + '</td>' +
-          '<td class="col-sep">-</td><td>-</td><td>-</td><td>-</td><td>-</td>' +
+          '<td class="col-sep">-</td><td>-</td><td class="col-sep">-</td><td>-</td><td>-</td><td>-</td><td>-</td>' +
           '<td class="col-sep ' + papCls(p.pap) + '">' + fmtPap(p.pap) + '</td>';
       } else {
         var svh = s.sv + s.hld;
@@ -1635,16 +1708,42 @@
           td(s.k_pct, fmtPct(s.k_pct), L.p_k_pct) +
           td(s.bb_pct, fmtPct(s.bb_pct), L.p_bb_pct, true) +
           '<td>' + fmtPct(s.k_bb_pct) + '</td>' +
-          '<td>' + fmtAvg(s.babip) + '</td>' +
-          '<td>' + (p.career_babip != null ? fmtAvg(p.career_babip) : '-') + '</td>' +
-          '<td class="' + luckCls(p.luck) + '">' + (isOvr ? (p.luck || '-') : '-') + '</td>' +
           td(null, s.hra, undefined, false, true) +
           '<td>' + (isOvr ? s.w + '-' + s.l : '-') + '</td>' +
+          '<td class="col-sep">' + (isOvr ? s.gs : '-') + '</td>' +
           '<td>' + (isOvr ? s.qs : '-') + '</td>' +
+          '<td>' + (isOvr ? fmtPct(s.qs_pct) : '-') + '</td>' +
           '<td>' + (isOvr ? svh : '-') + '</td>' +
           '<td>' + (isOvr ? fmtPct(s.irs_pct) : '-') + '</td>' +
           '<td class="col-sep ' + papCls(p.pap) + '">' + fmtPap(p.pap) + '</td>';
       }
+      tb.appendChild(tr);
+    });
+  }
+
+  function renderPitchersLuck() {
+    var tb = document.querySelector('#pitchers-luck-table tbody');
+    if (!tb) return;
+    tb.innerHTML = '';
+    pitData.forEach(function(p) {
+      var s = p.splits['1'];
+      var tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td data-sort-value="' + p.role_order + '">' + p.role + '</td>' +
+        '<td class="left"><a class="player-link" href="/player/' + p.pid + '">' + p.name + '</a></td>' +
+        '<td class="col-sep">' + (s ? fmtAvg(s.babip) : '-') + '</td>' +
+        '<td>' + (p.career_babip != null ? fmtAvg(p.career_babip) : '-') + '</td>' +
+        '<td>' + fmtSigned(p.babip_diff, 3) + '</td>' +
+        '<td class="' + luckCls(p.luck) + '">' + (p.luck || '-') + '</td>' +
+        '<td class="col-sep">' + (s && s.hr_fb != null ? fmtPct(s.hr_fb * 100) : '-') + '</td>' +
+        '<td>' + (p.career_hrfb != null ? fmtPct(p.career_hrfb * 100) : '-') + '</td>' +
+        '<td>' + (p.hrfb_diff != null ? fmtSigned(p.hrfb_diff * 100, 1) : '-') + '</td>' +
+        '<td class="' + luckCls(p.hrfb_luck) + '">' + (p.hrfb_luck || '-') + '</td>' +
+        '<td class="col-sep">' + (s && s.lob_pct != null ? fmtPct(s.lob_pct * 100) : '-') + '</td>' +
+        '<td>' + (p.career_lob != null ? fmtPct(p.career_lob * 100) : '-') + '</td>' +
+        '<td>' + (p.lob_diff != null ? fmtSigned(p.lob_diff * 100, 1) : '-') + '</td>' +
+        '<td class="' + luckCls(p.lob_luck) + '">' + (p.lob_luck || '-') + '</td>' +
+        '<td class="col-sep ' + luckCls(p.all_up_luck) + '">' + (p.all_up_luck || '-') + '</td>';
       tb.appendChild(tr);
     });
   }
@@ -1665,9 +1764,20 @@
     });
   });
 
+  var twToggle = document.getElementById('tw-toggle');
+  if (twToggle) {
+    twToggle.addEventListener('change', function() {
+      var activeBtn = document.querySelector('#tab-hitters .split-btn.active');
+      renderHitters(activeBtn ? activeBtn.dataset.split : '1');
+      renderHittersLuck();
+    });
+  }
+
   // Initial render
   renderHitters('1');
   renderPitchers('1');
+  renderHittersLuck();
+  renderPitchersLuck();
 })();
 </script>
 

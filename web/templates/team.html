@@ -719,6 +719,9 @@
           <th data-sort="num" title="On-base percentage">OBP</th>
           <th data-sort="num" title="Slugging percentage">SLG</th>
           <th data-sort="num" title="On-base plus slugging">OPS</th>
+          <th data-sort="num" title="Batting average on balls in play, this season">BABIP</th>
+          <th data-sort="num" title="Career MLB batting average on balls in play — the baseline BABIP/Luck are judged against">Career BABIP</th>
+          <th data-sort="str" title="How far this season's BABIP is running from the player's own career level (Very Lucky/Somewhat Lucky/Neutral/Unlucky/Very Unlucky) — a hint at coming regression, not a value judgment. Blank until 80+ PA this season.">Luck</th>
           <th data-sort="num" title="Home runs" class="col-sep">HR</th>
           <th data-sort="num" title="Runs scored">R</th>
           <th data-sort="num" title="Runs batted in">RBI</th>
@@ -760,6 +763,9 @@
           <th data-sort="num" title="Strikeout rate (K/BF)">K%</th>
           <th data-sort="num" data-sort-best="low" title="Walk rate (BB/BF)">BB%</th>
           <th data-sort="num" title="Strikeout minus walk rate">K-BB%</th>
+          <th data-sort="num" data-sort-best="low" title="Batting average on balls in play allowed, this season">BABIP</th>
+          <th data-sort="num" data-sort-best="low" title="Career MLB batting average on balls in play allowed — the baseline BABIP/Luck are judged against">Career BABIP</th>
+          <th data-sort="str" title="How far this season's BABIP-against is running from the pitcher's own career level (Very Lucky/Somewhat Lucky/Neutral/Unlucky/Very Unlucky) — a LOWER current BABIP than career is the pitcher's luck (expect ERA to regress up), a HIGHER one is bad luck (expect ERA to regress down). Blank until 150+ BF this season.">Luck</th>
           <th data-sort="num" data-sort-best="low" title="Home runs allowed" class="col-sep">HR</th>
           <th data-sort="num" title="Win-loss record">W-L</th>
           <th data-sort="num" title="Quality starts (6+ IP, ≤3 ER)">QS</th>
@@ -1504,6 +1510,11 @@
     return full + '.' + thirds;
   }
   function surpCls(v) { return v > 0 ? 'pos' : v < 0 ? 'neg' : ''; }
+  function luckCls(luck) {
+    if (luck === 'Very Lucky' || luck === 'Somewhat Lucky') return 'pos';
+    if (luck === 'Very Unlucky' || luck === 'Unlucky') return 'neg';
+    return '';
+  }
   function papCls(v) { return v >= 7 ? 'pos' : v < 4 ? 'neg' : ''; }
   function fmtPap(v) { return v != null ? v.toFixed(1) : '-'; }
 
@@ -1547,7 +1558,10 @@
           '<td data-sort-value="' + p.pos_order + '">' + p.pos + '</td>' +
           '<td class="left"><a class="player-link" href="/player/' + p.pid + '">' + p.name + '</a>' + twBadge + statusBadge + '</td>' +
           '<td>' + p.age + '</td><td>' + p.ovr + '</td>' +
-          '<td class="col-sep">-</td><td class="col-sep">-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td class="col-sep">-</td><td>-</td><td>-</td><td>-</td><td>-</td><td class="col-sep">-</td><td>-</td>' +
+          '<td class="col-sep">-</td><td class="col-sep">-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td>' +
+          '<td>' + (p.career_babip != null ? fmtAvg(p.career_babip) : '-') + '</td>' +
+          '<td class="' + luckCls(p.luck) + '">' + (p.luck || '-') + '</td>' +
+          '<td class="col-sep">-</td><td>-</td><td>-</td><td>-</td><td>-</td><td class="col-sep">-</td><td>-</td>' +
           '<td class="col-sep ' + papCls(p.pap) + '">' + fmtPap(p.pap) + '</td>';
       } else {
         var L = lgAvg;
@@ -1563,6 +1577,9 @@
           td(s.obp, fmtAvg(s.obp), L.obp) +
           td(s.slg, fmtAvg(s.slg), L.slg) +
           td(s.ops, fmtAvg(s.ops), L.ops) +
+          '<td>' + fmtAvg(s.babip) + '</td>' +
+          '<td>' + (p.career_babip != null ? fmtAvg(p.career_babip) : '-') + '</td>' +
+          '<td class="' + luckCls(p.luck) + '">' + (isOvr ? (p.luck || '-') : '-') + '</td>' +
           td(null, s.hr, undefined, false, true) +
           '<td>' + (isOvr ? s.r : '-') + '</td>' +
           '<td>' + (isOvr ? s.rbi : '-') + '</td>' +
@@ -1596,7 +1613,10 @@
           '<td data-sort-value="' + p.role_order + '">' + p.role + '</td>' +
           '<td class="left"><a class="player-link" href="/player/' + p.pid + '">' + p.name + '</a>' + twBadge + statusBadge + '</td>' +
           '<td>' + p.age + '</td><td>' + p.ovr + '</td>' +
-          '<td class="col-sep">-</td><td class="col-sep">-</td><td>-</td><td>-</td><td class="col-sep">-</td><td>-</td><td>-</td><td>-</td><td>-</td><td class="col-sep">-</td><td>-</td><td>-</td><td>-</td><td>-</td>' +
+          '<td class="col-sep">-</td><td class="col-sep">-</td><td>-</td><td>-</td><td class="col-sep">-</td><td>-</td><td>-</td><td>-</td><td>-</td>' +
+          '<td>-</td><td>' + (p.career_babip != null ? fmtAvg(p.career_babip) : '-') + '</td>' +
+          '<td class="' + luckCls(p.luck) + '">' + (p.luck || '-') + '</td>' +
+          '<td class="col-sep">-</td><td>-</td><td>-</td><td>-</td><td>-</td>' +
           '<td class="col-sep ' + papCls(p.pap) + '">' + fmtPap(p.pap) + '</td>';
       } else {
         var svh = s.sv + s.hld;
@@ -1615,6 +1635,9 @@
           td(s.k_pct, fmtPct(s.k_pct), L.p_k_pct) +
           td(s.bb_pct, fmtPct(s.bb_pct), L.p_bb_pct, true) +
           '<td>' + fmtPct(s.k_bb_pct) + '</td>' +
+          '<td>' + fmtAvg(s.babip) + '</td>' +
+          '<td>' + (p.career_babip != null ? fmtAvg(p.career_babip) : '-') + '</td>' +
+          '<td class="' + luckCls(p.luck) + '">' + (isOvr ? (p.luck || '-') : '-') + '</td>' +
           td(null, s.hra, undefined, false, true) +
           '<td>' + (isOvr ? s.w + '-' + s.l : '-') + '</td>' +
           '<td>' + (isOvr ? s.qs : '-') + '</td>' +

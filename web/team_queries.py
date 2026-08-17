@@ -537,6 +537,8 @@ def get_roster_hitters(team_id=None):
         obp = (h + bb + hbp) / (ab + bb + hbp + sf) if (ab + bb + hbp + sf) else None
         slg = (h + d + 2*t + 3*hr) / ab if ab else None
         ops = (obp or 0) + (slg or 0) if obp is not None else None
+        babip_denom = ab - k - hr + sf
+        babip = (h - hr) / babip_denom if babip_denom > 0 else None
         return {
             "pa": pa, "ab": ab, "avg": _r3(avg), "obp": _r3(obp), "slg": _r3(slg),
             "ops": _r3(ops), "hr": hr, "r": s["r"] or 0, "rbi": s["rbi"] or 0,
@@ -544,8 +546,23 @@ def get_roster_hitters(team_id=None):
             "bb_pct": round(100 * bb / pa, 1) if pa else None,
             "k_pct": round(100 * k / pa, 1) if pa else None,
             "war": round(s["war"], 1) if s["war"] is not None else 0,
-            "g": s["g"] or 0,
+            "g": s["g"] or 0, "babip": _r3(babip),
         }
+
+    # Career MLB BABIP (all years, split_id=1) — the baseline the current
+    # season's BABIP is judged against for the luck label.
+    roster_pids = [p["player_id"] for p in players]
+    career_babip = {}
+    if roster_pids:
+        qs = ",".join("?" * len(roster_pids))
+        for r in conn.execute(f"""
+            SELECT player_id, SUM(ab), SUM(h), SUM(hr), SUM(k), SUM(sf)
+            FROM mlb_batting_stats WHERE split_id=1 AND player_id IN ({qs})
+            GROUP BY player_id
+        """, roster_pids):
+            pid, s_ab, s_h, s_hr, s_k, s_sf = r
+            denom = (s_ab or 0) - (s_k or 0) - (s_hr or 0) + (s_sf or 0)
+            career_babip[pid] = (s_h - s_hr) / denom if denom > 0 else None
 
     result = []
     team_g, dpw, salaries = _pap_context(conn, tid, year)
@@ -560,6 +577,11 @@ def get_roster_hitters(team_id=None):
         s1 = splits.get(1) if splits else None
         war = s1["war"] if s1 and s1["war"] is not None else None
         _display_ovr = p["composite_score"] if p["composite_score"] is not None else (p["ovr"] or 0)
+        _c_babip = career_babip.get(pid)
+        _cur_babip = _fmt_split(s1)["babip"] if s1 else None
+        _cur_pa = (s1["pa"] or 0) if s1 else 0
+        _luck_gap = (_cur_babip - _c_babip) if (_cur_babip is not None and _c_babip is not None
+                                                  and _cur_pa >= _BABIP_MIN_PA) else None
         result.append({
             "pid": pid, "name": p["name"], "age": p["age"],
             "ovr": _display_ovr, "pos": pos,
@@ -567,6 +589,7 @@ def get_roster_hitters(team_id=None):
             "surplus": round(p["surplus_yr1"] / _money_divisor(), 1) if p["surplus_yr1"] else 0,
             "pap": calc_pap(war, salaries.get(pid, 0), team_g, dpw),
             "is_two_way": pid in twp_pids,
+            "career_babip": _r3(_c_babip), "luck": _babip_luck(_luck_gap),
             "status": "DL" if (p["is_on_dl"] or p["is_on_dl60"]) else
                       ("INJ" if p["injury_is_injured"] else
                        ("DFA" if p["designated_for_assignment"] else
@@ -608,7 +631,7 @@ def get_roster_pitchers(team_id=None):
     pit = {}  # pid -> {split_id -> dict}
     for r in conn.execute("""
         SELECT player_id, split_id, ip, g, gs, w, l, sv, era, k, bb, ha, war,
-               hra, bf, hld, bs, qs, er, r AS runs, cg, sho, ir, irs
+               hra, bf, hld, bs, qs, er, r AS runs, cg, sho, ir, irs, hp
         FROM mlb_pitching_stats WHERE year=? AND split_id IN (1,2,3) AND team_id=?
     """, (year, tid)):
         pit.setdefault(r["player_id"], {})[r["split_id"]] = dict(r)
@@ -631,8 +654,11 @@ def get_roster_pitchers(team_id=None):
         ip, bf = s["ip"] or 0, s["bf"] or 0
         k, bb, ha, hra = s["k"] or 0, s["bb"] or 0, s["ha"] or 0, s["hra"] or 0
         ir, irs = s["ir"] or 0, s["irs"] or 0
+        hp = s["hp"] or 0
         whip = (bb + ha) / ip if ip else None
         irs_pct = round(100 * irs / ir, 1) if ir else None
+        babip_denom = bf - k - hra - bb - hp
+        babip = (ha - hra) / babip_denom if babip_denom > 0 else None
         return {
             "ip": ip, "g": s["g"] or 0, "gs": s["gs"] or 0,
             "w": s["w"] or 0, "l": s["l"] or 0, "sv": s["sv"] or 0,
@@ -644,8 +670,23 @@ def get_roster_pitchers(team_id=None):
             "k_bb_pct": round(100 * (k - bb) / bf, 1) if bf else None,
             "war": round(s["war"], 1) if s["war"] is not None else 0,
             "hld": s["hld"] or 0, "bs": s["bs"] or 0,
-            "qs": s["qs"] or 0, "irs_pct": irs_pct,
+            "qs": s["qs"] or 0, "irs_pct": irs_pct, "babip": _r3(babip),
         }
+
+    # Career MLB BABIP-against (all years, split_id=1) — the baseline the
+    # current season's BABIP-against is judged against for the luck label.
+    roster_pids = [p["player_id"] for p in players]
+    career_babip = {}
+    if roster_pids:
+        qs = ",".join("?" * len(roster_pids))
+        for r in conn.execute(f"""
+            SELECT player_id, SUM(bf), SUM(k), SUM(hra), SUM(bb), SUM(hp), SUM(ha)
+            FROM mlb_pitching_stats WHERE split_id=1 AND player_id IN ({qs})
+            GROUP BY player_id
+        """, roster_pids):
+            pid, s_bf, s_k, s_hra, s_bb, s_hp, s_ha = r
+            denom = (s_bf or 0) - (s_k or 0) - (s_hra or 0) - (s_bb or 0) - (s_hp or 0)
+            career_babip[pid] = (s_ha - s_hra) / denom if denom > 0 else None
 
     result = []
     team_g, dpw, salaries = _pap_context(conn, tid, year)
@@ -656,6 +697,14 @@ def get_roster_pitchers(team_id=None):
         s1 = splits.get(1) if splits else None
         war = s1["war"] if s1 and s1["war"] is not None else None
         _display_ovr = p["composite_score"] if p["composite_score"] is not None else (p["ovr"] or 0)
+        _c_babip = career_babip.get(pid)
+        _cur_babip = _fmt_split(s1)["babip"] if s1 else None
+        _cur_bf = (s1["bf"] or 0) if s1 else 0
+        # Inverted vs hitters: a LOWER current BABIP-against than career is
+        # the pitcher's luck (suppressing hits on balls in play), so the
+        # gap is career minus current, not current minus career.
+        _luck_gap = (_c_babip - _cur_babip) if (_cur_babip is not None and _c_babip is not None
+                                                  and _cur_bf >= _BABIP_MIN_BF) else None
         result.append({
             "pid": pid, "name": p["name"], "age": p["age"],
             "ovr": _display_ovr, "role": role_str,
@@ -663,6 +712,7 @@ def get_roster_pitchers(team_id=None):
             "surplus": round(p["surplus_yr1"] / _money_divisor(), 1) if p["surplus_yr1"] else 0,
             "pap": calc_pap(war, salaries.get(pid, 0), team_g, dpw),
             "is_two_way": pid in twp_pids,
+            "career_babip": _r3(_c_babip), "luck": _babip_luck(_luck_gap),
             "status": "DL" if (p["is_on_dl"] or p["is_on_dl60"]) else
                       ("INJ" if p["injury_is_injured"] else
                        ("DFA" if p["designated_for_assignment"] else
@@ -680,6 +730,37 @@ def get_roster_pitchers(team_id=None):
 
 def _r3(v):
     return round(v, 3) if v is not None else None
+
+
+# Minimum current-season sample before a luck label means anything — BABIP is
+# extremely noisy in small samples, so a 15-PA sample running .050 hot isn't
+# "Very Lucky," it's just noise. Matches the ~80 PA / 150 BF thresholds
+# already used elsewhere in the app for "is this sample real yet."
+_BABIP_MIN_PA = 80
+_BABIP_MIN_BF = 150
+
+
+def _babip_luck(gap):
+    """gap is already sign-adjusted so positive always means "playing
+    better than their real established level right now" (Lucky) and
+    negative always means the opposite (Unlucky), for both hitters
+    (current BABIP vs their own career BABIP) and pitchers (career BABIP
+    allowed vs their own current BABIP allowed — inverted, since a LOWER
+    current BABIP-against than career is the pitcher having the luck).
+    Bands are a standard sabermetric rule of thumb, not a calibrated
+    model: BABIP typically wobbles +/-.020-.030 a season on luck alone.
+    """
+    if gap is None:
+        return None
+    if gap >= 0.040:
+        return "Very Lucky"
+    if gap >= 0.020:
+        return "Somewhat Lucky"
+    if gap > -0.020:
+        return "Neutral"
+    if gap > -0.040:
+        return "Unlucky"
+    return "Very Unlucky"
 
 
 # Age at/above which a minor leaguer is a cut candidate on age grounds alone.

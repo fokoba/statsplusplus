@@ -79,11 +79,12 @@
 {# ── Tabs ── #}
 {% if affiliates %}
 <nav class="org-nav">
-  <a href="/team/{{ tid }}" class="org-nav-item active">MLB</a>
+  <a href="/team/{{ tid }}" class="org-nav-item active" id="org-nav-mlb">MLB</a>
   <a href="/team/{{ tid }}/minors" class="org-nav-item">All MiLB</a>
   {% for aff in affiliates %}
   <a href="/team/{{ aff.team_id }}" class="org-nav-item" title="{{ aff.name }}">{{ aff.level }}</a>
   {% endfor %}
+  <button type="button" class="org-nav-item intl-nav-trigger" data-tab="intl" title="International Complex ({{ intl_complex|length }} players)">Intl Complex</button>
 </nav>
 {% endif %}
 
@@ -93,12 +94,13 @@
   <button class="tab" data-tab="org">Organization</button>
   <button class="tab" data-tab="hitters">Hitters</button>
   <button class="tab" data-tab="pitchers">Pitchers</button>
-  <button class="tab" data-tab="intl">Intl Complex</button>
-  <button class="tab" data-tab="contracts">Contracts</button>
   <button class="tab" data-tab="finances">Finances</button>
+  <button class="tab" data-tab="contracts">Contracts</button>
   <button class="tab" data-tab="dev">Player Development</button>
-  <button class="tab" data-tab="cuts">Cut Candidates</button>
   <button class="tab" data-tab="adds">Add Candidates</button>
+  <button class="tab" data-tab="cuts">Cut Candidates</button>
+  <a class="tab" href="/best-available">Best Available</a>
+  <a class="tab" href="/scouting">Scouting Targets</a>
 </div>
 
 {# ══════ Main ══════ #}
@@ -1800,11 +1802,19 @@
 </script>
 
 <script>
-document.querySelectorAll('.tab-bar .tab').forEach(btn => {
+document.querySelectorAll('.tab-bar .tab[data-tab], .intl-nav-trigger').forEach(btn => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('.tab-bar .tab').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-bar .tab[data-tab]').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-    btn.classList.add('active');
+    var mlbNav = document.getElementById('org-nav-mlb');
+    if (btn.classList.contains('intl-nav-trigger')) {
+      btn.classList.add('active');
+      if (mlbNav) mlbNav.classList.remove('active');
+    } else {
+      document.querySelectorAll('.intl-nav-trigger').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      if (mlbNav) mlbNav.classList.add('active');
+    }
     document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
   });
 });

@@ -454,10 +454,17 @@ def lineup_optimizer():
     import lineup_optimizer_queries as _loq
     opponent_id = request.args.get("opponent", type=int)
     is_home = request.args.get("venue", "home") != "away"
+    roster_scope = request.args.get("roster_scope", "mlb")
+    if roster_scope not in ("mlb", "40man", "org"):
+        roster_scope = "mlb"
+    top_n = request.args.get("top_n", type=int)
     data = _loq.get_lineup_optimizer(opponent_id=opponent_id, is_home=is_home)
+    park_data = _loq.get_best_by_park(roster_scope=roster_scope, top_n=top_n,
+                                       opponent_id=opponent_id, is_home=is_home)
+    merged = {**data, **park_data}
     return render_template("lineup_optimizer.html",
                            breadcrumbs=[{"label": "Lineup Optimizer", "url": "/lineup-optimizer"}],
-                           **data)
+                           **merged)
 
 
 @app.route("/park-factors-upload", methods=["POST"])

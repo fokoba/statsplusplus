@@ -8,10 +8,13 @@ team_id) — this isn't a promotion-consideration tool, just "who do I
 start out of who's already up," matching how the feature was asked for.
 """
 
-from statsplusplus.evaluation.park_fit import load_park_factors
-from web_league_context import get_db, get_cfg, my_team_id, team_names_map, team_abbr_map
+from statsplusplus.evaluation.park_fit import (
+    load_park_factors, compute_batter_park_fit, compute_batter_park_value_pct,
+)
+from statsplusplus.config.ratings import norm_continuous as _normc
+from web_league_context import get_db, get_cfg, my_team_id, team_names_map, team_abbr_map, level_map
 
-from scouting_queries import _fetch_rows, _org_where, _build_entries, _HITTER_POS_CODES
+from scouting_queries import _fetch_rows, _org_where, _build_entries, _HITTER_POS_CODES, _pos_group
 from statsplusplus.data.evaluation_engine import load_tool_weights
 
 _HITTER_ORDER = list(_HITTER_POS_CODES.values())  # C,1B,2B,3B,SS,LF,CF,RF
@@ -310,6 +313,109 @@ def get_lineup_optimizer(opponent_id=None, is_home=True):
         "batting_order_vr": batting_order_vr, "batting_order_vl": batting_order_vl,
         "has_dh": has_dh,
         "ph_vr": ph_vr, "ph_vl": ph_vl, "pr_vr": pr_vr, "pr_vl": pr_vl,
+    }
+
+
+_ROSTER_SCOPE_DEFAULT_N = {"mlb": 3, "40man": 5, "org": 10}
+_ROSTER_SCOPE_LABELS = {"mlb": "Active MLB Roster", "40man": "40-Man Roster", "org": "Whole Org"}
+
+
+def _forty_man_pids(conn, parent_team_id):
+    return {
+        r[0] for r in conn.execute(
+            "SELECT c.player_id FROM contracts c JOIN players p ON c.player_id=p.player_id "
+            "WHERE p.parent_team_id=? AND c.is_major=1", (parent_team_id,)
+        ).fetchall()
+    }
+
+
+def get_best_by_park(roster_scope="mlb", top_n=None, opponent_id=None, is_home=True):
+    """Best hitter at each position for a specific park, ranked by overall
+    park-adjusted composite (composite_score + the same capped park_delta
+    used everywhere else on this page) — reuses whichever park the main
+    Lineup Optimizer controls above already resolved to (home = your own
+    park, away = the selected opponent's, from the league-wide upload).
+
+    roster_scope controls how deep the pool goes: "mlb" = current active
+    roster only, "40man" = the org's full 40-man, "org" = every affiliate.
+    Not-yet-MLB players are scored on POTENTIAL tools for park fit (same
+    convention as All Minors/Add Candidates — reflects who they'll grow
+    into, not their barely-developed current tools), while active-roster
+    players use current tools as normal.
+    """
+    conn = get_db()
+    team_id = my_team_id()
+    cfg = get_cfg()
+    ratings_scale = cfg.ratings_scale
+    hitter_weights = load_tool_weights(cfg.league_dir).get("hitter", {})
+    park, park_is_mine = _load_park(team_id, opponent_id, is_home)
+
+    if top_n is None:
+        top_n = _ROSTER_SCOPE_DEFAULT_N.get(roster_scope, 10)
+
+    where, params = _org_where(team_id, "org")
+    rows = conn.execute(f"""
+        SELECT p.player_id, p.name, p.age, p.pos, p.role, p.level,
+               r.composite_score, r.bats,
+               r.cntct, r.gap, r.pow, r.eye,
+               r.pot_cntct, r.pot_gap, r.pot_pow, r.pot_eye
+        FROM players p
+        LEFT JOIN latest_ratings r ON p.player_id = r.player_id
+        WHERE {where} AND r.composite_score IS NOT NULL
+    """, params).fetchall()
+
+    if roster_scope == "mlb":
+        rows = [r for r in rows if str(r[5]) == "1"]
+    elif roster_scope == "40man":
+        forty = _forty_man_pids(conn, team_id)
+        rows = [r for r in rows if r[0] in forty]
+    # "org" keeps everyone _org_where already scoped to.
+
+    lmap = level_map()
+    by_group = {}
+    for r in rows:
+        (pid, name, age, pos, role, level, comp, bats,
+         cntct, gap, pow_, eye, pot_cntct, pot_gap, pot_pow, pot_eye) = r
+        group, is_pitcher = _pos_group(pos, role)
+        if group is None or is_pitcher:
+            continue
+
+        is_mlb = str(level) == "1"
+        if is_mlb:
+            tools = {"contact": _normc(cntct, ratings_scale), "gap": _normc(gap, ratings_scale),
+                      "power": _normc(pow_, ratings_scale), "eye": _normc(eye, ratings_scale)}
+        else:
+            tools = {"contact": _normc(pot_cntct, ratings_scale), "gap": _normc(pot_gap, ratings_scale),
+                      "power": _normc(pot_pow, ratings_scale), "eye": _normc(pot_eye, ratings_scale)}
+        weights = hitter_weights.get(group, hitter_weights.get("COF", {}))
+        park_fit = compute_batter_park_fit(tools, bats, weights, park) if park else None
+        park_value_pct = compute_batter_park_value_pct(tools, bats, weights, park) if park else None
+        park_delta = _park_delta(park_fit)
+
+        by_group.setdefault(group, []).append({
+            "pid": pid, "name": name, "age": age,
+            "level": lmap.get(str(level), "MLB" if is_mlb else str(level)),
+            "is_mlb": is_mlb,
+            "composite_score": comp, "park_fit": park_fit, "park_value_pct": park_value_pct,
+            "park_delta": park_delta, "adjusted": round(comp + park_delta),
+        })
+
+    best_by_park = {}
+    for group in _HITTER_POS_CODES.values():
+        pool = by_group.get(group, [])
+        pool.sort(key=lambda p: (-p["adjusted"], -(p["park_fit"] if p["park_fit"] is not None else -999)))
+        best_by_park[group] = pool[:top_n]
+
+    abbrs = team_abbr_map()
+    park_team_abbr = abbrs.get(team_id) if park_is_mine else abbrs.get(opponent_id)
+
+    return {
+        "best_by_park": best_by_park,
+        "hitter_order": list(_HITTER_POS_CODES.values()),
+        "roster_scope": roster_scope, "top_n": top_n,
+        "roster_scope_labels": _ROSTER_SCOPE_LABELS,
+        "roster_scope_default_n": _ROSTER_SCOPE_DEFAULT_N,
+        "park": park, "park_is_mine": park_is_mine, "park_team_abbr": park_team_abbr,
     }
 
 

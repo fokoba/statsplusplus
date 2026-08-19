@@ -244,7 +244,98 @@
   </table>
 </div>
 
+<div class="panel">
+  <h2>Best By Park <span style="color:var(--text-dim); font-weight:400; font-size:13px">— top {{ top_n }} at each position{% if park %} for {{ park.park }}{% if park_team_abbr %} ({{ park_team_abbr }}){% endif %}{% endif %}, ranked by park-adjusted composite</span></h2>
+  <div style="font-size:12px; color:var(--text-dim); margin-bottom:10px">
+    Same park as the controls above (home = your own park, away = the selected opponent's). Ranked by Composite +
+    Park (capped ±5, same as everywhere else on this page) — talent first, park is a nudge on top, never a
+    replacement for it. Minor leaguers not yet on the active roster are scored on POTENTIAL tools for park fit
+    (who they'll grow into), same convention as Add Candidates/All Minors.
+  </div>
+  <div style="margin-bottom:12px; display:flex; flex-wrap:wrap; gap:16px; align-items:center; font-size:13px">
+    <div>
+      Roster:
+      <select id="park-roster-scope" onchange="parkScopeChanged()">
+        {% for scope, label in roster_scope_labels.items() %}
+        <option value="{{ scope }}" {% if roster_scope == scope %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      Show top
+      <input type="number" id="park-top-n" min="1" max="50" value="{{ top_n }}" style="width:50px" onchange="lineupUpdate()">
+    </div>
+  </div>
+  {% if not park %}
+  <div style="color:var(--text-dim); font-size:12px; padding:8px 0">
+    {% if is_home %}No home park data.{% else %}Select an opponent above (and upload their park data if you haven't) to see this.{% endif %}
+  </div>
+  {% else %}
+  <div class="scout-grid">
+    {% for group in hitter_order %}
+    {% set players = best_by_park.get(group, []) %}
+    <div class="scout-card">
+      <div class="scout-card-head">{{ group }} <span style="color:var(--text-dim); font-weight:400">({{ players|length }})</span></div>
+      {% if players %}
+      <table class="scout-mini-table">
+        <thead>
+          <tr><th></th><th class="left">Name</th>{% if roster_scope != 'mlb' %}<th>Lvl</th>{% endif %}<th>Comp</th><th>Fit</th><th title="Composite + Park">Adj</th></tr>
+        </thead>
+        <tbody>
+          {% for p in players %}
+          <tr>
+            <td>{{ loop.index }}</td>
+            <td class="left">{% if not p.is_mlb %}<span class="scout-mine-tag">{{ p.level }}</span>{% endif %}<a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
+            {% if roster_scope != 'mlb' %}<td>{{ p.level }}</td>{% endif %}
+            <td><span class="ovr-color" data-g="{{ p.composite_score }}">{{ p.composite_score }}</span></td>
+            <td class="{{ 'pos' if p.park_fit and p.park_fit > 0 else 'neg' if p.park_fit and p.park_fit < 0 else '' }}">{{ p.park_fit if p.park_fit is not none else '-' }}</td>
+            <td style="font-weight:600" class="{{ 'pos' if p.adjusted > p.composite_score else 'neg' if p.adjusted < p.composite_score else '' }}">{{ p.adjusted }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div style="color:var(--text-dim); font-size:12px; padding:8px 0">No qualifying players.</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+<style>
+.scout-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
+}
+.scout-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  min-width: 0;
+  overflow-x: auto;
+}
+.scout-card-head { font-weight: 600; font-size: 13px; margin-bottom: 6px; white-space: nowrap; }
+.scout-mini-table { width: 100%; font-size: 12px; border-collapse: collapse; table-layout: fixed; }
+.scout-mini-table th, .scout-mini-table td { padding: 2px 4px; }
+.scout-mini-table th.left, .scout-mini-table td.left {
+  width: 42%; max-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.scout-mini-table th:first-child, .scout-mini-table td:first-child { width: 18px; }
+.scout-mine-tag {
+  display: inline-block; font-size: 9px; font-weight: 700; color: #4caf50;
+  border: 1px solid #4caf50; border-radius: 3px; padding: 0 3px; margin-right: 3px;
+}
+</style>
+
 <script>
+function parkScopeChanged() {
+  var scope = document.getElementById('park-roster-scope').value;
+  var defaults = {{ roster_scope_default_n|tojson }};
+  document.getElementById('park-top-n').value = defaults[scope] || 10;
+  lineupUpdate();
+}
 function lineupUpdate() {
   var url = new URL(window.location.href);
   var opp = document.getElementById('opp-select').value;
@@ -252,6 +343,10 @@ function lineupUpdate() {
   if (opp) url.searchParams.set('opponent', opp);
   else url.searchParams.delete('opponent');
   if (venue) url.searchParams.set('venue', venue.value);
+  var scope = document.getElementById('park-roster-scope');
+  if (scope) url.searchParams.set('roster_scope', scope.value);
+  var topN = document.getElementById('park-top-n');
+  if (topN && topN.value) url.searchParams.set('top_n', topN.value);
   window.location.href = url.toString();
 }
 </script>

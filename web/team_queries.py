@@ -3579,8 +3579,29 @@ def get_minor_league_roster(team_id):
     return {"hitters": hitters, "pitchers": pitchers}
 
 
+def _org_vr_vl_composites(conn, team_id):
+    """{pid: {"vr":, "vl":}} for EVERY player in the whole org (MLB +
+    every affiliate, hitters and pitchers alike) — same underlying
+    computation as _defense_hit_composites(), just not filtered down to
+    position players only, since All Minor Leaguers needs both.
+    """
+    from scouting_queries import _fetch_rows, _org_where, _build_entries
+    ratings_scale = get_cfg().ratings_scale
+    all_weights = load_tool_weights(get_cfg().league_dir)
+    ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
+    ed_surplus = conn.execute("SELECT MAX(eval_date) FROM player_surplus").fetchone()[0]
+    where, params = _org_where(team_id, "org")
+    rows = _fetch_rows(conn, where, params, ed, ed_surplus)
+    entries = _build_entries(rows, ratings_scale, None, all_weights.get("hitter", {}),
+                              all_weights.get("pitcher", {}), set(), is_mine=True)
+    return {e["pid"]: {"vr": e["vr_score"], "vl": e["vl_score"]} for e in entries}
+
+
 def get_org_minor_league_roster(parent_team_id):
-    """Full minor league roster for an entire org (all levels), split into hitters and pitchers."""
+    """Full minor league roster for an entire org (all levels), split into
+    hitters and pitchers — plus the org's own MLB roster, tagged is_pro,
+    for the "show pro players" comparison toggle (still returned even
+    though the page defaults to hiding them, filtering client-side)."""
     conn = get_db()
     from statsplusplus.config.ratings import norm as _norm_rating
 
@@ -3595,6 +3616,9 @@ def get_org_minor_league_roster(parent_team_id):
     if not aff_ids:
         return {"hitters": [], "pitchers": []}
 
+    # Minor league affiliates plus the org's own MLB roster (p.team_id =
+    # parent_team_id there) — the MLB rows are tagged is_pro below so the
+    # template can filter them back out by default.
     placeholders = ",".join("?" * len(aff_ids))
     rows = conn.execute(f"""
         SELECT p.player_id, p.name, p.age, p.pos, p.role, p.level,
@@ -3615,9 +3639,11 @@ def get_org_minor_league_roster(parent_team_id):
         LEFT JOIN latest_ratings r ON p.player_id = r.player_id
         LEFT JOIN prospect_fv pf ON p.player_id = pf.player_id
         LEFT JOIN player_surplus ps ON p.player_id = ps.player_id
-        WHERE p.team_id IN ({placeholders})
+        WHERE p.team_id IN ({placeholders}) OR (p.team_id = ? AND p.level = '1')
         ORDER BY p.level, COALESCE(r.composite_score, r.ovr, 0) DESC
-    """, aff_ids).fetchall()
+    """, aff_ids + [parent_team_id]).fetchall()
+
+    vr_vl = _org_vr_vl_composites(conn, parent_team_id)
 
     # 40-man roster lookup (contract with is_major=1 under this parent org)
     forty_man_pids = set()
@@ -3725,11 +3751,14 @@ def get_org_minor_league_roster(parent_team_id):
             display_p = _pm.get(pos, "?")
 
         _pers = _personality_fields(intel, wrk_ethic, lead, loy, greed, adaptability, ptype)
+        _vrvl = vr_vl.get(pid, {})
         base = {
             "pid": pid, "name": name, "age": age,
             "pos": display_p, "bt": bt,
             "level": level_name, "level_num": int(level) if level else 99,
+            "is_pro": str(level) == "1",
             "composite": composite, "ceiling": ceiling,
+            "vr": _vrvl.get("vr"), "vl": _vrvl.get("vl"),
             "fv": fv, "fv_str": fv_str, "risk": risk,
             "surplus": round((prospect_surplus if prospect_surplus is not None else mlb_surplus) / _money_divisor(), 1)
                        if (prospect_surplus is not None or mlb_surplus is not None) else None,

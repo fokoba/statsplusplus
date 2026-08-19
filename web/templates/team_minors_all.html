@@ -4,7 +4,7 @@
 <div class="page-header">
   <h1>{{ team_name }} — All Minor Leaguers</h1>
   <div style="color:var(--text-dim); font-size:13px; margin-top:4px">
-    {{ roster.hitters|length + roster.pitchers|length }} players across {{ affiliates|length }} affiliate{{ "s" if affiliates|length != 1 }}
+    {{ (roster.hitters|rejectattr('is_pro')|list|length) + (roster.pitchers|rejectattr('is_pro')|list|length) }} players across {{ affiliates|length }} affiliate{{ "s" if affiliates|length != 1 }}
   </div>
 </div>
 
@@ -48,6 +48,12 @@
     </div>
     <div class="filter-group">
       <label style="font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px">&nbsp;</label>
+      <label style="font-size:12px; color:var(--text); cursor:pointer; display:flex; align-items:center; gap:4px; margin-top:3px" title="Also shows the org's own MLB roster in these tables, for easy side-by-side comparison against your minor leaguers.">
+        <input type="checkbox" id="pro-filter" onchange="applyFilters()"> Show pro players
+      </label>
+    </div>
+    <div class="filter-group">
+      <label style="font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px">&nbsp;</label>
       <label style="font-size:12px; color:var(--text); cursor:pointer; display:flex; align-items:center; gap:4px; margin-top:3px" title="Dims rows whose personality Type is Selfish, Outspoken, Unmotivated, or Disruptive.">
         <input type="checkbox" id="negpers-filter" onchange="applyFilters()"> Dim bad personalities
       </label>
@@ -77,8 +83,8 @@
   </div>
 
   <div class="roster-tabs" style="margin-bottom:12px">
-    <button class="split-btn active" onclick="switchMinorsTab(this, 'hitters')">Hitters ({{ roster.hitters|length }})</button>
-    <button class="split-btn" onclick="switchMinorsTab(this, 'pitchers')">Pitchers ({{ roster.pitchers|length }})</button>
+    <button class="split-btn active" onclick="switchMinorsTab(this, 'hitters')">Hitters ({{ roster.hitters|rejectattr('is_pro')|list|length }})</button>
+    <button class="split-btn" onclick="switchMinorsTab(this, 'pitchers')">Pitchers ({{ roster.pitchers|rejectattr('is_pro')|list|length }})</button>
   </div>
 
   {# Hitters table #}
@@ -91,6 +97,8 @@
         <th data-sort="num" data-sort-best="low">Age</th>
         <th data-sort="str">B/T</th>
         <th data-sort="num">Comp</th>
+        <th data-sort="num" title="Composite computed using vs-RHP split tool ratings where available">vR</th>
+        <th data-sort="num" title="Composite computed using vs-LHP split tool ratings where available">vL</th>
         <th data-sort="num">Ceil</th>
         <th data-sort="str" data-sort-best="high">FV</th>
         <th data-sort="str" title="Scouting accuracy grade for this player's ratings">Acc</th>
@@ -112,7 +120,7 @@
     </thead>
     <tbody>
       {% for p in roster.hitters %}
-      <tr data-level="{{ p.level_num }}" data-pos="{{ p.pos }}" data-40man="{{ '1' if p.on_40man else '0' }}" data-ptype="{{ p.personality_type_class }}" data-dev-good="{{ '1' if p.dev_good else '' }}" data-dev-bad="{{ '1' if p.dev_bad else '' }}">
+      <tr data-level="{{ p.level_num }}" data-pos="{{ p.pos }}" data-40man="{{ '1' if p.on_40man else '0' }}" data-pro="{{ '1' if p.is_pro else '0' }}" data-ptype="{{ p.personality_type_class }}" data-dev-good="{{ '1' if p.dev_good else '' }}" data-dev-bad="{{ '1' if p.dev_bad else '' }}">
         <td data-sort-value="{{ p.level_num }}"><span class="level-badge level-{{ p.level|lower|replace('-','') }}">{{ p.level }}</span></td>
         <td class="left" data-sort-value="{{ p._pos_sort }}">{{ p.pos }}</td>
         <td class="left">
@@ -122,6 +130,8 @@
         <td class="age-cell" data-level="{{ p.level_num }}" data-age="{{ p.age }}">{{ p.age }}</td>
         <td>{{ p.bt }}</td>
         <td>{% if p.composite %}<span class="ovr-color" data-g="{{ p.composite }}">{{ p.composite }}</span>{% else %}—{% endif %}</td>
+        <td>{% if p.vr is not none %}<span class="ovr-color" data-g="{{ p.vr }}">{{ p.vr|round|int }}</span>{% else %}—{% endif %}</td>
+        <td>{% if p.vl is not none %}<span class="ovr-color" data-g="{{ p.vl }}">{{ p.vl|round|int }}</span>{% else %}—{% endif %}</td>
         <td>{% if p.ceiling %}<span class="ovr-color" data-g="{{ p.ceiling }}">{{ p.ceiling }}</span>{% else %}—{% endif %}</td>
         <td>{{ p.fv_str or '—' }}{% if p.risk %} <span style="font-size:10px;color:{% if p.risk == 'Low' %}#4caf50{% elif p.risk == 'Medium' %}#ffc107{% elif p.risk == 'High' %}#ff9800{% else %}#f44336{% endif %}">{{ p.risk[0] }}</span>{% endif %}</td>
         <td>{{ p.acc or '—' }}</td>
@@ -159,6 +169,8 @@
         <th data-sort="num" data-sort-best="low">Age</th>
         <th data-sort="str">T</th>
         <th data-sort="num">Comp</th>
+        <th data-sort="num" title="Composite computed using vs-RHP split tool ratings where available">vR</th>
+        <th data-sort="num" title="Composite computed using vs-LHP split tool ratings where available">vL</th>
         <th data-sort="num">Ceil</th>
         <th data-sort="str" data-sort-best="high">FV</th>
         <th data-sort="str" title="Scouting accuracy grade for this player's ratings">Acc</th>
@@ -178,7 +190,7 @@
     </thead>
     <tbody>
       {% for p in roster.pitchers %}
-      <tr data-level="{{ p.level_num }}" data-pos="{{ p.pos }}" data-40man="{{ '1' if p.on_40man else '0' }}" data-ptype="{{ p.personality_type_class }}" data-dev-good="{{ '1' if p.dev_good else '' }}" data-dev-bad="{{ '1' if p.dev_bad else '' }}">
+      <tr data-level="{{ p.level_num }}" data-pos="{{ p.pos }}" data-40man="{{ '1' if p.on_40man else '0' }}" data-pro="{{ '1' if p.is_pro else '0' }}" data-ptype="{{ p.personality_type_class }}" data-dev-good="{{ '1' if p.dev_good else '' }}" data-dev-bad="{{ '1' if p.dev_bad else '' }}">
         <td data-sort-value="{{ p.level_num }}"><span class="level-badge level-{{ p.level|lower|replace('-','') }}">{{ p.level }}</span></td>
         <td class="left" data-sort-value="{{ p._pos_sort }}">{{ p.pos }}</td>
         <td class="left">
@@ -188,6 +200,8 @@
         <td class="age-cell" data-level="{{ p.level_num }}" data-age="{{ p.age }}">{{ p.age }}</td>
         <td>{{ p.bt.split('/')[1] if '/' in p.bt else p.bt }}</td>
         <td>{% if p.composite %}<span class="ovr-color" data-g="{{ p.composite }}">{{ p.composite }}</span>{% else %}—{% endif %}</td>
+        <td>{% if p.vr is not none %}<span class="ovr-color" data-g="{{ p.vr }}">{{ p.vr|round|int }}</span>{% else %}—{% endif %}</td>
+        <td>{% if p.vl is not none %}<span class="ovr-color" data-g="{{ p.vl }}">{{ p.vl|round|int }}</span>{% else %}—{% endif %}</td>
         <td>{% if p.ceiling %}<span class="ovr-color" data-g="{{ p.ceiling }}">{{ p.ceiling }}</span>{% else %}—{% endif %}</td>
         <td>{{ p.fv_str or '—' }}{% if p.risk %} <span style="font-size:10px;color:{% if p.risk == 'Low' %}#4caf50{% elif p.risk == 'Medium' %}#ffc107{% elif p.risk == 'High' %}#ff9800{% else %}#f44336{% endif %}">{{ p.risk[0] }}</span>{% endif %}</td>
         <td>{{ p.acc or '—' }}</td>
@@ -312,6 +326,7 @@ function filterLevel(btn) {
 function applyFilters() {
   var posFilter = document.getElementById('pos-filter').value;
   var fortyOnly = document.getElementById('forty-man-filter').checked;
+  var showPro = document.getElementById('pro-filter').checked;
   var visibleCount = 0;
 
   // Dimming applies to every row, including whichever tab isn't currently
@@ -339,6 +354,9 @@ function applyFilters() {
       }
       // 40-man filter
       if (show && fortyOnly && tr.dataset['40man'] !== '1') show = false;
+      // Pro players are hidden by default — this page is "All Minor
+      // Leaguers" first; the toggle opts into the comparison view.
+      if (show && !showPro && tr.dataset.pro === '1') show = false;
 
       tr.style.display = show ? '' : 'none';
       if (show) visibleCount++;
@@ -348,7 +366,7 @@ function applyFilters() {
   // Update count display
   var countEl = document.getElementById('filter-count');
   var total = document.querySelector('.roster-tab-table:not([style*="display: none"]) tbody').querySelectorAll('tr').length;
-  if (activeLevel !== 'all' || posFilter !== 'all' || fortyOnly) {
+  if (activeLevel !== 'all' || posFilter !== 'all' || fortyOnly || showPro) {
     countEl.textContent = 'Showing ' + visibleCount + ' of ' + total;
   } else {
     countEl.textContent = '';

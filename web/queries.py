@@ -1227,7 +1227,7 @@ def get_positional_rankings():
     # MLB players with composite scores
     mlb_rows = conn.execute("""
         SELECT p.player_id, p.name, p.age, p.pos, p.role, p.team_id,
-               r.composite_score, r.true_ceiling,
+               r.composite_score, r.true_ceiling, r.tool_only_score,
                r.offensive_grade, r.defensive_value, r.ctrl,
                r.c, r.first_b, r.second_b, r.third_b, r.ss, r.lf, r.cf, r.rf
         FROM players p
@@ -1318,9 +1318,16 @@ def get_positional_rankings():
                 # understates it (e.g. norm(70, "1-100") -> 60, confirmed
                 # against a real player: Terry Jessup's raw SS rating is
                 # 70, displayed here as 60 before this fix).
+                # Base = pure tool-only grade (no in-season stat blend);
+                # Perf = how many points the stat blend added/subtracted to
+                # arrive at the full Comp. Same tool_only_score already
+                # shown parenthetically on the player page.
+                _base = r["tool_only_score"] if r["tool_only_score"] is not None else r["composite_score"]
+                _perf = (r["composite_score"] - _base) if (r["composite_score"] is not None and _base is not None) else None
                 group["mlb"].append({
                     "pid": r["player_id"], "name": r["name"], "age": r["age"],
                     "team": teams.get(r["team_id"], "?"),
+                    "base": _base, "perf": _perf,
                     "composite": r["composite_score"], "ceiling": r["true_ceiling"],
                     "off": r["offensive_grade"],
                     "def": _norm_r(_pos_def_raw, ratings_scale) if _pos_def_raw else None,

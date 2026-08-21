@@ -1208,6 +1208,9 @@ def get_positional_rankings():
     teams = team_abbr_map()
     cfg = get_cfg()
     stats_year = cfg.year
+    # Captured before the `for key, cfg in _POS_GROUPS` loop below shadows
+    # this `cfg` name with each position group's own config dict.
+    ratings_scale = cfg.ratings_scale
 
     # Get MLB org IDs for filtering. LeagueConfig() with no base_dir silently
     # falls back to whichever league it defaults to internally — not
@@ -1309,12 +1312,18 @@ def get_positional_rankings():
                     "COF": max(r["lf"] or 0, r["rf"] or 0) or None,
                 }
                 _pos_def_raw = _pos_def_map.get(key)
+                # norm() defaults to scale="1-100" — silently wrong for a
+                # "20-80" league (PPL), where a raw value already IS the
+                # 20-80 grade and re-normalizing it as if on 1-100
+                # understates it (e.g. norm(70, "1-100") -> 60, confirmed
+                # against a real player: Terry Jessup's raw SS rating is
+                # 70, displayed here as 60 before this fix).
                 group["mlb"].append({
                     "pid": r["player_id"], "name": r["name"], "age": r["age"],
                     "team": teams.get(r["team_id"], "?"),
                     "composite": r["composite_score"], "ceiling": r["true_ceiling"],
                     "off": r["offensive_grade"],
-                    "def": _norm_r(_pos_def_raw) if _pos_def_raw else None,
+                    "def": _norm_r(_pos_def_raw, ratings_scale) if _pos_def_raw else None,
                     "rank": len(group["mlb"]) + 1,
                 })
 

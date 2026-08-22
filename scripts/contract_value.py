@@ -184,8 +184,34 @@ def contract_value(player_id, retention_pct=0.0, _conn=None, _hist=None, league_
 
     pid, name, age, ovr, pot, bucket = result
     c = conn.execute("SELECT * FROM contracts WHERE player_id=?", (pid,)).fetchone()
-    if not c:
-        return None
+    # A released player keeps a contracts ROW (all zeros — years=0 etc.),
+    # it isn't deleted, so "if not c" alone never catches this. Confirmed
+    # bug: Bryan Yariv/Zack Miller both had a real (all-zero) contracts
+    # row after release, so `c` was truthy and `years_total = c["years"]`
+    # came out 0 — remaining = 0, the for-loop below never ran, and
+    # surplus was silently stuck at 0 despite them clearly being
+    # above-replacement players (Add Candidates showed $0 surplus; the
+    # player page's Valuation tab was blank).
+    if not c or not c["years"]:
+        # Either case — no row, or a real-but-empty one — is only worth
+        # valuing if this is a genuine free agent (released, unsigned);
+        # anything else (retired, amateur) has no real contract for a
+        # legitimate reason and should stay None. Assume the "aggressive
+        # one-year prove-it offer" scenario (a fresh league-minimum 1yr
+        # deal) and let the existing years_total==1 control-estimation
+        # path below project forward from there — the same logic already
+        # used for a real 1yr contract.
+        p_status = conn.execute(
+            "SELECT free_agent, retired, team_id FROM players WHERE player_id=?", (pid,)
+        ).fetchone()
+        is_free_agent = bool(p_status and p_status["free_agent"] == 1
+                              and p_status["retired"] == 0 and p_status["team_id"] == 0)
+        if not is_free_agent:
+            return None
+        c = {
+            "years": 1, "current_year": 0, "salary_0": league_minimum(),
+            "no_trade": 0, "last_year_team_option": 0, "last_year_player_option": 0,
+        }
 
     state     = _get_state()
     game_date = state["game_date"]

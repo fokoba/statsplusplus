@@ -1285,6 +1285,61 @@ def _fit_position(bucket, weak_positions):
     return bucket if bucket in weak_positions else ""
 
 
+# bucket -> DEFENSIVE_WEIGHTS key for the vR/vL composite's defense blend —
+# same mapping scouting_queries._COMPOSITE_DEF_BUCKET uses, duplicated here
+# (not imported) since team_queries.py can't import from scouting_queries
+# at module level — scouting_queries already imports several names from
+# this module, so a module-level import back would be circular.
+_ADD_COMPOSITE_DEF_BUCKET = {"C": "C", "SS": "SS", "2B": "2B", "3B": "3B",
+                             "CF": "CF", "LF": "COF_LF", "RF": "COF_RF"}
+
+
+def _add_candidate_vr_vl_def(ratings_scale, hitter_weights_by_bucket, bucket, fit,
+                              cntct_r, gap_r, pow_r, eye_r, cntct_l, gap_l, pow_l, eye_l,
+                              c_frm, c_blk, c_arm, ifr, ife, ifa, tdp, ofr, ofe, ofa,
+                              c, first_b, second_b, third_b, ss, lf, cf, rf):
+    """vR/vL composite (same compute_composite_hitter blend Best Available/
+    Defense use) plus a raw Def Rating at the "Fits At" position — only
+    computed when a fit position exists at all, since Def Rating is
+    meaningless without knowing which position to grade. A combined
+    "LF/RF" fit shows whichever corner grades higher.
+    """
+    from statsplusplus.config.ratings import norm as _norm_rating, norm_continuous as _normc2
+    from statsplusplus.evaluation.composite import compute_composite_hitter
+    from statsplusplus.evaluation.constants import DEFENSIVE_WEIGHTS
+
+    weights = hitter_weights_by_bucket.get(bucket, hitter_weights_by_bucket.get("COF", {}))
+    vr_tools = {"contact": _normc2(cntct_r, ratings_scale), "gap": _normc2(gap_r, ratings_scale),
+                "power": _normc2(pow_r, ratings_scale), "eye": _normc2(eye_r, ratings_scale)}
+    vl_tools = {"contact": _normc2(cntct_l, ratings_scale), "gap": _normc2(gap_l, ratings_scale),
+                "power": _normc2(pow_l, ratings_scale), "eye": _normc2(eye_l, ratings_scale)}
+    def_bucket = _ADD_COMPOSITE_DEF_BUCKET.get(bucket)
+    if def_bucket:
+        def_weights = DEFENSIVE_WEIGHTS.get(def_bucket, {})
+        defense = {"CFrm": _normc2(c_frm, ratings_scale), "CBlk": _normc2(c_blk, ratings_scale),
+                   "CArm": _normc2(c_arm, ratings_scale), "IFR": _normc2(ifr, ratings_scale),
+                   "IFE": _normc2(ife, ratings_scale), "IFA": _normc2(ifa, ratings_scale),
+                   "TDP": _normc2(tdp, ratings_scale), "OFR": _normc2(ofr, ratings_scale),
+                   "OFE": _normc2(ofe, ratings_scale), "OFA": _normc2(ofa, ratings_scale)}
+    else:
+        def_weights, defense = {}, {}
+    try:
+        vr = compute_composite_hitter(vr_tools, weights, defense, def_weights)
+        vl = compute_composite_hitter(vl_tools, weights, defense, def_weights)
+    except Exception:
+        vr = vl = None
+
+    def_rating = None
+    if fit:
+        _pos_def_map = {"C": c, "1B": first_b, "2B": second_b, "3B": third_b,
+                        "SS": ss, "LF": lf, "CF": cf, "RF": rf}
+        grades = [g for g in (_norm_rating(_pos_def_map.get(p), ratings_scale)
+                              for p in fit.split("/")) if g is not None]
+        if grades:
+            def_rating = max(grades)
+    return vr, vl, def_rating
+
+
 def get_waiver_candidates(team_id=None):
     """Players currently on waivers, excluding this org's own players.
 
@@ -1307,7 +1362,10 @@ def get_waiver_candidates(team_id=None):
                pf.fv_continuous,
                r.cntct, r.gap, r.pow, r.eye, r.stf, r.mov, r.ctrl, r.bats,
                r.pot_cntct, r.pot_gap, r.pot_pow, r.pot_stf, r.pot_mov, r.pot_ctrl,
-               r.adaptability, r.personality_type
+               r.adaptability, r.personality_type,
+               r.cntct_r, r.gap_r, r.pow_r, r.eye_r, r.cntct_l, r.gap_l, r.pow_l, r.eye_l,
+               r.c_frm, r.c_blk, r.c_arm, r.ifr, r.ife, r.ifa, r.tdp, r.ofr, r.ofe, r.ofa,
+               r.c, r.first_b, r.second_b, r.third_b, r.ss, r.lf, r.cf, r.rf
         FROM players p
         LEFT JOIN latest_ratings r ON p.player_id = r.player_id
         LEFT JOIN prospect_fv pf ON pf.player_id = p.player_id AND pf.eval_date = ?
@@ -1360,19 +1418,29 @@ def get_waiver_candidates(team_id=None):
          surplus_raw, prospect_surplus_raw, fv_continuous,
          cntct, gap, pow_, eye, stf, mov, ctrl, bats,
          pot_cntct, pot_gap, pot_pow, pot_stf, pot_mov, pot_ctrl,
-         adaptability, ptype) = r
+         adaptability, ptype,
+         cntct_r, gap_r, pow_r, eye_r, cntct_l, gap_l, pow_l, eye_l,
+         c_frm, c_blk, c_arm, ifr, ife, ifa, tdp, ofr, ofe, ofa,
+         def_c, def_1b, def_2b, def_3b, def_ss, def_lf, def_cf, def_rf) = r
         bucket = _bucket_for_display(pf_bucket, role, pos)
         potential = true_ceil if true_ceil is not None else ceil_score
         _pers = _personality_fields(intel, wrk_ethic, lead, loy, greed, adaptability, ptype)
         level_disp = level_map().get(str(level)) or ("FA" if str(level)=="0" else str(level))
         is_pitcher = role in ROLE_MAP
+        _fit = _fit_position(bucket, weak_positions)
 
         if is_pitcher:
             _tools = {"stuff": _normc(stf, ratings_scale), "movement": _normc(mov, ratings_scale),
                       "control": _normc(ctrl, ratings_scale)}
+            vr_composite = vl_composite = def_rating = None
         else:
             _tools = {"contact": _normc(cntct, ratings_scale), "gap": _normc(gap, ratings_scale),
                       "power": _normc(pow_, ratings_scale), "eye": _normc(eye, ratings_scale)}
+            vr_composite, vl_composite, def_rating = _add_candidate_vr_vl_def(
+                ratings_scale, hitter_weights_by_bucket, bucket, _fit,
+                cntct_r, gap_r, pow_r, eye_r, cntct_l, gap_l, pow_l, eye_l,
+                c_frm, c_blk, c_arm, ifr, ife, ifa, tdp, ofr, ofe, ofa,
+                def_c, def_1b, def_2b, def_3b, def_ss, def_lf, def_cf, def_rf)
 
         # Not-yet-MLB players are scored on potential tools (their current
         # tools are barely developed and not the real signal) — same
@@ -1421,7 +1489,8 @@ def get_waiver_candidates(team_id=None):
             "cur_team_id": cur_tid, "cur_team_name": cur_name or str(cur_tid),
             "composite_score": comp, "potential": potential, "fv_str": fv_str,
             "acc": acc, **_pers,
-            "fit": _fit_position(bucket, weak_positions),
+            "fit": _fit,
+            "vr_composite": vr_composite, "vl_composite": vl_composite, "def_rating": def_rating,
             "park_fit": park_fit, "park_value": park_value,
             "surplus": round((surplus_raw if surplus_raw is not None else prospect_surplus_raw) / _money_divisor(), 1)
                        if (surplus_raw is not None or prospect_surplus_raw is not None) else None,
@@ -1551,7 +1620,10 @@ def get_free_agent_candidates(team_id=None):
                pf.fv_continuous, fap.ask_raw,
                r.cntct, r.gap, r.pow, r.eye, r.stf, r.mov, r.ctrl, r.bats,
                r.pot_cntct, r.pot_gap, r.pot_pow, r.pot_stf, r.pot_mov, r.pot_ctrl,
-               r.adaptability, r.personality_type
+               r.adaptability, r.personality_type,
+               r.cntct_r, r.gap_r, r.pow_r, r.eye_r, r.cntct_l, r.gap_l, r.pow_l, r.eye_l,
+               r.c_frm, r.c_blk, r.c_arm, r.ifr, r.ife, r.ifa, r.tdp, r.ofr, r.ofe, r.ofa,
+               r.c, r.first_b, r.second_b, r.third_b, r.ss, r.lf, r.cf, r.rf
         FROM players p
         LEFT JOIN latest_ratings r ON p.player_id = r.player_id
         LEFT JOIN prospect_fv pf ON pf.player_id = p.player_id AND pf.eval_date = ?
@@ -1610,18 +1682,28 @@ def get_free_agent_candidates(team_id=None):
          prospect_surplus_raw, fv_continuous, ask_raw,
          cntct, gap, pow_, eye, stf, mov, ctrl, bats,
          pot_cntct, pot_gap, pot_pow, pot_stf, pot_mov, pot_ctrl,
-         adaptability, ptype) = r
+         adaptability, ptype,
+         cntct_r, gap_r, pow_r, eye_r, cntct_l, gap_l, pow_l, eye_l,
+         c_frm, c_blk, c_arm, ifr, ife, ifa, tdp, ofr, ofe, ofa,
+         def_c, def_1b, def_2b, def_3b, def_ss, def_lf, def_cf, def_rf) = r
         bucket = _bucket_for_display(pf_bucket, role, pos)
         potential = true_ceil if true_ceil is not None else ceil_score
         _pers = _personality_fields(intel, wrk_ethic, lead, loy, greed, adaptability, ptype)
         level_disp = level_map().get(str(level)) or ("FA" if str(level)=="0" else str(level))
         is_pitcher = role in ROLE_MAP
+        _fit = _fit_position(bucket, weak_positions)
         if is_pitcher:
             _tools = {"stuff": _normc(stf, ratings_scale), "movement": _normc(mov, ratings_scale),
                       "control": _normc(ctrl, ratings_scale)}
+            vr_composite = vl_composite = def_rating = None
         else:
             _tools = {"contact": _normc(cntct, ratings_scale), "gap": _normc(gap, ratings_scale),
                       "power": _normc(pow_, ratings_scale), "eye": _normc(eye, ratings_scale)}
+            vr_composite, vl_composite, def_rating = _add_candidate_vr_vl_def(
+                ratings_scale, hitter_weights_by_bucket, bucket, _fit,
+                cntct_r, gap_r, pow_r, eye_r, cntct_l, gap_l, pow_l, eye_l,
+                c_frm, c_blk, c_arm, ifr, ife, ifa, tdp, ofr, ofe, ofa,
+                def_c, def_1b, def_2b, def_3b, def_ss, def_lf, def_cf, def_rf)
         spec_score = compute_specialist_score(_tools, is_pitcher)
 
         # Park fit/value for a not-yet-MLB player should reflect what he'll
@@ -1675,7 +1757,8 @@ def get_free_agent_candidates(team_id=None):
             "level": level_disp,
             "bucket": bucket, "composite_score": comp, "potential": potential,
             "fv": fv, "fv_str": fv_str, "acc": acc, **_pers,
-            "fit": _fit_position(bucket, weak_positions),
+            "fit": _fit,
+            "vr_composite": vr_composite, "vl_composite": vl_composite, "def_rating": def_rating,
             "surplus": round((surplus_raw if surplus_raw is not None else prospect_surplus_raw) / _money_divisor(), 1)
                        if (surplus_raw is not None or prospect_surplus_raw is not None) else None,
             "peak_surplus": _peak_surplus(fv_continuous, age, level_disp, pf_bucket, ovr=comp, pot=potential),

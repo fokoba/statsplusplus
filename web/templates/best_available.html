@@ -100,9 +100,9 @@
     </thead>
     <tbody>
       {% for p in players %}
-      <tr{% if p.is_mine %} class="scout-mine-row"{% endif %} data-ptype="{{ p.personality_type_class }}" data-dev-good="{{ '1' if p.dev_good else '' }}" data-dev-bad="{{ '1' if p.dev_bad else '' }}" data-milc="{{ 'yes' if (p.is_milc and not p.is_mine) else 'no' }}">
+      <tr{% if p.is_mine and p.is_protected %} class="scout-mine-protected-row" title="Already on your 40-man — protected"{% elif p.is_mine %} class="scout-mine-row"{% endif %} data-ptype="{{ p.personality_type_class }}" data-dev-good="{{ '1' if p.dev_good else '' }}" data-dev-bad="{{ '1' if p.dev_bad else '' }}" data-milc="{{ 'yes' if (p.is_milc and not p.is_mine) else 'no' }}">
         <td><input type="checkbox" class="scout-checkbox" data-pid="{{ p.pid }}" data-page="{{ page_key }}"></td>
-        <td class="left">{% if p.is_mine %}<span class="scout-mine-tag">{{ p.roster_tag }}</span>{% endif %}{% if p.good_pick %}<span title="Both a good Park Fit (20+) and a positive Long-Term Surplus — a high-confidence add">⭐</span>{% endif %}<a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
+        <td class="left">{% if p.is_mine %}<span class="{{ 'scout-mine-tag-protected' if p.is_protected else 'scout-mine-tag' }}">{{ p.roster_tag }}</span>{% endif %}{% if p.good_pick %}<span title="Both a good Park Fit (20+) and a positive Long-Term Surplus — a high-confidence add">⭐</span>{% endif %}<a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
         <td>{{ p.age if p.age is not none else '-' }}</td>
         <td><span class="ovr-color" data-g="{{ p.composite_score }}">{{ p.composite_score if p.composite_score is not none else '-' }}</span></td>
         {% if value_key %}
@@ -189,10 +189,11 @@
 <div class="panel">
   <h2>Best Rule 5 Eligible <span style="color:var(--text-dim); font-weight:400; font-size:13px">(top 10 per position, restricted to the top 25% Ovr at that position)</span></h2>
   <div style="font-size:12px; color:var(--text-dim); margin-bottom:12px; padding:8px; border:1px solid var(--border); border-radius:6px">
-    Not free agents — this pool is every other org's exposed minor leaguers, from a manually uploaded OOTP "Rule 5 Draft
-    Eligible" export. These are High/Very High confidence reads only — confirmed, ready-to-draft picks. With a Compare
-    toggle on above, your own tagged rows here are YOUR players currently exposed and needing 40-man protection, not
-    comparison targets:
+    The CSV upload's only job is telling us who OOTP considers Rule 5 eligible — that's roster-protection history the
+    live sync can't derive. Everything else is checked live on every page load, not trusted from the file: free
+    agents, retired players, and anyone already protected on a 40-man (yours or another org's) are automatically
+    excluded even if the file is stale on those points. These are High/Very High confidence reads only — confirmed,
+    ready-to-draft picks.
     <form method="post" action="/rule5-upload" enctype="multipart/form-data" style="display:inline-flex; align-items:center; gap:6px; margin-top:6px">
       <input type="hidden" name="dest" value="/best-available">
       <input type="file" name="rule5_file" required>
@@ -200,6 +201,12 @@
     </form>
     {% if request.args.get('rule5_count') %}<span style="color:#4caf50">Imported {{ request.args.get('rule5_count') }} players.</span>{% endif %}
     {% if request.args.get('rule5_error') %}<span style="color:#f44336">Upload failed — check the file and try again.</span>{% endif %}
+    <div style="margin-top:8px">
+      With a Compare toggle on above, your own tagged rows here are YOUR exposed players, not comparison targets —
+      <span class="scout-mine-tag">green</span> means still unprotected (needs a 40-man add before the draft),
+      <span class="scout-mine-tag-protected">purple</span> means already on your 40-man (handled — kept visible so
+      you can track your own protection progress even though the uploaded file itself never updates on its own).
+    </div>
   </div>
   {% if rule5_uploaded %}
   <div class="scout-grid">
@@ -261,10 +268,15 @@
 .scout-mini-table th:first-child, .scout-mini-table td:first-child { width: 18px; }
 tr.scout-marked .player-link { color: var(--text-dim); text-decoration: line-through; }
 tr.scout-mine-row { background: rgba(76, 175, 80, 0.12); }
+tr.scout-mine-protected-row { background: rgba(156, 39, 176, 0.14); }
 tr.scout-milc-row { background: rgba(255, 122, 26, 0.14); }
 .scout-mine-tag {
   display: inline-block; font-size: 9px; font-weight: 700; color: #4caf50;
   border: 1px solid #4caf50; border-radius: 3px; padding: 0 3px; margin-right: 3px;
+}
+.scout-mine-tag-protected {
+  display: inline-block; font-size: 9px; font-weight: 700; color: #9c27b0;
+  border: 1px solid #9c27b0; border-radius: 3px; padding: 0 3px; margin-right: 3px;
 }
 </style>
 

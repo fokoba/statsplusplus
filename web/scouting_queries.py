@@ -499,12 +499,33 @@ def _rule5_has_data(conn):
         return False
 
 
+def _protected_pids(conn):
+    """Every player_id currently on ANY team's 40-man roster, leaguewide —
+    "protected" in the Rule 5 sense. Same is_major signal as the 40-man
+    badge shown elsewhere in the app, just not scoped to one org here."""
+    try:
+        return {r[0] for r in conn.execute(
+            "SELECT player_id FROM contracts WHERE is_major=1"
+        ).fetchall()}
+    except Exception:
+        return set()
+
+
 def _rule5_all_players(conn):
     """All Rule 5-eligible players with ratings, grouped by position — the
     shared base pool for every Rule 5 section (main, youth). Each caller
     computes its own quality cutoff at whatever percentile it needs via
     _position_cutoffs(), since the main and youth sections intentionally
     use different bars.
+
+    The uploaded rule5_eligible CSV only tells us in-game eligibility
+    (roster-protection history the live sync can't derive) — it goes
+    stale on everything else. So this always cross-checks the LIVE
+    players table for free-agent/retired status (no need for a fresh
+    upload just because someone got released or retired since), and
+    excludes anyone already protected on a 40-man (not actually
+    available in a real Rule 5 draft) rather than trusting the CSV's
+    snapshot-in-time roster picture.
     """
     if not _rule5_has_data(conn):
         return {}
@@ -517,9 +538,11 @@ def _rule5_all_players(conn):
             JOIN players p ON p.player_id = re.player_id
             LEFT JOIN latest_ratings r ON p.player_id = r.player_id
             WHERE r.composite_score IS NOT NULL
+              AND p.team_id != 0 AND COALESCE(p.free_agent, 0) = 0 AND COALESCE(p.retired, 0) = 0
         """).fetchall()
     except Exception:
         return {}
+    protected = _protected_pids(conn)
 
     players = []
     for (pid, name, age, pos, role, acc, comp, ceil_score, true_ceil,
@@ -527,10 +550,13 @@ def _rule5_all_players(conn):
         group, is_pitcher = _pos_group(pos, role)
         if group is None:
             continue
+        if pid in protected:
+            continue
         potential = true_ceil if true_ceil is not None else ceil_score
         _pers = _personality_fields(intel, wrk_ethic, lead, loy, greed, adaptability, ptype)
         players.append({"pid": pid, "name": name, "age": age, "group": group,
                          "composite_score": comp, "potential": potential, "acc": acc,
+                         "is_protected": False,
                          "surplus": None, "good_pick": False, "newly_confirmed": False,
                          "is_mine": False, "roster_tag": None,
                          **_pers})
@@ -614,6 +640,13 @@ def _rule5_mine(conn, team_id, scope):
     needs protecting (a 40-man add) before the draft, not a target to
     compare against. No accuracy/quality/top-10 gating: every exposed
     player of yours matters, however deep the list runs.
+
+    Includes players you've since protected too (is_protected=True) —
+    the uploaded rule5_eligible CSV is a snapshot and doesn't update as
+    you add players to your 40-man, so this deliberately keeps showing
+    them (colored differently by the caller) as a running record of your
+    own protection progress, rather than silently dropping them the
+    moment they're handled.
     """
     if not _rule5_has_data(conn):
         return {}
@@ -626,10 +659,11 @@ def _rule5_mine(conn, team_id, scope):
             FROM rule5_eligible re
             JOIN players p ON p.player_id = re.player_id
             LEFT JOIN latest_ratings r ON p.player_id = r.player_id
-            WHERE {where} AND r.composite_score IS NOT NULL
+            WHERE {where} AND r.composite_score IS NOT NULL AND COALESCE(p.retired, 0) = 0
         """, params).fetchall()
     except Exception:
         return {}
+    protected = _protected_pids(conn)
 
     out = {}
     for (pid, name, age, pos, role, acc, comp, ceil_score, true_ceil, level,
@@ -641,6 +675,7 @@ def _rule5_mine(conn, team_id, scope):
         _pers = _personality_fields(intel, wrk_ethic, lead, loy, greed, adaptability, ptype)
         entry = {"pid": pid, "name": name, "age": age, "group": group,
                  "composite_score": comp, "potential": potential, "acc": acc,
+                 "is_protected": pid in protected,
                  "surplus": None, "good_pick": False, "newly_confirmed": False,
                  "is_mine": True, "roster_tag": level_map().get(str(level), str(level)),
                  **_pers}

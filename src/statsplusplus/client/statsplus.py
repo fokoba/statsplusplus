@@ -37,6 +37,7 @@ import logging
 import os
 import re
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any, Optional
@@ -120,15 +121,45 @@ def _base_url() -> str:
     return f"https://statsplus.net/{slug}/api"
 
 
-def _fetch(url: str) -> str:
+# StatsPlus bot filtering serves a login page to requests with no User-Agent —
+# identify the tool. https://wiki.statsplus.net/web-tools/statsplus-api#authentication
+_USER_AGENT = "statsplusplus/1.0 (+https://github.com/statsplusplus)"
+_WAIT_RE = re.compile(r"wait (\d+) seconds", re.IGNORECASE)
+_RATE_LIMIT_MAX_RETRIES = 4
+
+
+def _fetch(url: str, _retries: int = _RATE_LIMIT_MAX_RETRIES) -> str:
     _, cookie = _resolve_creds()
-    req = urllib.request.Request(url, headers={"Cookie": cookie, "Accept": "application/json"})
-    with urllib.request.urlopen(req) as r:
-        body: str = r.read().decode()
-    if "requires user to be logged in" in body:
-        raise CookieExpiredError(
-            "StatsPlus session expired — update your cookie in Settings."
-        )
+    headers = {
+        "Cookie": cookie,
+        "Accept": "application/json",
+        "User-Agent": _USER_AGENT,
+    }
+    body: str = ""
+    for attempt in range(_retries + 1):
+        req = urllib.request.Request(url, headers=headers)
+        try:
+            with urllib.request.urlopen(req) as r:
+                body = r.read().decode()
+        except urllib.error.HTTPError as e:
+            if e.code == 429 and attempt < _retries:
+                retry_after = e.headers.get("Retry-After") if e.headers else None
+                wait = int(retry_after) if retry_after and retry_after.isdigit() else 35
+                log.info("Rate limited (429) — waiting %ds (attempt %d)", wait, attempt + 1)
+                time.sleep(wait + 2)
+                continue
+            raise
+        if "requires user to be logged in" in body:
+            raise CookieExpiredError(
+                "StatsPlus session expired — update your cookie in Settings."
+            )
+        m = _WAIT_RE.search(body)
+        if m and attempt < _retries:
+            wait = int(m.group(1))
+            log.info("Rate limited — waiting %ds (attempt %d)", wait, attempt + 1)
+            time.sleep(wait + 2)
+            continue
+        return body
     return body
 
 
@@ -366,9 +397,29 @@ _RATINGS_EXPECTED_126 = (
     "Int,WrkEthic,Greed,Loy,Lead,Prone,Acc,Ovr,Pot"
 ).split(",")
 
+# Newer OOTP export (127 cols). Drops Ovr, Pot, Prone — leagues that don't
+# surface OVR/POT (e.g. PPL) never populated these anyway. Adds GBType, FBType,
+# PotVel, ArmSlot. The three Ctrl columns are already correctly labeled.
+_RATINGS_EXPECTED_127 = (
+    "ID,Name,Pos,League,Team,Org,LgLvl,Age,Height,Bats,Throws,"
+    "Cntct,Gap,Pow,Eye,Ks,BABIP,Cntct_R,Gap_R,Pow_R,Eye_R,Ks_R,BABIP_R,"
+    "Cntct_L,Gap_L,Pow_L,Eye_L,Ks_L,BABIP_L,PotCntct,PotGap,PotPow,PotEye,PotKs,PotBABIP,"
+    "IFR,IFE,IFA,TDP,OFR,OFE,OFA,CBlk,CArm,CFrm,"
+    "P,C,1B,2B,3B,SS,LF,CF,RF,PotP,PotC,Pot1B,Pot2B,Pot3B,PotSS,PotLF,PotCF,PotRF,"
+    "Speed,StlRt,Steal,Run,SacBunt,BuntHit,GBType,FBType,"
+    "Stf,Mov,HRA,PBABIP,Ctrl,Stf_R,Mov_R,HRA_R,PBABIP_R,"
+    "Ctrl_R,Stf_L,Mov_L,HRA_L,PBABIP_L,Ctrl_L,"
+    "PotStf,PotMov,PotHRA,PotPBABIP,PotCtrl,Vel,PotVel,ArmSlot,GB,Stm,Hold,"
+    "Fst,Snk,Cutt,Crv,Sld,Chg,Splt,Frk,CirChg,Scr,Kncrv,Knbl,"
+    "PotFst,PotSnk,PotCutt,PotCrv,PotSld,PotChg,PotSplt,PotFrk,"
+    "PotCirChg,PotScr,PotKncrv,PotKnbl,"
+    "Int,WrkEthic,Greed,Loy,Lead,Acc"
+).split(",")
+
 _RATINGS_KNOWN_FORMATS: dict[int, list[str]] = {
     113: _RATINGS_EXPECTED_113,
     126: _RATINGS_EXPECTED_126,
+    127: _RATINGS_EXPECTED_127,
 }
 
 
@@ -381,6 +432,7 @@ def _fix_ratings_header(text: str) -> str:
     cols = lines[0].split(",")
 
     # Find the three Ctrl columns
+    has_plain_ctrl = "Ctrl" in cols
     ctrl_r_idx: Optional[int] = None
     ctrl_l_indices: list[int] = []
     for i, c in enumerate(cols):
@@ -389,7 +441,12 @@ def _fix_ratings_header(text: str) -> str:
         elif c == "Ctrl_L":
             ctrl_l_indices.append(i)
 
-    if ctrl_r_idx is not None and len(ctrl_l_indices) >= 2:
+    # Only repair the mislabeled legacy header. Newer exports label the three
+    # Ctrl columns correctly; if a plain "Ctrl" is already present the header is
+    # well-formed and the rename would corrupt it.
+    if has_plain_ctrl:
+        pass  # already correct — no repair needed
+    elif ctrl_r_idx is not None and len(ctrl_l_indices) >= 2:
         cols[ctrl_r_idx] = "Ctrl"
         cols[ctrl_l_indices[0]] = "Ctrl_R"
     elif ctrl_r_idx is not None and len(ctrl_l_indices) == 1:

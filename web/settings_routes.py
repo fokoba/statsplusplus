@@ -338,7 +338,7 @@ def onboard_step3():
 
     if request.method == "GET":
         from statsplusplus.data import db as _db
-        conn = _db.get_conn(league_dir)
+        conn = _db.get_connection(league_dir)
         from statsplus import client
         api_teams = {t["ID"]: f"{t['Name']} {t['Nickname']}" for t in client.get_teams()
                      if t.get("Nickname")}

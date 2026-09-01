@@ -76,8 +76,15 @@ The launcher handles Python environment setup and dependency installation automa
 git clone <repo-url> statsplusplus
 cd statsplusplus
 python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -e .
 ```
+
+This installs the `statsplusplus` package (a `src/` layout) in editable mode
+along with its dependencies. The editable install is required — running
+`web/app.py` or any `scripts/*.py` tool imports the `statsplusplus` package,
+which is not on `sys.path` without it. (`pip install -r requirements.txt` alone
+installs Flask but not the package, and you'll hit
+`ModuleNotFoundError: No module named 'statsplusplus'`.)
 
 The only dependency is Flask. Everything else uses the Python standard library.
 

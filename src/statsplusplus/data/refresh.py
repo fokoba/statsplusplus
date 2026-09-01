@@ -1406,9 +1406,12 @@ def _run_fv_calc():
         log.info("  fv_calc complete")
 
 
-if __name__ == "__main__":
+def main():
     args = sys.argv[1:]
     default_year = _cfg.year
+    # Configure logging to console + data/logs/ so refresh runs leave a trail.
+    from statsplusplus.utils.logging import setup_logging
+    setup_logging(BASE / "data" / "logs")
     if args and args[0] == "state":
         game_date = args[1] if len(args) > 1 else "unknown"
         year      = int(args[2]) if len(args) > 2 else default_year
@@ -1435,3 +1438,7 @@ if __name__ == "__main__":
             log.info("=== Pipeline complete ===")
         else:
             log.info("=== Pipeline complete (--no-fv: skipped eval/calibrate/fv) ===")
+
+
+if __name__ == "__main__":
+    main()

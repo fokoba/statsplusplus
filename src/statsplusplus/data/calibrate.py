@@ -1628,6 +1628,12 @@ def calibrate(dry_run=False):
     return weights
 
 
-if __name__ == "__main__":
+def main():
+    from statsplusplus.utils.logging import setup_logging
+    setup_logging(Path(_PROJECT_ROOT) / "data" / "logs")
     dry_run = "--dry-run" in sys.argv
     calibrate(dry_run=dry_run)
+
+
+if __name__ == "__main__":
+    main()

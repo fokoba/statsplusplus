@@ -177,3 +177,36 @@ class TestInitSchema:
         assert row["age"] == 25
         assert row["team_id"] == 44
         conn.close()
+
+
+class TestRatingsHistoryProne:
+    """Regression: fresh installs crashed writing ratings_history because the
+    'prone' column was missing from the schema (and the migration)."""
+
+    def test_fresh_schema_has_prone(self, tmp_path):
+        league_dir = tmp_path / "lg"
+        league_dir.mkdir()
+        init_schema(league_dir)
+        conn = get_connection(league_dir)
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(ratings_history)")}
+        assert "prone" in cols
+        conn.close()
+
+    def test_migration_adds_prone_to_legacy_db(self, tmp_path):
+        from statsplusplus.data.db import _migrate_ratings_history
+
+        league_dir = tmp_path / "lg"
+        league_dir.mkdir()
+        conn = get_connection(league_dir)
+        # Simulate a legacy ratings_history without prone.
+        conn.executescript(
+            "DROP TABLE IF EXISTS ratings_history;"
+            "CREATE TABLE ratings_history ("
+            "  player_id INTEGER, snapshot_date TEXT, ovr INTEGER,"
+            "  PRIMARY KEY (player_id, snapshot_date));"
+        )
+        conn.commit()
+        _migrate_ratings_history(conn)
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(ratings_history)")}
+        assert "prone" in cols
+        conn.close()

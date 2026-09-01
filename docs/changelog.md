@@ -4,6 +4,58 @@ Completed and deferred work items, organized by session. Moved from `task_list.m
 
 ---
 
+## Session 80 (2026-09-01)
+
+### Bug Fixes — Ratings CSV Ingestion
+
+- **New 127-column ratings export broke ingestion** — StatsPlus changed the ratings-export CSV schema: it now has 127 columns, drops `Ovr`/`Pot`/`Prone`, and adds `GBType`/`FBType`/`PotVel`/`ArmSlot`. Registered the 127-col layout as a known format so the "header changed" warning no longer fires. Leagues that don't surface OVR/POT (e.g. PPL) never populated those fields anyway — the app's own composite/ceiling/FV model runs fine without them (verified: PPL refresh produces 6,497 prospect FV grades and 8,252 player evaluations).
+
+- **Ctrl column repair corrupted correctly-labeled headers** — `_fix_ratings_header` was written to fix a legacy export that mislabeled the three control columns. The newer export labels them correctly (`Ctrl`/`Ctrl_R`/`Ctrl_L`), but the repair still fired — renaming the real `Ctrl_R` → `Ctrl` (duplicate) and `Ctrl_L` → `Ctrl_R`, corrupting control-vs-hand ratings. Added a guard: skip the repair when a plain `Ctrl` column is already present. Legacy repair path preserved. Fixed in both `statsplus/client.py` (live path) and `src/statsplusplus/client/statsplus.py`. Added `tests/test_ratings_header.py` (4 tests).
+
+- **Refresh had no logging** — `refresh.py`'s `__main__` never called `setup_logging()`, so refresh runs left no trace in `data/logs/` (INFO dropped entirely; only stray WARNINGs escaped via Python's last-resort handler). This is why the failed PPL pull produced no diagnostic trail. Now configures console + `data/logs/statspp.log` at startup.
+
+### Bug Fixes — CLI Entry Points (refactor leftovers)
+
+- **`spp-refresh` and `spp-calibrate` entry points were broken** — both `pyproject.toml` scripts pointed at a `main()` function that didn't exist (`statsplusplus.data.refresh:main`, `statsplusplus.data.calibrate:main`); the modules only had bare `if __name__ == "__main__"` blocks. Extracted a `main()` in each (both now also call `setup_logging`). Audited all 15 entry points — the other 13 were fine.
+- **`scripts/refresh.py` / `scripts/calibrate.py` missing** — README, RULES.md, steering docs, and `tools_reference.md` all document `python3 scripts/refresh.py [year]`, but no such shim existed after the refactor (the logic moved into the package). Added thin shims delegating to the package `main()`, matching the pattern used by every other `scripts/` CLI tool.
+
+**Known (not fixed this session):** the web layer has two divergent Flask apps — the live `web/app.py` (full route set, run via `python3 web/app.py`) and a partial `create_app` factory in `src/statsplusplus/web/app.py` (the `spp-web` entry point) whose blueprints cover only a subset of routes. Finishing the web migration is a larger cleanup tracked under the codebase quality work.
+
+### Bug Fixes — Fresh Install (Windows beta tester report)
+
+Six issues hit going from `git clone` to a working dashboard on a clean install:
+
+- **`ModuleNotFoundError: No module named 'statsplusplus'`** — README's developer install ran `pip install -r requirements.txt`, which installs Flask but not the `src/` package, so `web/app.py` and every `scripts/*.py` failed to import `statsplusplus`. README now instructs `pip install -e .` with an explanation.
+- **Ratings export failed with `CookieExpiredError` even with a fresh cookie** — StatsPlus runs bot filtering that serves a login page to requests with no `User-Agent`; `_fetch()` interpreted that as an expired cookie. Added a `User-Agent` header (per the StatsPlus API docs). Applied to both client copies.
+- **Historical backfill / team-stats hit HTTP 429** — team-stats endpoints are rate limited (one render/minute, plus a per-year render lock). `_fetch()` now handles rate limiting centrally: it retries on HTTP 429 (honoring `Retry-After`) and on the plain-text "wait N seconds" body message StatsPlus returns, rather than requiring manual `sleep()` calls in `refresh.py`.
+- **`table ratings_history has no column named prone`** — the `ratings_history` snapshot writes a `prone` value, but the column was missing from the `CREATE TABLE` and the migration (affected fresh installs, not just upgrades). Added `prone TEXT` to the schema and to `_migrate_ratings_history`. **Also found:** the ratings migration functions (`_migrate_ratings`, `_migrate_ratings_history`, `_migrate_ratings_components`) were defined but never called by `init_schema` — orphaned since the package refactor. Wired all three in (idempotent additive `ALTER TABLE`s), so existing installs now pick up `prone` and other post-refactor columns on startup instead of only fresh installs.
+- **`module 'statsplusplus.data.db' has no attribute 'get_conn'`** — onboarding step 3 called `_db.get_conn(league_dir)`; the function is `get_connection()`. Fixed in `web/settings_routes.py` and two silently-failing call sites in `web/player_queries.py` (promotion/demotion readiness).
+
+Regression tests added: `tests/data/test_db.py` (prone column, fresh + migration), `tests/test_ratings_header.py` (User-Agent header, wait-message retry).
+
+### Bug Fixes — Refactor Audit (OVR/POT-less leagues)
+
+A systematic audit (import every module, invoke every CLI tool against PPL, boot the web app) surfaced a class of bugs where CLI analysis tools assumed OVR/POT are always numbers — they crash on leagues that don't surface them (PPL returns NULL).
+
+- **`team_needs.py`, `trade_assets.py`, `farm_analysis.py`, `roster_analysis.py` crashed on PPL** with `NoneType` format/comparison errors. Root cause: raw `r.ovr`/`r.pot` are NULL and `dict.get(k, default)` returns None (not the default) when the key exists with a NULL value. Fixed at the data-loading layer — OVR falls back to the app's `composite_score`, POT to `ceiling_score` (SQL `COALESCE` in the query tools, dict coalesce in the scaffold tools). Verified: COALESCE is a no-op on OVR-present leagues (emlb still shows real game OVR), and PPL now shows composite-derived values instead of crashing. The web UI already handled this correctly.
+- **Removed `scripts/_prospect_debug.py`** — a committed one-off debug script (hardcoded player name + cookie) that overwrote `data/app_config.json` on import. Not a real tool, not referenced anywhere; it was the sole module-import failure in the audit.
+
+Regression test added: `tests/test_scripts.py::TestOvrPotFallbackForLeaguesWithoutOvr`.
+
+### Test Infrastructure — Interface Smoke Tests
+
+Added a cheap smoke-test layer that would have caught nearly every bug this session (broken entry points, tools crashing on OVR/POT-less leagues):
+
+- **`tests/test_entry_points.py`** — parses `[project.scripts]` from `pyproject.toml` and asserts every entry point resolves to a callable `main` (16 tests). Guards against the `spp-refresh`/`spp-calibrate` no-`main()` regression.
+- **`tests/test_cli_smoke.py`** — builds two on-disk fixture leagues (OVR/POT present, and OVR/POT NULL/PPL-style) and runs each CLI tool as a subprocess against both, asserting a clean exit (20 tests). Exercises the real invocation path (module-level context resolution + queries), not mocked internals.
+- **Caught a real miss:** the smoke test surfaced that `benchmark.py`'s *prospect* comparison path (`comp - ovr`) still crashed on OVR-less leagues — the earlier guard only covered the MLB path. Fixed by detecting OVR-unavailability across both MLB and prospect data before any comparison.
+- **`tests/test_web_smoke.py`** — boots the live `web/app.py` against on-disk fixture leagues (OVR-present + OVR-less) and asserts key routes (`/dashboard`, `/league`, `/team/<id>`, `/team/<id>/minors`, `/player/<id>`, `/settings`, and read-only API GETs) return non-5xx. Drives the real request lifecycle (league-context resolution, request-scoped DB, query execution, template rendering) — not mocked internals. A `real_web` pytest marker opts these tests out of the autouse `patch_web_context` mock so they hit the real query layer. Shared fixture builder extracted to `tests/_fixture_league.py`.
+- **Caught two more real bugs:** (1) `team.html` divided by zero when a stat rank group had a single entry (`(s.n - 1)` denominator); (2) `projections.assign_diamond_positions` raised `NoneType >= int` when a player had a NULL games count. Both fixed defensively.
+
+Suite now at 780 passing (+57).
+
+---
+
 ## Session 79 (2026-08-10)
 
 ### Evaluation Model — Consolidation & Calibration

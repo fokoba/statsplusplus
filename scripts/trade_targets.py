@@ -210,7 +210,8 @@ def find_targets(bucket, min_ovr=50, sellers_only=False, include_controlled=Fals
         SELECT p.player_id, p.name, p.age, p.team_id, p.pos, p.role,
                p.injury_is_injured, p.injury_left, p.is_on_dl, p.is_on_dl60,
                p.designated_for_assignment, p.is_on_waivers,
-               r.ovr, r.pot,
+               COALESCE(r.ovr, r.composite_score) AS ovr,
+               COALESCE(r.pot, r.ceiling_score) AS pot,
                r.cntct, r.pow, r.eye, r.speed, r.cf,
                r.cntct_r, r.pow_r, r.eye_r,
                r.cntct_l, r.pow_l, r.eye_l,
@@ -232,12 +233,12 @@ def find_targets(bucket, min_ovr=50, sellers_only=False, include_controlled=Fals
         LEFT JOIN mlb_pitching_stats pi ON p.player_id = pi.player_id
             AND pi.year = ? AND pi.split_id = 1
         WHERE p.level = '1'
-          AND r.ovr >= ?
+          AND COALESCE(r.ovr, r.composite_score) >= ?
           AND r.league_id > 0
           AND c.player_id IS NOT NULL
           AND c.salary_0 > ?
           {pos_filter}
-        ORDER BY r.ovr DESC
+        ORDER BY COALESCE(r.ovr, r.composite_score) DESC
     """, (eval_date, year, year, min_ovr, _cfg.minimum_salary)).fetchall()
 
     # Pull split stats if vs_hand requested (split_id 2=vsLHP, 3=vsRHP)

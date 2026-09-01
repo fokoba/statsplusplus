@@ -44,7 +44,7 @@
   <td>{% if fmt == "pct" %}{{ "%.3f"|format(s.val) }}{% elif fmt == "rate" %}{{ "%.1f"|format(s.val) }}%{% elif fmt == "dec2" %}{{ "%.2f"|format(s.val) }}{% elif fmt == "int" %}{{ s.val }}{% endif %}</td>
   <td class="rank-cell">
     {%- set r = s.rank -%}
-    {%- set pct = (((s.n - r) * 100 / (s.n - 1)) * 0.85)|round|int -%}
+    {%- set pct = ((((s.n - r) * 100 / (s.n - 1)) * 0.85)|round|int) if s.n > 1 else 85 -%}
     <span class="rank-track">
     {%- if r <= 5 -%}<span class="rank-bar" style="width:{{ pct }}%;background:#50b4ff"></span><span class="rank-pill rank-elite">{{ r }}</span>
     {%- elif r <= 12 -%}<span class="rank-bar" style="width:{{ pct }}%;background:#7ec8ff"></span><span class="rank-pill rank-good">{{ r }}</span>

@@ -232,6 +232,18 @@ def compute_benchmark(league_slug):
     results["stat_year"] = stat_year
     results["mlb_n"] = len(mlb_data)
 
+    prospect_data = _load_prospect_data(conn, cfg)
+
+    # This tool benchmarks the app's composite against the game's OVR. Leagues
+    # that don't surface OVR (e.g. PPL) store NULL — the comparison is
+    # meaningless there, so report it rather than crashing on None arithmetic.
+    # Check both datasets: either may be empty, so require that any present rows
+    # all lack OVR before declaring it unavailable.
+    _rows_with_ovr = [d for d in (mlb_data + prospect_data) if d.get("ovr") is not None]
+    if (mlb_data or prospect_data) and not _rows_with_ovr:
+        results["ovr_unavailable"] = True
+        return results
+
     if mlb_data:
         wars = [d["war"] for d in mlb_data]
         comps = [d["comp"] for d in mlb_data]
@@ -281,7 +293,6 @@ def compute_benchmark(league_slug):
         results["mlb_bucket_wins"] = f"{wins}/{total}"
 
     # --- Prospect composite vs OVR ---
-    prospect_data = _load_prospect_data(conn, cfg)
     results["prospect_n"] = len(prospect_data)
 
     if prospect_data:
@@ -412,6 +423,12 @@ def print_benchmark(results):
     print(f"  EVALUATION ENGINE BENCHMARK — {league}")
     print(f"  Game date: {results['game_date']}  |  Stat year: {results.get('stat_year', '?')}")
     print(f"{'=' * 70}\n")
+
+    if results.get("ovr_unavailable"):
+        print("  This league does not surface OVR/POT ratings — there is no")
+        print("  game rating to benchmark the composite against. (N="
+              f"{results.get('mlb_n', 0)} MLB players evaluated.)\n")
+        return
 
     # --- MLB Composite vs WAR ---
     overall = results.get("mlb_overall", {})

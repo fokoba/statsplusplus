@@ -380,8 +380,15 @@ def mock_cfg():
 
 
 @pytest.fixture(autouse=True)
-def patch_web_context(db_conn, mock_cfg):
-    """Patch get_db and get_cfg in all web query modules for every test."""
+def patch_web_context(request, db_conn, mock_cfg):
+    """Patch get_db and get_cfg in all web query modules for every test.
+
+    Tests marked ``@pytest.mark.real_web`` opt out — they drive the live Flask
+    app against an on-disk fixture league and must hit the real query layer.
+    """
+    if request.node.get_closest_marker("real_web"):
+        yield
+        return
     targets = [
         "web_league_context.get_db",
         "web_league_context.get_cfg",

@@ -126,13 +126,23 @@ def load_level(level_key, game_date=None):
         age = rat.get("Age", ros.get("Age", 99))
         if age >= 26:
             continue
-        if level_key == "intl" and rat.get("Pot", 0) < 40:
+        # Intl-complex filter drops low-ceiling teenagers by POT. OVR/POT-less
+        # leagues (e.g. PPL) return NULL POT — fall back to the app's ceiling
+        # score so the filter still works.
+        _pot = rat.get("Pot")
+        if _pot is None:
+            _pot = rat.get("ceiling_score")
+        if level_key == "intl" and _pot is not None and _pot < 40:
             continue
 
         role_num = str(ros.get("Role", 0))
         role_str = role_map.get(role_num, "position_player")
 
         p = dict(rat)
+        # OVR/POT-less leagues (e.g. PPL) store NULL. Fall back to the app's own
+        # composite/ceiling scores so gap-based logic (Pot - Ovr) works.
+        p["Ovr"] = (rat.get("Ovr") if rat.get("Ovr") is not None else rat.get("composite_score")) or 0
+        p["Pot"] = (rat.get("Pot") if rat.get("Pot") is not None else rat.get("ceiling_score")) or p["Ovr"]
         p["_level_key"] = level_key
         p["_level_label"] = FARM_LEVELS[level_key]["label"]
         p["_norm_age"] = FARM_LEVELS[level_key]["norm_age"]

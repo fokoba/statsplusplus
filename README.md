@@ -209,7 +209,7 @@ All scripts operate on the active league (set in `data/app_config.json` or via t
 
 ```bash
 # Full league refresh
-python3 scripts/refresh.py [year]
+python3 -m statsplusplus.data.refresh [year]   # or: spp-refresh [year]
 
 # Generate analysis scaffolds for your team
 python3 scripts/roster_analysis.py

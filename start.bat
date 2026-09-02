@@ -63,23 +63,9 @@ if %errorlevel% neq 0 (
     )
 )
 
-:: Clean up dead files from pre-1.2.0 installs
-set "_cleaned=0"
-for %%f in (
-    scripts\league_config.py scripts\league_context.py scripts\log_config.py
-    scripts\ratings.py scripts\constants.py scripts\player_utils.py
-    scripts\evaluation_engine.py scripts\fv_calc.py scripts\calibrate.py
-    scripts\refresh.py scripts\db.py scripts\arb_model.py scripts\war_model.py
-    scripts\fv_model.py scripts\data.py
-) do (
-    if exist "%%f" (
-        del "%%f"
-        set /a "_cleaned+=1"
-    )
-)
-if %_cleaned% gtr 0 (
-    echo  Cleaned up %_cleaned% legacy files from previous version.
-)
+:: Prune stale files left over from a previous version (manifest-based; no-op in
+:: dev checkouts that lack MANIFEST.txt). See prune_stale.py.
+.venv\Scripts\python prune_stale.py 2>nul
 
 :: Launch the app
 echo.

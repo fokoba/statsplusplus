@@ -246,7 +246,7 @@ tool grades and how projection models interpret raw inputs.
 
 ### Full evaluation cycle (new game date)
 ```bash
-python3 scripts/refresh.py 2033                  # all teams — auto-fetches date, updates state, runs fv_calc
+python3 -m statsplusplus.data.refresh 2033       # all teams — auto-fetches date, updates state, runs fv_calc
 python3 scripts/farm_analysis.py                 # farm scaffold
 python3 scripts/roster_analysis.py               # roster scaffold
 # Read scaffolds, write/update summaries, assemble reports
@@ -254,7 +254,7 @@ python3 scripts/roster_analysis.py               # roster scaffold
 
 ### Angels-only refresh (faster, active session)
 ```bash
-python3 scripts/refresh.py 2033                  # Angels only — same auto-state + fv_calc
+python3 -m statsplusplus.data.refresh 2033       # Angels only — same auto-state + fv_calc
 python3 scripts/farm_analysis.py
 python3 scripts/roster_analysis.py
 ```

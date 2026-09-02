@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
 Usage:
-  python3 scripts/refresh.py [year]                    # Full league refresh
-  python3 scripts/refresh.py state <game_date> [year]  # Update state only
+  python3 -m statsplusplus.data.refresh [year]                    # Full league refresh
+  python3 -m statsplusplus.data.refresh state <game_date> [year]  # Update state only
+  spp-refresh [year]                                              # (after pip install -e .)
 
 Game date is fetched automatically from the API. State is updated and fv_calc
 is run at the end — single command does everything.

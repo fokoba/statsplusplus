@@ -287,8 +287,8 @@ Run in this order each evaluation cycle:
 1. Read `config/state.json` — note the `game_date`
 2. Check whether `angels/` data files already exist on disk for that game date.
    If they do, **skip the refresh entirely** and proceed to step 4
-3. Only if data is missing or stale: `python3 scripts/refresh.py [year]`, then
-   `python3 scripts/refresh.py state <game_date> [year]`
+3. Only if data is missing or stale: `python3 -m statsplusplus.data.refresh [year]`, then
+   `python3 -m statsplusplus.data.refresh state <game_date> [year]`
 4. Run `python3 scripts/roster_analysis.py` — this produces
    `tmp/roster_scaffold_<game_date>.md` containing:
    - All position players and pitchers with normalized grade tables pre-computed

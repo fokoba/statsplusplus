@@ -2,7 +2,8 @@
 
 ## Golden Rule
 
-All data is fetched and written to SQLite by `scripts/refresh.py` via the StatsPlus API.
+All data is fetched and written to SQLite by the refresh pipeline
+(`python3 -m statsplusplus.data.refresh`) via the StatsPlus API.
 The web layer is read-only. MCP tools are for targeted interactive queries only.
 
 ---
@@ -15,7 +16,7 @@ The web layer is read-only. MCP tools are for targeted interactive queries only.
 2. **Default split is overall (`split=1`).** Splits 2 (vs L) and 3 (vs R) are also pulled for the current
    and prior year during refresh. Historical years (year-2 and older) only pull overall.
 
-3. **Refresh before analysis.** Either use the web UI refresh button or run `scripts/refresh.py`
+3. **Refresh before analysis.** Either use the web UI refresh button or run `python3 -m statsplusplus.data.refresh`
    to ensure data is current before any analysis.
 
 4. **Farm stats are unavailable.** The StatsPlus API returns empty for minor league batting/pitching/fielding
@@ -49,7 +50,7 @@ Click the ⟳ Refresh button in the nav bar. Takes 2-3 minutes. The site remains
 
 ### Via CLI
 ```bash
-python3 scripts/refresh.py [year]
+python3 -m statsplusplus.data.refresh [year]
 ```
 
 This fetches the game date from the API, updates `config/state.json`, pulls all data for all teams,

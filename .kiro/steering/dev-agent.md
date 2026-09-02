@@ -116,11 +116,12 @@ documentation pass.
 
 ## Data Rules
 
-All data fetched and written to `league.db` by `scripts/refresh.py` from the StatsPlus API.
+All data fetched and written to `league.db` by the refresh pipeline
+(`python3 -m statsplusplus.data.refresh`) from the StatsPlus API.
 No JSON data files read by analysis scripts (config files in `data/<league>/config/` are
 the exception). MCP tools are for targeted interactive queries only.
 
-### Refresh: `python3 scripts/refresh.py [year]`
+### Refresh: `python3 -m statsplusplus.data.refresh [year]`
 
 Fetches game date → updates state → pulls all data → computes league averages → runs
 fv_calc (FV + surplus). Idempotent on same game date.

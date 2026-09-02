@@ -89,9 +89,7 @@ python3 scripts/prospect_query.py team Toronto
 Rankings reflect the most recent `eval_date` in `prospect_fv`. After a league refresh:
 
 ```bash
-python3 scripts/refresh.py --league 2033
-python3 scripts/refresh.py state <game_date> 2033
-python3 scripts/fv_calc.py
+python3 -m statsplusplus.data.refresh 2033           # pulls data + runs fv_calc automatically
 python3 scripts/farm_analysis.py
 ```
 

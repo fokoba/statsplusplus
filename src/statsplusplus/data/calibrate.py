@@ -10,7 +10,7 @@ Produces config/model_weights.json with:
 
 Falls back to constants.py defaults when insufficient data.
 
-Usage: python3 scripts/calibrate.py [--dry-run]
+Usage: python3 -m statsplusplus.data.calibrate [--dry-run]   (or: spp-calibrate)
 """
 
 import json, os, sys, math

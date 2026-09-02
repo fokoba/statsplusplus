@@ -4,6 +4,18 @@ Completed and deferred work items, organized by session. Moved from `task_list.m
 
 ---
 
+## Session 81 (2026-09-02)
+
+### Release Mechanism — Manifest-Based Cleanup
+
+- **Dropped the `scripts/refresh.py` / `scripts/calibrate.py` shims** (added Session 80). Their logic lives in the package, and the launcher's cleanup list already treated those filenames as dead — the two collided. Standardized on `python3 -m statsplusplus.data.refresh` / `.calibrate` (and `spp-refresh` / `spp-calibrate` after `pip install -e .`). Updated README, RULES.md, PURPOSE.md, `system_overview.md`, `tools_reference.md`, the guide docs, and the dev-agent steering. The `spp-refresh`/`spp-calibrate` entry points and module invocations are unaffected.
+
+- **Manifest-based stale-file cleanup** — replaced the launchers' hardcoded "dead files" delete loop (which ran on every launch and couldn't tell a stale leftover from a legitimately re-added file) with a manifest-driven prune. The release workflow now emits `MANIFEST.txt` (generated from the zip's own contents, so it can't drift) and includes it in the zip. `prune_stale.py` deletes any `.py` under tracked code dirs (`scripts/`, `src/`, `web/`, `statsplus/`) not in the manifest. Conservative by design: no-op without a manifest (dev checkouts), only `.py` files, never touches `data/`/config/non-code. Composes with the future external-data-directory move. Added `tests/test_prune_stale.py` (7 tests covering the safety properties). `start.sh`/`start.bat` now call `prune_stale.py`.
+
+### Testing Design
+
+- Added `docs/testing_pipeline_design.md` — a draft plan for a staged test/release pipeline (commit CI matrix, artifact-boot validation, Playwright rendering, live-API contract canary). Not yet implemented.
+
 ## Session 80 (2026-09-01)
 
 ### Bug Fixes — Ratings CSV Ingestion

@@ -41,24 +41,9 @@ echo "  Checking dependencies..."
     .venv/bin/pip install -r requirements.txt
 }
 
-# Clean up dead files from pre-1.2.0 installs (safe — these are no longer used)
-_DEAD_FILES=(
-    scripts/league_config.py scripts/league_context.py scripts/log_config.py
-    scripts/ratings.py scripts/constants.py scripts/player_utils.py
-    scripts/evaluation_engine.py scripts/fv_calc.py scripts/calibrate.py
-    scripts/refresh.py scripts/db.py scripts/arb_model.py scripts/war_model.py
-    scripts/fv_model.py scripts/data.py
-)
-_cleaned=0
-for f in "${_DEAD_FILES[@]}"; do
-    if [ -f "$f" ]; then
-        rm "$f"
-        _cleaned=$((_cleaned + 1))
-    fi
-done
-if [ $_cleaned -gt 0 ]; then
-    echo "  Cleaned up $_cleaned legacy files from previous version."
-fi
+# Prune stale files left over from a previous version (manifest-based; no-op in
+# dev checkouts that lack MANIFEST.txt). See prune_stale.py.
+.venv/bin/python3 prune_stale.py 2>/dev/null || true
 
 echo ""
 echo "  Starting Stats++..."

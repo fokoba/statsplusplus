@@ -19,24 +19,24 @@ jobs:
           VERSION=${GITHUB_REF#refs/tags/}
           ZIPNAME="statsplusplus-${VERSION}.zip"
 
+          _EXCLUDES=(
+            ".git/*" ".gitignore" "data/*"
+            "__pycache__/*" "*/__pycache__/*" "*.pyc"
+            ".kiro/*" ".playwright-mcp/*" "tests/*"
+            "docs/screenshots/*" "assets/screenshots/*"
+            "assets/*.png" "assets/*.jpg" "samples/*"
+            "*.Zone.Identifier" ".venv/*" "MANIFEST.txt"
+          )
+
           # Create a clean zip excluding dev/runtime files
-          zip -r "$ZIPNAME" . \
-            -x ".git/*" \
-            -x ".gitignore" \
-            -x "data/*" \
-            -x "__pycache__/*" \
-            -x "*/__pycache__/*" \
-            -x "*.pyc" \
-            -x ".kiro/*" \
-            -x ".playwright-mcp/*" \
-            -x "tests/*" \
-            -x "docs/screenshots/*" \
-            -x "assets/screenshots/*" \
-            -x "assets/*.png" \
-            -x "assets/*.jpg" \
-            -x "samples/*" \
-            -x "*.Zone.Identifier" \
-            -x ".venv/*"
+          zip -r "$ZIPNAME" . $(printf -- '-x %s ' "${_EXCLUDES[@]}")
+
+          # Generate MANIFEST.txt from the zip's own contents so it can never
+          # drift from what actually ships. Sorted, one relative path per line.
+          # The launcher uses this to prune stale files left over from a prior
+          # version extracted over the top of this one.
+          unzip -Z1 "$ZIPNAME" | grep -v '/$' | sort > MANIFEST.txt
+          zip "$ZIPNAME" MANIFEST.txt
 
           echo "ZIPNAME=$ZIPNAME" >> $GITHUB_ENV
           echo "VERSION=$VERSION" >> $GITHUB_ENV

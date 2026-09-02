@@ -1,8 +1,13 @@
 {
-  "last_posted_commit": "3cf7266",
-  "last_posted_date": "2026-09-01",
-  "last_posted_title": "Setup Fixes & Ratings Export Compatibility",
+  "last_posted_commit": "f75d0be",
+  "last_posted_date": "2026-09-02",
+  "last_posted_title": "v1.3.0 — Install & Upgrade Stability",
   "history": [
+    {
+      "date": "2026-09-02",
+      "commit": "f75d0be",
+      "title": "v1.3.0 — Install & Upgrade Stability"
+    },
     {
       "date": "2026-09-01",
       "commit": "3cf7266",

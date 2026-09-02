@@ -6,6 +6,11 @@ Completed and deferred work items, organized by session. Moved from `task_list.m
 
 ## Session 81 (2026-09-02)
 
+### Fresh-Install Fix — Package Not Importable
+
+- **`ModuleNotFoundError: No module named 'statsplusplus'` for zip users** — the launchers ran `pip install -r requirements.txt`, which installs Flask but not the `src/`-layout package, so the app failed to import for anyone using the primary (launcher) install path — not just the developer path fixed in Session 80. Two-layer fix: (1) `start.sh`/`start.bat` now run `pip install -e .` (installs Flask via pyproject **and** the package, and enables the `spp-*` commands); (2) `web/app.py` also self-bootstraps `src/` onto `sys.path` as defense-in-depth, so the app imports even if the editable install didn't take. Fixed the README troubleshooting note that recommended the failing `requirements.txt` command. Added `tests/test_install_bootstrap.py` — runs `web/app.py` in a subprocess with the editable install neutralized to prove the bootstrap works on its own.
+
+
 ### Release Mechanism — Manifest-Based Cleanup
 
 - **Dropped the `scripts/refresh.py` / `scripts/calibrate.py` shims** (added Session 80). Their logic lives in the package, and the launcher's cleanup list already treated those filenames as dead — the two collided. Standardized on `python3 -m statsplusplus.data.refresh` / `.calibrate` (and `spp-refresh` / `spp-calibrate` after `pip install -e .`). Updated README, RULES.md, PURPOSE.md, `system_overview.md`, `tools_reference.md`, the guide docs, and the dev-agent steering. The `spp-refresh`/`spp-calibrate` entry points and module invocations are unaffected.

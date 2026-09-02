@@ -34,11 +34,13 @@ if [ ! -d ".venv" ]; then
     "$PYTHON" -m venv .venv
 fi
 
-# Install/update dependencies
+# Install/update the package (editable). This installs Flask (from pyproject)
+# AND puts the statsplusplus package (src/ layout) on the path — required, or
+# the app fails with "No module named 'statsplusplus'".
 echo "  Checking dependencies..."
-.venv/bin/pip install -q -r requirements.txt 2>/dev/null || {
+.venv/bin/pip install -q -e . 2>/dev/null || {
     echo "  Installing dependencies..."
-    .venv/bin/pip install -r requirements.txt
+    .venv/bin/pip install -e .
 }
 
 # Prune stale files left over from a previous version (manifest-based; no-op in

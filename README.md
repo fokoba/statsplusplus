@@ -284,7 +284,9 @@ Cookies expire periodically — if refreshes start failing with authentication e
 
 ## Troubleshooting
 
-**"No module named flask"** — Run `.venv/bin/pip install -r requirements.txt` from the project root.
+**"No module named flask"** — Run `.venv/bin/pip install -e .` from the project root.
+
+**"No module named 'statsplusplus'"** — The package isn't installed. Run `.venv/bin/pip install -e .` from the project root (`pip install -r requirements.txt` alone installs Flask but not the package). The launcher (`start.sh`/`start.bat`) does this automatically.
 
 **Refresh fails or times out** — The StatsPlus API can be slow. Ratings exports in particular may take 45+ seconds. The refresh will retry automatically. If it consistently fails, check that your session cookie is still valid.
 

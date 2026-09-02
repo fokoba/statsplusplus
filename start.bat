@@ -50,12 +50,14 @@ if not exist ".venv" (
     )
 )
 
-:: Install/update dependencies
+:: Install/update the package (editable). Installs Flask AND puts the
+:: statsplusplus package (src/ layout) on the path — required, or the app
+:: fails with "No module named 'statsplusplus'".
 echo  Checking dependencies...
-.venv\Scripts\pip install -q -r requirements.txt 2>nul
+.venv\Scripts\pip install -q -e . 2>nul
 if %errorlevel% neq 0 (
     echo  Installing dependencies...
-    .venv\Scripts\pip install -r requirements.txt
+    .venv\Scripts\pip install -e .
     if %errorlevel% neq 0 (
         echo  [ERROR] Failed to install dependencies.
         pause

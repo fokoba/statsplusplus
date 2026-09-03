@@ -84,6 +84,8 @@ documentation pass.
    - **Tone**: concise but informative. One sentence per bullet explaining what changed and why it matters.
    - Post using `discord_post.py message` with a custom formatted embed (not `latest` which parses changelog with truncation). See prior session examples for the Python webhook pattern.
 
+9. **Version release** — whenever a Discord post goes out, cut a release so launcher-install users (who update via the release zip, not `git`) get the same changes. Steps: bump `version` in `pyproject.toml`, commit, push `main`, then create and push an annotated tag (`git tag -a vX.Y.Z -m "..."; git push origin vX.Y.Z`) — the tag triggers the `release.yml` workflow that builds the zip. Version choice: **patch** (`Z`) for bug-fix-only batches, **minor** (`Y`) for new features or behavior/model changes, **major** (`X`) for breaking changes. The annotated-tag message should summarize the release (mirrors the Discord post). Note any migration caveat (e.g. per-league calibrated data updates only on the user's next calibrate/refresh — code must degrade gracefully until then). `gh` is not installed locally, so verifying the CI build succeeded and the zip contains `MANIFEST.txt` is a user action.
+
 ### What does NOT need updating
 
 - CSS-only changes, template formatting tweaks, sort order changes

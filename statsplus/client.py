@@ -16,6 +16,15 @@ from pathlib import Path
 
 log = logging.getLogger("statspp.client")
 
+# StatsPlus runs bot filtering that serves a login page to requests with no
+# User-Agent, which otherwise surfaces as a false CookieExpiredError.
+_USER_AGENT = "statsplusplus/1.0 (+https://github.com/statsplusplus)"
+
+# Some endpoints (team stats, ratings export) can return a plain-text
+# "please wait N seconds" message in the response BODY (HTTP 200) instead of
+# a 429 status — the existing retry loop below only catches the latter.
+_WAIT_RE = re.compile(r"wait (\d+) seconds", re.IGNORECASE)
+
 # Deferred credential resolution — no module-level env reads.
 _league_url = None
 _cookie = None
@@ -75,12 +84,12 @@ class CookieExpiredError(Exception):
 
 def _fetch(url: str, max_retries: int = 5) -> str:
     _, cookie = _resolve_creds()
-    req = urllib.request.Request(url, headers={"Cookie": cookie, "Accept": "application/json"})
+    headers = {"Cookie": cookie, "Accept": "application/json", "User-Agent": _USER_AGENT}
+    req = urllib.request.Request(url, headers=headers)
     for attempt in range(max_retries):
         try:
             with urllib.request.urlopen(req) as r:
                 body = r.read().decode()
-            break
         except urllib.error.HTTPError as e:
             if e.code in (429, 502, 503, 504) and attempt < max_retries - 1:
                 retry_after = e.headers.get("Retry-After") if e.headers else None
@@ -90,6 +99,14 @@ def _fetch(url: str, max_retries: int = 5) -> str:
                 time.sleep(wait)
                 continue
             raise
+        m = _WAIT_RE.search(body)
+        if m and attempt < max_retries - 1:
+            wait = int(m.group(1))
+            log.info("Rate limited (body message) — waiting %ds (attempt %d/%d)",
+                      wait, attempt + 1, max_retries)
+            time.sleep(wait + 2)
+            continue
+        break
     if "requires user to be logged in" in body:
         raise CookieExpiredError(
             "StatsPlus session expired — update your cookie in Settings.")
@@ -219,7 +236,26 @@ _RATINGS_EXPECTED_126 = (
     "Int,WrkEthic,Greed,Loy,Lead,Prone,Acc,Ovr,Pot"
 ).split(",")
 
-_RATINGS_KNOWN_FORMATS = {113: _RATINGS_EXPECTED_113, 126: _RATINGS_EXPECTED_126}
+# Newer OOTP export (127 cols). Drops Ovr, Pot, Prone — leagues that don't
+# surface OVR/POT (e.g. PPL) never populated these anyway. Adds GBType, FBType,
+# PotVel, ArmSlot. The three Ctrl columns are already correctly labeled.
+_RATINGS_EXPECTED_127 = (
+    "ID,Name,Pos,League,Team,Org,LgLvl,Age,Height,Bats,Throws,"
+    "Cntct,Gap,Pow,Eye,Ks,BABIP,Cntct_R,Gap_R,Pow_R,Eye_R,Ks_R,BABIP_R,"
+    "Cntct_L,Gap_L,Pow_L,Eye_L,Ks_L,BABIP_L,PotCntct,PotGap,PotPow,PotEye,PotKs,PotBABIP,"
+    "IFR,IFE,IFA,TDP,OFR,OFE,OFA,CBlk,CArm,CFrm,"
+    "P,C,1B,2B,3B,SS,LF,CF,RF,PotP,PotC,Pot1B,Pot2B,Pot3B,PotSS,PotLF,PotCF,PotRF,"
+    "Speed,StlRt,Steal,Run,SacBunt,BuntHit,GBType,FBType,"
+    "Stf,Mov,HRA,PBABIP,Ctrl,Stf_R,Mov_R,HRA_R,PBABIP_R,"
+    "Ctrl_R,Stf_L,Mov_L,HRA_L,PBABIP_L,Ctrl_L,"
+    "PotStf,PotMov,PotHRA,PotPBABIP,PotCtrl,Vel,PotVel,ArmSlot,GB,Stm,Hold,"
+    "Fst,Snk,Cutt,Crv,Sld,Chg,Splt,Frk,CirChg,Scr,Kncrv,Knbl,"
+    "PotFst,PotSnk,PotCutt,PotCrv,PotSld,PotChg,PotSplt,PotFrk,"
+    "PotCirChg,PotScr,PotKncrv,PotKnbl,"
+    "Int,WrkEthic,Greed,Loy,Lead,Acc"
+).split(",")
+
+_RATINGS_KNOWN_FORMATS = {113: _RATINGS_EXPECTED_113, 126: _RATINGS_EXPECTED_126, 127: _RATINGS_EXPECTED_127}
 
 
 def _fix_ratings_header(text: str) -> str:
@@ -239,6 +275,12 @@ def _fix_ratings_header(text: str) -> str:
 
     cols = lines[0].split(",")
 
+    # Only repair the mislabeled legacy header. Newer exports (127-col) label
+    # the three Ctrl columns correctly — if a plain "Ctrl" is already present
+    # the header is well-formed and this rename logic would corrupt it (it'd
+    # blow away the real "Ctrl" while relabeling the real "Ctrl_R").
+    has_plain_ctrl = "Ctrl" in cols
+
     # Find the three Ctrl columns by scanning for the pattern
     ctrl_r_idx = None
     ctrl_l_indices = []
@@ -248,7 +290,9 @@ def _fix_ratings_header(text: str) -> str:
         elif c == "Ctrl_L":
             ctrl_l_indices.append(i)
 
-    if ctrl_r_idx is not None and len(ctrl_l_indices) >= 2:
+    if has_plain_ctrl:
+        pass  # already correct — no repair needed
+    elif ctrl_r_idx is not None and len(ctrl_l_indices) >= 2:
         # API sends: Ctrl_R (=overall), Ctrl_L (=vs_R), Ctrl_L (=vs_L)
         # Fix to:    Ctrl,              Ctrl_R,          Ctrl_L
         cols[ctrl_r_idx] = "Ctrl"

@@ -55,6 +55,7 @@ def compute_ceiling(
     role: str = "SP",
     age: int = 25,
     ratings_scale: str = "1-100",
+    transforms: dict[str, list[float]] | None = None,
 ) -> int:
     """Compute Ceiling_Score from potential tool ratings.
 
@@ -83,11 +84,11 @@ def compute_ceiling(
     # Compute raw potential composite
     if is_pitcher:
         raw_ceiling = compute_composite_pitcher(
-            potential_tools, weights, arsenal or {}, stamina, role,
+            potential_tools, weights, arsenal or {}, stamina, role, transforms,
         )
     else:
         raw_ceiling = compute_composite_hitter(
-            potential_tools, weights, defense or {}, def_weights or {},
+            potential_tools, weights, defense or {}, def_weights or {}, transforms,
         )
 
     # Peak tool bonus: rewards uneven profiles with elite carrying tools.
@@ -132,6 +133,7 @@ def compute_true_ceiling(
     arsenal: Optional[dict[str, float | int]] = None,
     stamina: int = 50,
     role: str = "SP",
+    transforms: dict[str, list[float]] | None = None,
 ) -> int:
     """Compute the true ceiling from potential tools with no age blend.
 
@@ -146,11 +148,11 @@ def compute_true_ceiling(
     """
     if is_pitcher:
         raw = compute_composite_pitcher(
-            potential_tools, weights, arsenal or {}, stamina, role,
+            potential_tools, weights, arsenal or {}, stamina, role, transforms,
         )
     else:
         raw = compute_composite_hitter(
-            potential_tools, weights, defense or {}, def_weights or {},
+            potential_tools, weights, defense or {}, def_weights or {}, transforms,
         )
 
     # Floor: never below composite
@@ -171,6 +173,7 @@ def compute_component_ceilings(
     age: int = 25,
     ct_config: Optional[dict[str, Any]] = None,
     position: str = "",
+    transforms: dict[str, list[float]] | None = None,
 ) -> dict[str, Any]:
     """Compute component-level ceilings from potential tool ratings.
 
@@ -211,7 +214,7 @@ def compute_component_ceilings(
 
     if is_pitcher:
         raw_pitching = compute_composite_pitcher(
-            potential_tools, weights, arsenal or {}, stamina, role,
+            potential_tools, weights, arsenal or {}, stamina, role, transforms,
         )
         current_off = current_components.get("offensive_grade")
         if current_off is not None:
@@ -221,7 +224,7 @@ def compute_component_ceilings(
         else:
             result["offensive_ceiling"] = max(20, min(80, raw_pitching))
     else:
-        raw_offensive = compute_offensive_grade(potential_tools, weights)
+        raw_offensive = compute_offensive_grade(potential_tools, weights, transforms)
         raw_baserunning = compute_baserunning_value(potential_tools, weights)
         raw_defensive = compute_defensive_value(defense or {}, def_weights or {})
 

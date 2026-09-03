@@ -54,6 +54,9 @@ from statsplusplus.data.evaluation_engine import (
     _CARRYING_TOOL_GRADE_THRESHOLD,
     compute_positional_medians,
     compute_positional_percentile,
+    _compute_stat_signal,
+    _load_qualifying_stat_seasons,
+    shrink_weights_toward_prior,
 )
 from statsplusplus.evaluation.composite import (
     offensive_grade_raw,
@@ -569,6 +572,174 @@ class TestProperty8NoStatFallback:
         blend weight."""
         score = compute_composite_mlb(tool_score, [], peak_age=28, player_age=28)
         assert score == tool_score
+
+
+class TestBlendAgeDampening:
+    """Age-symmetric blend dampening.
+
+    Young players whose tools exceed their (small) stat sample get a dampened
+    blend so tools dominate. Symmetrically, post-peak players whose recent-but-
+    fading stats exceed their declined tools get a dampened blend so their
+    current tools carry more weight — an aging player should not be lifted well
+    above his tools by results he can no longer sustain.
+    """
+
+    # A strong multi-season stat signal (well above a modest tool score).
+    STRONG_STATS = [65.0, 66.0, 65.0]  # 3 seasons -> base blend 0.60
+
+    def test_aging_player_blend_dampened(self):
+        """A post-peak player with stats > tools is lifted LESS than a
+        peak-age player with the same inputs."""
+        peak = compute_composite_mlb(50, self.STRONG_STATS, peak_age=27,
+                                     player_age=27, is_pitcher=True, bucket="RP")
+        aged = compute_composite_mlb(50, self.STRONG_STATS, peak_age=27,
+                                     player_age=37, is_pitcher=True, bucket="RP")
+        assert aged < peak, f"aging lift {aged} should be below peak lift {peak}"
+
+    def test_aging_dampening_scales_with_age(self):
+        """Older post-peak players are dampened more (monotonic toward tools)."""
+        ages = [28, 31, 34, 37, 40]
+        scores = [compute_composite_mlb(50, self.STRONG_STATS, peak_age=27,
+                                        player_age=a, is_pitcher=True, bucket="RP")
+                  for a in ages]
+        # Non-increasing as age rises (more dampening -> closer to tool 50).
+        assert scores == sorted(scores, reverse=True), scores
+        assert scores[-1] < scores[0]
+
+    def test_aging_dampening_not_applied_when_tools_exceed_stats(self):
+        """If a post-peak player's tools already exceed his stats, the aging
+        dampener does not apply (blend only pulls toward the weaker signal via
+        the normal formula, not an extra age penalty)."""
+        # tools 65 > stat signal ~40; aging branch requires stat > tool, so age
+        # should not change the result relative to peak age here.
+        weak_stats = [40.0, 40.0, 40.0]
+        peak = compute_composite_mlb(65, weak_stats, peak_age=27,
+                                     player_age=27, is_pitcher=True, bucket="RP")
+        aged = compute_composite_mlb(65, weak_stats, peak_age=27,
+                                     player_age=37, is_pitcher=True, bucket="RP")
+        assert aged == peak
+
+    def test_peak_age_player_unchanged(self):
+        """At exactly peak age, neither the young nor aging branch fires."""
+        # Compare a plain blend (peak age) to itself — sanity that peak age is
+        # the neutral point.
+        s = compute_composite_mlb(50, self.STRONG_STATS, peak_age=28,
+                                  player_age=28, is_pitcher=False, bucket="1B")
+        # No dampening at peak: blend is the full recency-weighted result.
+        assert s > 50  # stats above tools lift the score
+
+
+class TestStatSignalStaleness:
+    """Stale-season handling in _compute_stat_signal.
+
+    Seasons older than STAT_STALE_DROP_YEARS are dropped; retained older
+    seasons have their deviation from average (50) shrunk with age.
+    """
+
+    LG = (0.320, 0.420, 4.50)  # lg_obp, lg_slg, lg_era
+
+    def _pitcher_season(self, year, era):
+        return {"year": year, "era": era}
+
+    def test_stale_seasons_dropped(self):
+        """A season 4+ years old is dropped from the signal."""
+        seasons = [self._pitcher_season(2030, 3.0),   # 4 yrs ago -> dropped
+                   self._pitcher_season(2029, 2.5)]   # 5 yrs ago -> dropped
+        sig = _compute_stat_signal(seasons, True, *self.LG, current_year=2034)
+        assert sig == []
+
+    def test_recent_season_retained(self):
+        """A current-year season is retained at full strength (no decay)."""
+        seasons = [self._pitcher_season(2034, 3.0)]
+        sig = _compute_stat_signal(seasons, True, *self.LG, current_year=2034)
+        assert len(sig) == 1
+
+    def test_older_season_decayed_toward_average(self):
+        """A 2-3 yr old season sits closer to 50 than the same stat this year."""
+        recent = _compute_stat_signal([self._pitcher_season(2034, 2.5)], True,
+                                      *self.LG, current_year=2034)[0]
+        older = _compute_stat_signal([self._pitcher_season(2031, 2.5)], True,
+                                     *self.LG, current_year=2034)[0]
+        # Same raw stat, but the older one is pulled toward 50.
+        assert abs(older - 50) < abs(recent - 50)
+
+    def test_no_current_year_means_no_staleness(self):
+        """Without current_year, staleness handling is inert (back-compat)."""
+        seasons = [self._pitcher_season(2029, 2.5)]
+        sig = _compute_stat_signal(seasons, True, *self.LG)
+        assert len(sig) == 1
+
+
+class TestQualifyingSeasonYearAggregation:
+    """_load_qualifying_stat_seasons aggregates by year (traded players)."""
+
+    def _db(self):
+        import sqlite3
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript("""
+            CREATE TABLE pitching_stats (player_id INTEGER, year INTEGER, team_id INTEGER,
+                split_id INTEGER, league_id INTEGER, ip REAL, gs INTEGER,
+                er INTEGER, outs INTEGER, k INTEGER, bb INTEGER, hra INTEGER, hp INTEGER);
+            CREATE VIEW mlb_pitching_stats AS SELECT * FROM pitching_stats WHERE league_id IS NULL;
+        """)
+        return conn
+
+    def test_traded_reliever_year_summed(self):
+        """Two mid-season stints in one year are summed into a single qualifying
+        season, not two — fixing double-counting in the blend."""
+        conn = self._db()
+        # 25 + 10 IP across two teams in 2033; neither stint alone clears 20,
+        # but the summed 35 IP does (RP threshold).
+        conn.execute("INSERT INTO pitching_stats VALUES (1,2033,10,1,NULL,25.0,0,9,75,30,8,2,0)")
+        conn.execute("INSERT INTO pitching_stats VALUES (1,2033,11,1,NULL,10.0,0,4,30,12,3,1,0)")
+        conn.commit()
+        seasons = _load_qualifying_stat_seasons(conn, 1, is_pitcher=True)
+        assert len(seasons) == 1, "traded stints should collapse to one season"
+        assert seasons[0]["year"] == 2033
+        # ERA recomputed from summed er/outs: (13*27)/105
+        assert abs(seasons[0]["era"] - (13 * 27.0 / 105.0)) < 1e-6
+
+    def test_split_season_qualifies_when_summed(self):
+        """A season disqualified per-stint qualifies once summed."""
+        conn = self._db()
+        # 12 + 12 IP: neither clears 20, summed 24 does.
+        conn.execute("INSERT INTO pitching_stats VALUES (2,2033,10,1,NULL,12.0,0,5,36,10,3,1,0)")
+        conn.execute("INSERT INTO pitching_stats VALUES (2,2033,11,1,NULL,12.0,0,5,36,10,3,1,0)")
+        conn.commit()
+        seasons = _load_qualifying_stat_seasons(conn, 2, is_pitcher=True)
+        assert len(seasons) == 1
+
+
+class TestShrinkWeightsTowardPrior:
+    """Ridge-style shrinkage of calibrated weights toward a prior."""
+
+    PRIOR = {"stuff": 0.44, "movement": 0.28, "control": 0.28}
+    # An extreme regression result that starves the primary tool.
+    EXTREME = {"stuff": 0.08, "movement": 0.62, "control": 0.30}
+
+    def test_output_normalized(self):
+        out = shrink_weights_toward_prior(self.EXTREME, self.PRIOR, n=200)
+        assert abs(sum(out.values()) - 1.0) < 1e-9
+
+    def test_tiny_sample_leans_prior(self):
+        out = shrink_weights_toward_prior(self.EXTREME, self.PRIOR, n=10)
+        # With almost no sample, stuff is pulled back near the prior (0.44).
+        assert out["stuff"] > 0.35
+
+    def test_full_sample_keeps_min_prior_influence(self):
+        """Even at full sample the prior tempers the extreme (stuff not starved)."""
+        out = shrink_weights_toward_prior(self.EXTREME, self.PRIOR, n=500,
+                                          min_lambda=0.25)
+        assert out["stuff"] > self.EXTREME["stuff"]  # lifted off 0.08
+        assert out["movement"] < self.EXTREME["movement"]  # pulled down off 0.62
+
+    def test_more_sample_closer_to_data(self):
+        small = shrink_weights_toward_prior(self.EXTREME, self.PRIOR, n=30)
+        large = shrink_weights_toward_prior(self.EXTREME, self.PRIOR, n=180)
+        # Larger sample → movement weight closer to the (high) regression value.
+        assert large["movement"] > small["movement"]
+
 
 
 class TestProperty9StatNormalization:

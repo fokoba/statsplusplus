@@ -629,9 +629,22 @@ def compute_composite_mlb(
     if bucket in _DEFENSE_POSITIONS:
         blend_weight *= _DEFENSE_POSITIONS[bucket]
 
-    # Young player adjustment
+    # Young player adjustment: a young player's tools are more predictive than
+    # a small early-career stat sample, so dampen the blend when tools exceed
+    # the stat signal below peak age.
     if player_age < peak_age and tool_score > stat_signal:
         age_factor = max(0.3, 1.0 - (peak_age - player_age) * 0.1)
+        blend_weight *= age_factor
+
+    # Aging player adjustment (symmetric): past peak age, a player's tools
+    # reflect current, declining ability, while recent-but-fading results can
+    # overstate what he still is. When the stat signal exceeds the tools for a
+    # post-peak player, dampen the blend so the declined tools carry more
+    # weight. Without this, aging relievers coasting on good ERAs are lifted
+    # well above their tools (empirically the age-35+ group showed the largest
+    # positive blend lift, concentrated in low-stuff arms).
+    elif player_age > peak_age and stat_signal > tool_score:
+        age_factor = max(0.3, 1.0 - (player_age - peak_age) * 0.1)
         blend_weight *= age_factor
 
     composite = tool_score * (1.0 - blend_weight) + stat_signal * blend_weight

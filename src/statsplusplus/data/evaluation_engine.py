@@ -50,6 +50,20 @@ log = logging.getLogger("statspp.evaluation_engine")
 
 
 # ---------------------------------------------------------------------------
+# Stat-blend staleness handling
+# ---------------------------------------------------------------------------
+# A qualifying season this many years old or more is dropped from the stat
+# blend entirely — production that far in the past does not describe a player's
+# current ability (e.g. a 39-year-old whose newest qualifying season is 5 years
+# old should be evaluated on his current tools, not stale results).
+STAT_STALE_DROP_YEARS: int = 4
+# Within the retained window, each year of age shrinks the season's deviation
+# from league-average (50 on the 20-80 scale) by this fraction, so recent
+# seasons dominate the signal even before position-based recency weighting.
+STAT_STALE_DECAY_PER_YEAR: float = 0.15
+
+
+# ---------------------------------------------------------------------------
 # Two-way player detection thresholds (tool-based path)
 # ---------------------------------------------------------------------------
 # These thresholds gate the tool-based two-way detection for prospects without
@@ -1313,6 +1327,53 @@ def normalize_coefficients(coefficients: dict, min_weight: float = 0.0) -> dict:
     return normalized
 
 
+def shrink_weights_toward_prior(
+    weights: dict,
+    prior: dict,
+    n: int,
+    n_full: int = 200,
+    min_lambda: float = 0.25,
+) -> dict:
+    """Blend regression-derived weights toward a prior (ridge-style shrinkage).
+
+    ``final = lambda * prior + (1 - lambda) * weights``, where ``lambda``
+    (the weight given to the prior) shrinks as the sample size grows:
+
+        lambda = min_lambda + (1 - min_lambda) * (1 - min(n, n_full) / n_full)
+
+    With a full sample (``n >= n_full``) the prior still contributes
+    ``min_lambda`` so a sound baseball prior always tempers extreme
+    single-feature solutions (e.g. per-feature r² weighting can starve a
+    primary tool like pitcher Stuff when a correlated tool has a marginally
+    higher r²). With a tiny sample the prior dominates. Only keys present in
+    ``weights`` are blended; the result is renormalized to sum to 1.0.
+
+    Args:
+        weights: Regression-derived weights (should already sum to ~1.0).
+        prior: Prior weights (e.g. the hand-tuned defaults) for the same keys.
+        n: Sample size the regression was fit on.
+        n_full: Sample size at which shrinkage reaches its floor.
+        min_lambda: Minimum prior weight, even at full sample.
+
+    Returns:
+        Blended weights summing to 1.0.
+    """
+    if not weights:
+        return dict(weights)
+    frac = min(max(n, 0), n_full) / n_full
+    lam = min_lambda + (1.0 - min_lambda) * (1.0 - frac)
+    lam = max(0.0, min(1.0, lam))
+
+    blended = {}
+    for k, w in weights.items():
+        p = prior.get(k, w)
+        blended[k] = lam * p + (1.0 - lam) * w
+    total = sum(blended.values())
+    if total > 0:
+        blended = {k: v / total for k, v in blended.items()}
+    return blended
+
+
 def recombine_component_weights(
     hitting_coeffs: dict,
     baserunning_coeffs: dict,
@@ -1607,27 +1668,71 @@ def _load_qualifying_stat_seasons(
 ) -> list[dict]:
     """Load qualifying stat seasons for an MLB player, most recent first.
 
-    Hitters: AB >= 130, split_id=1
-    Pitchers: IP >= 40 (SP) or IP >= 20 (RP), split_id=1
+    Season totals are aggregated **by year** before the qualifying threshold
+    is applied. A player traded mid-season has multiple ``mlb_*_stats`` rows in
+    the same year (one per team stint); summing them first prevents (a) one
+    calendar year double-counting in the recency-weighted blend and (b) a full
+    season being disqualified because neither individual stint clears the
+    threshold on its own. Rate stats (ERA, OBP, SLG) are recomputed from the
+    summed component counts, not averaged from the per-stint rate columns.
 
-    Returns list of dicts with year, obp, slg (hitters) or ip, k, bb, hra, hp (pitchers).
+    Hitters: full-year AB >= 130, split_id=1
+    Pitchers: full-year IP >= 40 (SP) or IP >= 20 (RP), split_id=1
+
+    Returns list of dicts with year + era (pitchers) or obp, slg (hitters).
     """
     if is_pitcher:
         rows = conn.execute("""
-            SELECT year, era, ip, k, bb, hra, hp, gs
+            SELECT year,
+                   SUM(ip) AS ip, SUM(gs) AS gs,
+                   SUM(er) AS er, SUM(outs) AS outs,
+                   SUM(k) AS k, SUM(bb) AS bb, SUM(hra) AS hra, SUM(hp) AS hp
             FROM mlb_pitching_stats
             WHERE player_id = ? AND split_id = 1
-              AND ((gs > 3 AND ip >= 40) OR (gs <= 3 AND ip >= 20))
+            GROUP BY year
+            HAVING ((SUM(gs) > 3 AND SUM(ip) >= 40) OR (SUM(gs) <= 3 AND SUM(ip) >= 20))
             ORDER BY year DESC
         """, (player_id,)).fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            outs = d.get("outs") or 0
+            er = d.get("er") or 0
+            # Recompute ERA from summed components (er * 27 / outs), matching
+            # the true-decimal-innings storage rule. Fall back to NULL if outs
+            # is unavailable so _compute_stat_signal skips the season.
+            d["era"] = (er * 27.0 / outs) if outs > 0 else None
+            result.append(d)
+        return result
     else:
         rows = conn.execute("""
-            SELECT year, obp, slg, ab
+            SELECT year,
+                   SUM(ab) AS ab, SUM(h) AS h, SUM(d) AS d, SUM(t) AS t,
+                   SUM(hr) AS hr, SUM(bb) AS bb, SUM(hbp) AS hbp, SUM(sf) AS sf
             FROM mlb_batting_stats
-            WHERE player_id = ? AND split_id = 1 AND ab >= 130
+            WHERE player_id = ? AND split_id = 1
+            GROUP BY year
+            HAVING SUM(ab) >= 130
             ORDER BY year DESC
         """, (player_id,)).fetchall()
-    return [dict(r) for r in rows]
+        result = []
+        for r in rows:
+            d = dict(r)
+            ab = d.get("ab") or 0
+            h = d.get("h") or 0
+            bb = d.get("bb") or 0
+            hbp = d.get("hbp") or 0
+            sf = d.get("sf") or 0
+            dbl = d.get("d") or 0
+            trp = d.get("t") or 0
+            hr = d.get("hr") or 0
+            ob_denom = ab + bb + hbp + sf
+            d["obp"] = ((h + bb + hbp) / ob_denom) if ob_denom > 0 else None
+            # Total bases = singles + 2·2B + 3·3B + 4·HR = h + d + 2t + 3hr.
+            total_bases = h + dbl + 2 * trp + 3 * hr
+            d["slg"] = (total_bases / ab) if ab > 0 else None
+            result.append(d)
+        return result
 
 
 def _load_milb_stat_seasons(
@@ -1764,16 +1869,28 @@ def _compute_stat_signal(
     lg_obp: float,
     lg_slg: float,
     lg_era: float,
+    current_year: int | None = None,
 ) -> list[float]:
     """Convert qualifying stat seasons to 20-80 scale values.
 
     Hitters: OPS+ = 100 × (OBP/lgOBP + SLG/lgSLG - 1) → stat_to_2080()
     Pitchers: ERA- = ERA / lgERA × 100, inverted (200 - ERA-) → pitcher_stat_to_2080()
 
+    When ``current_year`` is provided, seasons older than
+    ``STAT_STALE_DROP_YEARS`` are dropped, and seasons within the retained
+    window have their deviation from average (50) shrunk by
+    ``STAT_STALE_DECAY_PER_YEAR`` per year of age. This prevents a player's old
+    production from driving his current composite.
+
     Returns list of 20-80 values, most recent first.
     """
     result: list[float] = []
     for season in stat_seasons:
+        years_ago = 0
+        if current_year is not None:
+            years_ago = max(0, current_year - (season.get("year") or current_year))
+            if years_ago >= STAT_STALE_DROP_YEARS:
+                continue  # too stale to describe current ability
         if is_pitcher:
             era = season.get("era")
             if era is None or lg_era <= 0:
@@ -1788,7 +1905,12 @@ def _compute_stat_signal(
                 continue
             stat_plus = 100.0 * (obp / lg_obp + slg / lg_slg - 1.0)
 
-        result.append(pitcher_stat_to_2080(stat_plus) if is_pitcher else stat_to_2080(stat_plus))
+        val = pitcher_stat_to_2080(stat_plus) if is_pitcher else stat_to_2080(stat_plus)
+        # Age-decay: shrink the deviation from 50 for older-but-retained seasons.
+        if years_ago > 0:
+            decay = max(0.0, 1.0 - years_ago * STAT_STALE_DECAY_PER_YEAR)
+            val = 50.0 + (val - 50.0) * decay
+        result.append(val)
     return result
 
 
@@ -1886,6 +2008,14 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
 
     # -- Load league averages for MLB stat blending --
     lg_obp, lg_slg, lg_era = _load_league_averages(league_dir)
+
+    # Current season year — used to age-discount stale qualifying seasons in
+    # the stat blend (a season 4+ years old should not drive today's composite).
+    _cy_row = conn.execute("SELECT MAX(year) FROM mlb_pitching_stats").fetchone()
+    current_year = (_cy_row[0] if _cy_row and _cy_row[0] else None)
+    if current_year is None:
+        _cy_row = conn.execute("SELECT MAX(year) FROM mlb_batting_stats").fetchone()
+        current_year = (_cy_row[0] if _cy_row and _cy_row[0] else 0)
 
     # -- Load MiLB averages and level discounts for unified stat blending --
     milb_averages = _load_milb_averages(league_dir)
@@ -2288,6 +2418,7 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
             if stat_seasons:
                 mlb_stat_2080_values = _compute_stat_signal(
                     stat_seasons, is_pitcher, lg_obp, lg_slg, lg_era,
+                    current_year=current_year,
                 )
                 if mlb_stat_2080_values:
                     peak_age = 27 if is_pitcher else 28

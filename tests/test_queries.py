@@ -158,7 +158,8 @@ def _pos_rankings_pitcher_db():
         CREATE TABLE players (player_id INTEGER PRIMARY KEY, name TEXT, age INTEGER,
             pos INTEGER, role INTEGER, team_id INTEGER, parent_team_id INTEGER, level TEXT);
         CREATE TABLE latest_ratings (player_id INTEGER, composite_score INTEGER,
-            true_ceiling INTEGER, offensive_grade INTEGER, defensive_value INTEGER,
+            true_ceiling INTEGER, tool_only_score INTEGER, offensive_grade INTEGER,
+            defensive_value INTEGER,
             ctrl INTEGER, c INTEGER, first_b INTEGER, second_b INTEGER, third_b INTEGER,
             ss INTEGER, lf INTEGER, cf INTEGER, rf INTEGER);
         CREATE TABLE pitching_stats (player_id INTEGER, year INTEGER, split_id INTEGER,
@@ -169,12 +170,12 @@ def _pos_rankings_pitcher_db():
     """)
     # Ace starter: 2 starts in 2 appearances.
     conn.execute("INSERT INTO players VALUES (20, 'Ace SP', 27, 1, 11, 1, NULL, '1')")
-    conn.execute("INSERT INTO latest_ratings VALUES (20, 70, 72, NULL, NULL, 60,"
+    conn.execute("INSERT INTO latest_ratings VALUES (20, 70, 72, NULL, NULL, NULL, 60,"
                  "NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL)")
     conn.execute("INSERT INTO pitching_stats VALUES (20, ?, 1, NULL, 2, 2)", (YEAR,))
     # Reliever who made one spot start: 1 GS in 8 appearances -> gs/g = 0.125.
     conn.execute("INSERT INTO players VALUES (21, 'Setup RP', 29, 1, 13, 1, NULL, '1')")
-    conn.execute("INSERT INTO latest_ratings VALUES (21, 55, 57, NULL, NULL, 55,"
+    conn.execute("INSERT INTO latest_ratings VALUES (21, 55, 57, NULL, NULL, NULL, 55,"
                  "NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL)")
     conn.execute("INSERT INTO pitching_stats VALUES (21, ?, 1, NULL, 1, 8)", (YEAR,))
     conn.commit()

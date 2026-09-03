@@ -43,6 +43,8 @@ from statsplusplus.data.db import get_connection
 from statsplusplus.evaluation.composite import (
     compute_composite_hitter,
     compute_composite_pitcher,
+    derive_tool_transform,
+    apply_tool_transform,
     PITCHER_CORE_KEYS,
 )
 from statsplusplus.evaluation.constants import (
@@ -765,6 +767,182 @@ def print_section(title: str, data: dict, indent: int = 0) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Out-of-sample transform hold-out validation
+# ---------------------------------------------------------------------------
+
+def _ols_beta(X, y):
+    """Solve OLS via normal equations + Gaussian elimination. X includes intercept."""
+    k = len(X[0]); n = len(y)
+    XtX = [[sum(X[i][a] * X[i][b] for i in range(n)) for b in range(k)] for a in range(k)]
+    Xty = [sum(X[i][a] * y[i] for i in range(n)) for a in range(k)]
+    A = [XtX[i][:] + [Xty[i]] for i in range(k)]
+    for col in range(k):
+        mr = max(range(col, k), key=lambda r: abs(A[r][col]))
+        A[col], A[mr] = A[mr], A[col]
+        if abs(A[col][col]) < 1e-10:
+            continue
+        for row in range(col + 1, k):
+            f = A[row][col] / A[col][col]
+            for j in range(col, k + 1):
+                A[row][j] -= f * A[col][j]
+    beta = [0.0] * k
+    for i in range(k - 1, -1, -1):
+        beta[i] = A[i][k]
+        for j in range(i + 1, k):
+            beta[i] -= A[i][j] * beta[j]
+        if abs(A[i][i]) > 1e-10:
+            beta[i] /= A[i][i]
+    return beta
+
+
+_TR_BANDS = [(20, 35), (35, 45), (45, 55), (55, 65), (65, 85)]
+
+
+def _fit_curves_from_samples(samples, tool_keys):
+    """samples: list of (tool_vals_dict, war). Returns {tool: curve} via
+    residualized band means + derive_tool_transform (same method as calibrate)."""
+    from statsplusplus.evaluation.constants import TOOL_TRANSFORM_PRIOR, TOOL_TRANSFORM_DEFAULT_PRIOR
+    if len(samples) < 40:
+        return {}
+    X = [[1.0] + [s[0][t] for t in tool_keys] for s in samples]
+    y = [s[1] for s in samples]
+    beta = _ols_beta(X, y)
+    b0 = beta[0]; bt = {t: beta[i + 1] for i, t in enumerate(tool_keys)}
+    curves = {}
+    for t in tool_keys:
+        bands = {b: [] for b in _TR_BANDS}
+        for vals, war in samples:
+            resid = war - (b0 + sum(bt[o] * vals[o] for o in tool_keys if o != t))
+            v = vals[t]
+            for b in _TR_BANDS:
+                if b[0] <= v < b[1]:
+                    bands[b].append(resid); break
+        import statistics as _st
+        means = [(_st.mean(bands[b]) if bands[b] else None) for b in _TR_BANDS]
+        counts = [len(bands[b]) for b in _TR_BANDS]
+        prior = TOOL_TRANSFORM_PRIOR.get(t, TOOL_TRANSFORM_DEFAULT_PRIOR)
+        curves[t] = derive_tool_transform(means, counts, prior=prior)
+    return curves
+
+
+def _r_squared(xs, ys):
+    n = len(xs)
+    if n < 3:
+        return 0.0
+    mx = sum(xs) / n; my = sum(ys) / n
+    sxx = sum((x - mx) ** 2 for x in xs); syy = sum((y - my) ** 2 for y in ys)
+    sxy = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+    return (sxy ** 2) / (sxx * syy) if sxx and syy else 0.0
+
+
+def test_transform_holdout(conn, scale, league_dir, holdout_year=None):
+    """Out-of-sample test: fit per-tool transform curves on all years EXCEPT
+    the hold-out year, then compare global-transform vs held-out per-tool
+    transform at predicting the hold-out year's WAR.
+
+    Limitation (stated honestly): ratings_history only covers recent seasons,
+    so this uses current tool ratings (stable year-to-year for peak-age
+    players) rather than period-correct ratings. It tests whether the curve
+    SHAPE generalizes to a year it was not fit on — the model change in
+    question — not a fully period-correct forecast.
+    """
+    conn.row_factory = None
+    import sqlite3
+    conn.row_factory = sqlite3.Row
+    years = [r[0] for r in conn.execute(
+        "SELECT DISTINCT year FROM mlb_pitching_stats WHERE year IS NOT NULL ORDER BY year").fetchall()]
+    if holdout_year is None:
+        holdout_year = years[-2] if len(years) >= 2 else years[-1]  # last complete season
+
+    load_tw = None
+    import json as _json
+    tw_path = league_dir / "config" / "tool_weights.json"
+    if tw_path.exists():
+        load_tw = _json.load(open(tw_path))
+    hw = (load_tw or {}).get("hitter", {})
+    pw = (load_tw or {}).get("pitcher", {})
+
+    def _bucket(pos, role):
+        if pos == 1 or role in (11, 12, 13):
+            return "SP" if role == 11 else "RP"
+        return {2: "C", 3: "1B", 4: "2B", 5: "3B", 6: "SS",
+                7: "COF", 8: "CF", 9: "COF", 10: "1B"}.get(pos, "COF")
+
+    out = {"holdout_year": holdout_year}
+
+    # ---- Pitchers ----
+    prows = conn.execute("""
+        SELECT p.pos, p.role, ps.year, ps.war, ps.ip,
+               r.stf, r.mov, r.ctrl, r.stm
+        FROM players p JOIN latest_ratings r ON r.player_id = p.player_id
+        JOIN mlb_pitching_stats ps ON ps.player_id = p.player_id AND ps.split_id = 1
+        WHERE p.level = 1 AND ps.ip >= 40
+    """).fetchall()
+    p_train = []  # (vals, war) from non-holdout years
+    p_test = []   # (row) holdout year
+    for r in prows:
+        vals = {"stuff": _norm(r["stf"], scale), "movement": _norm(r["mov"], scale),
+                "control": _norm(r["ctrl"], scale)}
+        if any(v is None for v in vals.values()) or r["war"] is None:
+            continue
+        if r["year"] == holdout_year:
+            p_test.append((r, vals))
+        else:
+            p_train.append((vals, r["war"]))
+    p_curves = _fit_curves_from_samples(p_train, ["stuff", "movement", "control"])
+    g_new, g_old, g_w = [], [], []
+    for r, vals in p_test:
+        role = "SP" if r["role"] == 11 else "RP"
+        w = pw.get(role, {})
+        stm = _norm(r["stm"], scale) or 50
+        new = compute_composite_pitcher(vals, w, {}, stm, role, p_curves)
+        old = compute_composite_pitcher(vals, w, {}, stm, role, None)
+        g_new.append(new); g_old.append(old); g_w.append(r["war"])
+    out["pitchers"] = {
+        "n_train": len(p_train), "n_test": len(g_w),
+        "global_r2": round(_r_squared(g_old, g_w), 4),
+        "holdout_transform_r2": round(_r_squared(g_new, g_w), 4),
+    } if len(g_w) >= 10 else {"error": f"only {len(g_w)} test pitchers"}
+
+    # ---- Hitters ----
+    hrows = conn.execute("""
+        SELECT p.pos, p.role, b.year, b.war,
+               r.cntct, r.gap, r.pow, r.eye, r.speed, r.steal, r.ifr, r.ofr, r.c_frm
+        FROM players p JOIN latest_ratings r ON r.player_id = p.player_id
+        JOIN mlb_batting_stats b ON b.player_id = p.player_id AND b.split_id = 1
+        WHERE p.level = 1 AND b.pa >= 300 AND p.role NOT IN (11, 12, 13)
+    """).fetchall()
+    h_train, h_test = [], []
+    for r in hrows:
+        vals = {"contact": _norm(r["cntct"], scale), "gap": _norm(r["gap"], scale),
+                "power": _norm(r["pow"], scale), "eye": _norm(r["eye"], scale),
+                "speed": _norm(r["speed"], scale)}
+        if any(vals[k] is None for k in ("contact", "gap", "power", "eye")) or r["war"] is None:
+            continue
+        vals["speed"] = vals["speed"] if vals["speed"] is not None else 50
+        if r["year"] == holdout_year:
+            h_test.append((r, vals))
+        else:
+            h_train.append((vals, r["war"]))
+    h_curves = _fit_curves_from_samples(h_train, ["contact", "gap", "power", "eye", "speed"])
+    hn, ho, hw_ = [], [], []
+    for r, vals in h_test:
+        b = _bucket(r["pos"], r["role"]); w = hw.get(b, hw.get("COF", {}))
+        defense = {"ifr": _norm(r["ifr"], scale), "ofr": _norm(r["ofr"], scale),
+                   "c_frm": _norm(r["c_frm"], scale)}
+        new = compute_composite_hitter(vals, w, defense, {}, h_curves)
+        old = compute_composite_hitter(vals, w, defense, {}, None)
+        hn.append(new); ho.append(old); hw_.append(r["war"])
+    out["hitters"] = {
+        "n_train": len(h_train), "n_test": len(hw_),
+        "global_r2": round(_r_squared(ho, hw_), 4),
+        "holdout_transform_r2": round(_r_squared(hn, hw_), 4),
+    } if len(hw_) >= 10 else {"error": f"only {len(hw_)} test hitters"}
+
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -772,8 +950,10 @@ def main():
     parser = argparse.ArgumentParser(description="Model regression testing")
     parser.add_argument("--league", help="League slug (default: active league)")
     parser.add_argument("--test", default="all",
-                       choices=["composite", "imbalance", "aging", "stat_blend", "all"],
+                       choices=["composite", "imbalance", "aging", "stat_blend", "holdout", "all"],
                        help="Which test to run")
+    parser.add_argument("--holdout-year", type=int, default=None,
+                       help="With --test holdout: the year to hold out (default: last complete season)")
     parser.add_argument("--calibrate", action="store_true",
                        help="Derive league-specific parameters and write to model_weights.json")
     parser.add_argument("--dry-run", action="store_true",
@@ -795,6 +975,12 @@ def main():
     if args.calibrate:
         result = run_calibration(conn, scale, league_dir, dry_run=args.dry_run)
         print_section("Calibration Results", result)
+        conn.close()
+        return
+
+    if args.test == "holdout":
+        result = test_transform_holdout(conn, scale, league_dir, args.holdout_year)
+        print_section("Transform Hold-Out (out-of-sample)", result)
         conn.close()
         return
 

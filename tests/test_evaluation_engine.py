@@ -62,6 +62,9 @@ from statsplusplus.evaluation.composite import (
     offensive_grade_raw,
     baserunning_value_raw,
     defensive_value_raw,
+    derive_tool_transform,
+    apply_tool_transform,
+    tool_transform,
 )
 from statsplusplus.evaluation.constants import DEFENSIVE_WEIGHTS
 
@@ -739,6 +742,76 @@ class TestShrinkWeightsTowardPrior:
         large = shrink_weights_toward_prior(self.EXTREME, self.PRIOR, n=180)
         # Larger sample → movement weight closer to the (high) regression value.
         assert large["movement"] > small["movement"]
+
+
+class TestDeriveToolTransform:
+    """Per-tool transform curve derivation from residualized WAR bands."""
+
+    ANCHORS = (28.0, 40.0, 50.0, 60.0, 72.0)
+    PRIOR = [-9.0, -4.0, 0.0, 5.0, 12.0]
+
+    def test_output_length_and_50_pinned(self):
+        means = [1.0, 1.5, 2.0, 2.6, 3.4]
+        counts = [50, 200, 400, 200, 100]
+        curve = derive_tool_transform(means, counts, prior=self.PRIOR)
+        assert len(curve) == 5
+        assert curve[2] == 0.0  # anchor 50 pinned to delta 0
+
+    def test_monotone_non_decreasing(self):
+        means = [1.0, 1.5, 2.0, 2.6, 3.4]
+        counts = [50, 200, 400, 200, 100]
+        curve = derive_tool_transform(means, counts, prior=self.PRIOR)
+        assert all(curve[i] <= curve[i + 1] + 1e-9 for i in range(len(curve) - 1))
+
+    def test_noisy_nonmonotone_input_still_monotone_output(self):
+        # A band that dips (noise) must not produce a decreasing curve.
+        means = [1.0, 2.2, 2.0, 1.9, 3.4]  # 55-65 band lower than 45-55
+        counts = [30, 150, 400, 150, 80]
+        curve = derive_tool_transform(means, counts, prior=self.PRIOR)
+        assert all(curve[i] <= curve[i + 1] + 1e-9 for i in range(len(curve) - 1))
+
+    def test_missing_band_falls_back_to_prior(self):
+        means = [None, 1.5, 2.0, 2.6, None]  # thin/absent tails
+        counts = [0, 200, 400, 200, 0]
+        curve = derive_tool_transform(means, counts, prior=self.PRIOR)
+        # Curve is still valid, monotone, 50-pinned.
+        assert curve[2] == 0.0
+        assert all(curve[i] <= curve[i + 1] + 1e-9 for i in range(len(curve) - 1))
+
+    def test_clamped_to_max_delta(self):
+        from statsplusplus.evaluation.constants import TOOL_TRANSFORM_MAX_DELTA
+        means = [-50.0, -20.0, 2.0, 30.0, 90.0]  # extreme deltas
+        counts = [200, 200, 400, 200, 200]
+        curve = derive_tool_transform(means, counts, prior=self.PRIOR)
+        assert all(abs(v) <= TOOL_TRANSFORM_MAX_DELTA + 1e-9 for v in curve)
+
+
+class TestApplyToolTransform:
+    """Interpolating a rating through a per-tool transform curve."""
+
+    ANCHORS = (28.0, 40.0, 50.0, 60.0, 72.0)
+    CURVE = [-9.0, -4.0, 0.0, 5.0, 12.0]
+
+    def test_at_50_returns_50(self):
+        assert apply_tool_transform(50.0, self.CURVE) == 50.0
+
+    def test_boost_above_average(self):
+        # At anchor 60, delta +5 → effective 65.
+        assert apply_tool_transform(60.0, self.CURVE) == 65.0
+
+    def test_penalty_below_average(self):
+        # At anchor 40, delta -4 → effective 36.
+        assert apply_tool_transform(40.0, self.CURVE) == 36.0
+
+    def test_linear_interpolation_between_anchors(self):
+        # Midway between 50 (0) and 60 (+5) → delta +2.5 → 55 + 2.5.
+        assert abs(apply_tool_transform(55.0, self.CURVE) - 57.5) < 1e-9
+
+    def test_none_curve_falls_back_to_global(self):
+        assert apply_tool_transform(70.0, None) == tool_transform(70.0)
+
+    def test_below_lowest_anchor_uses_first_delta(self):
+        assert apply_tool_transform(20.0, self.CURVE) == 20.0 + self.CURVE[0]
 
 
 

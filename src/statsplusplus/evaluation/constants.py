@@ -140,6 +140,51 @@ MLB_TOOL_FLOOR: int = 35
 FLOOR_PENALTY_RATE: float = 0.25
 
 # ---------------------------------------------------------------------------
+# Per-tool, per-league transform curves
+# ---------------------------------------------------------------------------
+# Rating anchors (20-80 scale) at which a tool's effective-value curve is
+# defined. The curve maps each anchor rating to an *effective* rating; between
+# anchors the transform interpolates linearly. Anchor 50 is pinned to a 0
+# delta (an average tool is worth an average value). These are the band
+# midpoints used during calibration.
+TOOL_TRANSFORM_ANCHORS: tuple[float, ...] = (28.0, 40.0, 50.0, 60.0, 72.0)
+
+# Maximum effective-rating delta (points above/below the raw rating) at any
+# anchor, to keep curves on-scale and prevent noisy bands from exploding.
+TOOL_TRANSFORM_MAX_DELTA: float = 15.0
+
+# Per-tool PRIOR curves: effective-rating delta at each of TOOL_TRANSFORM_ANCHORS.
+# Encodes the baseball prior that standout skills are disproportionately
+# valuable (convex top end) while deficiencies are penalized — with the
+# convexity varying by tool (contact/power/stuff steep; gap/speed shallow).
+# Calibration shrinks the data-derived curve toward these by sample size.
+TOOL_TRANSFORM_PRIOR: dict[str, list[float]] = {
+    "contact":  [-9.0, -4.0, 0.0, 5.0, 12.0],
+    "power":    [-9.0, -4.0, 0.0, 5.0, 11.0],
+    "eye":      [-6.0, -3.0, 0.0, 3.0, 7.0],
+    "gap":      [-3.0, -1.0, 0.0, 1.0, 3.0],
+    "speed":    [-3.0, -1.0, 0.0, 1.0, 3.0],
+    "stuff":    [-9.0, -4.0, 0.0, 5.0, 12.0],
+    "movement": [-6.0, -3.0, 0.0, 3.0, 7.0],
+    "control":  [-6.0, -3.0, 0.0, 3.0, 7.0],
+}
+# Default (fallback) prior for any tool without a specific entry — the shape of
+# the current global tool_transform (mild convex).
+TOOL_TRANSFORM_DEFAULT_PRIOR: list[float] = [-6.0, -3.0, 0.0, 3.0, 7.0]
+
+# Reference WAR-per-rating-point used to convert residualized marginal-WAR band
+# deltas into rating-equivalent deltas. A single shared scale (rather than each
+# tool's own regression slope) keeps low-signal tools from exploding.
+TOOL_TRANSFORM_WAR_PER_POINT: float = 0.08
+
+# Shrinkage of the data-derived curve toward the prior. lambda (prior weight)
+# per anchor scales with that band's sample size; floors at TRANSFORM_MIN_LAMBDA
+# even at full sample so the baseball prior always tempers noise.
+TOOL_TRANSFORM_N_FULL: int = 200
+TOOL_TRANSFORM_MIN_LAMBDA: float = 0.30
+
+
+# ---------------------------------------------------------------------------
 # Composite imbalance penalty parameters
 # ---------------------------------------------------------------------------
 

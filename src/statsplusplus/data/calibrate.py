@@ -1368,16 +1368,15 @@ def calibrate(dry_run=False):
     print("=== Tool Weight Regression (Step 0) ===")
     tool_weights = _calibrate_tool_weights(conn, game_year, role_map)
     if tool_weights:
-        for bucket in list(HITTER_BUCKETS):
-            n = tool_weights.get("calibration_n", {}).get(bucket, 0)
-            r2_info = tool_weights.get("calibration_r2", {}).get(bucket, {})
-            r2_str = ", ".join(f"{k}={v:.3f}" for k, v in r2_info.items()) if r2_info else "defaults"
-            print(f"  {bucket:<4} N={n:<5} R²: {r2_str}")
-        for role in PITCHER_BUCKETS:
-            n = tool_weights.get("calibration_n", {}).get(role, 0)
-            r2_info = tool_weights.get("calibration_r2", {}).get(role, {})
-            r2_str = ", ".join(f"{k}={v:.3f}" for k, v in r2_info.items()) if r2_info else "defaults"
-            print(f"  {role:<4} N={n:<5} R²: {r2_str}")
+        # _calibrate_tool_weights() regresses hitters/pitchers pooled across
+        # positions (not per-bucket), so calibration_n only carries three
+        # keys: hitter_offensive, pitcher_SP, pitcher_RP — report those
+        # directly instead of a per-position breakdown the current
+        # implementation doesn't produce.
+        cal_n = tool_weights.get("calibration_n", {})
+        print(f"  hitter offensive  N={cal_n.get('hitter_offensive', 0)}")
+        print(f"  pitcher SP        N={cal_n.get('pitcher_SP', 0)}")
+        print(f"  pitcher RP        N={cal_n.get('pitcher_RP', 0)}")
 
         if not dry_run:
             tw_path = league_dir / "config" / "tool_weights.json"

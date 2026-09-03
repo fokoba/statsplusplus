@@ -252,3 +252,71 @@ def test_popup_pitcher_has_stats():
     assert stats is not None
     assert stats["era"] is not None
     assert stats["war"] is not None
+
+
+# ── _mlb_context — peer pool must not be gated by playing time ───────────────
+#
+# Regression: composite/ceiling are ratings-based, so the peer pool for the
+# "rank among MLB RPs" panel is every MLB pitcher who has appeared — NOT those
+# past a full-season IP floor. An earlier IP floor collapsed the RP pool to ~11
+# players six games into the season ("#5 of 11"). SP/RP is split by usage
+# (gs/g ratio), not raw role codes.
+
+import sqlite3
+from types import SimpleNamespace
+
+
+def _mlb_context_pitcher_db(n_relievers=30):
+    """In-memory DB with many MLB relievers, all low-IP (early season)."""
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript("""
+        CREATE TABLE players (player_id INTEGER PRIMARY KEY, name TEXT, level INTEGER,
+            pos INTEGER, role INTEGER);
+        CREATE TABLE latest_ratings (player_id INTEGER, composite_score INTEGER);
+        CREATE TABLE batting_stats (player_id INTEGER, year INTEGER, split_id INTEGER,
+            league_id INTEGER, pa INTEGER);
+        CREATE TABLE pitching_stats (player_id INTEGER, year INTEGER, split_id INTEGER,
+            league_id INTEGER, ip REAL, g INTEGER, gs INTEGER);
+        CREATE VIEW mlb_batting_stats AS SELECT * FROM batting_stats WHERE league_id IS NULL;
+        CREATE VIEW mlb_pitching_stats AS SELECT * FROM pitching_stats WHERE league_id IS NULL;
+    """)
+    # A batting row so MAX(year) resolves to YEAR.
+    conn.execute("INSERT INTO batting_stats VALUES (999, ?, 1, NULL, 20)", (YEAR,))
+    # n relievers, each with only ~3 IP (below any full-season floor), composites 40..40+n.
+    for i in range(n_relievers):
+        pid = 100 + i
+        conn.execute("INSERT INTO players VALUES (?, ?, 1, 1, 13)", (pid, f"RP{i}"))
+        conn.execute("INSERT INTO latest_ratings VALUES (?, ?)", (pid, 40 + i))
+        conn.execute("INSERT INTO pitching_stats VALUES (?, ?, 1, NULL, 3.0, 3, 0)", (pid, YEAR))
+    # One starter (2 GS / 2 G) that must NOT appear in the RP pool.
+    conn.execute("INSERT INTO players VALUES (200, 'Ace', 1, 1, 11)")
+    conn.execute("INSERT INTO latest_ratings VALUES (200, 75)")
+    conn.execute("INSERT INTO pitching_stats VALUES (200, ?, 1, NULL, 12.0, 2, 2)", (YEAR,))
+    conn.commit()
+    return conn
+
+
+def _patch_lc(monkeypatch):
+    import statsplusplus.config.league_config as _lc
+    monkeypatch.setattr(
+        _lc, "LeagueConfig",
+        lambda *a, **k: SimpleNamespace(role_map={11: "starter", 12: "reliever", 13: "closer"}))
+
+
+def test_mlb_context_rp_pool_not_ip_gated(monkeypatch):
+    conn = _mlb_context_pitcher_db(n_relievers=30)
+    _patch_lc(monkeypatch)
+    # Rank a mid-pack reliever (composite 55).
+    ctx = player_queries._mlb_context(conn, "RP", 55, 55)
+    assert ctx is not None
+    # All 30 low-IP relievers are peers; the lone starter is excluded.
+    assert ctx["n"] == 30, f"expected full 30-reliever pool, got {ctx['n']}"
+
+
+def test_mlb_context_starter_excluded_from_rp_pool(monkeypatch):
+    conn = _mlb_context_pitcher_db(n_relievers=30)
+    _patch_lc(monkeypatch)
+    # SP pool should be just the single 2GS/2G starter -> too small (<5) -> None.
+    sp_ctx = player_queries._mlb_context(conn, "SP", 75, 75)
+    assert sp_ctx is None  # only 1 SP; guard returns None below the 5-peer minimum

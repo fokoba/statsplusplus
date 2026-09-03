@@ -20,6 +20,8 @@ from statsplusplus.config.league_context import (
     get_league_dir,
     get_statsplus_cookie,
     set_statsplus_cookie,
+    get_statsplus_token,
+    set_statsplus_token,
 )
 from statsplusplus.utils.logging import get_logger
 
@@ -99,6 +101,14 @@ def settings():
                 cookie += f";csrftoken={csrf}"
             set_statsplus_cookie(cookie, cfg.league_dir)
 
+        elif action == "save_token":
+            # Sanctioned auth (see https://wiki.statsplus.net/web-tools/statsplus-api)
+            # — a per-team API token from this league's Preferences page on
+            # the StatsPlus site, preferred over the session cookie above
+            # once set.
+            token = request.form.get("statsplus_token", "").strip()
+            set_statsplus_token(token, cfg.league_dir)
+
         elif action == "save_structure":
             try:
                 leagues = json.loads(request.form.get("leagues_json", "[]"))
@@ -163,11 +173,13 @@ def settings():
         counts = {tbl: 0 for tbl in ["players", "ratings", "batting_stats", "pitching_stats", "contracts", "teams"]}
 
     all_mlb_teams = {int(k): v for k, v in cfg.team_abbr_map.items()}
+    statsplus_token = get_statsplus_token(cfg.league_dir)
 
     return render_template("settings.html",
                            current=current_team, teams=teams,
                            cfg=cfg, state=state,
                            session_id=session_id, csrf_token=csrf_token,
+                           statsplus_token=statsplus_token,
                            counts=counts, league_groups=cfg.leagues,
                            all_mlb_teams=all_mlb_teams,
                            leagues_json=json.dumps(cfg.leagues, indent=2))

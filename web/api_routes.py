@@ -17,6 +17,7 @@ from statsplusplus.config.league_context import (
     get_league_dir,
     get_statsplus_cookie,
     set_statsplus_cookie,
+    get_statsplus_token,
 )
 from statsplusplus.utils.logging import get_logger
 
@@ -373,8 +374,9 @@ def api_draft_picks():
         cfg = _get_cfg()
         slug = cfg.settings.get("statsplus_slug", "")
         cookie = get_statsplus_cookie(cfg.league_dir)
-        if slug and cookie:
-            client.configure(slug, cookie)
+        token = get_statsplus_token(cfg.league_dir)
+        if slug and (cookie or token):
+            client.configure(slug, cookie, token)
         raw = client.get_draft()
         picks = [{"pid": d["ID"], "name": d["Player Name"], "team": d["Team"],
                   "tid": d["Team ID"], "pos": d["Position"], "age": d["Age"],
@@ -553,7 +555,7 @@ def api_draft_settings_copy():
 # ── Refresh ──
 
 
-def _run_refresh(slug, league_dir, statsplus_slug, cookie):
+def _run_refresh(slug, league_dir, statsplus_slug, cookie, token=""):
     """Run refresh.py in background thread."""
     _log = get_logger("web")
     _log.info("=== dashboard refresh started (league=%s) ===", slug)
@@ -562,7 +564,7 @@ def _run_refresh(slug, league_dir, statsplus_slug, cookie):
         from statsplusplus.config.league_config import LeagueConfig
         bg_cfg = LeagueConfig(base_dir=league_dir)
         script = Path(__file__).parent.parent / "src" / "statsplusplus" / "data" / "refresh.py"
-        env = {**os.environ, "STATSPP_LEAGUE": slug, "STATSPLUS_COOKIE": cookie}
+        env = {**os.environ, "STATSPP_LEAGUE": slug, "STATSPLUS_COOKIE": cookie, "STATSPLUS_TOKEN": token}
         if statsplus_slug:
             env["STATSPLUS_LEAGUE_URL"] = statsplus_slug
         result = subprocess.run(
@@ -624,10 +626,11 @@ def refresh():
     league_dir = g.league_dir
     statsplus_slug = cfg.settings.get("statsplus_slug", "")
     cookie = get_statsplus_cookie(league_dir)
+    token = get_statsplus_token(league_dir)
     _refresh_status["running"] = True
     _refresh_status["result"] = None
     _refresh_status["message"] = ""
-    threading.Thread(target=_run_refresh, args=(slug, league_dir, statsplus_slug, cookie), daemon=True).start()
+    threading.Thread(target=_run_refresh, args=(slug, league_dir, statsplus_slug, cookie, token), daemon=True).start()
     return jsonify({"status": "started"})
 
 
@@ -653,8 +656,9 @@ def api_game_date():
         cfg = _get_cfg()
         slug = cfg.settings.get("statsplus_slug", "")
         cookie = get_statsplus_cookie(cfg.league_dir)
-        if slug and cookie:
-            client.configure(slug, cookie)
+        token = get_statsplus_token(cfg.league_dir)
+        if slug and (cookie or token):
+            client.configure(slug, cookie, token)
         remote_date = client.get_date().strip()
     except Exception:
         remote_date = None
@@ -694,18 +698,21 @@ def api_save_session_cookie():
 
 @api_bp.route("/api/test-connection", methods=["POST"])
 def api_test_connection():
-    """Test StatsPlus API connection with the provided or saved cookie."""
+    """Test StatsPlus API connection with the provided/saved cookie or token."""
     cfg = _get_cfg()
     slug = cfg.settings.get("statsplus_slug", "")
     data = request.get_json(silent=True) or {}
+    token = data.get("token", "").strip()
+    if not token:
+        token = get_statsplus_token(cfg.league_dir)
     cookie = data.get("cookie", "").strip()
     if not cookie:
         cookie = get_statsplus_cookie(cfg.league_dir)
-    if not cookie:
-        return jsonify({"ok": False, "error": "No cookie configured"})
+    if not cookie and not token:
+        return jsonify({"ok": False, "error": "No cookie or token configured"})
     try:
         from statsplus import client
-        client.configure(slug, cookie)
+        client.configure(slug, cookie, token)
         date = client.get_date()
         client._get("/ratings/")
         return jsonify({"ok": True, "game_date": date})

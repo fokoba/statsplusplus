@@ -1105,12 +1105,13 @@ def get_draft_pool():
     picks = []
     try:
         from statsplus import client as _dc
-        from statsplusplus.config.league_context import get_statsplus_cookie
+        from statsplusplus.config.league_context import get_statsplus_cookie, get_statsplus_token
         cfg = get_cfg()
         slug = cfg.settings.get("statsplus_slug", "")
         cookie = get_statsplus_cookie()
-        if slug and cookie:
-            _dc.configure(slug, cookie)
+        token = get_statsplus_token()
+        if slug and (cookie or token):
+            _dc.configure(slug, cookie, token)
         raw = _dc.get_draft()
         picks = [{"pid": d["ID"], "name": d["Player Name"], "team": d["Team"],
                   "tid": d["Team ID"], "pos": d["Position"], "age": d["Age"],

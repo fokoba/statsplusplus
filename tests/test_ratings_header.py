@@ -83,7 +83,7 @@ def test_fetch_sends_user_agent(monkeypatch):
         captured["headers"] = req.headers
         return _FakeResp("ok")
 
-    monkeypatch.setattr(client, "_resolve_creds", lambda: ("ppl", "sessionid=x"))
+    monkeypatch.setattr(client, "_resolve_creds", lambda: ("ppl", "sessionid=x", ""))
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
     body = client._fetch("https://example/test")
     assert body == "ok"
@@ -96,7 +96,7 @@ def test_fetch_retries_on_wait_message(monkeypatch):
     """A 'wait N seconds' body should trigger a retry, not be returned as data."""
     responses = iter([_FakeResp("please wait 1 seconds"), _FakeResp("real-data")])
 
-    monkeypatch.setattr(client, "_resolve_creds", lambda: ("ppl", "sessionid=x"))
+    monkeypatch.setattr(client, "_resolve_creds", lambda: ("ppl", "sessionid=x", ""))
     monkeypatch.setattr(urllib.request, "urlopen", lambda req, *a, **k: next(responses))
     monkeypatch.setattr(client.time, "sleep", lambda s: None)
     body = client._fetch("https://example/test")

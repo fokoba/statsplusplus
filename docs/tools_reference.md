@@ -539,8 +539,8 @@ Import with `sys.path.insert(0, 'web')`. All are read-only against the DB.
 | `get_top_prospects(n)` | List of top N prospects league-wide |
 | `get_all_prospects()` | All FV≥40 prospects with ratings |
 | `get_prospect_summary(pid)` | Full prospect detail for side panel |
-| `get_batting_leaders(year, min_pa)` | Top 5 per stat, MLB/AL/NL |
-| `get_pitching_leaders(year, min_ip)` | Top 5 per stat, MLB/AL/NL |
+| `get_batting_leaders(year)` | Top 5 per stat, MLB/AL/NL. Rate stats (AVG/OPS) use a games-scaled qualifier; counting stats ungated |
+| `get_pitching_leaders(year)` | Top 5 per stat, MLB/AL/NL. Rate stats (ERA/WHIP) use a games-scaled qualifier; counting stats ungated |
 | `search_players(query)` | Up to 15 matching players (MLB + prospects) across all orgs |
 | `get_prospect_comps(pid)` | 3-tier MLB comps for a prospect (Upside/Likely/Floor) |
 | `get_player_card(pid)` | Side-panel-style data for any player (tools, pitches, defense, stats) |

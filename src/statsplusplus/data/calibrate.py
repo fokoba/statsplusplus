@@ -44,6 +44,7 @@ def defensive_score(p, bucket):
 
 from statsplusplus.data.evaluation_engine import (
     derive_tool_weights, normalize_coefficients, recombine_component_weights,
+    shrink_weights_toward_prior,
     DEFAULT_TOOL_WEIGHTS, validate_tool_weights,
 )
 HITTER_BUCKETS = ("C", "SS", "2B", "3B", "CF", "COF", "1B")
@@ -299,47 +300,53 @@ def _calibrate_tool_weights(conn, game_year, role_map):
 
         stuff = norm(r["stf"])
         control = norm(r["ctrl"])
-        # Use HRA as movement proxy when available (cleaner signal, r=0.927 with mov)
-        hra_val = norm(r["rating_hra"])
-        if hra_val and hra_val > 20:
-            movement = hra_val
-        else:
-            movement = norm(r["mov"])
+        movement = norm(r["mov"])
         if any(v is None for v in (stuff, movement, control)):
             continue
 
-        # Arsenal quality
-        pitch_ratings = [norm(r[col]) for col in pitch_cols if r[col] and r[col] > 0]
-        arsenal_quality = sum(1 for pr in pitch_ratings if pr is not None and pr >= 45)
-
-        tool_dict = {"stuff": stuff, "movement": movement, "control": control, "arsenal": arsenal_quality}
+        # Regress only the three core tools. Arsenal is intentionally NOT a
+        # regression feature: OOTP's Stuff rating is already ~a function of the
+        # pitcher's top pitches (corr(stuff, top-3 pitch mean) ≈ 0.97), so an
+        # arsenal count is a collinear proxy for Stuff that steals its share in
+        # the r²-based weighting. Arsenal is re-added below as a small fixed
+        # differentiator applied in the composite, never calibrated.
+        tool_dict = {"stuff": stuff, "movement": movement, "control": control}
 
         pitching_data[bucket][0].append(tool_dict)
         pitching_data[bucket][1].append(float(r["war"]))
 
+    # Small fixed arsenal share, carved out of the calibrated core weights so a
+    # standout arsenal is a minor tiebreaker without competing in the regression.
+    ARSENAL_FIXED_SHARE = 0.05
     result_pitcher = {}
     for role in PITCHER_BUCKETS:
         tool_ratings, targets = pitching_data[role]
+        n_role = len(tool_ratings)
         pitching_raw = derive_tool_weights(tool_ratings, targets, min_n=30)
+        prior = DEFAULT_TOOL_WEIGHTS["pitcher"].get(role, {})
+        # Prior over the three core tools only (renormalized without arsenal).
+        core_prior = {k: prior.get(k, 0.0) for k in ("stuff", "movement", "control")}
+        _cp = sum(core_prior.values())
+        if _cp > 0:
+            core_prior = {k: v / _cp for k, v in core_prior.items()}
 
         if pitching_raw is not None:
-            # No artificial floor — let the regression decide
-            pitching_norm = normalize_coefficients(pitching_raw, min_weight=0.0)
-            # Ensure arsenal gets at least 5% (it's always relevant for SP depth)
-            if "arsenal" in pitching_norm and pitching_norm["arsenal"] < 0.05:
-                deficit = 0.05 - pitching_norm["arsenal"]
-                pitching_norm["arsenal"] = 0.05
-                # Remove from largest
-                largest = max(pitching_norm, key=pitching_norm.get)
-                pitching_norm[largest] -= deficit
-            # Re-normalize
-            pt = sum(pitching_norm.values())
-            if pt > 0:
-                pitching_norm = {k: round(v / pt, 4) for k, v in pitching_norm.items()}
-            result_pitcher[role] = pitching_norm
+            core_norm = normalize_coefficients(pitching_raw, min_weight=0.0)
+            # Ridge-style shrinkage toward the baseball-sound prior. Prevents
+            # per-feature r² weighting from starving a primary tool (Stuff)
+            # when a correlated tool has a marginally higher r².
+            core_norm = shrink_weights_toward_prior(core_norm, core_prior, n_role)
         else:
-            print("Pitcher %s regression failed (N=%d) — using defaults", role, len(tool_ratings))
-            result_pitcher[role] = dict(DEFAULT_TOOL_WEIGHTS["pitcher"].get(role, {}))
+            print("Pitcher %s regression failed (N=%d) — using defaults" % (role, n_role))
+            core_norm = dict(core_prior)
+
+        # Re-introduce the fixed arsenal share and renormalize to 1.0.
+        scaled = {k: v * (1.0 - ARSENAL_FIXED_SHARE) for k, v in core_norm.items()}
+        scaled["arsenal"] = ARSENAL_FIXED_SHARE
+        pt = sum(scaled.values())
+        if pt > 0:
+            scaled = {k: round(v / pt, 4) for k, v in scaled.items()}
+        result_pitcher[role] = scaled
 
     # -------------------------------------------------------------------
     # Recombination weights (for component display)

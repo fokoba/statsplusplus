@@ -47,6 +47,10 @@ from statsplusplus.data.evaluation_engine import (
     shrink_weights_toward_prior,
     DEFAULT_TOOL_WEIGHTS, validate_tool_weights,
 )
+from statsplusplus.evaluation.composite import derive_tool_transform
+from statsplusplus.evaluation.constants import (
+    TOOL_TRANSFORM_ANCHORS, TOOL_TRANSFORM_PRIOR, TOOL_TRANSFORM_DEFAULT_PRIOR,
+)
 HITTER_BUCKETS = ("C", "SS", "2B", "3B", "CF", "COF", "1B")
 PITCHER_BUCKETS = ("SP", "RP")
 
@@ -383,6 +387,120 @@ def _calibrate_tool_weights(conn, game_year, role_map):
         return dict(DEFAULT_TOOL_WEIGHTS)
 
     return tool_weights
+
+
+# ---------------------------------------------------------------------------
+# Per-tool transform curves (residualized marginal-WAR band fit)
+# ---------------------------------------------------------------------------
+
+# The rating bands aligned to TOOL_TRANSFORM_ANCHORS (28/40/50/60/72).
+_TRANSFORM_BANDS = [(20, 35), (35, 45), (45, 55), (55, 65), (65, 85)]
+
+
+def _fit_tool_transforms(rows, tool_cols, war_key="war"):
+    """Fit residualized transform curves for a set of tools.
+
+    For each tool, isolates its own contribution to WAR by removing the OLS-
+    predicted contribution of the *other* tools (residualization), then bins
+    the residual by rating band and hands the band means/counts to
+    ``derive_tool_transform`` (which shrinks toward the per-tool prior,
+    enforces monotonicity, and pins 50→0).
+
+    Args:
+        rows: sequence of dicts (or sqlite Rows) with normalized tool ratings
+            under each ``tool_cols`` key and a WAR value under ``war_key``.
+        tool_cols: list of tool names (keys already present in ``rows``).
+
+    Returns:
+        {tool: [delta_per_anchor...], ...} plus an ``_n`` key with sample size,
+        or ``None`` if the sample is too small (< 40).
+    """
+    data = []
+    for r in rows:
+        vals = {t: r[t] for t in tool_cols}
+        w = r[war_key]
+        if any(v is None for v in vals.values()) or w is None:
+            continue
+        data.append((vals, float(w)))
+    n = len(data)
+    if n < 40:
+        return None
+
+    # Multivariate OLS: WAR ~ intercept + tools (for residualization).
+    X = [[1.0] + [d[0][t] for t in tool_cols] for d in data]
+    y = [d[1] for d in data]
+    beta = _multivariate_ols(X, y)
+    b0 = beta[0]
+    bt = {t: beta[i + 1] for i, t in enumerate(tool_cols)}
+
+    curves = {"_n": n}
+    for t in tool_cols:
+        band_vals = {b: [] for b in _TRANSFORM_BANDS}
+        for vals, war in data:
+            # Residual = WAR minus the other tools' predicted contribution.
+            others = b0 + sum(bt[o] * vals[o] for o in tool_cols if o != t)
+            resid = war - others
+            v = vals[t]
+            for b in _TRANSFORM_BANDS:
+                if b[0] <= v < b[1]:
+                    band_vals[b].append(resid)
+                    break
+        import statistics
+        means = [(statistics.mean(band_vals[b]) if band_vals[b] else None)
+                 for b in _TRANSFORM_BANDS]
+        counts = [len(band_vals[b]) for b in _TRANSFORM_BANDS]
+        prior = TOOL_TRANSFORM_PRIOR.get(t, TOOL_TRANSFORM_DEFAULT_PRIOR)
+        curves[t] = derive_tool_transform(means, counts, prior=prior)
+    return curves
+
+
+def _calibrate_tool_transforms(conn, game_year, role_map):
+    """Derive per-tool, per-role transform curves from residualized WAR bands.
+
+    Returns a dict keyed by player-type/role (``hitter``/``SP``/``RP``) mapping
+    to ``{tool: [delta_per_anchor...]}`` curves, for storage under the
+    ``tool_transforms`` key of ``tool_weights.json``. Tools/roles with
+    insufficient sample are omitted (the composite falls back to the global
+    transform, then to per-tool priors via ``derive_tool_transform``).
+    """
+    year_hi = game_year - 1
+    year_lo = year_hi - CALIBRATION_YEARS - 1  # wider window for band stability
+    result = {}
+
+    # Hitters — pooled across positions (transforms are per-tool, not per-position).
+    hitter_rows = conn.execute("""
+        SELECT r.cntct, r.gap, r.pow, r.eye, r.speed, b.war
+        FROM latest_ratings r
+        JOIN players p ON r.player_id = p.player_id
+        JOIN mlb_batting_stats b ON b.player_id = p.player_id AND b.split_id = 1
+        WHERE p.level = 1 AND p.role NOT IN (11, 12, 13)
+          AND b.year >= ? AND b.year <= ? AND b.pa >= 200
+    """, (year_lo, year_hi)).fetchall()
+    h_norm = [{"contact": norm(r["cntct"]), "gap": norm(r["gap"]),
+               "power": norm(r["pow"]), "eye": norm(r["eye"]),
+               "speed": norm(r["speed"]), "war": r["war"]} for r in hitter_rows]
+    h_curves = _fit_tool_transforms(h_norm, ["contact", "gap", "power", "eye", "speed"])
+    if h_curves:
+        result["hitter"] = {k: v for k, v in h_curves.items() if k != "_n"}
+
+    # Pitchers — per role.
+    pitcher_rows = conn.execute("""
+        SELECT r.stf, r.mov, r.ctrl, ps.war, p.role, ps.ip, ps.gs
+        FROM latest_ratings r
+        JOIN players p ON r.player_id = p.player_id
+        JOIN mlb_pitching_stats ps ON ps.player_id = p.player_id AND ps.split_id = 1
+        WHERE p.level = 1 AND ps.year >= ? AND ps.year <= ?
+    """, (year_lo, year_hi)).fetchall()
+    for role, want in (("SP", lambda r: (r["gs"] or 0) > 3 and (r["ip"] or 0) >= 40),
+                       ("RP", lambda r: (r["gs"] or 0) <= 3 and (r["ip"] or 0) >= 20)):
+        p_norm = [{"stuff": norm(r["stf"]), "movement": norm(r["mov"]),
+                   "control": norm(r["ctrl"]), "war": r["war"]}
+                  for r in pitcher_rows if want(r)]
+        p_curves = _fit_tool_transforms(p_norm, ["stuff", "movement", "control"])
+        if p_curves:
+            result[role] = {k: v for k, v in p_curves.items() if k != "_n"}
+
+    return result or None
 
 
 # Step 1: OVR_TO_WAR regression
@@ -1392,6 +1510,24 @@ def calibrate(dry_run=False):
             print(f"  Wrote {tw_path}")
     else:
         print("  No tool weight data available — using defaults")
+    print()
+
+    # Step 0b: Per-tool transform curves (residualized marginal-WAR band fit)
+    print("=== Tool Transform Curves (Step 0b) ===")
+    tool_transforms = _calibrate_tool_transforms(conn, game_year, role_map)
+    if tool_transforms:
+        for grp, curves in tool_transforms.items():
+            summary = ", ".join(f"{t}:{c[-1]:+.0f}@72" for t, c in curves.items())
+            print(f"  {grp:<7} {summary}")
+        if not dry_run and tool_weights:
+            # Store alongside weights so it loads with the same file/loader.
+            tool_weights["tool_transforms"] = tool_transforms
+            tw_path = league_dir / "config" / "tool_weights.json"
+            with open(tw_path, "w") as f:
+                json.dump(tool_weights, f, indent=2)
+            print(f"  Merged tool_transforms into {tw_path}")
+    else:
+        print("  Insufficient data — composite uses the global tool transform")
     print()
 
     # Development curves (gap closure, age runway, expected gaps)

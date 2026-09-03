@@ -175,8 +175,16 @@ def _build_batting_leaders(rows, pa_qual, n=5):
     }
 
 
-def get_batting_leaders(yr=None, min_pa=50):
-    """Top 5 per stat, keyed by 'All' + each league short name."""
+def get_batting_leaders(yr=None):
+    """Top 5 per stat, keyed by 'All' + each league short name.
+
+    Rate-stat panels (AVG, OPS) are gated by a games-scaled qualifier
+    (``pa_qual`` = 3.1 PA/team-game) so they stay meaningful all season.
+    Counting-stat panels (HR, RBI, SB, WAR) are ungated — a home-run
+    leaderboard should not require a full-season plate-appearance minimum.
+    No playing-time floor is applied to the row set; the qualifier is the
+    only gate, and the top-N selector ignores NULL values.
+    """
     yr = yr or year()
     conn = get_db()
     tip = conn.execute("SELECT AVG(ip) FROM team_pitching_stats WHERE year=? AND split_id=1",
@@ -187,9 +195,9 @@ def get_batting_leaders(yr=None, min_pa=50):
         SELECT p.player_id, p.name, p.team_id,
                b.ab, b.h, b.d, b.t, b.hr, b.rbi, b.bb, b.k, b.sb, b.pa, b.war, b.r, b.hbp
         FROM mlb_batting_stats b JOIN players p ON b.player_id=p.player_id
-        WHERE b.year=? AND b.split_id=1 AND b.pa >= ?
+        WHERE b.year=? AND b.split_id=1
         ORDER BY b.war DESC
-    """, (yr, min_pa)).fetchall()
+    """, (yr,)).fetchall()
     league_sets = _build_league_team_sets()
     result = {"All": _build_batting_leaders(rows, pa_qual)}
     for lg_short, tids in league_sets.items():
@@ -217,8 +225,15 @@ def _build_pitching_leaders(rows, ip_qual, n=5):
     }
 
 
-def get_pitching_leaders(yr=None, min_ip=10):
-    """Top 5 per stat, keyed by 'All' + each league short name."""
+def get_pitching_leaders(yr=None):
+    """Top 5 per stat, keyed by 'All' + each league short name.
+
+    Rate-stat panels (ERA, WHIP) are gated by a games-scaled qualifier
+    (``ip_qual`` = 1.0 IP/team-game). Counting-stat panels (W, K, SV, WAR) are
+    ungated — a saves leaderboard should not require a full-season innings
+    minimum. No playing-time floor is applied to the row set; the qualifier is
+    the only gate, and the top-N selector ignores NULL values.
+    """
     yr = yr or year()
     conn = get_db()
     tip = conn.execute("SELECT AVG(ip) FROM team_pitching_stats WHERE year=? AND split_id=1",
@@ -229,9 +244,9 @@ def get_pitching_leaders(yr=None, min_ip=10):
         SELECT p.player_id, p.name, p.team_id,
                ps.ip, ps.era, ps.k, ps.bb, ps.w, ps.l, ps.sv, ps.war, ps.ha, ps.hld
         FROM mlb_pitching_stats ps JOIN players p ON ps.player_id=p.player_id
-        WHERE ps.year=? AND ps.split_id=1 AND ps.ip >= ?
+        WHERE ps.year=? AND ps.split_id=1
         ORDER BY ps.war DESC
-    """, (yr, min_ip)).fetchall()
+    """, (yr,)).fetchall()
     league_sets = _build_league_team_sets()
     result = {"All": _build_pitching_leaders(rows, ip_qual)}
     for lg_short, tids in league_sets.items():
@@ -1256,7 +1271,13 @@ def get_positional_rankings():
         g = r["g"] or 0
         gs = r["gs"] or 0
         if g > 0:
-            pitcher_is_sp[r["player_id"]] = (gs > 3 and gs / g > 0.5)
+            # A starter starts the majority of their appearances. The gs/g
+            # ratio is the real discriminator; do NOT add an absolute GS floor
+            # (e.g. gs > 3) — early in a season an ace has only 1-2 starts, and
+            # such a floor would misclassify every starter as a reliever until
+            # ~a month in. A reliever's occasional spot start keeps gs/g well
+            # below 0.5, so the ratio alone handles that case.
+            pitcher_is_sp[r["player_id"]] = (gs > 0 and gs / g > 0.5)
 
     # Prospects with FV grades — only from MLB orgs
     prospect_rows = conn.execute("""

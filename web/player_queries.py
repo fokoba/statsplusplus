@@ -40,12 +40,18 @@ def _dollars_per_war():
 # ---------------------------------------------------------------------------
 
 def _mlb_context(conn, bucket, composite, ceiling):
-    """Compute MLB percentile and tier label for composite and ceiling.
+    """Compute MLB rank and tier label for composite and ceiling.
 
-    Compares against qualified MLB regulars at the same position bucket.
-    Qualification thresholds scale with season progress so early-season
-    data still produces meaningful comparisons.
-    Full-season targets: Hitters 200 PA, SP 80 IP, RP 30 IP.
+    Ranks the player's composite/ceiling against MLB peers at the same
+    position bucket. Composite and ceiling are ratings-based values, so the
+    peer pool is NOT gated by a playing-time threshold — the pool is every MLB
+    player who has appeared this season at the bucket. (An earlier design gated
+    the pool by a full-season IP/PA floor, which collapsed the peer group to a
+    handful of players in the season's first weeks, e.g. "#5 of 11 RPs".)
+
+    Pitchers are split into SP/RP by usage (games-started ratio), not raw role
+    codes, consistent with the league positional-rankings page — role codes are
+    unreliable across leagues.
     """
     from statsplusplus.utils.positions import assign_bucket as _ab
     from statsplusplus.config.league_config import LeagueConfig; _lc = LeagueConfig()
@@ -55,42 +61,36 @@ def _mlb_context(conn, bucket, composite, ceiling):
     if not _year:
         return None
 
-    # Scale qualification thresholds by season progress.
-    # Full season ≈ 162 games from ~April 1 to ~Sept 30 (183 days).
-    # Minimum floor: 50 PA / 20 IP SP / 8 IP RP to avoid tiny samples.
-    game_date = _lc.game_date
-    if game_date:
-        import datetime
-        if isinstance(game_date, str):
-            game_date = datetime.date.fromisoformat(game_date)
-        season_start = datetime.date(game_date.year, 4, 1)
-        days_elapsed = max(1, (game_date - season_start).days)
-        season_frac = min(1.0, days_elapsed / 183)
-    else:
-        season_frac = 1.0
-    pa_min = max(50, round(200 * season_frac))
-    sp_ip_min = max(20, round(80 * season_frac))
-    rp_ip_min = max(8, round(30 * season_frac))
-
-    if bucket == "SP":
+    if bucket in ("SP", "RP"):
+        # All MLB pitchers who have appeared this season, with usage split.
         rows = conn.execute("""
-            SELECT r.composite_score FROM latest_ratings r
+            SELECT r.composite_score, p.role, ps.gs, ps.g
+            FROM latest_ratings r
             JOIN players p ON r.player_id = p.player_id
             JOIN mlb_pitching_stats ps ON ps.player_id = p.player_id AND ps.split_id = 1
-            WHERE p.level = 1 AND r.composite_score IS NOT NULL AND p.role = '11'
-              AND ps.year = ? AND CAST(ps.ip AS REAL) >= ?
-        """, (_year, sp_ip_min)).fetchall()
-        vals = [r["composite_score"] for r in rows]
-    elif bucket == "RP":
-        rows = conn.execute("""
-            SELECT r.composite_score FROM latest_ratings r
-            JOIN players p ON r.player_id = p.player_id
-            JOIN mlb_pitching_stats ps ON ps.player_id = p.player_id AND ps.split_id = 1
-            WHERE p.level = 1 AND r.composite_score IS NOT NULL AND p.role IN ('12','13')
-              AND ps.year = ? AND CAST(ps.ip AS REAL) >= ?
-        """, (_year, rp_ip_min)).fetchall()
-        vals = [r["composite_score"] for r in rows]
+            WHERE p.level = 1 AND r.composite_score IS NOT NULL
+              AND ps.year = ? AND ps.g > 0
+        """, (_year,)).fetchall()
+        # Fall back to prior year if the season hasn't started (spring training).
+        if not rows:
+            rows = conn.execute("""
+                SELECT r.composite_score, p.role, ps.gs, ps.g
+                FROM latest_ratings r
+                JOIN players p ON r.player_id = p.player_id
+                JOIN mlb_pitching_stats ps ON ps.player_id = p.player_id AND ps.split_id = 1
+                WHERE p.level = 1 AND r.composite_score IS NOT NULL
+                  AND ps.year = ? AND ps.g > 0
+            """, (_year - 1,)).fetchall()
+        vals = []
+        for r in rows:
+            g = r["g"] or 0
+            gs = r["gs"] or 0
+            # SP = starts the majority of appearances; ratio only, no GS floor.
+            is_sp = (gs > 0 and gs / g > 0.5) if g > 0 else (r["role"] == 11)
+            if (bucket == "SP") == is_sp:
+                vals.append(r["composite_score"])
     else:
+        # All MLB position players who have appeared this season, bucketed.
         rows = conn.execute("""
             SELECT r.composite_score, p.pos, p.role
             FROM latest_ratings r
@@ -98,8 +98,8 @@ def _mlb_context(conn, bucket, composite, ceiling):
             JOIN mlb_batting_stats bs ON bs.player_id = p.player_id AND bs.split_id = 1
             WHERE p.level = 1 AND r.composite_score IS NOT NULL
               AND p.role NOT IN ('11','12','13')
-              AND bs.year = ? AND bs.pa >= ?
-        """, (_year, pa_min)).fetchall()
+              AND bs.year = ? AND bs.pa > 0
+        """, (_year,)).fetchall()
         vals = []
         for r in rows:
             p = {"Pos": str(r["pos"] or ""), "_role": _rm.get(str(r["role"] or 0), "position_player")}

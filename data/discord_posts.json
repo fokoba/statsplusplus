@@ -1,12 +1,12 @@
 {
-  "last_posted_commit": "f75d0be",
+  "last_posted_commit": "7074a2bc066f4eb8c27436ececcadea4014a2698",
   "last_posted_date": "2026-09-02",
-  "last_posted_title": "v1.3.0 — Install & Upgrade Stability",
+  "last_posted_title": "v1.3.0 \u2014 Install & Upgrade Stability",
   "history": [
     {
       "date": "2026-09-02",
       "commit": "f75d0be",
-      "title": "v1.3.0 — Install & Upgrade Stability"
+      "title": "v1.3.0 \u2014 Install & Upgrade Stability"
     },
     {
       "date": "2026-09-01",
@@ -87,6 +87,11 @@
       "date": "2026-08-07",
       "commit": "d19ce77",
       "title": "Complete Architecture Overhaul \u2014 All Shims Eliminated"
+    },
+    {
+      "commit": "7074a2bc066f4eb8c27436ececcadea4014a2698",
+      "date": "2026-09-03",
+      "title": "Player Evaluation Overhaul & Early-Season Fixes"
     }
   ]
 }

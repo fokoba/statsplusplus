@@ -38,6 +38,25 @@ and process fixes (`data/calibrate.py`, `data/evaluation_engine.py`):
 
 *Note: further work in progress on per-tool, per-league marginal-WAR-derived transform curves (residualized) — the flat global `tool_transform` under-rewards standout skills, whose marginal WAR is strongly convex at the top of the rating distribution.*
 
+### Evaluation Model — Per-Tool, Per-League Transform Curves
+
+Replaced the single hardcoded global `tool_transform` (flat 1.3× above 60 /
+1.5× below 40) with per-tool, per-league value curves derived from each
+league's own data. The prototype confirmed marginal WAR is strongly **convex**
+at the top of the rating distribution and the convexity **varies by tool**
+(contact/power/stuff steep; gap/speed near-linear; RP tools flat/noisy).
+
+- **New primitives** (`evaluation/composite.py`): `derive_tool_transform()` turns residualized marginal-WAR-by-band data into a monotone, 50-pinned, clamped effective-rating curve, shrunk toward a per-tool prior by band sample size (thin/absent bands fall back to prior). `apply_tool_transform()` interpolates a rating through a curve, falling back to the global transform when none exists (backward compatible).
+- **Calibration** (`data/calibrate.py`): `_calibrate_tool_transforms` isolates each tool's own WAR contribution via multivariate-OLS **residualization** (removes correlated tools' signal — cf. the stuff/movement problem), bins the residual by rating band, and derives a curve per tool per player-type/role. Stored under a new `tool_transforms` key in `tool_weights.json`.
+- **Wiring**: threaded optional per-tool curves through the composite functions and all ceiling functions (`compute_ceiling`/`compute_true_ceiling`/`compute_component_ceilings`), so both current composite AND potential/ceiling scoring use the calibrated curves. The engine loads the curves and passes the hitter/SP/RP set to every scoring call.
+- **Effect**: standout skills now assert themselves. Elite-upside prospects gain up to +9 ceiling (e.g. a 70-potential-power bat), org-filler with weak potential drops, sharpening farm tiers. MLB: McClanahan's ceiling correctly leads the ace group.
+
+**Out-of-sample validation** — added `--test holdout` to `model_regression.py`: fits transform curves on all years except a hold-out year, then compares global vs per-tool transform at predicting the hold-out year's WAR. Across four independent hold-out years (2030-2033), the per-tool transform improved **hitter** out-of-sample WAR prediction by **+0.046 R² every year** (a robust, genuine gain), and was **−0.020 R²** for **pitchers** (a small cost). The pitcher transform is thus a deliberate tradeoff: it fixes eye-test ordering and ceiling sensibility for elite arms at a small cost to raw WAR prediction, since pitcher WAR in this league is genuinely movement-driven (accepted).
+
+### Calibration Process (continued)
+
+- Added `shrink_weights_toward_prior()` (ridge-style shrinkage) and applied it to pitcher tool-weight calibration; removed `arsenal` as a regression feature (collinear proxy for Stuff, corr 0.97) — re-added as a small fixed 0.05 differentiator. Weights recalibrated on eMLB: RP stuff 0.07→0.18, SP stuff 0.23→0.27 (movement still leads, per the data).
+
 
 
 ### Fresh-Install Fix — Package Not Importable

@@ -300,8 +300,14 @@ def _apply_pitcher_compensation(tools: dict[str, float | int | None]) -> dict[st
 def offensive_grade_raw(
     tools: dict[str, float | int | None],
     weights: dict[str, float],
+    transforms: dict[str, list[float]] | None = None,
 ) -> Optional[float]:
-    """Unclamped offensive weighted average with tool compensation."""
+    """Unclamped offensive weighted average with tool compensation.
+
+    ``transforms`` optionally maps a tool name to a per-tool transform curve
+    (from ``derive_tool_transform``); tools without a curve fall back to the
+    global :func:`tool_transform`.
+    """
     effective = _apply_hitter_compensation(tools)
     _COMPENSATED_KEYS = {"power": "_power_transformed", "eye": "_eye_transformed"}
 
@@ -315,7 +321,8 @@ def offensive_grade_raw(
             if comp_val is not None:
                 transformed = float(comp_val)
             else:
-                transformed = tool_transform(float(val))
+                transformed = apply_tool_transform(
+                    float(val), (transforms or {}).get(key))
             available.append((transformed, w))
 
     if not available:
@@ -378,13 +385,14 @@ def defensive_value_raw(
 def compute_offensive_grade(
     tools: dict[str, float | int | None],
     weights: dict[str, float],
+    transforms: dict[str, list[float]] | None = None,
 ) -> Optional[int]:
     """Compute offensive component from hitting tools only.
 
     Uses contact, gap, power, eye with piecewise tool transform and
     calibrated weights. Returns integer on 20-80 scale.
     """
-    raw = offensive_grade_raw(tools, weights)
+    raw = offensive_grade_raw(tools, weights, transforms)
     if raw is None:
         return None
     return max(20, min(80, round(raw)))
@@ -427,6 +435,7 @@ def compute_composite_hitter(
     weights: dict[str, float],
     defense: dict[str, float | int | None],
     def_weights: dict[str, float],
+    transforms: dict[str, list[float]] | None = None,
 ) -> int:
     """Compute hitter Composite_Score from tool ratings and weights.
 
@@ -439,11 +448,13 @@ def compute_composite_hitter(
         weights: Positional weight profile summing to ~1.0.
         defense: Defensive tool ratings (IFR, OFR, CArm, etc.).
         def_weights: Positional defensive importance weights.
+        transforms: Optional per-tool transform curves. Falls back to the
+            global tool_transform for any tool without a curve.
 
     Returns:
         Integer composite score in [20, 80].
     """
-    off_raw = offensive_grade_raw(tools, weights)
+    off_raw = offensive_grade_raw(tools, weights, transforms)
     br_raw = baserunning_value_raw(tools, weights)
     def_raw = defensive_value_raw(defense, def_weights)
 
@@ -526,6 +537,7 @@ def compute_composite_pitcher(
     arsenal: dict[str, float | int],
     stamina: float | int,
     role: str,
+    transforms: dict[str, list[float]] | None = None,
 ) -> int:
     """Compute pitcher Composite_Score from tools, arsenal, and role.
 
@@ -555,7 +567,8 @@ def compute_composite_pitcher(
             if comp_val is not None:
                 transformed = float(comp_val)
             else:
-                transformed = tool_transform(float(val))
+                transformed = apply_tool_transform(
+                    float(val), (transforms or {}).get(key))
             available.append((transformed, w))
 
     if not available:
@@ -641,15 +654,17 @@ def compute_tool_only_score(
     arsenal: Optional[dict[str, float | int]] = None,
     stamina: int = 50,
     role: str = "SP",
+    transforms: dict[str, list[float]] | None = None,
 ) -> int:
     """Compute the pre-stat-blend score for a player.
 
     Delegates to compute_composite_hitter or compute_composite_pitcher.
+    ``transforms`` optionally supplies per-tool value curves.
     """
     if player_type == "hitter":
-        return compute_composite_hitter(tools, weights, defense or {}, def_weights or {})
+        return compute_composite_hitter(tools, weights, defense or {}, def_weights or {}, transforms)
     else:
-        return compute_composite_pitcher(tools, weights, arsenal or {}, stamina, role)
+        return compute_composite_pitcher(tools, weights, arsenal or {}, stamina, role, transforms)
 
 
 # ---------------------------------------------------------------------------

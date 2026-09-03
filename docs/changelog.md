@@ -4,7 +4,41 @@ Completed and deferred work items, organized by session. Moved from `task_list.m
 
 ---
 
-## Session 81 (2026-09-02)
+## Session 82 (2026-09-03)
+
+### Bug Fixes — League Overview & Rankings (early-season sample-size)
+
+A cluster of bugs surfaced 6 games into the eMLB regular season, all from
+full-season assumptions applied to early-season data:
+
+- **League leaders empty / wrong** (`web/queries.py`) — `get_batting_leaders`/`get_pitching_leaders` gated the row set behind hard playing-time floors (`pa >= 50`, `ip >= 10`). Six games in, no hitter had 50 PA (max was 37) so every batting panel was empty, and only one reliever cleared 10 IP so the saves leaderboard showed a single bogus "1 save". Removed the floors entirely: rate stats (AVG/OPS/ERA/WHIP) are gated by the existing games-scaled qualifier; counting stats (HR/RBI/SB/W/K/SV/WAR) are ungated. The top-N selector already ignores NULLs, so zero-stat rows can't surface.
+- **Positional rankings: SPs flooding RP** (`web/queries.py get_positional_rankings`) — SP/RP was classified as `gs > 3 AND gs/g > 0.5`. The `gs > 3` floor misclassified every starter as a reliever early season (league max was 2 GS), so aces (McClanahan, Crochet) fell into RP and SP was starved. Dropped the absolute GS floor; the `gs/g > 0.5` ratio is the real discriminator and works at any sample size.
+- **Player-page positional rank pool too small / inconsistent** (`web/player_queries.py _mlb_context`) — the "#N of M at position" panel gated its peer pool by a full-season IP/PA floor (e.g. RP `ip >= 8`), collapsing the pool to ~11 relievers early season ("#5 of 11"). Composite/ceiling are ratings-based, so the pool is now every MLB player who has appeared at the bucket (no playing-time floor), and pitchers are split by usage (`gs/g`) rather than unreliable role codes — consistent with the positional-rankings page.
+
+### Evaluation Model — MLB Stat Blending (aging, staleness, traded players)
+
+Investigated a report that a high-end closer (Grimaldo) ranked below fringe
+relievers. Root cause was the stat blend over-crediting aging/stale results.
+Data-grounded fixes (validated against `scripts/model_regression.py`; blend
+still "HELPS", RMSE stable):
+
+- **Symmetric aging-player dampener** (`evaluation/composite.py compute_composite_mlb`) — the blend dampened young players whose tools exceed a small stat sample; added the mirror for post-peak players whose fading results exceed their declined tools. Empirically, the age-35+ reliever group had the largest positive blend lift (+3.93), concentrated in low-stuff arms; after the fix the lift curve peaks at 29-31 and decays with age (35+ down to +0.56), with low-stuff aging arms no longer lifted more than high-stuff ones.
+- **Traded-player year aggregation** (`data/evaluation_engine.py _load_qualifying_stat_seasons`) — qualifying seasons are now summed **by year** before the threshold is applied, with rate stats recomputed from summed components. Fixes both double-counting (a traded player's two stints inflating `seasons_available` toward the 0.60 blend weight) and under-counting (a split season that qualifies only when summed).
+- **Stale-season decay/drop** (`_compute_stat_signal`) — qualifying seasons ≥4 years old are dropped; retained older seasons have their deviation from average shrunk 15%/year. Prevents ancient production from driving a current composite.
+
+### Calibration Process — Pitcher Tool Weights
+
+Diagnosed implausible calibrated pitcher weights (movement ~0.62, stuff as low
+as 0.07 for RP) that ranked a 38-stuff pitcher above 100-stuff aces. Root causes
+and process fixes (`data/calibrate.py`, `data/evaluation_engine.py`):
+
+- **Removed `arsenal` as a regression feature** — OOTP's Stuff rating is already ≈ a function of the pitcher's top pitches (corr(stuff, top-3 pitch mean) ≈ 0.97), so an arsenal count was a collinear proxy stealing Stuff's share in the per-feature r² weighting. Arsenal is re-added as a small fixed (0.05) differentiator in the composite, never calibrated.
+- **Prior shrinkage** — new `shrink_weights_toward_prior()` blends calibrated weights toward the hand-tuned defaults, ridge-style, with the prior weighted more as sample size shrinks (floor 25% even at full sample). Prevents per-feature r² weighting from starving a primary tool.
+- Removed the dead "HRA-as-movement proxy" line in calibration (HRA is unpopulated in this league — corr 0.00 — so it silently fell back to movement).
+
+*Note: further work in progress on per-tool, per-league marginal-WAR-derived transform curves (residualized) — the flat global `tool_transform` under-rewards standout skills, whose marginal WAR is strongly convex at the top of the rating distribution.*
+
+
 
 ### Fresh-Install Fix — Package Not Importable
 

@@ -29,6 +29,13 @@ from statsplusplus.evaluation.constants import (
     TOOL_TRANSFORM_LOW_THRESHOLD,
     TOOL_TRANSFORM_HIGH_THRESHOLD,
     TOOL_TRANSFORM_LOW_PENALTY,
+    TOOL_TRANSFORM_ANCHORS,
+    TOOL_TRANSFORM_MAX_DELTA,
+    TOOL_TRANSFORM_PRIOR,
+    TOOL_TRANSFORM_DEFAULT_PRIOR,
+    TOOL_TRANSFORM_WAR_PER_POINT,
+    TOOL_TRANSFORM_N_FULL,
+    TOOL_TRANSFORM_MIN_LAMBDA,
     TOOL_TRANSFORM_HIGH_BONUS,
     MLB_TOOL_FLOOR,
     FLOOR_PENALTY_RATE,
@@ -75,6 +82,115 @@ def tool_transform(val: float) -> float:
         return TOOL_TRANSFORM_LOW_THRESHOLD - (TOOL_TRANSFORM_LOW_THRESHOLD - val) * TOOL_TRANSFORM_LOW_PENALTY
     else:
         return float(val)
+
+
+def derive_tool_transform(
+    band_residual_means: list[float | None],
+    band_counts: list[int],
+    prior: list[float] | None = None,
+    war_per_point: float = TOOL_TRANSFORM_WAR_PER_POINT,
+    anchors: tuple[float, ...] = TOOL_TRANSFORM_ANCHORS,
+) -> list[float]:
+    """Build a per-tool transform curve from residualized marginal-WAR bands.
+
+    Converts each band's *residualized* mean WAR (the tool's own contribution,
+    with correlated tools removed) — expressed relative to the average (50)
+    band — into a rating-equivalent effective delta, shrinks it toward a
+    per-tool prior by sample size, enforces monotonicity, and clamps to a sane
+    range. Anchor 50 is pinned to 0.
+
+    Args:
+        band_residual_means: Residualized mean WAR per band, most-negative-band
+            first, aligned to ``anchors``. ``None`` for a band with no data.
+        band_counts: Sample size per band, aligned to ``anchors``.
+        prior: Prior effective-delta per anchor. Defaults to the mild-convex
+            default prior.
+        war_per_point: Shared WAR→rating conversion (a single reference scale
+            keeps low-signal tools from exploding). 
+        anchors: Rating anchors (must include 50.0).
+
+    Returns:
+        Effective-rating delta per anchor (monotone non-decreasing, 50→0,
+        clamped to ±TOOL_TRANSFORM_MAX_DELTA).
+    """
+    prior = prior if prior is not None else TOOL_TRANSFORM_DEFAULT_PRIOR
+    k = len(anchors)
+    mid_i = anchors.index(50.0)
+    base = band_residual_means[mid_i]
+
+    # 1. Data-derived deltas in rating units (relative to the average band).
+    data_delta: list[float | None] = []
+    for i in range(k):
+        m = band_residual_means[i]
+        if m is None or base is None:
+            data_delta.append(None)
+        else:
+            data_delta.append((m - base) / war_per_point)
+
+    # 2. Shrink toward prior per-anchor by band sample size.
+    shrunk: list[float] = []
+    for i in range(k):
+        p = prior[i]
+        if data_delta[i] is None:
+            shrunk.append(p)
+            continue
+        n_i = band_counts[i] if i < len(band_counts) else 0
+        frac = min(max(n_i, 0), TOOL_TRANSFORM_N_FULL) / TOOL_TRANSFORM_N_FULL
+        lam = TOOL_TRANSFORM_MIN_LAMBDA + (1.0 - TOOL_TRANSFORM_MIN_LAMBDA) * (1.0 - frac)
+        lam = max(0.0, min(1.0, lam))
+        shrunk.append(lam * p + (1.0 - lam) * data_delta[i])
+
+    # 3. Pin the 50 anchor to 0 (shift so average tool = average value).
+    shift = shrunk[mid_i]
+    shifted = [s - shift for s in shrunk]
+
+    # 4. Clamp to sane range.
+    clamped = [max(-TOOL_TRANSFORM_MAX_DELTA, min(TOOL_TRANSFORM_MAX_DELTA, s)) for s in shifted]
+
+    # 5. Enforce monotonicity (a higher rating must never map to lower value).
+    #    Running max from the bottom up.
+    mono: list[float] = []
+    run = -TOOL_TRANSFORM_MAX_DELTA
+    for v in clamped:
+        run = max(run, v)
+        mono.append(round(run, 2))
+    # Re-pin 50 to exactly 0 after monotone pass (running-max may have nudged it).
+    z = mono[mid_i]
+    mono = [round(v - z, 2) for v in mono]
+    return mono
+
+
+def apply_tool_transform(
+    val: float,
+    curve: list[float] | None,
+    anchors: tuple[float, ...] = TOOL_TRANSFORM_ANCHORS,
+) -> float:
+    """Apply a per-tool transform curve to a rating via linear interpolation.
+
+    ``curve`` is a list of effective-rating *deltas* at ``anchors`` (as produced
+    by :func:`derive_tool_transform`). The returned value is
+    ``val + interpolated_delta``. When ``curve`` is ``None`` the function falls
+    back to the global :func:`tool_transform`, preserving legacy behavior for
+    leagues without calibrated curves.
+    """
+    if not curve:
+        return tool_transform(val)
+    # Clamp to the anchor range, then linearly interpolate the delta.
+    if val <= anchors[0]:
+        delta = curve[0]
+    elif val >= anchors[-1]:
+        delta = curve[-1]
+    else:
+        delta = curve[-1]
+        for i in range(len(anchors) - 1):
+            a0, a1 = anchors[i], anchors[i + 1]
+            if a0 <= val <= a1:
+                span = a1 - a0
+                frac = (val - a0) / span if span else 0.0
+                delta = curve[i] + (curve[i + 1] - curve[i]) * frac
+                break
+    return float(val) + delta
+
 
 
 def sub_mlb_floor_penalty(tools: dict[str, float | int | None]) -> float:

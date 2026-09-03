@@ -114,6 +114,10 @@
       <input type="checkbox" id="cu-devbad-filter" onchange="cuFilterResults()">
       Dim bad development
     </label>
+    <label style="font-size:13px" title="Dims (doesn't hide) players whose scouting accuracy isn't Very High or High — easy way to see who's a confirmed read in this file vs. who still needs more scouting.">
+      <input type="checkbox" id="cu-lowacc-filter" onchange="cuFilterResults()">
+      Dim below High confidence
+    </label>
     <label style="font-size:13px" title="Specialist/Generalist score (0-100) measures the spread between a player's best and worst core tool — 0 = perfectly balanced, 100 = one standout carrying tool. Specialist is 50+.">
       Skill profile:
       <select id="cu-spec-filter" onchange="cuFilterResults()">
@@ -162,7 +166,7 @@
     </thead>
     <tbody>
       {% for p in results %}
-      <tr class="cu-row" data-pid="{{ p.pid }}" data-pos="{{ p.bucket }}" data-org="{{ p.org }}" data-type="{{ 'pitcher' if p.is_pitcher else 'hitter' }}" data-r5="{{ 'yes' if p.rule5_eligible else 'no' }}" data-fa="{{ 'yes' if p.is_free_agent else 'no' }}" data-waivers="{{ 'yes' if p.on_waivers else 'no' }}" data-platoon="{{ p.platoon_strong_side or '' }}" data-ptype="{{ p.personality_class }}" data-dev-good="{{ '1' if p.dev_good else '' }}" data-dev-bad="{{ '1' if p.dev_bad else '' }}" data-spec="{{ p.specialist_label }}">
+      <tr class="cu-row" data-pid="{{ p.pid }}" data-pos="{{ p.bucket }}" data-org="{{ p.org }}" data-type="{{ 'pitcher' if p.is_pitcher else 'hitter' }}" data-r5="{{ 'yes' if p.rule5_eligible else 'no' }}" data-fa="{{ 'yes' if p.is_free_agent else 'no' }}" data-waivers="{{ 'yes' if p.on_waivers else 'no' }}" data-platoon="{{ p.platoon_strong_side or '' }}" data-ptype="{{ p.personality_class }}" data-dev-good="{{ '1' if p.dev_good else '' }}" data-dev-bad="{{ '1' if p.dev_bad else '' }}" data-spec="{{ p.specialist_label }}" data-acc="{{ p.acc or '' }}">
         <td><input type="checkbox" class="cu-checkbox" data-pid="{{ p.pid }}"></td>
         <td class="left cu-name">{{ p.name }}</td>
         <td>{{ p.bucket }}</td>
@@ -216,6 +220,7 @@ function cuFilterResults() {
   var vsRightOnly = document.getElementById('cu-vsright-filter').checked;
   var vsLeftOnly = document.getElementById('cu-vsleft-filter').checked;
   var dimNegPers = document.getElementById('cu-negpers-filter').checked;
+  var dimLowAcc = document.getElementById('cu-lowacc-filter').checked;
   var specFilter = document.getElementById('cu-spec-filter').value;
   var rows = document.querySelectorAll('#custom-upload-table tbody tr');
   var shown = 0;
@@ -232,6 +237,7 @@ function cuFilterResults() {
       && (!specFilter || tr.dataset.spec === specFilter);
     tr.style.display = match ? '' : 'none';
     if (match) shown++;
+    tr.classList.toggle('cu-lowacc-dim', dimLowAcc && tr.dataset.acc !== 'VH' && tr.dataset.acc !== 'H');
   });
   applyPersDevFilters('#custom-upload-table tbody tr', {
     negId: 'cu-negpers-filter', posId: 'cu-pospers-filter',
@@ -248,6 +254,7 @@ function cuFilterResults() {
   if (vsLeftOnly) parts.push('vs LHP/LHB');
   if (specFilter) parts.push(specFilter + 's');
   if (dimNegPers) parts.push('negative personalities dimmed');
+  if (dimLowAcc) parts.push('below High confidence dimmed');
   var countEl = document.getElementById('cu-count');
   if (countEl) countEl.textContent = '(' + shown + ' shown' + (parts.length ? ' — ' + parts.join(', ') : '') + ')';
 }
@@ -256,6 +263,7 @@ function cuFilterResults() {
 <style>
 .cu-row.cu-marked .cu-name { color: var(--text-dim); text-decoration: line-through; }
 .cu-row.cu-marked td { opacity: 0.5; }
+.cu-row.cu-lowacc-dim { opacity: 0.4; }
 </style>
 
 <script>

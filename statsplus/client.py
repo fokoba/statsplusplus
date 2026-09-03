@@ -19,33 +19,45 @@ log = logging.getLogger("statspp.client")
 # Deferred credential resolution — no module-level env reads.
 _league_url = None
 _cookie = None
+_token = None
 
 
-def configure(league_url: str, cookie: str):
+def configure(league_url: str, cookie: str, token: str = ""):
     """Set credentials explicitly (used by onboarding, tests, etc.)."""
-    global _league_url, _cookie
+    global _league_url, _cookie, _token
     _league_url = league_url
     _cookie = cookie
+    _token = token
 
 
 def _resolve_creds():
-    """Resolve credentials lazily. Priority: configure() > league_context > .env."""
-    global _league_url, _cookie
-    if _league_url and _cookie:
-        return _league_url, _cookie
+    """Resolve credentials lazily. Priority: configure() > league_context > .env.
+
+    Returns (league_url, cookie, token). token is the sanctioned per-team
+    API token (see https://wiki.statsplus.net/web-tools/statsplus-api) —
+    preferred over the session cookie when configured; cookie remains the
+    fallback for leagues that haven't set a token yet.
+    """
+    global _league_url, _cookie, _token
+    if _league_url and (_cookie or _token):
+        return _league_url, _cookie, _token
     # Try league_context (new multi-league path)
     try:
-        from statsplusplus.config.league_context import get_league_dir, get_statsplus_cookie
+        from statsplusplus.config.league_context import (
+            get_league_dir, get_statsplus_cookie, get_statsplus_token,
+        )
         cookie = get_statsplus_cookie()
+        token = get_statsplus_token()
         league_dir = get_league_dir()
         settings_path = league_dir / "config" / "league_settings.json"
         if settings_path.exists():
             settings = json.loads(settings_path.read_text())
             slug = settings.get("statsplus_slug", "")
-            if slug and cookie:
+            if slug and (cookie or token):
                 _league_url = slug
                 _cookie = cookie
-                return _league_url, _cookie
+                _token = token
+                return _league_url, _cookie, _token
     except Exception:
         pass
     # Legacy fallback: .env file
@@ -58,13 +70,14 @@ def _resolve_creds():
                 os.environ.setdefault(k.strip(), v.strip())
     _league_url = os.environ.get("STATSPLUS_LEAGUE_URL", "")
     _cookie = os.environ.get("STATSPLUS_COOKIE", "")
-    if not _league_url or not _cookie:
+    _token = os.environ.get("STATSPLUS_TOKEN", "")
+    if not _league_url or not (_cookie or _token):
         raise RuntimeError("StatsPlus credentials not configured. Set via configure(), app_config.json, or statsplus/.env")
-    return _league_url, _cookie
+    return _league_url, _cookie, _token
 
 
 def _base_url():
-    slug, _ = _resolve_creds()
+    slug, _, _ = _resolve_creds()
     return f"https://statsplus.net/{slug}/api"
 
 
@@ -86,12 +99,15 @@ _RATE_LIMIT_MAX_RETRIES = 4
 
 
 def _fetch(url: str, _retries: int = _RATE_LIMIT_MAX_RETRIES) -> str:
-    _, cookie = _resolve_creds()
-    headers = {
-        "Cookie": cookie,
-        "Accept": "application/json",
-        "User-Agent": _USER_AGENT,
-    }
+    _, cookie, token = _resolve_creds()
+    headers = {"Accept": "application/json", "User-Agent": _USER_AGENT}
+    if token:
+        # Sanctioned auth (see https://wiki.statsplus.net/web-tools/statsplus-api):
+        # a per-team token appended as a query param, not the session cookie.
+        sep = "&" if "?" in url else "?"
+        url = f"{url}{sep}token={token}"
+    else:
+        headers["Cookie"] = cookie
     for attempt in range(_retries + 1):
         req = urllib.request.Request(url, headers=headers)
         try:

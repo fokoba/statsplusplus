@@ -144,3 +144,51 @@ def set_statsplus_cookie(cookie: str, league_dir: Path | None = None) -> None:
             pass
     state["statsplus_cookie"] = cookie
     state_path.write_text(json.dumps(state, indent=2) + "\n")
+
+
+def get_statsplus_token(league_dir: Path | None = None) -> str:
+    """Get the StatsPlus team API token for a league — the sanctioned
+    authentication method (see https://wiki.statsplus.net/web-tools/statsplus-api),
+    a per-team token from that league's Preferences page on the StatsPlus
+    site, passed as a ?token= query param. Preferred over the session
+    cookie when present; the cookie remains the fallback for leagues that
+    haven't configured a token yet.
+
+    Priority: per-league state.json (statsplus_token key), then the
+    global app_config.json (legacy single-league installs).
+    """
+    if league_dir is None:
+        league_dir = get_league_dir()
+    state_path = league_dir / "config" / "state.json"
+    if state_path.exists():
+        try:
+            state = json.loads(state_path.read_text())
+            token = str(state.get("statsplus_token", ""))
+            if token:
+                return token
+        except (json.JSONDecodeError, OSError):
+            pass
+    cfg = _read_app_config()
+    token = cfg.get("statsplus_token", "")
+    return str(token) if token else ""
+
+
+def set_statsplus_token(token: str, league_dir: Path | None = None) -> None:
+    """Persist the StatsPlus team API token for a specific league.
+
+    Stores in the league's state.json file, same pattern as
+    set_statsplus_cookie().
+    """
+    if league_dir is None:
+        league_dir = get_league_dir()
+    config_dir = league_dir / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    state_path = config_dir / "state.json"
+    state: dict[str, object] = {}
+    if state_path.exists():
+        try:
+            state = json.loads(state_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            pass
+    state["statsplus_token"] = token
+    state_path.write_text(json.dumps(state, indent=2) + "\n")

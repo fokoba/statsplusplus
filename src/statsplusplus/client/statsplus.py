@@ -47,6 +47,7 @@ log = logging.getLogger("statspp.client")
 # Deferred credential resolution — no module-level env reads.
 _league_url: Optional[str] = None
 _cookie: Optional[str] = None
+_token: Optional[str] = None
 
 
 class CookieExpiredError(Exception):
@@ -54,45 +55,56 @@ class CookieExpiredError(Exception):
     pass
 
 
-def configure(league_url: str, cookie: str) -> None:
+def configure(league_url: str, cookie: str, token: str = "") -> None:
     """Set credentials explicitly (used by onboarding, tests, etc.)."""
-    global _league_url, _cookie
+    global _league_url, _cookie, _token
     _league_url = league_url
     _cookie = cookie
+    _token = token
 
 
-def _resolve_creds() -> tuple[str, str]:
+def _resolve_creds() -> tuple[str, str, str]:
     """Resolve credentials lazily.
 
     Priority: configure() > league_context > environment > .env file.
+
+    Returns (league_url, cookie, token). token is the sanctioned per-team
+    API token (see https://wiki.statsplus.net/web-tools/statsplus-api) —
+    preferred over the session cookie when configured.
     """
-    global _league_url, _cookie
-    if _league_url and _cookie:
-        return _league_url, _cookie
+    global _league_url, _cookie, _token
+    if _league_url and (_cookie or _token):
+        return _league_url, _cookie or "", _token or ""
 
     # Try league_context (multi-league path)
     try:
-        from statsplusplus.config.league_context import get_league_dir, get_statsplus_cookie
+        from statsplusplus.config.league_context import (
+            get_league_dir, get_statsplus_cookie, get_statsplus_token,
+        )
         cookie = get_statsplus_cookie()
+        token = get_statsplus_token()
         league_dir = get_league_dir()
         settings_path = league_dir / "config" / "league_settings.json"
         if settings_path.exists():
             settings = json.loads(settings_path.read_text())
             slug = settings.get("statsplus_slug", "")
-            if slug and cookie:
+            if slug and (cookie or token):
                 _league_url = str(slug)
                 _cookie = str(cookie)
-                return _league_url, _cookie
+                _token = str(token)
+                return _league_url, _cookie, _token
     except Exception:
         pass
 
     # Environment variables
     env_url = os.environ.get("STATSPLUS_LEAGUE_URL", "")
     env_cookie = os.environ.get("STATSPLUS_COOKIE", "")
-    if env_url and env_cookie:
+    env_token = os.environ.get("STATSPLUS_TOKEN", "")
+    if env_url and (env_cookie or env_token):
         _league_url = env_url
         _cookie = env_cookie
-        return _league_url, _cookie
+        _token = env_token
+        return _league_url, _cookie, _token
 
     # Legacy .env file
     env_path = Path(__file__).parent.parent.parent.parent / "statsplus" / ".env"
@@ -107,8 +119,9 @@ def _resolve_creds() -> tuple[str, str]:
             pass
         _league_url = os.environ.get("STATSPLUS_LEAGUE_URL", "")
         _cookie = os.environ.get("STATSPLUS_COOKIE", "")
-        if _league_url and _cookie:
-            return _league_url, _cookie
+        _token = os.environ.get("STATSPLUS_TOKEN", "")
+        if _league_url and (_cookie or _token):
+            return _league_url, _cookie, _token
 
     raise RuntimeError(
         "StatsPlus credentials not configured. "
@@ -117,7 +130,7 @@ def _resolve_creds() -> tuple[str, str]:
 
 
 def _base_url() -> str:
-    slug, _ = _resolve_creds()
+    slug, _, _ = _resolve_creds()
     return f"https://statsplus.net/{slug}/api"
 
 
@@ -129,12 +142,18 @@ _RATE_LIMIT_MAX_RETRIES = 4
 
 
 def _fetch(url: str, _retries: int = _RATE_LIMIT_MAX_RETRIES) -> str:
-    _, cookie = _resolve_creds()
+    _, cookie, token = _resolve_creds()
     headers = {
-        "Cookie": cookie,
         "Accept": "application/json",
         "User-Agent": _USER_AGENT,
     }
+    if token:
+        # Sanctioned auth: per-team token appended as a query param, not
+        # the session cookie. See docstring on _resolve_creds().
+        sep = "&" if "?" in url else "?"
+        url = f"{url}{sep}token={token}"
+    else:
+        headers["Cookie"] = cookie
     body: str = ""
     for attempt in range(_retries + 1):
         req = urllib.request.Request(url, headers=headers)

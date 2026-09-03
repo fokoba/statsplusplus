@@ -90,6 +90,37 @@
   {# ── Connection ── #}
   <div class="panel settings-section">
     <h2>Connection</h2>
+
+    <h3 style="margin-bottom:4px">API Token <span class="dim">(recommended)</span></h3>
+    <div class="dim" style="font-size:0.9em; margin-bottom:8px">
+      The <a href="https://wiki.statsplus.net/web-tools/statsplus-api" target="_blank">sanctioned StatsPlus API</a> —
+      a per-team token instead of your browser session. Used automatically instead of the session cookie below once set.
+    </div>
+    <form method="post">
+      <input type="hidden" name="action" value="save_token">
+      <div class="form-grid">
+        <label>Team Token</label>
+        <input type="text" name="statsplus_token" id="statsplus-token-input" value="{{ statsplus_token }}" style="width:400px" placeholder="Paste your team token">
+      </div>
+      <div style="margin-top:8px; display:flex; gap:8px; align-items:center">
+        <button type="submit">Save</button>
+        <button type="button" id="test-token-btn" onclick="testTokenConnection()">Test Connection</button>
+        <span id="test-token-result" class="dim"></span>
+      </div>
+    </form>
+    <details style="margin-top:12px">
+      <summary class="dim" style="cursor:pointer">Where do I find this?</summary>
+      <div style="margin-top:8px; padding:12px; background:var(--bg); border-radius:6px; font-size:0.9em; line-height:1.6">
+        <ol style="margin:0; padding-left:20px">
+          <li>Open <a href="https://statsplus.net" target="_blank">statsplus.net</a>, log in, and make sure you're linked to your team in this league.</li>
+          <li>Go to your <strong>Preferences</strong> page on the StatsPlus site.</li>
+          <li>Copy your <strong>team token</strong> — it's valid for one team in one league, so set it separately for each league you manage here.</li>
+        </ol>
+      </div>
+    </details>
+
+    <h3 style="margin:16px 0 4px">Session Cookie <span class="dim">(fallback)</span></h3>
+    <div class="dim" style="font-size:0.9em; margin-bottom:8px">Used only when no API token is set above.</div>
     <form method="post">
       <input type="hidden" name="action" value="save_cookie">
       <div class="form-grid">
@@ -136,6 +167,29 @@
     fetch('/api/test-connection', {method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({cookie: cookie})
+    }).then(r => r.json()).then(data => {
+      if (data.ok) {
+        result.textContent = '✓ Connected — game date: ' + data.game_date;
+        result.style.color = '#4caf50';
+      } else {
+        result.textContent = '✗ ' + (data.error || 'Connection failed');
+        result.style.color = '#e74c3c';
+      }
+    }).catch(() => {
+      result.textContent = '✗ Request failed';
+      result.style.color = '#e74c3c';
+    }).finally(() => { btn.disabled = false; });
+  }
+  function testTokenConnection() {
+    const btn = document.getElementById('test-token-btn');
+    const result = document.getElementById('test-token-result');
+    btn.disabled = true;
+    result.textContent = 'Testing...';
+    result.style.color = '#888';
+    const token = document.getElementById('statsplus-token-input').value;
+    fetch('/api/test-connection', {method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({token: token})
     }).then(r => r.json()).then(data => {
       if (data.ok) {
         result.textContent = '✓ Connected — game date: ' + data.game_date;

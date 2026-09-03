@@ -83,13 +83,14 @@ def _get_taken_pids():
     """Fetch already-drafted player IDs from StatsPlus API."""
     try:
         from statsplus import client
-        from statsplusplus.config.league_context import get_statsplus_cookie
+        from statsplusplus.config.league_context import get_statsplus_cookie, get_statsplus_token
         from statsplusplus.config.league_config import LeagueConfig
         cfg = LeagueConfig()
         slug = cfg.settings.get("statsplus_slug", "")
         cookie = get_statsplus_cookie()
-        if slug and cookie:
-            client.configure(slug, cookie)
+        token = get_statsplus_token()
+        if slug and (cookie or token):
+            client.configure(slug, cookie, token)
         raw = client.get_draft()
         return {d["ID"] for d in raw if d.get("ID")}
     except Exception as e:

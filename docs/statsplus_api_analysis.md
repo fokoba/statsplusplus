@@ -235,11 +235,41 @@ task (`docs/task_list.md` — "StatsPlus API doc-diff review").
 - **`/ratings?osa=1`** — anonymous OSA (scout-independent) ratings; enables
   scouted-vs-OSA divergence analysis. *(Tracked as its own task.)*
 
-### Field-level audit (TODO)
-The wiki has per-endpoint field tables for the big endpoints (`/players` is the
-richest). A systematic pass should diff each endpoint's documented columns
-against what `refresh.py`'s upsert functions store, to surface fields we ignore.
-Phase 1 (Session 69) already pulled 45 new `/players` fields; re-check for any
-added since. Highest-value candidates to re-audit: `/players`, the `*statsv2`
-stat endpoints (advanced stat columns), and `/contract` (option/incentive
-fields, mostly captured in Phase 4).
+### Field-level audit (Session 83 quick pass)
+
+Diffed the wiki's documented columns against what `refresh.py` upserts store.
+
+**`/contract` — fully covered.** All OOTP26 columns present, including the
+option/vesting fields, buyouts, `minimum_pa/ip` + bonuses, `mvp/cyyoung/allstar`
+bonuses, `no_trade`, `is_major` (Phase 4, complete).
+
+**stat endpoints (`*statsv2`) — no new columns flagged** in the quick pass; the
+format tracks OOTP's own stat table dumps. A deeper pass could confirm we store
+every advanced column, but nothing jumped out as newly-added.
+
+**`/players` — several documented fields NOT stored (the real gap).** The wiki
+notes that in **April 2026** `Organization ID` + `League ID` were added, and
+"all the fields after Organization ID" were added to expose as much per-player
+info as possible; **July 2026** added the `?retired=0/1` filter. We store the
+Phase-1 (Session 69) subset but not these:
+
+| Field | Why it may matter |
+|---|---|
+| `Organization ID` | OOTP sometimes leaves Parent Team ID unset for MLB teams but sets Org ID — more reliable org attribution (could fix stray org-assignment edge cases). |
+| `League ID` (on player row) | **Negative for international-complex players** — a clean way to identify/segment intl players. |
+| `Retired` + `?retired=0` param | Pre-filter retired players → faster refresh (fewer rows fetched/parsed). |
+| `bats`, `throws` (now on /players; numeric 1=R/2=L/3=S) | We currently source handedness from ratings; /players is an alternative/validation source. |
+| `secondary_service_*`, `pro_service_days_this_year` | Finer service-time tracking (secondary/40-man nuance). |
+| `years_protected_from_rule_5`, `draft_eligible` | Rule 5 / draft-eligibility logic for roster decisions. |
+| `last_team_id` | Prior team (recently released/traded context). |
+| `hall_of_fame`, `inducted`, `draft_supplemental`, `draft_league_id` | Lower value; historical/completeness. |
+
+**Recommended for a deeper session (in rough priority):**
+1. `Organization ID` — fix org attribution where Parent Team ID is unset.
+2. `?retired=0` refresh filter — a cheap refresh-speed win.
+3. `League ID` negative flag — clean intl-player identification.
+4. `bats`/`throws` from `/players` as the authoritative handedness source.
+5. Rule-5 / draft-eligible fields — feed roster/protection tooling.
+
+These are additive schema columns + `_upsert_players` field reads (same shape as
+the Phase-1 work), plus one refresh query-param change for `?retired=0`.

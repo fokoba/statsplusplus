@@ -204,3 +204,42 @@ Ordered by priority. Ties into PR #11 (token auth).
    advanced (no conditional GET, so this is the intended pattern).
 6. **`osa=1` anonymous ratings** — ties into API Roadmap Phase 5a (OSA ratings);
    note the 15-min/IP anonymous limit and that it needs no auth.
+
+---
+
+## 7. Endpoint coverage & untapped-data opportunities (Session 83 first pass)
+
+Comparison of the wiki's documented endpoints against what the client actually
+consumes (`statsplus/client.py`). Deeper field-level audit is a tracked recurring
+task (`docs/task_list.md` — "StatsPlus API doc-diff review").
+
+### Endpoints we already consume
+`/teams`, `/players`, `/date`, `/contract`, `/contractextension`, `/exports`,
+`/gamehistory`, `/teambatstats`, `/teampitchstats`, `/playerbatstatsv2`,
+`/playerpitchstatsv2`, `/playerfieldstatsv2`, `/draftv2`, `/tradeblock`,
+`/ballparks`, `/lgdata`, plus `/ratings` and (new) `/tokencheck`.
+
+### Documented but NOT consumed — opportunities
+- **`/ballparks` park factors (fetched but unused).** We call `/ballparks` but
+  don't use the payload's park factors: `avg_r`, `avg_l`, `avg`, `d` (doubles),
+  `t` (triples), `hr_r`, `hr_l`, `hr`, plus `capacity`, `stadium_type`,
+  `surface`. **Opportunity:** park-adjusted offensive stats and HR normalization
+  (a big HR park inflates raw power output); handedness-split HR factors
+  (`hr_r`/`hr_l`) could refine platoon/park value. Accepts a `lid` for minor
+  leagues too. *(Tracked: API Roadmap Phase 3b — park factors.)*
+- **`/draftpool` demand column.** Adding `?token=` to `/draftpool` returns each
+  prospect's **bonus demand** (as loaded when the draft started). **Opportunity:**
+  factor demand into draft value (over-slot demand reduces attractiveness;
+  under-slot creates value) and auto-draft list generation. *(Tracked in the
+  Draft Tab backlog: "Bonus demand display + draft value integration.")*
+- **`/ratings?osa=1`** — anonymous OSA (scout-independent) ratings; enables
+  scouted-vs-OSA divergence analysis. *(Tracked as its own task.)*
+
+### Field-level audit (TODO)
+The wiki has per-endpoint field tables for the big endpoints (`/players` is the
+richest). A systematic pass should diff each endpoint's documented columns
+against what `refresh.py`'s upsert functions store, to surface fields we ignore.
+Phase 1 (Session 69) already pulled 45 new `/players` fields; re-check for any
+added since. Highest-value candidates to re-audit: `/players`, the `*statsv2`
+stat endpoints (advanced stat columns), and `/contract` (option/incentive
+fields, mostly captured in Phase 4).

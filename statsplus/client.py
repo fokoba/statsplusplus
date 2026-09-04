@@ -98,12 +98,15 @@ class CookieExpiredError(Exception):
 def _fetch(url: str, max_retries: int = 5) -> str:
     _, cookie, token = _resolve_creds()
     headers = {"Accept": "application/json", "User-Agent": _USER_AGENT}
-    if token:
+    if token and "token=" not in url:
         # Sanctioned auth (see https://wiki.statsplus.net/web-tools/statsplus-api):
         # a per-team token appended as a query param, not the session cookie.
+        # Skip if the URL already carries a token= param — export poll URLs
+        # (e.g. /api/mycsv/?request=...&token=...) embed their own per-job
+        # token, and appending ours a second time breaks the poll.
         sep = "&" if "?" in url else "?"
         url = f"{url}{sep}token={token}"
-    else:
+    elif not token:
         headers["Cookie"] = cookie
     req = urllib.request.Request(url, headers=headers)
     for attempt in range(max_retries):

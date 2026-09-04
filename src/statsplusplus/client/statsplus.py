@@ -147,12 +147,15 @@ def _fetch(url: str, _retries: int = _RATE_LIMIT_MAX_RETRIES) -> str:
         "Accept": "application/json",
         "User-Agent": _USER_AGENT,
     }
-    if token:
+    if token and "token=" not in url:
         # Sanctioned auth: per-team token appended as a query param, not
-        # the session cookie. See docstring on _resolve_creds().
+        # the session cookie. See docstring on _resolve_creds(). Skip if the
+        # URL already carries a token= param — export poll URLs (e.g.
+        # /api/mycsv/?request=...&token=...) embed their own per-job token,
+        # and appending ours a second time breaks the poll.
         sep = "&" if "?" in url else "?"
         url = f"{url}{sep}token={token}"
-    else:
+    elif not token:
         headers["Cookie"] = cookie
     body: str = ""
     for attempt in range(_retries + 1):

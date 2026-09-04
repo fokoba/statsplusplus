@@ -1150,19 +1150,39 @@ function defFilterPers() {
       OOTP gives this level no affiliate team of its own — these players sit directly on the org's roster with level
       Intl. Now included in Farm Surplus above.
     </div>
+    <div class="roster-controls">
+      <span style="display:flex; align-items:center; gap:12px; font-size:12px; color:var(--text-dim)">
+        <label title="Dims rows whose personality Type is Selfish, Outspoken, Unmotivated, or Disruptive.">
+          <input type="checkbox" id="intl-negpers-filter" onchange="intlFilterPers()"> Dim bad personalities
+        </label>
+        <label title="Bolds rows whose personality Type is Fan Fav, Sparkplug, Captain, Humble, or Prankster.">
+          <input type="checkbox" id="intl-pospers-filter" onchange="intlFilterPers()"> Show positive personalities
+        </label>
+        <label title="Bolds rows with a high Work Ethic, Baseball IQ, or Adaptability.">
+          <input type="checkbox" id="intl-devgood-filter" onchange="intlFilterPers()"> Show good development
+        </label>
+        <label title="Dims rows with a low Work Ethic, Baseball IQ, or Adaptability.">
+          <input type="checkbox" id="intl-devbad-filter" onchange="intlFilterPers()"> Dim bad development
+        </label>
+      </span>
+      <button type="button" class="btn btn-sm" id="intl-copy-selected" style="margin-left:auto">Copy selected names</button>
+      <span id="intl-copy-status" style="font-size:12px; color:var(--text-dim)"></span>
+    </div>
     <table>
       <thead>
         <tr>
           <th><input type="checkbox" id="intl-select-all" title="Select/deselect all"></th>
           <th data-sort="pos">Pos</th><th data-sort="str" class="left">Name</th><th data-sort="num" data-sort-best="low">Age</th>
           <th data-sort="num">Ovr</th><th data-sort="num">Pot</th>
-          <th data-sort="str" data-sort-best="high" class="left">FV</th><th data-sort="str">Acc</th><th data-sort="num">Surplus</th>
+          <th data-sort="str" data-sort-best="high" class="left">FV</th><th data-sort="str">Acc</th>
+          <th data-sort="str">Type</th><th data-sort="str" class="left">Notes</th>
+          <th data-sort="num">Surplus</th>
         </tr>
       </thead>
       <tbody>
         {% for p in intl_complex %}
-        <tr class="intl-row">
-          <td><input type="checkbox" class="intl-cut-checkbox" data-pid="{{ p.pid }}"></td>
+        <tr class="intl-row" data-ptype="{{ p.personality_type_class }}" data-dev-good="{{ '1' if p.dev_good else '' }}" data-dev-bad="{{ '1' if p.dev_bad else '' }}">
+          <td><input type="checkbox" class="intl-cut-checkbox" data-pid="{{ p.pid }}" data-name="{{ p.name }}"></td>
           <td data-sort-value="{{ p.pos_order }}">{{ p.bucket }}</td>
           <td class="left"><a class="player-link intl-name" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
           <td>{{ p.age }}</td>
@@ -1170,6 +1190,13 @@ function defFilterPers() {
           <td><span class="ovr-color" data-g="{{ p.ceiling_score }}">{{ p.ceiling_score if p.ceiling_score is not none else '-' }}</span></td>
           <td class="left">{{ p.fv_str }}{% if p.risk %} <span style="font-size:10px;color:{% if p.risk == 'Low' %}#4caf50{% elif p.risk == 'Medium' %}#ffc107{% elif p.risk == 'High' %}#ff9800{% else %}#f44336{% endif %}">{{ p.risk[0] }}</span>{% endif %}</td>
           <td>{{ p.acc or '-' }}</td>
+          <td><span class="ptype-{{ p.personality_type_class }}">{{ p.personality_type }}</span></td>
+          <td class="left pers-notes">
+            {%- if p.buffs %}<span class="buff">{{ p.buffs|join(", ") }}</span>{% endif -%}
+            {%- if p.buffs and p.concerns %}<br>{% endif -%}
+            {%- if p.concerns %}<span class="concern">{{ p.concerns|join(", ") }}</span>{% endif -%}
+            {%- if not p.buffs and not p.concerns %}<span style="color:var(--text-dim)">—</span>{% endif -%}
+          </td>
           <td class="{{ 'pos' if p.surplus > 0 else 'neg' if p.surplus < 0 else '' }}">${{ p.surplus }}{{ money_unit }}</td>
         </tr>
         {% endfor %}
@@ -1184,6 +1211,13 @@ function defFilterPers() {
 </style>
 
 <script>
+function intlFilterPers() {
+  applyPersDevFilters('#tab-intl tr[data-ptype]', {
+    negId: 'intl-negpers-filter', posId: 'intl-pospers-filter',
+    devGoodId: 'intl-devgood-filter', devBadId: 'intl-devbad-filter',
+  });
+}
+
 /* ── Intl Complex: mark-for-cut checkboxes, persisted per-player in localStorage ── */
 (function() {
   var STORAGE_KEY = 'statspp_intl_cut_marks_{{ tid }}';
@@ -1225,6 +1259,34 @@ function defFilterPers() {
           cb.dispatchEvent(new Event('change'));
         }
       });
+    });
+  }
+
+  var copyBtn = document.getElementById('intl-copy-selected');
+  var copyStatus = document.getElementById('intl-copy-status');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', function() {
+      var names = Array.prototype.slice.call(document.querySelectorAll('.intl-cut-checkbox:checked'))
+        .map(function(cb) { return cb.dataset.name; });
+      if (!names.length) {
+        copyStatus.textContent = 'No players selected.';
+        return;
+      }
+      var text = names.join('\n');
+      var done = function() { copyStatus.textContent = 'Copied ' + names.length + ' name' + (names.length === 1 ? '' : 's') + '.'; };
+      var fail = function() { copyStatus.textContent = 'Copy failed — select and copy manually.'; };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, fail);
+      } else {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); done(); } catch (e) { fail(); }
+        document.body.removeChild(ta);
+      }
     });
   }
 })();

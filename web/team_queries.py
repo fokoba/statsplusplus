@@ -1887,7 +1887,8 @@ def get_intl_complex(team_id=None):
 
     rows = conn.execute("""
         SELECT p.name, p.age, pf.fv, pf.fv_str, pf.bucket, pf.prospect_surplus, p.player_id, p.pos,
-               r.composite_score, r.ceiling_score, r.acc, pf.risk
+               r.composite_score, r.ceiling_score, r.acc, pf.risk,
+               r.int_, r.wrk_ethic, r.lead, r.loy, r.greed, r.adaptability, r.personality_type
         FROM players p
         LEFT JOIN prospect_fv pf ON pf.player_id=p.player_id AND pf.eval_date=?
         LEFT JOIN latest_ratings r ON p.player_id=r.player_id
@@ -1895,8 +1896,10 @@ def get_intl_complex(team_id=None):
     """, (ed, tid)).fetchall()
 
     out = []
-    for name, age, fv, fv_str, bucket, surplus, pid, pos, comp, ceil_score, acc, risk in rows:
+    for (name, age, fv, fv_str, bucket, surplus, pid, pos, comp, ceil_score, acc, risk,
+         intel, wrk_ethic, lead, loy, greed, adaptability, ptype) in rows:
         disp_bucket = _display_pos(bucket, pos) if bucket else pos_map().get(pos, "?")
+        _pers = _personality_fields(intel, wrk_ethic, lead, loy, greed, adaptability, ptype)
         out.append({
             "pid": pid, "name": name, "age": age,
             "bucket": disp_bucket, "pos_order": pos_order().get(disp_bucket, 99),
@@ -1904,6 +1907,7 @@ def get_intl_complex(team_id=None):
             "composite_score": comp, "ceiling_score": ceil_score,
             "surplus": round(surplus / _money_divisor(), 1) if surplus else 0,
             "acc": acc, "risk": risk,
+            **_pers,
         })
     out.sort(key=lambda x: (-(x["fv"] if x["fv"] is not None else -1), x["age"] if x["age"] is not None else 99))
     return out

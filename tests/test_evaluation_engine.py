@@ -2490,10 +2490,14 @@ class TestCompositeDecompositionRoundTrip:
         )
 
         # Step 5: Assert near-equality — the decomposition is lossless for
-        # the weighted-average portion, but the sub-MLB floor penalty applied
-        # in compute_composite_hitter is not captured by the decomposition.
-        # Allow tolerance of up to the maximum floor penalty + imbalance penalty.
-        assert abs(recomposed - composite) <= 22, (
+        # the weighted-average portion, but the direct composite additionally
+        # applies the sub-MLB floor penalty and the tool-imbalance penalty,
+        # which the recombination does not capture. The per-tool transform
+        # curves (Session 82) amplify standout tools more than the old global
+        # transform, so an extreme profile (e.g. one 80 tool, rest at 20)
+        # widens that gap slightly. Tolerance covers the max floor + imbalance
+        # penalty under the amplified transform.
+        assert abs(recomposed - composite) <= 26, (
             f"Round-trip mismatch for bucket={bucket}: "
             f"composite={composite}, recomposed={recomposed}, "
             f"off_raw={off_raw}, br_raw={br_raw}, def_raw={def_raw}, "

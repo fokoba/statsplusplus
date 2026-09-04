@@ -4,7 +4,60 @@ Completed and deferred work items, organized by session. Moved from `task_list.m
 
 ---
 
-## Session 82 (2026-09-03)
+## Session 83 (2026-09-04)
+
+### StatsPlus API — Token Authentication (sanctioned integration path)
+
+Reviewed the updated StatsPlus API wiki (`docs/StatsPlus APIs _ StatsPlus Wiki.html`),
+captured findings in `docs/statsplus_api_analysis.md`, and adapted PR #11
+(fokoba) with the token-expiry/error safety it was missing.
+
+- **Per-team API token** is now the preferred auth method — the documented
+  "method to use from a script or tool." Passed as `?token=`; the session
+  cookie is kept as an automatic fallback, so existing installs are unchanged.
+  New `get/set_statsplus_token` storage mirrors the cookie.
+- **Content-type / human-message guard in `_fetch`** (both clients) — StatsPlus
+  returns several errors as HTTP 200 `text/plain` (expired/invalid token,
+  logged-out, rate-limit, "ratings updating"). A tool that only checks the
+  status code saves the error message where it expected data. `_fetch` now
+  classifies these: raises `TokenExpiredError` / `CookieExpiredError` for auth,
+  retries rate-limit/transient, and only parses genuine data. This closes a
+  data-corruption hole (an expired token would otherwise poison a refresh).
+- **`/tokencheck`** client method; Settings + onboarding "Test Connection"
+  validate tokens through it and report the team the token maps to.
+- Token threaded through every `configure()` call site (refresh subprocess env,
+  draft fetch web + CLI, date check, test-connection). Refresh surfaces
+  `TokenExpiredError`.
+- **UI**: Settings + onboarding gain an "API Token (recommended)" section with
+  the cookie relabeled as fallback; the header **StatsPlus Session** panel is
+  now a full connection panel (token + cookie, method-aware "✓ active (token)"
+  status). Instructions match the real StatsPlus flow (Prefs → API Token →
+  Current Token; 90-day expiry; one token per team per league). README gains a
+  "Getting Your StatsPlus API Token" section.
+
+### StatsPlus API — Rate Limiting
+
+Addresses user reports of rate-limiting failures during refresh.
+
+- **`/date` gate** — `refresh.py` compares the remote game date to the stored
+  one and **skips the whole pull when unchanged** ("Already up to date"),
+  stopping the common "refresh again to check" cycle from hitting the
+  once-per-5-minutes-per-team `/ratings` limit. `--force` overrides. A failed
+  refresh doesn't advance the stored date, so fix-and-retry still re-runs.
+- **`/ratings` cooldown** — `start_ratings_export` no longer blocks the refresh
+  (and its lock) for a multi-minute cooldown: short waits are slept through,
+  longer ones raise `RateLimitedError(seconds)` surfaced to the user as
+  "try again in about N seconds." Fixed a pre-existing broken log f-string.
+
+### Fix
+
+- Widened the composite decomposition round-trip test tolerance (22 → 26) — the
+  Session 82 per-tool transform amplifies standout tools, widening the gap
+  between the direct composite (floor + imbalance penalties) and the lossless
+  recombination for extreme profiles. Surfaced by a hypothesis seed; not a
+  correctness change.
+
+
 
 ### Bug Fixes — League Overview & Rankings (early-season sample-size)
 

@@ -17,6 +17,17 @@ Discovered during full script verification pass.
 
 ## Code Quality
 
+### StatsPlus API integration (Session 83)
+
+- [x] **API token authentication** — Sanctioned per-team token as the preferred auth method, cookie fallback, content-type/human-message guard in `_fetch` (raises on expired/invalid token), `/tokencheck`-backed Test Connection, threaded through all `configure()` sites, UI in Settings + onboarding + the header session panel. **Done Session 83.**
+- [x] **Refresh `/date` gate + `/ratings` cooldown handling** — skip redundant pulls when the game date is unchanged (`--force` to override); surface the once-per-5-min `/ratings` cooldown as `RateLimitedError` instead of blocking. **Done Session 83.**
+- [ ] **PR #10 (fokoba) — review** — "Fix trade valuations using the wrong league's data when switching leagues." Still open; review and merge/adapt like PR #11. **LOE: Low.**
+- [ ] **PR #11 (fokoba) — close/supersede** — the token-auth PR was adapted into the Session 83 work (with the token-expiry/content-type safety it lacked). Close it referencing the merged commit, or confirm it can be closed. **LOE: trivial.**
+- [ ] **`/date`-gate force option in the web UI** — the CLI has `--force`; a redundant web Refresh click now shows "Already up to date." If users want to force a re-pull from the browser, add a force affordance (e.g. shift-click or a small menu). Low priority — fix-and-retry after a failure already re-runs without force. **LOE: Low.**
+- [ ] **OSA ratings via `osa=1` (API Roadmap Phase 5a)** — the wiki confirms `/ratings?osa=1` is anonymous (no auth), rate-limited per-IP (15 min). Enables scouted-vs-OSA comparison. **LOE: Medium.**
+- [ ] **`/date`-driven per-endpoint caching (extension)** — beyond the refresh gate, individual non-`/date`-changing endpoints (teams, players, contracts, ballparks, lgdata) could be cached and skipped between refreshes. Lower value now that the whole-refresh gate exists. **LOE: Medium.**
+
+
 - [x] **Additional ratings scales** — Support 1-20 scale (maps to 20-80 via linear `20 + (raw-1)/19 * 60`). Auto-detection: max rating ≤20 → 1-20, >80 → 1-100, else 20-80. Added to settings and onboarding dropdowns. **Done Session 57.**
 - [x] **Snapshot test fragility** — `test_prospect_value.py` now stubs `dollars_per_war()` and `league_minimum()` via `unittest.mock.patch` to fixed values ($7M, $800K). Tests are fully deterministic regardless of `league_averages.json` state. Structural invariants (monotonicity, option ≥ base, SP > RP) plus a $/WAR scaling test. `test_player_utils.py` was already stable (exact FV grades depend on model_weights.json which only changes during recalibration, not refresh). **Done Session 57.**
 - [x] **Evaluation engine docs** — Add `evaluation_engine.py` to `docs/tools_reference.md` and `docs/system_overview.md`. Document the `run()` entry point, pure computation functions, and the batch pipeline integration in `refresh.py`. **LOE: Low.**

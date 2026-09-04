@@ -1,5 +1,5 @@
 {
-  "last_posted_commit": "7074a2bc066f4eb8c27436ececcadea4014a2698",
+  "last_posted_commit": "efa74d0ebe50c7a3a9ecab6809b97428017efd5d",
   "last_posted_date": "2026-09-02",
   "last_posted_title": "v1.3.0 \u2014 Install & Upgrade Stability",
   "history": [
@@ -92,6 +92,11 @@
       "commit": "7074a2bc066f4eb8c27436ececcadea4014a2698",
       "date": "2026-09-03",
       "title": "Player Evaluation Overhaul & Early-Season Fixes"
+    },
+    {
+      "commit": "efa74d0ebe50c7a3a9ecab6809b97428017efd5d",
+      "date": "2026-09-04",
+      "title": "StatsPlus API Tokens & Smarter Refreshes"
     }
   ]
 }

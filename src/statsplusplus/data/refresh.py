@@ -1336,6 +1336,17 @@ def _refresh_stat_percentiles(year):
     log.info(f"  stat percentiles: OPS+ P95={bat_p95}, ERA- P5={pit_p5}")
 
 
+def _stored_game_date() -> str:
+    """Return the game date recorded in the active league's state.json, or ''."""
+    try:
+        state_path = get_league_dir() / "config" / "state.json"
+        if state_path.exists():
+            return str(json.loads(state_path.read_text()).get("game_date", "") or "")
+    except (json.JSONDecodeError, OSError):
+        pass
+    return ""
+
+
 def update_state(game_date, year):
     league_dir = get_league_dir()
     state_path = league_dir / "config" / "state.json"
@@ -1424,11 +1435,30 @@ def main():
         if args and args[0] == "--no-fv":
             skip_fv = True
             args = args[1:]
+        force = False
+        if args and args[0] == "--force":
+            # Bypass the /date gate and re-pull even when the game date is unchanged.
+            force = True
+            args = args[1:]
         year = int(args[0]) if args else default_year
         game_date = client.get_date()
         # Derive year from API game date — state.json may be stale or uninitialized
         if game_date and len(game_date) >= 4:
             year = int(game_date[:4])
+
+        # /date gate: StatsPlus data only changes when the game date advances,
+        # and there is no conditional GET (every fetch transfers the whole body,
+        # and /ratings is rate-limited to once per 5 min per team). Skip the
+        # expensive pull when the stored game date already matches — this avoids
+        # burning the ratings rate limit on redundant refreshes ("did it work?
+        # let me try again"). Use --force to override.
+        stored_date = _stored_game_date()
+        if not force and game_date and stored_date and game_date == stored_date:
+            log.info("=== Up to date: game date %s unchanged since last refresh "
+                     "(use --force to re-pull) ===", game_date)
+            print(f"Already up to date (game date {game_date}). Use --force to re-pull.")
+            return
+
         log.info("=== Full pipeline: year=%s, game_date=%s ===", year, game_date)
         refresh_league(year, game_date=game_date)
         update_state(game_date, year)

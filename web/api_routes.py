@@ -17,6 +17,8 @@ from statsplusplus.config.league_context import (
     get_league_dir,
     get_statsplus_cookie,
     set_statsplus_cookie,
+    get_statsplus_token,
+    set_statsplus_token,
 )
 from statsplusplus.utils.logging import get_logger
 
@@ -371,8 +373,9 @@ def api_draft_picks():
         cfg = _get_cfg()
         slug = cfg.settings.get("statsplus_slug", "")
         cookie = get_statsplus_cookie(cfg.league_dir)
-        if slug and cookie:
-            client.configure(slug, cookie)
+        token = get_statsplus_token(cfg.league_dir)
+        if slug and (cookie or token):
+            client.configure(slug, cookie, token)
         raw = client.get_draft()
         picks = [{"pid": d["ID"], "name": d["Player Name"], "team": d["Team"],
                   "tid": d["Team ID"], "pos": d["Position"], "age": d["Age"],
@@ -549,7 +552,7 @@ def api_draft_settings_copy():
 # ── Refresh ──
 
 
-def _run_refresh(slug, league_dir, statsplus_slug, cookie):
+def _run_refresh(slug, league_dir, statsplus_slug, cookie, token=""):
     """Run refresh.py in background thread."""
     _log = get_logger("web")
     _log.info("=== dashboard refresh started (league=%s) ===", slug)
@@ -559,6 +562,8 @@ def _run_refresh(slug, league_dir, statsplus_slug, cookie):
         bg_cfg = LeagueConfig(base_dir=league_dir)
         script = Path(__file__).parent.parent / "src" / "statsplusplus" / "data" / "refresh.py"
         env = {**os.environ, "STATSPP_LEAGUE": slug, "STATSPLUS_COOKIE": cookie}
+        if token:
+            env["STATSPLUS_TOKEN"] = token
         if statsplus_slug:
             env["STATSPLUS_LEAGUE_URL"] = statsplus_slug
         result = subprocess.run(
@@ -596,6 +601,15 @@ def _run_refresh(slug, league_dir, statsplus_slug, cookie):
             last = lines[-1] if lines else "Unknown error"
             if "CookieExpiredError" in err or "requires user to be logged in" in err:
                 last = "StatsPlus session expired — update your cookie in Settings."
+            elif "TokenExpiredError" in err or "API token has expired" in err or "Invalid or unknown API token" in err:
+                last = "StatsPlus API token expired or invalid — log in on StatsPlus to refresh it, then update it in Settings."
+            elif "RateLimitedError" in err or "once per 5 minutes" in err or "Request too soon" in err:
+                # Surface the wait time if present.
+                import re as _re
+                _m = _re.search(r"in about (\d+) seconds", err) or _re.search(r"wait (\d+) seconds", err)
+                _secs = _m.group(1) if _m else None
+                last = ("StatsPlus limits ratings pulls to once per 5 minutes. "
+                        + (f"Try again in about {_secs} seconds." if _secs else "Try again shortly."))
             _refresh_status["result"] = "error"
             _refresh_status["message"] = last[:300]
     except subprocess.TimeoutExpired:
@@ -620,10 +634,11 @@ def refresh():
     league_dir = g.league_dir
     statsplus_slug = cfg.settings.get("statsplus_slug", "")
     cookie = get_statsplus_cookie(league_dir)
+    token = get_statsplus_token(league_dir)
     _refresh_status["running"] = True
     _refresh_status["result"] = None
     _refresh_status["message"] = ""
-    threading.Thread(target=_run_refresh, args=(slug, league_dir, statsplus_slug, cookie), daemon=True).start()
+    threading.Thread(target=_run_refresh, args=(slug, league_dir, statsplus_slug, cookie, token), daemon=True).start()
     return jsonify({"status": "started"})
 
 
@@ -649,8 +664,9 @@ def api_game_date():
         cfg = _get_cfg()
         slug = cfg.settings.get("statsplus_slug", "")
         cookie = get_statsplus_cookie(cfg.league_dir)
-        if slug and cookie:
-            client.configure(slug, cookie)
+        token = get_statsplus_token(cfg.league_dir)
+        if slug and (cookie or token):
+            client.configure(slug, cookie, token)
         remote_date = client.get_date().strip()
     except Exception:
         remote_date = None
@@ -659,8 +675,9 @@ def api_game_date():
 
 @api_bp.route("/api/session-cookie")
 def api_session_cookie():
-    """Return current session cookie components for the active league."""
-    cookie = get_statsplus_cookie(_get_cfg().league_dir) or ""
+    """Return current session cookie components + API token for the active league."""
+    league_dir = _get_cfg().league_dir
+    cookie = get_statsplus_cookie(league_dir) or ""
     sid = ""
     csrf = ""
     for part in cookie.split(";"):
@@ -669,7 +686,8 @@ def api_session_cookie():
             sid = part[len("sessionid="):]
         elif part.startswith("csrftoken="):
             csrf = part[len("csrftoken="):]
-    return jsonify({"session_id": sid, "csrf_token": csrf})
+    token = get_statsplus_token(league_dir) or ""
+    return jsonify({"session_id": sid, "csrf_token": csrf, "token": token})
 
 
 @api_bp.route("/api/save-session-cookie", methods=["POST"])
@@ -688,23 +706,61 @@ def api_save_session_cookie():
         return jsonify({"ok": False, "error": str(e)})
 
 
+@api_bp.route("/api/save-token", methods=["POST"])
+def api_save_token():
+    """Save the StatsPlus API token for the active league."""
+    data = request.get_json(silent=True) or {}
+    token = (data.get("token") or "").strip()
+    try:
+        set_statsplus_token(token, _get_cfg().league_dir)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
 @api_bp.route("/api/test-connection", methods=["POST"])
 def api_test_connection():
-    """Test StatsPlus API connection with the provided or saved cookie."""
+    """Test the StatsPlus API connection.
+
+    Accepts either a ``token`` or a ``cookie`` in the JSON body (falling back to
+    the saved credentials). A token is validated via the documented
+    /tokencheck endpoint (returns the team it maps to); a cookie is tested by
+    fetching the game date.
+    """
     cfg = _get_cfg()
     slug = cfg.settings.get("statsplus_slug", "")
     data = request.get_json(silent=True) or {}
-    cookie = data.get("cookie", "").strip()
+    from statsplus import client
+
+    # Token path (preferred) — validate via /tokencheck.
+    token = (data.get("token") or "").strip()
+    if not token and "cookie" not in data:
+        token = get_statsplus_token(cfg.league_dir)
+    if token:
+        ok, detail = client.tokencheck(slug, token)
+        if not ok:
+            return jsonify({"ok": False, "error": f"Token check failed: {detail}"})
+        # Token is valid; also report the game date for a friendly confirmation.
+        try:
+            client.configure(slug, "", token)
+            date = client.get_date()
+        except Exception:
+            date = None
+        return jsonify({"ok": True, "method": "token", "team_id": detail, "game_date": date})
+
+    # Cookie path (fallback).
+    cookie = (data.get("cookie") or "").strip()
     if not cookie:
         cookie = get_statsplus_cookie(cfg.league_dir)
     if not cookie:
-        return jsonify({"ok": False, "error": "No cookie configured"})
+        return jsonify({"ok": False, "error": "No token or cookie configured"})
     try:
-        from statsplus import client
-        client.configure(slug, cookie)
+        client.configure(slug, cookie, "")
         date = client.get_date()
         client._get("/ratings/")
-        return jsonify({"ok": True, "game_date": date})
+        return jsonify({"ok": True, "method": "cookie", "game_date": date})
+    except client.TokenExpiredError:
+        return jsonify({"ok": False, "error": "Token expired or invalid — log in on StatsPlus to refresh it."})
     except client.CookieExpiredError:
         return jsonify({"ok": False, "error": "Cookie expired or invalid — see instructions below to get a fresh one."})
     except Exception as e:

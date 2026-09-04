@@ -90,6 +90,38 @@
   {# ── Connection ── #}
   <div class="panel settings-section">
     <h2>Connection</h2>
+
+    <h3 style="margin-bottom:4px">API Token <span class="dim">(recommended)</span></h3>
+    <div class="dim" style="font-size:0.9em; margin-bottom:8px">
+      The <a href="https://wiki.statsplus.net/web-tools/statsplus-api" target="_blank">sanctioned StatsPlus API</a> auth —
+      a per-team token used instead of your browser session cookie. Used automatically once set, and more stable than a cookie.
+    </div>
+    <form method="post">
+      <input type="hidden" name="action" value="save_token">
+      <div class="form-grid">
+        <label>Team Token</label>
+        <input type="text" name="statsplus_token" id="statsplus-token-input" value="{{ statsplus_token or '' }}" style="width:400px" placeholder="Paste your team token">
+      </div>
+      <div style="margin-top:8px; display:flex; gap:8px; align-items:center">
+        <button type="submit">Save</button>
+        <button type="button" id="test-token-btn" onclick="testTokenConnection()">Test Connection</button>
+        <span id="test-token-result" class="dim"></span>
+      </div>
+    </form>
+    <details style="margin-top:12px">
+      <summary class="dim" style="cursor:pointer">Where do I find this?</summary>
+      <div style="margin-top:8px; padding:12px; background:#1a1a2e; border-radius:6px; font-size:0.9em; line-height:1.6">
+        <ol style="margin:0; padding-left:20px">
+          <li>Open <a href="https://statsplus.net" target="_blank">statsplus.net</a>, <strong>log in</strong>, and make sure you're linked to your team in this league.</li>
+          <li>Click <strong>Prefs</strong> (top-right, next to Logout) to open your User Settings page.</li>
+          <li>In the <strong>API Token</strong> box, copy the <strong>Current Token</strong> value (36 characters).</li>
+        </ol>
+        <p style="margin:8px 0 0; color:#888">A token is valid for <strong>one team in one league</strong> — set it separately for each league you manage here. Tokens expire <strong>90 days</strong> after creation; if refreshes start failing with a token error, log in on StatsPlus to refresh it and paste the new one here.</p>
+      </div>
+    </details>
+
+    <h3 style="margin:16px 0 4px">Session Cookie <span class="dim">(fallback)</span></h3>
+    <div class="dim" style="font-size:0.9em; margin-bottom:8px">Used only when no API token is set above.</div>
     <form method="post">
       <input type="hidden" name="action" value="save_cookie">
       <div class="form-grid">
@@ -139,6 +171,32 @@
     }).then(r => r.json()).then(data => {
       if (data.ok) {
         result.textContent = '✓ Connected — game date: ' + data.game_date;
+        result.style.color = '#4caf50';
+      } else {
+        result.textContent = '✗ ' + (data.error || 'Connection failed');
+        result.style.color = '#e74c3c';
+      }
+    }).catch(() => {
+      result.textContent = '✗ Request failed';
+      result.style.color = '#e74c3c';
+    }).finally(() => { btn.disabled = false; });
+  }
+  function testTokenConnection() {
+    const btn = document.getElementById('test-token-btn');
+    const result = document.getElementById('test-token-result');
+    btn.disabled = true;
+    result.textContent = 'Testing...';
+    result.style.color = '#888';
+    const token = document.getElementById('statsplus-token-input').value;
+    fetch('/api/test-connection', {method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({token: token})
+    }).then(r => r.json()).then(data => {
+      if (data.ok) {
+        let msg = '✓ Valid token';
+        if (data.team_id) msg += ' — team ' + data.team_id;
+        if (data.game_date) msg += ', game date: ' + data.game_date;
+        result.textContent = msg;
         result.style.color = '#4caf50';
       } else {
         result.textContent = '✗ ' + (data.error || 'Connection failed');

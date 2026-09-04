@@ -269,9 +269,20 @@ Global config in `data/app_config.json`:
 
 MIT License. See [LICENSE](LICENSE) for details.
 
+## Getting Your StatsPlus API Token
+
+The recommended way to authenticate is with a StatsPlus **API token** — the [sanctioned method for tools](https://wiki.statsplus.net/web-tools/statsplus-api). It's more stable than a session cookie (which expires frequently). To get yours:
+
+1. Log in to [statsplus.net](https://statsplus.net/) and make sure you're linked to your team in the league.
+2. Click **Prefs** (top-right of the page, next to Logout) to open your User Settings page.
+3. In the **API Token** box, copy the **Current Token** (a 36-character value).
+4. Paste it into the onboarding wizard, or Settings → Connection → API Token.
+
+A token is valid for **one team in one league** — set it separately for each league you manage. Tokens **expire 90 days** after creation; if refreshes start failing with a token error, log in on StatsPlus to refresh your token and paste the new one. The token is stored locally and only sent to the StatsPlus API.
+
 ## Getting Your StatsPlus Cookie
 
-The StatsPlus API requires authentication via session cookie. To get yours:
+If you prefer (or as a fallback), the app also supports authenticating with a browser **session cookie**. To get yours:
 
 1. Log in to [statsplus.net](https://statsplus.net/) in your browser
 2. Open Developer Tools (F12) → Application tab → Cookies → `statsplus.net`

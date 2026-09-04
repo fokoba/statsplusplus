@@ -1153,6 +1153,7 @@ function defFilterPers() {
     <table>
       <thead>
         <tr>
+          <th><input type="checkbox" id="intl-select-all" title="Select/deselect all"></th>
           <th data-sort="pos">Pos</th><th data-sort="str" class="left">Name</th><th data-sort="num" data-sort-best="low">Age</th>
           <th data-sort="num">Ovr</th><th data-sort="num">Pot</th>
           <th data-sort="str" data-sort-best="high" class="left">FV</th><th data-sort="str">Acc</th><th data-sort="num">Surplus</th>
@@ -1160,9 +1161,10 @@ function defFilterPers() {
       </thead>
       <tbody>
         {% for p in intl_complex %}
-        <tr>
+        <tr class="intl-row">
+          <td><input type="checkbox" class="intl-cut-checkbox" data-pid="{{ p.pid }}"></td>
           <td data-sort-value="{{ p.pos_order }}">{{ p.bucket }}</td>
-          <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
+          <td class="left"><a class="player-link intl-name" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
           <td>{{ p.age }}</td>
           <td><span class="ovr-color" data-g="{{ p.composite_score }}">{{ p.composite_score if p.composite_score is not none else '-' }}</span></td>
           <td><span class="ovr-color" data-g="{{ p.ceiling_score }}">{{ p.ceiling_score if p.ceiling_score is not none else '-' }}</span></td>
@@ -1175,6 +1177,58 @@ function defFilterPers() {
     </table>
   </div>
 </div>
+
+<style>
+.intl-row.intl-cut .intl-name { color: var(--text-dim); text-decoration: line-through; }
+.intl-row.intl-cut td { opacity: 0.5; }
+</style>
+
+<script>
+/* ── Intl Complex: mark-for-cut checkboxes, persisted per-player in localStorage ── */
+(function() {
+  var STORAGE_KEY = 'statspp_intl_cut_marks_{{ tid }}';
+
+  function loadMarks() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
+    catch (e) { return {}; }
+  }
+  function saveMarks(marks) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(marks));
+  }
+
+  var marks = loadMarks();
+  document.querySelectorAll('.intl-cut-checkbox').forEach(function(cb) {
+    var pid = cb.dataset.pid;
+    var row = cb.closest('.intl-row');
+    if (marks[pid]) {
+      cb.checked = true;
+      row.classList.add('intl-cut');
+    }
+    cb.addEventListener('change', function() {
+      if (cb.checked) {
+        marks[pid] = true;
+        row.classList.add('intl-cut');
+      } else {
+        delete marks[pid];
+        row.classList.remove('intl-cut');
+      }
+      saveMarks(marks);
+    });
+  });
+
+  var selectAll = document.getElementById('intl-select-all');
+  if (selectAll) {
+    selectAll.addEventListener('change', function() {
+      document.querySelectorAll('.intl-cut-checkbox').forEach(function(cb) {
+        if (cb.checked !== selectAll.checked) {
+          cb.checked = selectAll.checked;
+          cb.dispatchEvent(new Event('change'));
+        }
+      });
+    });
+  }
+})();
+</script>
 
 {# ══════ Contracts ══════ #}
 <div class="tab-content" id="tab-contracts">

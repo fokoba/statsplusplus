@@ -1,5 +1,5 @@
 {
-  "last_posted_commit": "efa74d0ebe50c7a3a9ecab6809b97428017efd5d",
+  "last_posted_commit": "72b38a6c1ab9cb9a687d652b7aabfe9c07679316",
   "last_posted_date": "2026-09-02",
   "last_posted_title": "v1.3.0 \u2014 Install & Upgrade Stability",
   "history": [
@@ -97,6 +97,12 @@
       "commit": "efa74d0ebe50c7a3a9ecab6809b97428017efd5d",
       "date": "2026-09-04",
       "title": "StatsPlus API Tokens & Smarter Refreshes"
+    },
+    {
+      "commit": "72b38a6c1ab9cb9a687d652b7aabfe9c07679316",
+      "date": "2026-09-05",
+      "title": "Service Time & Team-Control Accuracy",
+      "version": "1.5.1"
     }
   ]
 }

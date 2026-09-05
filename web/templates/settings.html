@@ -26,6 +26,27 @@
     </form>
   </div>
 
+  {# ── Dynamic Pages (experimental) ── #}
+  <div class="panel settings-section">
+    <h2>Dynamic Pages</h2>
+    <p style="color:var(--text-dim); font-size:13px; margin-top:0">
+      Phase-specific pages that surface the decisions relevant to the current
+      part of the season. Manual toggle for now.
+    </p>
+    <div class="form-row">
+      <label for="offseason-toggle" style="flex:1">
+        ❄ Offseason mode
+        <span style="display:block; color:var(--text-dim); font-weight:400; font-size:12px">
+          Adds an <strong>Offseason</strong> tab: arbitration, free agency, payroll outlook, extension candidates.
+        </span>
+      </label>
+      <label class="switch">
+        <input type="checkbox" id="offseason-toggle" {% if offseason_mode %}checked{% endif %}>
+        <span id="offseason-toggle-state">{{ 'On' if offseason_mode else 'Off' }}</span>
+      </label>
+    </div>
+  </div>
+
   {# ── League Identity ── #}
   <div class="panel settings-section">
     <h2>League Identity</h2>
@@ -216,6 +237,27 @@
       else alert('Wipe failed: ' + (data.error || 'Unknown error'));
     }).catch(() => alert('Wipe request failed'));
   }
+
+  // Offseason-mode toggle
+  (function () {
+    var t = document.getElementById('offseason-toggle');
+    if (!t) return;
+    t.addEventListener('change', function () {
+      fetch('/api/toggle-offseason', { method: 'POST' })
+        .then(r => r.json())
+        .then(function (d) {
+          if (d.ok) {
+            document.getElementById('offseason-toggle-state').textContent = d.offseason_mode ? 'On' : 'Off';
+            // reload so the nav link appears/disappears
+            window.location.reload();
+          } else {
+            alert('Toggle failed: ' + (d.error || 'unknown'));
+            t.checked = !t.checked;
+          }
+        })
+        .catch(function () { alert('Toggle request failed'); t.checked = !t.checked; });
+    });
+  })();
   </script>
 
   {# ── Data Management ── #}

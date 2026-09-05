@@ -61,6 +61,35 @@ def toggle_offseason():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+# Offseason phases (chronological) — drives which panels the /offseason page
+# surfaces. Manual selection for now (auto-detection is future work).
+OFFSEASON_PHASES = ["playoffs", "arbitration", "options", "free_agency",
+                    "rule5", "spring"]
+
+
+@api_bp.route("/api/set-offseason-phase", methods=["POST"])
+def set_offseason_phase():
+    """Set the manually-selected offseason sub-phase for the active league.
+
+    An empty/absent phase means "show all panels" (no phase focus).
+    """
+    import json
+    data = request.get_json(silent=True) or {}
+    phase = (data.get("phase") or "").strip().lower()
+    if phase and phase not in OFFSEASON_PHASES:
+        return jsonify({"ok": False, "error": "unknown phase"}), 400
+    cfg = _get_cfg()
+    state_path = Path(cfg.league_dir) / "config" / "state.json"
+    try:
+        state = json.loads(state_path.read_text()) if state_path.exists() else {}
+        state["offseason_phase"] = phase  # "" clears the focus
+        state_path.write_text(json.dumps(state, indent=2) + "\n")
+        return jsonify({"ok": True, "phase": phase})
+    except Exception as e:
+        log.error("set-offseason-phase failed: %s", e)
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @api_bp.route("/api/prospect/<int:pid>")
 def api_prospect(pid):
     import queries

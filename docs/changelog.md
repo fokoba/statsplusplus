@@ -4,7 +4,58 @@ Completed and deferred work items, organized by session. Moved from `task_list.m
 
 ---
 
-## Session 84 (2026-09-04)
+## Session 85 (2026-09-05)
+
+### Dynamic Pages — phase-aware Offseason page (Phase A, proof-of-concept)
+
+First "dynamic page": a phase-aware `/offseason` view that surfaces the decisions
+a GM makes during the offseason, gated behind a manual toggle (Settings →
+Dynamic Pages) and a sub-phase selector. All panels reuse existing valuation
+data — no new models.
+
+- **Phase stepper** — full-width interactive timeline across the top (Playoffs →
+  Arbitration → Options → Free Agency → Rule 5 → Spring, plus "All"). Click a
+  stage to focus the page; persists to `state.json` (`offseason_phase`). Panels
+  are gated by phase (`offseason_queries.panels_for_phase`): Arbitration shows
+  during Arbitration; Free Agency + Extensions during Free Agency; Trades always
+  shows; phases without a dedicated panel show a "coming soon" placeholder.
+- **Arbitration panel** — arb-eligible players, projected salary (perpetual-arb
+  model, using the league's calibrated `ARB_SALARY_MODEL` + career WAR), and a
+  tender/non-tender recommendation. All dollar thresholds scale by the league's
+  `$/WAR` (works at any salary scale, incl. low-dollar retro leagues).
+- **Free Agency market board** — the actual open-market pool: unsigned players
+  (`team_id = 0, free_agent = 1`) that have **played in this league** (excludes
+  foreign-league/NPB players from the API's global dump). Columns: pos (game
+  listed position), age, B/T, composite, ceiling, **Proj WAR**, last-season WAR,
+  and last-season stat line with sample size. Client-side filters (position, age
+  min/max, "fills a need only") + column sorting. **★ need** badge flags FAs at a
+  position where org depth is below league average AND who are an upgrade over
+  the team's current best there (reuses `get_draft_org_depth`). Scrollable panel.
+- **Extension candidates** — high-surplus own players 1-2 years from FA
+  (threshold scaled by `$/WAR`). Scrollable, capped height.
+- **Proj WAR = single source of truth** — the board's projection calls the same
+  `compute_player_value` the player valuation page uses (first control-year of
+  its breakdown), rather than re-deriving. Fixes a mismatch where the board
+  showed raw `peak_war` (ignoring aging + development/confidence discount).
+- **Payroll Outlook panel dropped** — redundant with the team page and its
+  perpetual-arb projections were unreliable (arb estimates too high; no
+  continuation for expired multi-year deals).
+- New `web/offseason_queries.py`, `web/templates/offseason.html`; endpoints
+  `/api/toggle-offseason` and `/api/set-offseason-phase` in `api_routes.py`;
+  toggle UI in `settings.html`; nav link + `offseason_mode` context in `base.html`.
+- **Tests** — `tests/test_offseason.py` (11): market-board unsigned-only,
+  foreign-league exclusion, Proj-WAR-matches-player-value, need-flag-requires-
+  upgrade, phase gating, and endpoint persistence. Suite: 848 passing.
+
+### Bug fix — connection test no longer burns the /ratings rate limit
+
+- Saving/verifying a token or cookie was firing a real `/ratings` export to prime
+  a poll URL, consuming the once-per-5-min-per-team budget — so a refresh started
+  shortly after was refused with `RateLimitedError`. Connection validation now
+  uses only the cheap, non-rate-limited `/tokencheck` + `/date`; the refresh
+  kicks off its own ratings export when it needs one. (Committed 69f05b5.)
+
+---
 
 ### Service time — single source of truth + control fix
 

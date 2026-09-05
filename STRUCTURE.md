@@ -75,6 +75,7 @@ statsplusplus/
 │   ├── player_queries.py           # Player page data
 │   ├── percentiles.py              # Percentile rankings
 │   ├── trade_queries.py            # Trade tab queries
+│   ├── offseason_queries.py        # Offseason page: arb, FA board, extensions, phase gating
 │   ├── templates/                  # Jinja2 templates
 │   └── static/                     # CSS, JS, favicon assets
 │

@@ -61,9 +61,20 @@ fv_calc.py ───────────────────────
                     ┌──────────────────────────────────────────────────────────┐
                     │  web/app.py (Flask)                                      │
                     │  Reads: all DB tables via queries.py (read-only)         │
-                    │  Routes: /, /team/<id>, /league, /player/<id>, /settings  │
+                    │  Routes: /, /team/<id>, /league, /player/<id>, /settings, │
+                    │          /offseason (phase-aware, manual toggle)          │
                     └──────────────────────────────────────────────────────────┘
 ```
+
+**Dynamic pages:** `/offseason` is a phase-aware page (behind a manual toggle in
+Settings → Dynamic Pages, stored as `offseason_mode` in `state.json`). A sub-phase
+stepper (`offseason_phase` in `state.json`) gates which panels show via
+`offseason_queries.panels_for_phase`. Panels — Arbitration (tender decisions,
+perpetual-arb-aware, `$/WAR`-scaled thresholds), Free Agency market board
+(unsigned + league-played FAs, need-flag via `get_draft_org_depth`, Proj WAR via
+the shared `compute_player_value`), Extension candidates, and always-on Trades —
+all reuse existing valuation data. Query module: `web/offseason_queries.py`.
+Endpoints: `/api/toggle-offseason`, `/api/set-offseason-phase`.
 
 **Rule:** `fv_calc.py` is the sole writer of `prospect_fv` and `player_surplus`.
 All other analysis scripts are read-only against the DB.

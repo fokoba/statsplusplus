@@ -1427,8 +1427,8 @@ def get_waiver_wire():
         """, (pid,)).fetchone() if role in (11, 12, 13) else None
 
         # Service time and control
-        svc_years = row[11] or 0
-        svc_days = row[12] or 0
+        from statsplusplus.evaluation.arb import service_time as _svc
+        _st = _svc(conn, pid)
         contract_years = row[26]
         contract_cur = row[27]
         salary = row[28] or 0
@@ -1452,7 +1452,7 @@ def get_waiver_wire():
             "bucket": row[23],
             "risk": row[24],
             "surplus": row[25],  # prospect_surplus from pf table
-            "service": f"{svc_years}.{svc_days:03d}" if svc_years else None,
+            "service": _st.display() if _st.total_days > 0 else None,
             "salary": salary,
             "years_control": years_remaining,
             "bat_stats": {"year": stat_row[0], "pa": stat_row[1], "war": round(stat_row[2], 1)} if stat_row else None,

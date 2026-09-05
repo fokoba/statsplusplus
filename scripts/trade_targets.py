@@ -302,12 +302,11 @@ def find_targets(bucket, min_ovr=50, sellers_only=False, include_controlled=Fals
         # Detect arb-eligible: salary above minimum but service time < 6 years
         # These are NOT true rentals — acquiring team doesn't control them post-season
         if status == "RENTAL" and sal > (_cfg.minimum_salary / 1e6):
-            from statsplusplus.evaluation.arb import estimate_service_time as _est_svc
+            from statsplusplus.evaluation.arb import service_time as _svc
             conn2 = _get_conn()
-            svc = _est_svc(conn2, pid)
-            conn2.close()
-            if svc is not None and svc < 6.0:
+            if not _svc(conn2, pid).is_free_agent_eligible:
                 status = "ARB"
+            conn2.close()
         prorated = sal * (games_remaining / 162)
         if max_salary_m is not None and prorated > max_salary_m:
             continue

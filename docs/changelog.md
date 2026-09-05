@@ -4,7 +4,17 @@ Completed and deferred work items, organized by session. Moved from `task_list.m
 
 ---
 
-## Session 83 (2026-09-04)
+## Session 84 (2026-09-04)
+
+### Service time — single source of truth + control fix
+
+- **Consolidated all MLB service-time interpretation into one helper** (`evaluation/arb.py`). New `service_time(conn, pid) -> ServiceTime` (frozen dataclass) is the single place that reads the service fields and derives fractional years, completed years, and `years.days` display. Rewired the five divergent call sites that each computed service inline and disagreed with each other: `estimate_control`, `free_agents.py` (arb detection), `fv_calc.py` and `trade_calculator.py` (1-year-deal control), `web/queries.py` (waiver-wire display), and `trade_targets.py` (RENTAL→ARB). `estimate_service_time` is retained as a thin wrapper.
+- **Fixed control under-count for arb-eligible players.** `estimate_control` used `math.ceil(svc)`, so a player at 4 years 70 days (4.41 svc) was rounded to 5 and shown with 1 control year instead of 2. Only *completed* years reduce control (`completed_years = days // 172`); the fix uses that. Verified end-to-end on real data — affected above-minimum arb players (e.g. 4.87 svc) now correctly return 2 control years, while completed-5 players correctly stay at 1 (no over-correction). **Scope:** this flows into the direct `estimate_control` callers — `contract_value.py`, `team_queries.py`, `projections.py` (CLI/web contract-value paths). It does **not** change `player_evaluation.surplus`, because `fv_calc` reads control straight from the contract for above-min players and only invokes the service helper for near-minimum 1-year (pre-arb) deals. Re-ran `fv_calc` to confirm: surplus table unchanged for these players (correct), distribution sane (8444 prospects, MLB surplus avg $13.7M).
+- **Confirmed field semantics against real data:** `mlb_service_days` is the *cumulative total* (an 18-year vet carries ~3183 days), full year = 172 days, so `mlb_service_years = floor(days/172)`. Corrected two docs (`api_impact_analysis.md`/`client_reference.md` had described days as a 0-171 remainder) and removed the wrong `f"{years}.{days:03d}"` display in `web/queries.py` that would have rendered `18.3183`. Centralized coercion of the text/empty-string-typed column so no caller trips over `'' / 172`.
+- **Super Two:** explicitly documented as **not modeled** (flat 3-year arb threshold). Removed the dead `has_received_arbitration` fetch in `estimate_control` (queried, never used) since it can't catch the pre-first-arb 2.xxx player anyway. Tracked as a low-impact backlog item.
+- Added `SERVICE_DAYS_PER_YEAR` (172) and `FREE_AGENCY_SERVICE_YEARS` (6) constants. Suite: 828 passing, 1 skipped.
+
+---
 
 ### StatsPlus API — Token Authentication (sanctioned integration path)
 

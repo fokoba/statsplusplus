@@ -84,21 +84,16 @@ def upcoming_fas(year, years_out=1, bucket=None, min_war=None, my_team_only=Fals
         yrs_left = r["years"] - r["current_year"]
         cur_sal = r["salary_0"] or 0
 
-        # Detect arb-eligible using exact service time from DB
+        # Detect arb-eligible using exact service time from the DB.
+        # A player with fewer than 6 completed MLB years still has team control
+        # left → arb-eligible, not a true walk-year free agent.
         is_arb = False
         if yrs_left <= 1 and cur_sal > _cfg.minimum_salary:
-            svc_yrs = r["mlb_service_years"]
-            svc_days = r["mlb_service_days"] or 0
-            if svc_yrs is not None:
-                # mlb_service_days is total cumulative days (172 days = 1 year)
-                svc = svc_days / 172.0
-            else:
-                # Fallback to estimation if service time not available
-                from statsplusplus.evaluation.arb import estimate_service_time as _est_svc
-                conn2 = _get_conn()
-                svc = _est_svc(conn2, r["player_id"])
-                conn2.close()
-            if svc is not None and svc < 6.0:
+            from statsplusplus.evaluation.arb import service_time as _svc
+            conn2 = _get_conn()
+            svc = _svc(conn2, r["player_id"])
+            conn2.close()
+            if not svc.is_free_agent_eligible:
                 is_arb = True
 
         results.append({

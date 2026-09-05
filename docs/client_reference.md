@@ -58,14 +58,14 @@ All players across all orgs and levels. Supports `?retired=0` filter.
 | `is_on_dl` | int | On disabled list (short-term) |
 | `is_on_dl60` | int | On 60-day DL |
 | `dl_days_this_year` | int | Days spent on DL this season |
-| `mlb_service_years` | int | MLB service time — years |
-| `mlb_service_days` | int | MLB service time — days |
+| `mlb_service_years` | int | MLB service — completed full years (= floor(days/172)) |
+| `mlb_service_days` | int | MLB service — **cumulative total days** (full year = 172 days) |
 | `mlb_service_days_this_year` | int | MLB service days accrued this season |
-| `pro_service_years` | int | Professional service — years |
-| `pro_service_days` | int | Professional service — days |
+| `pro_service_years` | int | Professional service — completed full years |
+| `pro_service_days` | int | Professional service — cumulative total days |
 | `pro_service_days_this_year` | int | Pro service days this season |
-| `secondary_service_years` | int | Secondary (MiLB) service — years |
-| `secondary_service_days` | int | Secondary service — days |
+| `secondary_service_years` | int | Secondary (MiLB) service — completed full years |
+| `secondary_service_days` | int | Secondary service — cumulative total days |
 | `secondary_service_days_this_year` | int | Secondary service days this season |
 | `days_on_waivers` | int | Days spent on waivers |
 | `days_on_waivers_left` | int | Days remaining on waivers |

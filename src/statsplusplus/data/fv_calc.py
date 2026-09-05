@@ -575,10 +575,8 @@ def _compute_and_store_player_values(
                 # If it's a 1-year deal at min salary, player is likely pre-arb
                 # Use service time to estimate true control
                 if contract_years_left == 1 and contract_salary <= min_sal * 1.1:
-                    svc = conn.execute(
-                        "SELECT mlb_service_years FROM players WHERE player_id=?", (pid,)
-                    ).fetchone()
-                    svc_years = (svc[0] or 0) if svc else 0
+                    from statsplusplus.evaluation.arb import service_time as _svc
+                    svc_years = _svc(conn, pid).completed_years
                     if svc_years < 3:
                         years_ctrl = max(1, 6 - svc_years)
                         ctrl_type = "pre-arb"

@@ -202,8 +202,8 @@ def value_player(spec):
         if c and c[0]:
             yrs_left = max(1, c[0] - (c[1] or 0))
             if yrs_left == 1 and (c[2] or 0) <= _min_sal * 1.1:
-                svc = conn.execute("SELECT mlb_service_years FROM players WHERE player_id=?", (pid,)).fetchone()
-                svc_years = (svc[0] or 0) if svc else 0
+                from statsplusplus.evaluation.arb import service_time as _svc
+                svc_years = _svc(conn, pid).completed_years
                 years_ctrl = max(1, 6 - svc_years)
             else:
                 years_ctrl = yrs_left

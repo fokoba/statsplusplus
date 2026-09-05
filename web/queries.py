@@ -1219,10 +1219,13 @@ def get_positional_rankings():
     cfg = get_cfg()
     stats_year = cfg.year
 
-    # Get MLB org IDs for filtering
+    # Get MLB org IDs for filtering. Use the request-scoped mlb_team_ids()
+    # (web_league_context), NOT LeagueConfig().mlb_team_ids — that fresh
+    # singleton lazily caches whichever league it first computed for the life
+    # of the process and never invalidates on /switch-league, so it can return
+    # another league's team IDs and reject every player here (empty rankings).
     try:
-        from statsplusplus.config.league_config import LeagueConfig
-        mlb_org_ids = LeagueConfig().mlb_team_ids
+        mlb_org_ids = set(mlb_team_ids())
     except Exception:
         mlb_org_ids = set(teams.keys())
 

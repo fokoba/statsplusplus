@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "statsplusplus"
-version = "1.0.0"
+version = "1.5.1"
 description = "Assistant GM dashboard for OOTP Baseball / StatsPlus leagues"
 requires-python = ">=3.10"
 dependencies = [
@@ -40,6 +40,9 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "real_web: drive the live Flask app against an on-disk fixture (skips the mocked web-context patch)",
+]
 
 [tool.mypy]
 packages = ["statsplusplus.models", "statsplusplus.evaluation", "statsplusplus.config", "statsplusplus.utils", "statsplusplus.data"]

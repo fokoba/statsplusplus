@@ -210,7 +210,8 @@ def find_targets(bucket, min_ovr=50, sellers_only=False, include_controlled=Fals
         SELECT p.player_id, p.name, p.age, p.team_id, p.pos, p.role,
                p.injury_is_injured, p.injury_left, p.is_on_dl, p.is_on_dl60,
                p.designated_for_assignment, p.is_on_waivers,
-               r.ovr, r.pot,
+               COALESCE(r.ovr, r.composite_score) AS ovr,
+               COALESCE(r.pot, r.ceiling_score) AS pot,
                r.cntct, r.pow, r.eye, r.speed, r.cf,
                r.cntct_r, r.pow_r, r.eye_r,
                r.cntct_l, r.pow_l, r.eye_l,
@@ -232,12 +233,12 @@ def find_targets(bucket, min_ovr=50, sellers_only=False, include_controlled=Fals
         LEFT JOIN mlb_pitching_stats pi ON p.player_id = pi.player_id
             AND pi.year = ? AND pi.split_id = 1
         WHERE p.level = '1'
-          AND r.ovr >= ?
+          AND COALESCE(r.ovr, r.composite_score) >= ?
           AND r.league_id > 0
           AND c.player_id IS NOT NULL
           AND c.salary_0 > ?
           {pos_filter}
-        ORDER BY r.ovr DESC
+        ORDER BY COALESCE(r.ovr, r.composite_score) DESC
     """, (eval_date, year, year, min_ovr, _cfg.minimum_salary)).fetchall()
 
     # Pull split stats if vs_hand requested (split_id 2=vsLHP, 3=vsRHP)
@@ -301,12 +302,11 @@ def find_targets(bucket, min_ovr=50, sellers_only=False, include_controlled=Fals
         # Detect arb-eligible: salary above minimum but service time < 6 years
         # These are NOT true rentals — acquiring team doesn't control them post-season
         if status == "RENTAL" and sal > (_cfg.minimum_salary / 1e6):
-            from statsplusplus.evaluation.arb import estimate_service_time as _est_svc
+            from statsplusplus.evaluation.arb import service_time as _svc
             conn2 = _get_conn()
-            svc = _est_svc(conn2, pid)
-            conn2.close()
-            if svc is not None and svc < 6.0:
+            if not _svc(conn2, pid).is_free_agent_eligible:
                 status = "ARB"
+            conn2.close()
         prorated = sal * (games_remaining / 162)
         if max_salary_m is not None and prorated > max_salary_m:
             continue

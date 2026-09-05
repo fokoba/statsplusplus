@@ -433,8 +433,12 @@ def main():
         d["ID"]     = d.pop("player_id", d.get("ID"))
         d["Name"]   = d.get("name", "")
         d["Age"]    = d.get("age", 0)
-        d["Ovr"]    = d.get("ovr", 0)
-        d["Pot"]    = d.get("pot", 0)
+        # Leagues that don't surface OVR/POT (e.g. PPL) store NULL. Fall back to
+        # the app's own composite/ceiling scores so downstream logic (contract
+        # flags, sorting, ceiling gaps) has numbers to work with. Note: dict.get
+        # returns None (not the default) when the key exists with a NULL value.
+        d["Ovr"]    = d.get("ovr") or d.get("composite_score") or 0
+        d["Pot"]    = d.get("pot") or d.get("ceiling_score") or d["Ovr"]
         d["Cntct"]  = d.get("cntct", 0);  d["Gap"]   = d.get("gap", 0)
         d["Pow"]    = d.get("pow", 0);    d["Eye"]   = d.get("eye", 0)
         d["Ks"]     = d.get("ks", 0);     d["Speed"] = d.get("speed", 0)
@@ -500,9 +504,9 @@ def main():
     starters  = [(p, r, b) for p, r, b in pitchers if r == "starter"]
     relievers = [(p, r, b) for p, r, b in pitchers if r in ("reliever", "closer")]
 
-    hitters.sort(key=lambda x: (pos_order.index(x[2]) if x[2] in pos_order else 99, -x[0]["Ovr"]))
-    starters.sort(key=lambda x: -x[0]["Ovr"])
-    relievers.sort(key=lambda x: (0 if x[1] == "closer" else 1, -x[0]["Ovr"]))
+    hitters.sort(key=lambda x: (pos_order.index(x[2]) if x[2] in pos_order else 99, -(x[0].get("Ovr") or 0)))
+    starters.sort(key=lambda x: -(x[0].get("Ovr") or 0))
+    relievers.sort(key=lambda x: (0 if x[1] == "closer" else 1, -(x[0].get("Ovr") or 0)))
 
     out = [
         f"# {_cfg.team_name(_cfg.my_team_id)} — Roster Scaffold",

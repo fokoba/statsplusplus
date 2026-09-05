@@ -102,10 +102,9 @@ def settings():
             set_statsplus_cookie(cookie, cfg.league_dir)
 
         elif action == "save_token":
-            # Sanctioned auth (see https://wiki.statsplus.net/web-tools/statsplus-api)
-            # — a per-team API token from this league's Preferences page on
-            # the StatsPlus site, preferred over the session cookie above
-            # once set.
+            # Sanctioned auth (https://wiki.statsplus.net/web-tools/statsplus-api):
+            # a per-team API token from this league's Prefs page on StatsPlus,
+            # preferred over the session cookie above once set.
             token = request.form.get("statsplus_token", "").strip()
             set_statsplus_token(token, cfg.league_dir)
 
@@ -226,32 +225,51 @@ def onboard_step1():
     slug = request.form.get("slug", "").strip().lower()
     session_id = request.form.get("session_id", "").strip()
     csrf_token = request.form.get("csrf_token", "").strip()
+    token = request.form.get("statsplus_token", "").strip()
+
+    def _err(msg):
+        return render_template("onboard.html", step=1, slug=slug,
+                               session_id=session_id, csrf_token=csrf_token,
+                               statsplus_token=token, error=msg)
+
     if not slug:
-        return render_template("onboard.html", step=1, slug=slug,
-                               session_id=session_id, csrf_token=csrf_token,
-                               error="Slug is required")
-    if not session_id:
-        return render_template("onboard.html", step=1, slug=slug,
-                               session_id=session_id, csrf_token=csrf_token,
-                               error="Session ID is required")
-    cookie = f"sessionid={session_id}"
-    if csrf_token:
-        cookie += f";csrftoken={csrf_token}"
+        return _err("Slug is required")
+    if not token and not session_id:
+        return _err("Provide an API token (recommended) or a session cookie")
+
+    cookie = ""
+    if session_id:
+        cookie = f"sessionid={session_id}"
+        if csrf_token:
+            cookie += f";csrftoken={csrf_token}"
+
+    # Persist credentials globally so they survive until the league dir exists.
     APP_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     app_cfg = json.loads(APP_CONFIG_PATH.read_text()) if APP_CONFIG_PATH.exists() else {}
-    app_cfg["statsplus_cookie"] = cookie
+    if cookie:
+        app_cfg["statsplus_cookie"] = cookie
+    if token:
+        app_cfg["statsplus_token"] = token
     APP_CONFIG_PATH.write_text(json.dumps(app_cfg, indent=2) + "\n")
+
     try:
         from statsplus import client
         import re
-        client.configure(slug, cookie)
+        # Prefer the token for validation via /tokencheck when provided.
+        if token:
+            ok, detail = client.tokencheck(slug, token)
+            if not ok:
+                return _err(f"Token check failed: {detail}")
+        client.configure(slug, cookie, token)
         resp = client._get("/ratings/")
         match = re.search(r'https?://\S+', resp)
         ratings_poll_url = match.group(0).rstrip(".)") if match else ""
+    except client.TokenExpiredError:
+        return _err("Token expired or invalid — log in on StatsPlus to refresh it.")
+    except client.CookieExpiredError:
+        return _err("Session cookie expired or invalid — grab a fresh one.")
     except Exception as e:
-        return render_template("onboard.html", step=1, slug=slug,
-                               session_id=session_id, csrf_token=csrf_token,
-                               error=f"Connection failed: {e}")
+        return _err(f"Connection failed: {e}")
     return render_template("onboard.html", step=2, slug=slug,
                            ratings_poll_url=ratings_poll_url)
 
@@ -262,9 +280,12 @@ def _run_onboard_refresh(slug, ratings_poll_url=""):
     _log.info("=== onboard refresh started (slug=%s) ===", slug)
     try:
         cookie = get_statsplus_cookie()
+        token = get_statsplus_token()
         script = Path(__file__).parent.parent / "src" / "statsplusplus" / "data" / "refresh.py"
         cmd = [sys.executable, "-u", str(script)]
         env = {**os.environ, "STATSPLUS_LEAGUE_URL": slug, "STATSPLUS_COOKIE": cookie, "STATSPP_LEAGUE": slug}
+        if token:
+            env["STATSPLUS_TOKEN"] = token
         if ratings_poll_url:
             env["RATINGS_POLL_URL"] = ratings_poll_url
         proc = subprocess.Popen(
@@ -356,7 +377,7 @@ def onboard_step3():
 
     if request.method == "GET":
         from statsplusplus.data import db as _db
-        conn = _db.get_conn(league_dir)
+        conn = _db.get_connection(league_dir)
         from statsplus import client
         api_teams = {t["ID"]: f"{t['Name']} {t['Nickname']}" for t in client.get_teams()
                      if t.get("Nickname")}

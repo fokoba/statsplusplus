@@ -205,6 +205,9 @@ def assign_diamond_positions(player, fielding_games=None, batting_games=0, use_p
     Returns list of (position_str, weight) tuples. Weights sum to 1.0.
     """
     role = player.get("role", 0)
+    # A NULL games value (player with a stat row but no games logged) coalesces
+    # to 0 rather than crashing the >= comparison below.
+    batting_games = batting_games or 0
     # Pitchers don't appear on the diamond
     if role in (11, 12, 13):
         return []

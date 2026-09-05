@@ -110,7 +110,8 @@ def get_assets(team_id=None, bucket=None, min_surplus_m=0,
         rows = conn.execute("""
             SELECT pf.player_id, p.name, p.age, pf.bucket, pf.fv, pf.fv_str,
                    pf.level, pf.prospect_surplus,
-                   r.ovr, r.pot
+                   COALESCE(r.ovr, r.composite_score) AS ovr,
+                   COALESCE(r.pot, r.ceiling_score) AS pot
             FROM prospect_fv pf
             JOIN players p ON pf.player_id = p.player_id
             JOIN latest_ratings r ON pf.player_id = r.player_id
@@ -169,8 +170,9 @@ def print_assets(mlb, prospects, team_id):
         print("-" * 70)
         for r in prospects:
             surp = f"${r['surplus_m']:+.1f}M"
+            ovr_pot = f"{r['ovr'] if r['ovr'] is not None else '-':>3}/{r['pot'] if r['pot'] is not None else '-':<3}"
             print(f"{r['name']:<22} {r['age']:>3} {r['bucket']:<5} {r['fv_str']:<5} "
-                  f"{r['level']:<8} {r['ovr']:>3}/{r['pot']:<3} {surp:>8}")
+                  f"{r['level']:<8} {ovr_pot} {surp:>8}")
 
 
 if __name__ == "__main__":

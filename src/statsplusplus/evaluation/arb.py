@@ -11,6 +11,7 @@ Public API:
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from typing import Any, Optional
 
 from statsplusplus.evaluation.constants import (
@@ -23,6 +24,8 @@ from statsplusplus.evaluation.constants import (
     ARB_RAISE_MIN,
     ARB_DEEP_SALARY_THRESHOLD,
     DEFAULT_MINIMUM_SALARY,
+    SERVICE_DAYS_PER_YEAR,
+    FREE_AGENCY_SERVICE_YEARS,
     SERVICE_GAMES_HITTER,
     SERVICE_STARTS_SP,
     SERVICE_GAMES_RP,
@@ -128,28 +131,140 @@ def arb_salary_perpetual(
 # ---------------------------------------------------------------------------
 
 
-def estimate_service_time(conn: Any, player_id: int) -> float:
-    """Get MLB service time as fractional years.
+# ---------------------------------------------------------------------------
+# Service time (single source of truth)
+# ---------------------------------------------------------------------------
+#
+# Real MLB / OOTP rules (see docs/ootp/financial_model.md):
+#   - A full service YEAR = 172 days on the active MLB roster (or MLB IL).
+#   - Service is expressed as `years.days`, e.g. 4.070 = 4 full years + 70 days.
+#     Only COMPLETED full years reduce team control / advance toward free agency.
+#   - Arbitration eligibility: 3 completed years (Super Two aside).
+#   - Free agency: 6 completed years.
+#
+# StatsPlus API field semantics (confirmed against live league data):
+#   - `mlb_service_days`  = CUMULATIVE total days of MLB service (NOT a 0-171
+#     remainder — an 18-year vet carries ~3183 days).
+#   - `mlb_service_years` = completed full years = floor(days / 172); redundant
+#     with days, kept by the API for convenience.
+#
+# Every consumer (arb detection, control estimation, FA classification, display)
+# must go through `service_time()` so the interpretation lives in exactly one
+# place.
 
-    Prefers exact values from the players table (mlb_service_days).
-    Falls back to games-based estimation.
+
+@dataclass(frozen=True)
+class ServiceTime:
+    """MLB service time derived from cumulative service days.
+
+    Attributes:
+        total_days: Cumulative days of MLB service.
+        years: Fractional service years (total_days / 172). Use for
+            thresholds like "arb-eligible" (>= 3) and "free agent" (>= 6).
+        completed_years: Whole completed years (floor). This is what reduces
+            remaining team control — a partial year does not count until it
+            reaches 172 days.
+        remainder_days: Days into the current, not-yet-completed year (0-171),
+            for `years.days` display.
+        exact: True if derived from the API service fields; False if the caller
+            should fall back to the games-based heuristic (no MLB service data).
+    """
+
+    total_days: int
+    years: float
+    completed_years: int
+    remainder_days: int
+    exact: bool
+
+    @property
+    def is_free_agent_eligible(self) -> bool:
+        """True if service alone qualifies the player for free agency.
+
+        NOTE: This is a service-time gate only. In OOTP a player becomes an
+        actual free agent when he has >= 6 completed years AND his contract has
+        expired (the game shows "free agent after contract expires"). A 6+ year
+        player on a multi-year deal is still controlled by that contract. Callers
+        must therefore gate this on contract state (e.g. only when the contract
+        is in its final year) — it is not "is a free agent right now".
+        """
+        return self.completed_years >= FREE_AGENCY_SERVICE_YEARS
+
+    def display(self) -> str:
+        """`years.days` notation, e.g. '4.070'."""
+        return f"{self.completed_years}.{self.remainder_days:03d}"
+
+
+def _coerce_days(raw: Any) -> Optional[int]:
+    """Normalize a raw service-days DB value to int days, or None if absent.
+
+    The column is stored inconsistently (integer for MLB players, empty text
+    for players who never reached MLB). Centralize the coercion so no caller
+    trips over `'' / 172.0` or a text divide.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, int):
+        return raw
+    s = str(raw).strip()
+    if not s:
+        return None
+    try:
+        return int(float(s))
+    except ValueError:
+        return None
+
+
+def service_time(conn: Any, player_id: int) -> ServiceTime:
+    """Resolve a player's MLB service time — the single source of truth.
+
+    Reads cumulative `mlb_service_days` from the players table and derives every
+    representation callers need (fractional years, completed years, display
+    days). Falls back to the games-based heuristic only when the API provides no
+    MLB service data.
 
     Args:
         conn: SQLite connection.
         player_id: Player ID.
 
     Returns:
-        Fractional years of MLB service (e.g. 3.5 = 3 years, 86 days).
+        A ``ServiceTime``. ``exact`` is False when the value came from the
+        games-based fallback.
     """
     row = conn.execute(
-        "SELECT mlb_service_years, mlb_service_days FROM players WHERE player_id=?",
-        (player_id,)
+        "SELECT mlb_service_days FROM players WHERE player_id=?",
+        (player_id,),
     ).fetchone()
-    if row and row[0] is not None:
-        days = row[1] or 0
-        return days / 172.0
+    days = _coerce_days(row[0]) if row else None
 
-    return _estimate_service_time_from_games(conn, player_id)
+    if days is not None:
+        completed = days // SERVICE_DAYS_PER_YEAR
+        return ServiceTime(
+            total_days=days,
+            years=days / SERVICE_DAYS_PER_YEAR,
+            completed_years=completed,
+            remainder_days=days - completed * SERVICE_DAYS_PER_YEAR,
+            exact=True,
+        )
+
+    # No MLB service data — estimate fractional years from games played.
+    est = _estimate_service_time_from_games(conn, player_id)
+    completed = int(est)
+    total = int(round(est * SERVICE_DAYS_PER_YEAR))
+    return ServiceTime(
+        total_days=total,
+        years=est,
+        completed_years=completed,
+        remainder_days=max(0, total - completed * SERVICE_DAYS_PER_YEAR),
+        exact=False,
+    )
+
+
+def estimate_service_time(conn: Any, player_id: int) -> float:
+    """Fractional MLB service years. Thin wrapper over ``service_time``.
+
+    Retained for callers that only need the fractional-year scalar.
+    """
+    return service_time(conn, player_id).years
 
 
 def _estimate_service_time_from_games(conn: Any, player_id: int) -> float:
@@ -195,29 +310,38 @@ def estimate_control(
         Tuple of (remaining_years, salary_schedule, pre_arb_years_left).
         Returns (None, None, None) if player appears to be a free agent.
     """
-    svc = estimate_service_time(conn, player_id)
+    svc = service_time(conn, player_id)
+    svc_years = svc.completed_years  # only completed years reduce control
 
-    arb_flag = conn.execute(
-        "SELECT has_received_arbitration FROM players WHERE player_id=?",
-        (player_id,)
-    ).fetchone()
-    has_arb = arb_flag[0] if arb_flag and arb_flag[0] is not None else None
+    # NOTE: Super Two is NOT modeled. Arb eligibility uses a flat 3 completed
+    # years. In real MLB/OOTP the top ~17% of players with 2.xxx service become
+    # arb-eligible a year early (a 4th arb year). Detecting it requires ranking
+    # the whole 2.xxx-service cohort against a league-configurable cutoff each
+    # offseason (it can't be read from one player's fields — `has_received_
+    # arbitration` only flips *after* the first arb, too late to catch the
+    # player whose upcoming offseason is his Super Two year). Consequence: a
+    # minority of 2.xxx players get their first arb year projected one season
+    # late (payroll slightly understated / surplus slightly overstated for
+    # them). Tracked in docs/task_list.md. Low impact — revisit if it matters.
 
     if perpetual_arb:
         remaining = max(1, 38 - age)
         return remaining, [None] * remaining, 0
 
     if salary <= min_sal:
-        if age >= 30 or (age >= 28 and svc >= 3) or svc >= 6:
+        if age >= 30 or (age >= 28 and svc_years >= 3) or svc_years >= FREE_AGENCY_SERVICE_YEARS:
             return None, None, None  # type: ignore[return-value]
-        svc_years = int(svc)
-        remaining = max(1, 6 - svc_years)
+        remaining = max(1, FREE_AGENCY_SERVICE_YEARS - svc_years)
         pre_arb_left = max(0, 3 - svc_years)
         return remaining, [None] * remaining, pre_arb_left
 
     if age >= 30:
         return None, None, None  # type: ignore[return-value]
 
-    est_svc = max(math.ceil(svc), 4 if salary > ARB_DEEP_SALARY_THRESHOLD else 3)
-    remaining = max(1, 6 - est_svc)
+    # Only completed years count toward the 6-year FA threshold. A player at
+    # 4 years 70 days (completed_years=4) has 2 years of control left, not 1.
+    # The salary-based floors guard against under-reported service on veterans
+    # (a well-paid player has clearly been in the league a while).
+    est_svc = max(svc_years, 4 if salary > ARB_DEEP_SALARY_THRESHOLD else 3)
+    remaining = max(1, FREE_AGENCY_SERVICE_YEARS - est_svc)
     return remaining, [None] * remaining, 0

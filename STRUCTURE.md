@@ -7,6 +7,8 @@ statsplusplus/
 ├── PURPOSE.md                  # Project goals and design principles
 ├── STRUCTURE.md                # This file
 ├── RULES.md                    # Data pull and storage rules
+├── start.sh / start.bat        # Launchers (venv setup, deps, stale-file prune, run app)
+├── prune_stale.py              # Manifest-based cleanup of stale files on upgrade (zip installs)
 │
 ├── src/statsplusplus/          # Core package (all logic lives here)
 │   ├── models/                     # Typed dataclasses (contracts between layers)
@@ -91,6 +93,7 @@ statsplusplus/
 │   └── client.py
 │
 └── docs/                       # Documentation
+    ├── evaluation_model_findings.md  # Model accuracy, user guide, empirical findings
 ```
 
 ## Architecture Layers

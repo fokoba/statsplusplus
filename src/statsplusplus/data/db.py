@@ -273,6 +273,7 @@ CREATE TABLE IF NOT EXISTS ratings_history (
     pot_cntct INTEGER, pot_gap INTEGER, pot_pow INTEGER, pot_eye INTEGER, pot_ks INTEGER,
     babip INTEGER, hra INTEGER, pbabip INTEGER,
     pot_babip INTEGER, pot_hra INTEGER, pot_pbabip INTEGER,
+    prone TEXT,
     composite_score INTEGER, ceiling_score INTEGER,
     offensive_grade INTEGER, baserunning_value INTEGER,
     defensive_value INTEGER, durability_score INTEGER, offensive_ceiling INTEGER,
@@ -530,6 +531,9 @@ def init_schema(league_dir: Optional[Path] = None) -> None:
     _migrate_stats_league_id(conn)
     _migrate_contracts(conn)
     _migrate_misc(conn)
+    _migrate_ratings(conn)
+    _migrate_ratings_history(conn)
+    _migrate_ratings_components(conn)
     conn.commit()
     conn.close()
 
@@ -567,6 +571,10 @@ def _migrate_ratings_history(conn: sqlite3.Connection) -> None:
     for col in new_cols:
         if col not in existing:
             conn.execute(f"ALTER TABLE ratings_history ADD COLUMN {col} INTEGER")
+    # prone is TEXT (H/N/L injury proneness), and is written by the history
+    # snapshot. Missing on installs created before it was added to the schema.
+    if "prone" not in existing:
+        conn.execute("ALTER TABLE ratings_history ADD COLUMN prone TEXT")
 
 
 def _migrate_ratings_components(conn: sqlite3.Connection) -> None:

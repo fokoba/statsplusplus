@@ -64,7 +64,9 @@ def analyze(team_id=None, year=None):
 
     # ── Hitting: primary position = most PA ──────────────────────────────────
     rows = conn.execute("""
-        SELECT p.player_id, p.name, p.pos, r.ovr, r.pot,
+        SELECT p.player_id, p.name, p.pos,
+               COALESCE(r.ovr, r.composite_score) AS ovr,
+               COALESCE(r.pot, r.ceiling_score) AS pot,
                b.avg, b.obp, b.slg, (b.obp + b.slg) as ops,
                b.war, b.pa, b.hr, b.bb, b.k,
                r.cntct_l, r.cntct_r, r.pow_l, r.pow_r, r.eye_l, r.eye_r, r.bats
@@ -134,7 +136,8 @@ def analyze(team_id=None, year=None):
 
     # ── Pitching: rotation (role=11) and bullpen (role=12/13) ────────────────
     pit_rows = conn.execute("""
-        SELECT p.player_id, p.name, p.role, r.ovr,
+        SELECT p.player_id, p.name, p.role,
+               COALESCE(r.ovr, r.composite_score) AS ovr,
                pi.era, pi.ip, pi.war, pi.k, pi.bb, pi.outs, pi.er,
                pi.gs, pi.g
         FROM players p
@@ -217,7 +220,8 @@ def print_report(data):
         delta_str = f"{h['delta']:+.3f}" if h["delta"] is not None else "     "
         war_str  = f"{h['war']:.1f}" if h["war"] else "  -"
         platoon  = f" [{h['platoon']}]" if h.get("platoon") else ""
-        print(f"{h['pos']:<5} {h['name']:<22} {h.get('ovr',0):>3}  {ops_str}  {delta_str}  {war_str:>5}  {h['pa']:>4}  {h['hr']:>3}  {icon} {h['flag']}{platoon}")
+        ovr_str = f"{h['ovr']:>3}" if h.get("ovr") is not None else "  -"
+        print(f"{h['pos']:<5} {h['name']:<22} {ovr_str}  {ops_str}  {delta_str}  {war_str:>5}  {h['pa']:>4}  {h['hr']:>3}  {icon} {h['flag']}{platoon}")
 
     # ── Pitching ─────────────────────────────────────────────────────────────
     sp = data["pitching"]["sp"]
@@ -271,12 +275,15 @@ def aaa_roster(team_id=None):
     conn = _get_conn()
     pos_map = {2:"C", 3:"1B", 4:"2B", 5:"3B", 6:"SS", 7:"LF", 8:"CF", 9:"RF", 10:"DH", 1:"P"}
     rows = conn.execute("""
-        SELECT p.player_id, p.name, p.age, p.pos, r.ovr, r.pot, r.cf, t.name as team_name
+        SELECT p.player_id, p.name, p.age, p.pos,
+               COALESCE(r.ovr, r.composite_score) AS ovr,
+               COALESCE(r.pot, r.ceiling_score) AS pot,
+               r.cf, t.name as team_name
         FROM players p
         JOIN latest_ratings r ON p.player_id = r.player_id
         JOIN teams t ON p.team_id = t.team_id
         WHERE p.parent_team_id = ? AND p.level = ?
-        ORDER BY r.ovr DESC
+        ORDER BY COALESCE(r.ovr, r.composite_score) DESC
     """, (team_id, aaa_level)).fetchall()
     conn.close()
     team_name = _cfg.team_names_map.get(team_id, str(team_id))

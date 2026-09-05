@@ -12,18 +12,35 @@
     {% if step == 1 %}
     {# ── Connect ── #}
     <form method="post" action="/onboard/step1">
-      <p>Enter the StatsPlus URL slug for this league and your session credentials.</p>
+      <p>Enter the StatsPlus URL slug for this league and how you'd like to authenticate.</p>
       <div class="form-grid">
         <label>League Slug</label>
         <input type="text" name="slug" value="{{ slug or '' }}" placeholder="e.g. emlb" required style="width:180px">
+        <label>API Token <span class="dim">(recommended)</span></label>
+        <input type="text" name="statsplus_token" value="{{ statsplus_token or '' }}" placeholder="Paste your team token" style="width:380px">
+      </div>
+      <details style="margin-top:10px">
+        <summary class="dim" style="cursor:pointer; font-size:0.85em">Where do I find the token?</summary>
+        <div style="margin-top:6px; padding:10px; background:#1a1a2e; border-radius:6px; font-size:0.85em; line-height:1.6">
+          <ol style="margin:0; padding-left:18px">
+            <li>Open <a href="https://statsplus.net" target="_blank">statsplus.net</a>, <strong>log in</strong>, and make sure you're linked to your team in this league.</li>
+            <li>Click <strong>Prefs</strong> (top-right, next to Logout) to open your User Settings page.</li>
+            <li>In the <strong>API Token</strong> box, copy the <strong>Current Token</strong> value.</li>
+          </ol>
+          <p style="margin:6px 0 0; color:#888">The <a href="https://wiki.statsplus.net/web-tools/statsplus-api" target="_blank">sanctioned</a> method — one token per team per league, valid 90 days.</p>
+        </div>
+      </details>
+
+      <div class="dim" style="margin:14px 0 6px; font-size:0.9em">Or use a session cookie (fallback — used only if no token is set):</div>
+      <div class="form-grid">
         <label>Session ID</label>
-        <input type="text" name="session_id" value="{{ session_id or '' }}" placeholder="Paste sessionid value" required style="width:380px">
+        <input type="text" name="session_id" value="{{ session_id or '' }}" placeholder="Paste sessionid value" style="width:380px">
         <label>CSRF Token <span class="dim">(optional)</span></label>
         <input type="text" name="csrf_token" value="{{ csrf_token or '' }}" placeholder="Paste csrftoken value" style="width:380px">
       </div>
       <details style="margin-top:10px">
-        <summary class="dim" style="cursor:pointer; font-size:0.85em">Where do I find these?</summary>
-        <div style="margin-top:6px; padding:10px; background:var(--bg); border-radius:6px; font-size:0.85em; line-height:1.6">
+        <summary class="dim" style="cursor:pointer; font-size:0.85em">Where do I find the cookie?</summary>
+        <div style="margin-top:6px; padding:10px; background:#1a1a2e; border-radius:6px; font-size:0.85em; line-height:1.6">
           <ol style="margin:0; padding-left:18px">
             <li>Open <a href="https://statsplus.net" target="_blank">statsplus.net</a> and <strong>log in</strong>.</li>
             <li>Press <kbd>F12</kbd> to open DevTools.</li>

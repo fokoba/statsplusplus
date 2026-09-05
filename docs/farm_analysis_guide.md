@@ -318,7 +318,7 @@ Run in this order each evaluation cycle:
 
 1. Read `config/state.json` — note the `game_date`
 2. Check whether `prospect_fv` already has rows for that `game_date`. If it does, skip to step 5.
-3. Only if data is missing or stale: `python3 scripts/refresh.py [year]`, then `python3 scripts/refresh.py state <game_date> [year]`
+3. Only if data is missing or stale: `python3 -m statsplusplus.data.refresh [year]`, then `python3 -m statsplusplus.data.refresh state <game_date> [year]`
 4. Run `python3 scripts/fv_calc.py` — computes FV for all prospects and surplus for all MLB players league-wide, writes to `prospect_fv` and `player_surplus`.
 5. Run `python3 scripts/farm_analysis.py` — reads `prospect_fv` and produces `tmp/farm_scaffold_<game_date>.md` containing:
    - All 15 ranked prospect cards with computed FV, normalized grade tables, and FV movement flags

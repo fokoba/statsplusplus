@@ -16,15 +16,6 @@ from pathlib import Path
 
 log = logging.getLogger("statspp.client")
 
-# StatsPlus runs bot filtering that serves a login page to requests with no
-# User-Agent, which otherwise surfaces as a false CookieExpiredError.
-_USER_AGENT = "statsplusplus/1.0 (+https://github.com/statsplusplus)"
-
-# Some endpoints (team stats, ratings export) can return a plain-text
-# "please wait N seconds" message in the response BODY (HTTP 200) instead of
-# a 429 status — the existing retry loop below only catches the latter.
-_WAIT_RE = re.compile(r"wait (\d+) seconds", re.IGNORECASE)
-
 # Deferred credential resolution — no module-level env reads.
 _league_url = None
 _cookie = None
@@ -42,9 +33,9 @@ def configure(league_url: str, cookie: str, token: str = ""):
 def _resolve_creds():
     """Resolve credentials lazily. Priority: configure() > league_context > .env.
 
-    Returns (league_url, cookie, token). token is the sanctioned per-team
-    API token (see https://wiki.statsplus.net/web-tools/statsplus-api) —
-    preferred over the session cookie when configured; cookie remains the
+    Returns ``(league_url, cookie, token)``. The token is the sanctioned
+    per-team API token (https://wiki.statsplus.net/web-tools/statsplus-api),
+    preferred over the session cookie when configured; the cookie remains the
     fallback for leagues that haven't set a token yet.
     """
     global _league_url, _cookie, _token
@@ -95,12 +86,53 @@ class CookieExpiredError(Exception):
     pass
 
 
-def _fetch(url: str, max_retries: int = 5) -> str:
+class TokenExpiredError(Exception):
+    """Raised when StatsPlus reports an expired or invalid API token.
+
+    Tokens are valid for 90 days; the user must log in on the StatsPlus site
+    to refresh the token, then update it in Settings.
+    """
+    pass
+
+
+class RateLimitedError(Exception):
+    """Raised when a rate-limited endpoint refuses and the wait is too long to
+    block on (e.g. the /ratings once-per-5-minutes-per-team cooldown). Carries
+    the number of seconds to wait so callers can surface it to the user."""
+    def __init__(self, seconds: int, message: str = ""):
+        self.seconds = seconds
+        super().__init__(message or f"Rate limited — try again in {seconds} seconds.")
+
+
+# StatsPlus runs bot filtering that serves a login page to requests with no
+# User-Agent. Identify the tool so the request isn't filtered. See:
+# https://wiki.statsplus.net/web-tools/statsplus-api#authentication
+_USER_AGENT = "statsplusplus/1.0 (+https://github.com/statsplusplus)"
+
+# Per the StatsPlus API docs, several errors are returned as HTTP 200 with a
+# plain-text body (rate-limit waits, expired credentials, "ratings updating",
+# etc.). A tool that only checks the status code saves the message into the
+# file where it expected data. We detect these human-message bodies and branch:
+# rate-limit → retry; auth → raise; transient → retry.
+# https://wiki.statsplus.net/web-tools/statsplus-api  (Status codes and response types)
+_WAIT_RE = re.compile(r"wait (\d+) seconds", re.IGNORECASE)
+_RATE_LIMIT_MAX_RETRIES = 4
+
+# Human-message markers (matched case-insensitively against the response body).
+_MSG_TOKEN_EXPIRED = "api token has expired"
+_MSG_TOKEN_INVALID = "invalid or unknown api token"
+_MSG_LOGIN_REQUIRED = "requires user to be logged in"
+# Transient "try again shortly" messages that are not a fixed wait-N-seconds.
+_MSG_RATINGS_UPDATING = "ratings are being updated"
+_MSG_IN_PROGRESS = "still in progress"
+
+
+def _fetch(url: str, _retries: int = _RATE_LIMIT_MAX_RETRIES) -> str:
     _, cookie, token = _resolve_creds()
     headers = {"Accept": "application/json", "User-Agent": _USER_AGENT}
     if token and "token=" not in url:
-        # Sanctioned auth (see https://wiki.statsplus.net/web-tools/statsplus-api):
-        # a per-team token appended as a query param, not the session cookie.
+        # Sanctioned auth: per-team token as a query param, no session cookie.
+        # https://wiki.statsplus.net/web-tools/statsplus-api
         # Skip if the URL already carries a token= param — export poll URLs
         # (e.g. /api/mycsv/?request=...&token=...) embed their own per-job
         # token, and appending ours a second time breaks the poll.
@@ -108,32 +140,73 @@ def _fetch(url: str, max_retries: int = 5) -> str:
         url = f"{url}{sep}token={token}"
     elif not token:
         headers["Cookie"] = cookie
-    req = urllib.request.Request(url, headers=headers)
-    for attempt in range(max_retries):
+
+    for attempt in range(_retries + 1):
+        req = urllib.request.Request(url, headers=headers)
+        ctype = ""
         try:
             with urllib.request.urlopen(req) as r:
+                ctype = (r.headers.get("Content-Type") or "").lower()
                 body = r.read().decode()
         except urllib.error.HTTPError as e:
-            if e.code in (429, 502, 503, 504) and attempt < max_retries - 1:
+            # HTTP 429: team-stats render limit. Honor Retry-After, else back off.
+            if e.code == 429 and attempt < _retries:
                 retry_after = e.headers.get("Retry-After") if e.headers else None
-                wait = int(retry_after) if retry_after and retry_after.isdigit() else 20 * (attempt + 1)
-                log.info("HTTP %d — waiting %ds before retry... (attempt %d/%d)",
-                          e.code, wait, attempt + 1, max_retries)
-                time.sleep(wait)
+                wait = int(retry_after) if retry_after and retry_after.isdigit() else 35
+                log.info("Rate limited (429) — waiting %ds (attempt %d)", wait, attempt + 1)
+                time.sleep(wait + 2)
                 continue
             raise
-        m = _WAIT_RE.search(body)
-        if m and attempt < max_retries - 1:
-            wait = int(m.group(1))
-            log.info("Rate limited (body message) — waiting %ds (attempt %d/%d)",
-                      wait, attempt + 1, max_retries)
-            time.sleep(wait + 2)
-            continue
-        break
-    if "requires user to be logged in" in body:
-        raise CookieExpiredError(
-            "StatsPlus session expired — update your cookie in Settings.")
+        # Content-type / human-message guard: StatsPlus returns several errors as
+        # HTTP 200 with a text/plain body. Only inspect the body as a "human
+        # message" when it isn't the expected data content-type (CSV/JSON), so
+        # legitimate data that happens to contain a keyword isn't misclassified.
+        is_data_ctype = ("text/csv" in ctype) or ("json" in ctype)
+        if not is_data_ctype:
+            decision = _classify_message(body)
+            if decision == "auth_token":
+                raise TokenExpiredError(
+                    "StatsPlus API token expired or invalid — log in on the "
+                    "StatsPlus site to refresh it, then update it in Settings.")
+            if decision == "auth_cookie":
+                raise CookieExpiredError(
+                    "StatsPlus session expired — update your cookie in Settings.")
+            if decision == "wait" and attempt < _retries:
+                m = _WAIT_RE.search(body)
+                wait = int(m.group(1)) if m else 30
+                log.info("Rate limited — waiting %ds (attempt %d)", wait, attempt + 1)
+                time.sleep(wait + 2)
+                continue
+            if decision == "transient" and attempt < _retries:
+                log.info("StatsPlus data not ready (%s) — retrying (attempt %d)",
+                         body.strip()[:60], attempt + 1)
+                time.sleep(15)
+                continue
+            # decision == "data" (or retries exhausted): fall through and return.
+        return body
     return body
+
+
+def _classify_message(body: str) -> str:
+    """Classify an API response body into a handling decision.
+
+    Returns one of: ``"auth_token"``, ``"auth_cookie"``, ``"wait"``,
+    ``"transient"``, or ``"data"``. Only the plain-text human messages the
+    StatsPlus API documents are recognized; anything else is treated as data.
+    Note: the ratings-export poll expects ``still in progress`` bodies and
+    handles them itself, so those are classified as data here (the poll loop
+    inspects them), not as a generic transient error.
+    """
+    low = body.lower()
+    if _MSG_TOKEN_EXPIRED in low or _MSG_TOKEN_INVALID in low:
+        return "auth_token"
+    if _MSG_LOGIN_REQUIRED in low:
+        return "auth_cookie"
+    if _WAIT_RE.search(body):
+        return "wait"
+    if _MSG_RATINGS_UPDATING in low:
+        return "transient"
+    return "data"
 
 
 def _get(path: str, params: dict = {}) -> str:
@@ -193,6 +266,45 @@ def get_teams() -> list[dict]:
 
 def get_date() -> str:
     return _get("/date/").strip()
+
+
+def tokencheck(slug: str, token: str) -> tuple[bool, str]:
+    """Validate a StatsPlus API token against a league.
+
+    Uses the documented /tokencheck endpoint
+    (https://wiki.statsplus.net/web-tools/statsplus-api): returns the team ID
+    (plain text) on success, or HTTP 400 with "Invalid Token" / "Token expired".
+
+    Args:
+        slug: League URL slug (e.g. "emlb").
+        token: The per-team API token to validate.
+
+    Returns:
+        (ok, detail). On success ``ok`` is True and ``detail`` is the team ID.
+        On failure ``ok`` is False and ``detail`` is a human-readable reason.
+    """
+    if not token:
+        return False, "No token provided"
+    url = f"https://statsplus.net/{slug}/api/tokencheck/?token={token}"
+    req = urllib.request.Request(
+        url, headers={"Accept": "text/plain", "User-Agent": _USER_AGENT})
+    try:
+        with urllib.request.urlopen(req) as r:
+            body = r.read().decode().strip()
+        # Success is a team ID; but guard against HTTP-200 message bodies too.
+        decision = _classify_message(body)
+        if decision == "auth_token":
+            return False, "Token expired or invalid"
+        return True, body
+    except urllib.error.HTTPError as e:
+        try:
+            detail = e.read().decode().strip() or f"HTTP {e.code}"
+        except Exception:
+            detail = f"HTTP {e.code}"
+        return False, detail
+    except Exception as e:
+        return False, str(e)
+
 
 def get_exports() -> dict:
     return _json("/exports/")
@@ -260,8 +372,9 @@ _RATINGS_EXPECTED_126 = (
 ).split(",")
 
 # Newer OOTP export (127 cols). Drops Ovr, Pot, Prone — leagues that don't
-# surface OVR/POT (e.g. PPL) never populated these anyway. Adds GBType, FBType,
-# PotVel, ArmSlot. The three Ctrl columns are already correctly labeled.
+# surface OVR/POT (e.g. PPL) never populated these anyway. Adds pitcher
+# batted-ball type descriptors (GBType, FBType), potential velocity (PotVel),
+# and arm slot (ArmSlot). The three Ctrl columns are already correctly labeled.
 _RATINGS_EXPECTED_127 = (
     "ID,Name,Pos,League,Team,Org,LgLvl,Age,Height,Bats,Throws,"
     "Cntct,Gap,Pow,Eye,Ks,BABIP,Cntct_R,Gap_R,Pow_R,Eye_R,Ks_R,BABIP_R,"
@@ -278,7 +391,11 @@ _RATINGS_EXPECTED_127 = (
     "Int,WrkEthic,Greed,Loy,Lead,Acc"
 ).split(",")
 
-_RATINGS_KNOWN_FORMATS = {113: _RATINGS_EXPECTED_113, 126: _RATINGS_EXPECTED_126, 127: _RATINGS_EXPECTED_127}
+_RATINGS_KNOWN_FORMATS = {
+    113: _RATINGS_EXPECTED_113,
+    126: _RATINGS_EXPECTED_126,
+    127: _RATINGS_EXPECTED_127,
+}
 
 
 def _fix_ratings_header(text: str) -> str:
@@ -298,13 +415,8 @@ def _fix_ratings_header(text: str) -> str:
 
     cols = lines[0].split(",")
 
-    # Only repair the mislabeled legacy header. Newer exports (127-col) label
-    # the three Ctrl columns correctly — if a plain "Ctrl" is already present
-    # the header is well-formed and this rename logic would corrupt it (it'd
-    # blow away the real "Ctrl" while relabeling the real "Ctrl_R").
-    has_plain_ctrl = "Ctrl" in cols
-
     # Find the three Ctrl columns by scanning for the pattern
+    has_plain_ctrl = "Ctrl" in cols
     ctrl_r_idx = None
     ctrl_l_indices = []
     for i, c in enumerate(cols):
@@ -313,6 +425,10 @@ def _fix_ratings_header(text: str) -> str:
         elif c == "Ctrl_L":
             ctrl_l_indices.append(i)
 
+    # Only repair the mislabeled legacy header. Newer exports label the three
+    # Ctrl columns correctly (Ctrl / Ctrl_R / Ctrl_L). If a plain "Ctrl" column
+    # is already present, the header is well-formed — running the rename would
+    # corrupt it (turning Ctrl_R → Ctrl duplicate, Ctrl_L → Ctrl_R).
     if has_plain_ctrl:
         pass  # already correct — no repair needed
     elif ctrl_r_idx is not None and len(ctrl_l_indices) >= 2:
@@ -360,19 +476,28 @@ def _fix_ratings_header(text: str) -> str:
 
 
 def start_ratings_export() -> str:
-    """Kick off the ratings export and return the poll URL without waiting."""
-    for attempt in range(5):
-        resp = _get("/ratings/")
-        wait = re.search(r'wait (\d+) seconds', resp)
-        if wait:
-            secs = int(wait.group(1))
-            log.info(f"Rate limited — waiting {secs}s...")
-            time.sleep(secs + 2)
-            continue
-        if "being updated" in resp.lower():
-            log.info("Ratings still being updated league-side — waiting 60s... (attempt %d)", attempt + 1)
-            time.sleep(60)
-            continue
+    """Kick off the ratings export and return the poll URL.
+
+    /ratings is rate-limited to once per 5 minutes per team. Rather than block
+    a refresh (and its lock) for a multi-minute cooldown, short waits are slept
+    through and longer ones are surfaced as RateLimitedError so the caller can
+    tell the user exactly how long to wait.
+    """
+    _RATINGS_MAX_BLOCKING_WAIT = 45  # sleep through brief waits; surface longer ones
+    for attempt in range(3):
+        # _retries=0: inspect the wait ourselves instead of _fetch auto-sleeping.
+        resp = _fetch(f"{_base_url()}/ratings/", _retries=0)
+        m = _WAIT_RE.search(resp)
+        if m:
+            secs = int(m.group(1))
+            if secs <= _RATINGS_MAX_BLOCKING_WAIT and attempt < 2:
+                log.info("ratings: rate limited — waiting %ds...", secs)
+                time.sleep(secs + 2)
+                continue
+            raise RateLimitedError(
+                secs,
+                f"StatsPlus limits ratings pulls to once per 5 minutes per team. "
+                f"Try again in about {secs} seconds.")
         break
     match = re.search(r'https?://\S+', resp)
     if not match:

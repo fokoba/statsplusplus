@@ -4,6 +4,191 @@ Completed and deferred work items, organized by session. Moved from `task_list.m
 
 ---
 
+## Session 84 (2026-09-04)
+
+### Service time — single source of truth + control fix
+
+- **Consolidated all MLB service-time interpretation into one helper** (`evaluation/arb.py`). New `service_time(conn, pid) -> ServiceTime` (frozen dataclass) is the single place that reads the service fields and derives fractional years, completed years, and `years.days` display. Rewired the five divergent call sites that each computed service inline and disagreed with each other: `estimate_control`, `free_agents.py` (arb detection), `fv_calc.py` and `trade_calculator.py` (1-year-deal control), `web/queries.py` (waiver-wire display), and `trade_targets.py` (RENTAL→ARB). `estimate_service_time` is retained as a thin wrapper.
+- **Fixed control under-count for arb-eligible players.** `estimate_control` used `math.ceil(svc)`, so a player at 4 years 70 days (4.41 svc) was rounded to 5 and shown with 1 control year instead of 2. Only *completed* years reduce control (`completed_years = days // 172`); the fix uses that. Verified end-to-end on real data — affected above-minimum arb players (e.g. 4.87 svc) now correctly return 2 control years, while completed-5 players correctly stay at 1 (no over-correction). **Scope:** this flows into the direct `estimate_control` callers — `contract_value.py`, `team_queries.py`, `projections.py` (CLI/web contract-value paths). It does **not** change `player_evaluation.surplus`, because `fv_calc` reads control straight from the contract for above-min players and only invokes the service helper for near-minimum 1-year (pre-arb) deals. Re-ran `fv_calc` to confirm: surplus table unchanged for these players (correct), distribution sane (8444 prospects, MLB surplus avg $13.7M).
+- **Confirmed field semantics against real data:** `mlb_service_days` is the *cumulative total* (an 18-year vet carries ~3183 days), full year = 172 days, so `mlb_service_years = floor(days/172)`. Corrected two docs (`api_impact_analysis.md`/`client_reference.md` had described days as a 0-171 remainder) and removed the wrong `f"{years}.{days:03d}"` display in `web/queries.py` that would have rendered `18.3183`. Centralized coercion of the text/empty-string-typed column so no caller trips over `'' / 172`.
+- **Super Two:** explicitly documented as **not modeled** (flat 3-year arb threshold). Removed the dead `has_received_arbitration` fetch in `estimate_control` (queried, never used) since it can't catch the pre-first-arb 2.xxx player anyway. Tracked as a low-impact backlog item.
+- Added `SERVICE_DAYS_PER_YEAR` (172) and `FREE_AGENCY_SERVICE_YEARS` (6) constants. Suite: 828 passing, 1 skipped.
+
+---
+
+### StatsPlus API — Token Authentication (sanctioned integration path)
+
+Reviewed the updated StatsPlus API wiki (`docs/StatsPlus APIs _ StatsPlus Wiki.html`),
+captured findings in `docs/statsplus_api_analysis.md`, and adapted PR #11
+(fokoba) with the token-expiry/error safety it was missing.
+
+- **Per-team API token** is now the preferred auth method — the documented
+  "method to use from a script or tool." Passed as `?token=`; the session
+  cookie is kept as an automatic fallback, so existing installs are unchanged.
+  New `get/set_statsplus_token` storage mirrors the cookie.
+- **Content-type / human-message guard in `_fetch`** (both clients) — StatsPlus
+  returns several errors as HTTP 200 `text/plain` (expired/invalid token,
+  logged-out, rate-limit, "ratings updating"). A tool that only checks the
+  status code saves the error message where it expected data. `_fetch` now
+  classifies these: raises `TokenExpiredError` / `CookieExpiredError` for auth,
+  retries rate-limit/transient, and only parses genuine data. This closes a
+  data-corruption hole (an expired token would otherwise poison a refresh).
+- **`/tokencheck`** client method; Settings + onboarding "Test Connection"
+  validate tokens through it and report the team the token maps to.
+- Token threaded through every `configure()` call site (refresh subprocess env,
+  draft fetch web + CLI, date check, test-connection). Refresh surfaces
+  `TokenExpiredError`.
+- **UI**: Settings + onboarding gain an "API Token (recommended)" section with
+  the cookie relabeled as fallback; the header **StatsPlus Session** panel is
+  now a full connection panel (token + cookie, method-aware "✓ active (token)"
+  status). Instructions match the real StatsPlus flow (Prefs → API Token →
+  Current Token; 90-day expiry; one token per team per league). README gains a
+  "Getting Your StatsPlus API Token" section.
+
+### StatsPlus API — Rate Limiting
+
+Addresses user reports of rate-limiting failures during refresh.
+
+- **`/date` gate** — `refresh.py` compares the remote game date to the stored
+  one and **skips the whole pull when unchanged** ("Already up to date"),
+  stopping the common "refresh again to check" cycle from hitting the
+  once-per-5-minutes-per-team `/ratings` limit. `--force` overrides. A failed
+  refresh doesn't advance the stored date, so fix-and-retry still re-runs.
+- **`/ratings` cooldown** — `start_ratings_export` no longer blocks the refresh
+  (and its lock) for a multi-minute cooldown: short waits are slept through,
+  longer ones raise `RateLimitedError(seconds)` surfaced to the user as
+  "try again in about N seconds." Fixed a pre-existing broken log f-string.
+
+### Fix
+
+- Widened the composite decomposition round-trip test tolerance (22 → 26) — the
+  Session 82 per-tool transform amplifies standout tools, widening the gap
+  between the direct composite (floor + imbalance penalties) and the lossless
+  recombination for extreme profiles. Surfaced by a hypothesis seed; not a
+  correctness change.
+
+
+
+### Bug Fixes — League Overview & Rankings (early-season sample-size)
+
+A cluster of bugs surfaced 6 games into the eMLB regular season, all from
+full-season assumptions applied to early-season data:
+
+- **League leaders empty / wrong** (`web/queries.py`) — `get_batting_leaders`/`get_pitching_leaders` gated the row set behind hard playing-time floors (`pa >= 50`, `ip >= 10`). Six games in, no hitter had 50 PA (max was 37) so every batting panel was empty, and only one reliever cleared 10 IP so the saves leaderboard showed a single bogus "1 save". Removed the floors entirely: rate stats (AVG/OPS/ERA/WHIP) are gated by the existing games-scaled qualifier; counting stats (HR/RBI/SB/W/K/SV/WAR) are ungated. The top-N selector already ignores NULLs, so zero-stat rows can't surface.
+- **Positional rankings: SPs flooding RP** (`web/queries.py get_positional_rankings`) — SP/RP was classified as `gs > 3 AND gs/g > 0.5`. The `gs > 3` floor misclassified every starter as a reliever early season (league max was 2 GS), so aces (McClanahan, Crochet) fell into RP and SP was starved. Dropped the absolute GS floor; the `gs/g > 0.5` ratio is the real discriminator and works at any sample size.
+- **Player-page positional rank pool too small / inconsistent** (`web/player_queries.py _mlb_context`) — the "#N of M at position" panel gated its peer pool by a full-season IP/PA floor (e.g. RP `ip >= 8`), collapsing the pool to ~11 relievers early season ("#5 of 11"). Composite/ceiling are ratings-based, so the pool is now every MLB player who has appeared at the bucket (no playing-time floor), and pitchers are split by usage (`gs/g`) rather than unreliable role codes — consistent with the positional-rankings page.
+
+### Evaluation Model — MLB Stat Blending (aging, staleness, traded players)
+
+Investigated a report that a high-end closer (Grimaldo) ranked below fringe
+relievers. Root cause was the stat blend over-crediting aging/stale results.
+Data-grounded fixes (validated against `scripts/model_regression.py`; blend
+still "HELPS", RMSE stable):
+
+- **Symmetric aging-player dampener** (`evaluation/composite.py compute_composite_mlb`) — the blend dampened young players whose tools exceed a small stat sample; added the mirror for post-peak players whose fading results exceed their declined tools. Empirically, the age-35+ reliever group had the largest positive blend lift (+3.93), concentrated in low-stuff arms; after the fix the lift curve peaks at 29-31 and decays with age (35+ down to +0.56), with low-stuff aging arms no longer lifted more than high-stuff ones.
+- **Traded-player year aggregation** (`data/evaluation_engine.py _load_qualifying_stat_seasons`) — qualifying seasons are now summed **by year** before the threshold is applied, with rate stats recomputed from summed components. Fixes both double-counting (a traded player's two stints inflating `seasons_available` toward the 0.60 blend weight) and under-counting (a split season that qualifies only when summed).
+- **Stale-season decay/drop** (`_compute_stat_signal`) — qualifying seasons ≥4 years old are dropped; retained older seasons have their deviation from average shrunk 15%/year. Prevents ancient production from driving a current composite.
+
+### Calibration Process — Pitcher Tool Weights
+
+Diagnosed implausible calibrated pitcher weights (movement ~0.62, stuff as low
+as 0.07 for RP) that ranked a 38-stuff pitcher above 100-stuff aces. Root causes
+and process fixes (`data/calibrate.py`, `data/evaluation_engine.py`):
+
+- **Removed `arsenal` as a regression feature** — OOTP's Stuff rating is already ≈ a function of the pitcher's top pitches (corr(stuff, top-3 pitch mean) ≈ 0.97), so an arsenal count was a collinear proxy stealing Stuff's share in the per-feature r² weighting. Arsenal is re-added as a small fixed (0.05) differentiator in the composite, never calibrated.
+- **Prior shrinkage** — new `shrink_weights_toward_prior()` blends calibrated weights toward the hand-tuned defaults, ridge-style, with the prior weighted more as sample size shrinks (floor 25% even at full sample). Prevents per-feature r² weighting from starving a primary tool.
+- Removed the dead "HRA-as-movement proxy" line in calibration (HRA is unpopulated in this league — corr 0.00 — so it silently fell back to movement).
+
+*Note: further work in progress on per-tool, per-league marginal-WAR-derived transform curves (residualized) — the flat global `tool_transform` under-rewards standout skills, whose marginal WAR is strongly convex at the top of the rating distribution.*
+
+### Evaluation Model — Per-Tool, Per-League Transform Curves
+
+Replaced the single hardcoded global `tool_transform` (flat 1.3× above 60 /
+1.5× below 40) with per-tool, per-league value curves derived from each
+league's own data. The prototype confirmed marginal WAR is strongly **convex**
+at the top of the rating distribution and the convexity **varies by tool**
+(contact/power/stuff steep; gap/speed near-linear; RP tools flat/noisy).
+
+- **New primitives** (`evaluation/composite.py`): `derive_tool_transform()` turns residualized marginal-WAR-by-band data into a monotone, 50-pinned, clamped effective-rating curve, shrunk toward a per-tool prior by band sample size (thin/absent bands fall back to prior). `apply_tool_transform()` interpolates a rating through a curve, falling back to the global transform when none exists (backward compatible).
+- **Calibration** (`data/calibrate.py`): `_calibrate_tool_transforms` isolates each tool's own WAR contribution via multivariate-OLS **residualization** (removes correlated tools' signal — cf. the stuff/movement problem), bins the residual by rating band, and derives a curve per tool per player-type/role. Stored under a new `tool_transforms` key in `tool_weights.json`.
+- **Wiring**: threaded optional per-tool curves through the composite functions and all ceiling functions (`compute_ceiling`/`compute_true_ceiling`/`compute_component_ceilings`), so both current composite AND potential/ceiling scoring use the calibrated curves. The engine loads the curves and passes the hitter/SP/RP set to every scoring call.
+- **Effect**: standout skills now assert themselves. Elite-upside prospects gain up to +9 ceiling (e.g. a 70-potential-power bat), org-filler with weak potential drops, sharpening farm tiers. MLB: McClanahan's ceiling correctly leads the ace group.
+
+**Out-of-sample validation** — added `--test holdout` to `model_regression.py`: fits transform curves on all years except a hold-out year, then compares global vs per-tool transform at predicting the hold-out year's WAR. Across four independent hold-out years (2030-2033), the per-tool transform improved **hitter** out-of-sample WAR prediction by **+0.046 R² every year** (a robust, genuine gain), and was **−0.020 R²** for **pitchers** (a small cost). The pitcher transform is thus a deliberate tradeoff: it fixes eye-test ordering and ceiling sensibility for elite arms at a small cost to raw WAR prediction, since pitcher WAR in this league is genuinely movement-driven (accepted).
+
+### Calibration Process (continued)
+
+- Added `shrink_weights_toward_prior()` (ridge-style shrinkage) and applied it to pitcher tool-weight calibration; removed `arsenal` as a regression feature (collinear proxy for Stuff, corr 0.97) — re-added as a small fixed 0.05 differentiator. Weights recalibrated on eMLB: RP stuff 0.07→0.18, SP stuff 0.23→0.27 (movement still leads, per the data).
+
+
+
+### Fresh-Install Fix — Package Not Importable
+
+- **`ModuleNotFoundError: No module named 'statsplusplus'` for zip users** — the launchers ran `pip install -r requirements.txt`, which installs Flask but not the `src/`-layout package, so the app failed to import for anyone using the primary (launcher) install path — not just the developer path fixed in Session 80. Two-layer fix: (1) `start.sh`/`start.bat` now run `pip install -e .` (installs Flask via pyproject **and** the package, and enables the `spp-*` commands); (2) `web/app.py` also self-bootstraps `src/` onto `sys.path` as defense-in-depth, so the app imports even if the editable install didn't take. Fixed the README troubleshooting note that recommended the failing `requirements.txt` command. Added `tests/test_install_bootstrap.py` — runs `web/app.py` in a subprocess with the editable install neutralized to prove the bootstrap works on its own.
+
+
+### Release Mechanism — Manifest-Based Cleanup
+
+- **Dropped the `scripts/refresh.py` / `scripts/calibrate.py` shims** (added Session 80). Their logic lives in the package, and the launcher's cleanup list already treated those filenames as dead — the two collided. Standardized on `python3 -m statsplusplus.data.refresh` / `.calibrate` (and `spp-refresh` / `spp-calibrate` after `pip install -e .`). Updated README, RULES.md, PURPOSE.md, `system_overview.md`, `tools_reference.md`, the guide docs, and the dev-agent steering. The `spp-refresh`/`spp-calibrate` entry points and module invocations are unaffected.
+
+- **Manifest-based stale-file cleanup** — replaced the launchers' hardcoded "dead files" delete loop (which ran on every launch and couldn't tell a stale leftover from a legitimately re-added file) with a manifest-driven prune. The release workflow now emits `MANIFEST.txt` (generated from the zip's own contents, so it can't drift) and includes it in the zip. `prune_stale.py` deletes any `.py` under tracked code dirs (`scripts/`, `src/`, `web/`, `statsplus/`) not in the manifest. Conservative by design: no-op without a manifest (dev checkouts), only `.py` files, never touches `data/`/config/non-code. Composes with the future external-data-directory move. Added `tests/test_prune_stale.py` (7 tests covering the safety properties). `start.sh`/`start.bat` now call `prune_stale.py`.
+
+### Testing Design
+
+- Added `docs/testing_pipeline_design.md` — a draft plan for a staged test/release pipeline (commit CI matrix, artifact-boot validation, Playwright rendering, live-API contract canary). Not yet implemented.
+
+## Session 80 (2026-09-01)
+
+### Bug Fixes — Ratings CSV Ingestion
+
+- **New 127-column ratings export broke ingestion** — StatsPlus changed the ratings-export CSV schema: it now has 127 columns, drops `Ovr`/`Pot`/`Prone`, and adds `GBType`/`FBType`/`PotVel`/`ArmSlot`. Registered the 127-col layout as a known format so the "header changed" warning no longer fires. Leagues that don't surface OVR/POT (e.g. PPL) never populated those fields anyway — the app's own composite/ceiling/FV model runs fine without them (verified: PPL refresh produces 6,497 prospect FV grades and 8,252 player evaluations).
+
+- **Ctrl column repair corrupted correctly-labeled headers** — `_fix_ratings_header` was written to fix a legacy export that mislabeled the three control columns. The newer export labels them correctly (`Ctrl`/`Ctrl_R`/`Ctrl_L`), but the repair still fired — renaming the real `Ctrl_R` → `Ctrl` (duplicate) and `Ctrl_L` → `Ctrl_R`, corrupting control-vs-hand ratings. Added a guard: skip the repair when a plain `Ctrl` column is already present. Legacy repair path preserved. Fixed in both `statsplus/client.py` (live path) and `src/statsplusplus/client/statsplus.py`. Added `tests/test_ratings_header.py` (4 tests).
+
+- **Refresh had no logging** — `refresh.py`'s `__main__` never called `setup_logging()`, so refresh runs left no trace in `data/logs/` (INFO dropped entirely; only stray WARNINGs escaped via Python's last-resort handler). This is why the failed PPL pull produced no diagnostic trail. Now configures console + `data/logs/statspp.log` at startup.
+
+### Bug Fixes — CLI Entry Points (refactor leftovers)
+
+- **`spp-refresh` and `spp-calibrate` entry points were broken** — both `pyproject.toml` scripts pointed at a `main()` function that didn't exist (`statsplusplus.data.refresh:main`, `statsplusplus.data.calibrate:main`); the modules only had bare `if __name__ == "__main__"` blocks. Extracted a `main()` in each (both now also call `setup_logging`). Audited all 15 entry points — the other 13 were fine.
+- **`scripts/refresh.py` / `scripts/calibrate.py` missing** — README, RULES.md, steering docs, and `tools_reference.md` all document `python3 scripts/refresh.py [year]`, but no such shim existed after the refactor (the logic moved into the package). Added thin shims delegating to the package `main()`, matching the pattern used by every other `scripts/` CLI tool.
+
+**Known (not fixed this session):** the web layer has two divergent Flask apps — the live `web/app.py` (full route set, run via `python3 web/app.py`) and a partial `create_app` factory in `src/statsplusplus/web/app.py` (the `spp-web` entry point) whose blueprints cover only a subset of routes. Finishing the web migration is a larger cleanup tracked under the codebase quality work.
+
+### Bug Fixes — Fresh Install (Windows beta tester report)
+
+Six issues hit going from `git clone` to a working dashboard on a clean install:
+
+- **`ModuleNotFoundError: No module named 'statsplusplus'`** — README's developer install ran `pip install -r requirements.txt`, which installs Flask but not the `src/` package, so `web/app.py` and every `scripts/*.py` failed to import `statsplusplus`. README now instructs `pip install -e .` with an explanation.
+- **Ratings export failed with `CookieExpiredError` even with a fresh cookie** — StatsPlus runs bot filtering that serves a login page to requests with no `User-Agent`; `_fetch()` interpreted that as an expired cookie. Added a `User-Agent` header (per the StatsPlus API docs). Applied to both client copies.
+- **Historical backfill / team-stats hit HTTP 429** — team-stats endpoints are rate limited (one render/minute, plus a per-year render lock). `_fetch()` now handles rate limiting centrally: it retries on HTTP 429 (honoring `Retry-After`) and on the plain-text "wait N seconds" body message StatsPlus returns, rather than requiring manual `sleep()` calls in `refresh.py`.
+- **`table ratings_history has no column named prone`** — the `ratings_history` snapshot writes a `prone` value, but the column was missing from the `CREATE TABLE` and the migration (affected fresh installs, not just upgrades). Added `prone TEXT` to the schema and to `_migrate_ratings_history`. **Also found:** the ratings migration functions (`_migrate_ratings`, `_migrate_ratings_history`, `_migrate_ratings_components`) were defined but never called by `init_schema` — orphaned since the package refactor. Wired all three in (idempotent additive `ALTER TABLE`s), so existing installs now pick up `prone` and other post-refactor columns on startup instead of only fresh installs.
+- **`module 'statsplusplus.data.db' has no attribute 'get_conn'`** — onboarding step 3 called `_db.get_conn(league_dir)`; the function is `get_connection()`. Fixed in `web/settings_routes.py` and two silently-failing call sites in `web/player_queries.py` (promotion/demotion readiness).
+
+Regression tests added: `tests/data/test_db.py` (prone column, fresh + migration), `tests/test_ratings_header.py` (User-Agent header, wait-message retry).
+
+### Bug Fixes — Refactor Audit (OVR/POT-less leagues)
+
+A systematic audit (import every module, invoke every CLI tool against PPL, boot the web app) surfaced a class of bugs where CLI analysis tools assumed OVR/POT are always numbers — they crash on leagues that don't surface them (PPL returns NULL).
+
+- **`team_needs.py`, `trade_assets.py`, `farm_analysis.py`, `roster_analysis.py` crashed on PPL** with `NoneType` format/comparison errors. Root cause: raw `r.ovr`/`r.pot` are NULL and `dict.get(k, default)` returns None (not the default) when the key exists with a NULL value. Fixed at the data-loading layer — OVR falls back to the app's `composite_score`, POT to `ceiling_score` (SQL `COALESCE` in the query tools, dict coalesce in the scaffold tools). Verified: COALESCE is a no-op on OVR-present leagues (emlb still shows real game OVR), and PPL now shows composite-derived values instead of crashing. The web UI already handled this correctly.
+- **Removed `scripts/_prospect_debug.py`** — a committed one-off debug script (hardcoded player name + cookie) that overwrote `data/app_config.json` on import. Not a real tool, not referenced anywhere; it was the sole module-import failure in the audit.
+
+Regression test added: `tests/test_scripts.py::TestOvrPotFallbackForLeaguesWithoutOvr`.
+
+### Test Infrastructure — Interface Smoke Tests
+
+Added a cheap smoke-test layer that would have caught nearly every bug this session (broken entry points, tools crashing on OVR/POT-less leagues):
+
+- **`tests/test_entry_points.py`** — parses `[project.scripts]` from `pyproject.toml` and asserts every entry point resolves to a callable `main` (16 tests). Guards against the `spp-refresh`/`spp-calibrate` no-`main()` regression.
+- **`tests/test_cli_smoke.py`** — builds two on-disk fixture leagues (OVR/POT present, and OVR/POT NULL/PPL-style) and runs each CLI tool as a subprocess against both, asserting a clean exit (20 tests). Exercises the real invocation path (module-level context resolution + queries), not mocked internals.
+- **Caught a real miss:** the smoke test surfaced that `benchmark.py`'s *prospect* comparison path (`comp - ovr`) still crashed on OVR-less leagues — the earlier guard only covered the MLB path. Fixed by detecting OVR-unavailability across both MLB and prospect data before any comparison.
+- **`tests/test_web_smoke.py`** — boots the live `web/app.py` against on-disk fixture leagues (OVR-present + OVR-less) and asserts key routes (`/dashboard`, `/league`, `/team/<id>`, `/team/<id>/minors`, `/player/<id>`, `/settings`, and read-only API GETs) return non-5xx. Drives the real request lifecycle (league-context resolution, request-scoped DB, query execution, template rendering) — not mocked internals. A `real_web` pytest marker opts these tests out of the autouse `patch_web_context` mock so they hit the real query layer. Shared fixture builder extracted to `tests/_fixture_league.py`.
+- **Caught two more real bugs:** (1) `team.html` divided by zero when a stat rank group had a single entry (`(s.n - 1)` denominator); (2) `projections.assign_diamond_positions` raised `NoneType >= int` when a player had a NULL games count. Both fixed defensively.
+
+Suite now at 780 passing (+57).
+
+---
+
 ## Session 79 (2026-08-10)
 
 ### Evaluation Model — Consolidation & Calibration

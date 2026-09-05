@@ -973,3 +973,46 @@ class TestComputeOrgNeeds:
 
         # 4 farm prospects → no need
         assert "SS" not in needs
+
+
+class TestOvrPotFallbackForLeaguesWithoutOvr:
+    """Regression: leagues that don't surface OVR/POT (e.g. PPL) store NULL.
+    CLI tools (team_needs, trade_assets) must fall back to the app's own
+    composite/ceiling scores via SQL COALESCE rather than crashing on None.
+    """
+
+    def test_coalesce_falls_back_to_composite_when_ovr_null(self, script_db):
+        conn = script_db
+        # A player with NULL ovr/pot but populated composite/ceiling (PPL-style).
+        conn.execute(
+            "INSERT INTO ratings (player_id, snapshot_date, ovr, pot, "
+            "composite_score, ceiling_score) VALUES (?,?,?,?,?,?)",
+            (99001, "2033-04-01", None, None, 57, 63),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT COALESCE(ovr, composite_score) AS ovr, "
+            "COALESCE(pot, ceiling_score) AS pot "
+            "FROM ratings WHERE player_id = ?",
+            (99001,),
+        ).fetchone()
+        assert row["ovr"] == 57
+        assert row["pot"] == 63
+
+    def test_coalesce_prefers_real_ovr_when_present(self, script_db):
+        conn = script_db
+        conn.execute(
+            "INSERT INTO ratings (player_id, snapshot_date, ovr, pot, "
+            "composite_score, ceiling_score) VALUES (?,?,?,?,?,?)",
+            (99002, "2033-04-01", 71, 75, 57, 63),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT COALESCE(ovr, composite_score) AS ovr, "
+            "COALESCE(pot, ceiling_score) AS pot "
+            "FROM ratings WHERE player_id = ?",
+            (99002,),
+        ).fetchone()
+        # Real OVR/POT win — COALESCE is a no-op on OVR-present leagues.
+        assert row["ovr"] == 71
+        assert row["pot"] == 75

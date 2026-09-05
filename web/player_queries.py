@@ -1975,7 +1975,7 @@ def get_player(pid):
             from promotion_readiness import compute_promotion_readiness, compute_demotion_risk
             from statsplusplus.data import db as _pr_db
             _pr_league_dir = get_cfg().league_dir
-            _pr_conn = _pr_db.get_conn(_pr_league_dir)
+            _pr_conn = _pr_db.get_connection(_pr_league_dir)
             promotion_readiness = compute_promotion_readiness(pid, _pr_conn, _pr_league_dir)
             demotion_risk = compute_demotion_risk(pid, _pr_conn, _pr_league_dir)
             _pr_conn.close()
@@ -1986,7 +1986,7 @@ def get_player(pid):
             from promotion_readiness import compute_demotion_risk
             from statsplusplus.data import db as _pr_db
             _pr_league_dir = get_cfg().league_dir
-            _pr_conn = _pr_db.get_conn(_pr_league_dir)
+            _pr_conn = _pr_db.get_connection(_pr_league_dir)
             demotion_risk = compute_demotion_risk(pid, _pr_conn, _pr_league_dir)
             _pr_conn.close()
         except Exception:

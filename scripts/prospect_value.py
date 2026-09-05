@@ -676,8 +676,9 @@ def prospect_surplus_with_option(fv, age, level, bucket, ovr=None, pot=None,
 
 def find_player(player_id):
     """Look up FV, level, bucket, and age from the DB (prospect_fv + players)."""
-    from statsplusplus.data import db
-    conn = db.get_conn()
+    from statsplusplus.data.db import get_connection
+    from statsplusplus.config.league_context import get_league_dir
+    conn = get_connection(get_league_dir())
     row = conn.execute("""
         SELECT pf.fv, pf.fv_str, pf.level, pf.bucket, p.age, pf.fv_continuous
         FROM prospect_fv pf

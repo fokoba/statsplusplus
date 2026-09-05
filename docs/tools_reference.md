@@ -294,14 +294,15 @@ Importable: `load_settings(league_dir)`, `save_settings(league_dir, settings)`,
 `copy_settings(from_dir, to_dir)`, `map_to_params(normalized)`, `resolve_for_round(settings, round_num)`,
 `PRESETS`, `SETTING_KEYS`, `DEFAULT_SETTINGS`, `DEFAULT_PARAMS`.
 
-### `scripts/refresh.py`
+### `statsplusplus.data.refresh`
 
 Data pipeline — pulls all data from StatsPlus API into the DB. Runs calibration
 and FV/surplus computation automatically after data pull.
 
 ```bash
-python3 scripts/refresh.py [year]    # Full refresh, all teams
-python3 scripts/refresh.py state <game_date> [year]  # Manual state override
+python3 -m statsplusplus.data.refresh [year]                    # Full refresh, all teams
+python3 -m statsplusplus.data.refresh state <game_date> [year]  # Manual state override
+spp-refresh [year]                                              # (after pip install -e .)
 ```
 
 **Do not run during article writing.** Only run when the game date has advanced.
@@ -319,7 +320,7 @@ python3 scripts/benchmark.py --json       # Machine-readable output
 STATSPP_LEAGUE=emlb python3 scripts/benchmark.py  # Specific league
 ```
 
-### `scripts/calibrate.py`
+### `statsplusplus.data.calibrate`
 
 Derives league-specific valuation tables and tool weights from actual data. Produces
 `config/model_weights.json` (OVR→WAR, COMPOSITE→WAR, FV→WAR, arb, scarcity) and
@@ -327,8 +328,9 @@ Derives league-specific valuation tables and tool weights from actual data. Prod
 automatically during refresh.
 
 ```bash
-python3 scripts/calibrate.py           # Write model_weights.json + tool_weights.json
-python3 scripts/calibrate.py --dry-run # Show results without writing
+python3 -m statsplusplus.data.calibrate            # Write model_weights.json + tool_weights.json
+python3 -m statsplusplus.data.calibrate --dry-run  # Show results without writing
+spp-calibrate                                      # (after pip install -e .)
 ```
 
 Two-pass execution during refresh:

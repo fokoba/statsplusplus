@@ -3,10 +3,16 @@
 import sys
 from pathlib import Path
 
-# Ensure project root is on sys.path for `from statsplus import client`
+# Ensure imports resolve even when the package isn't pip-installed:
+#   - project root  → `from statsplus import client`
+#   - src/          → `import statsplusplus...` (src/ layout)
+# `pip install -e .` normally handles src/, but this makes the app robust if the
+# editable install didn't take (e.g. a locked-down environment).
 _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
-if _PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, _PROJECT_ROOT)
+_SRC = str(Path(__file__).resolve().parent.parent / "src")
+for _p in (_SRC, _PROJECT_ROOT):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 from flask import Flask, render_template, redirect, request, g, session
 import werkzeug.exceptions

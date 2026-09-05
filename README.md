@@ -76,8 +76,15 @@ The launcher handles Python environment setup and dependency installation automa
 git clone <repo-url> statsplusplus
 cd statsplusplus
 python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -e .
 ```
+
+This installs the `statsplusplus` package (a `src/` layout) in editable mode
+along with its dependencies. The editable install is required — running
+`web/app.py` or any `scripts/*.py` tool imports the `statsplusplus` package,
+which is not on `sys.path` without it. (`pip install -r requirements.txt` alone
+installs Flask but not the package, and you'll hit
+`ModuleNotFoundError: No module named 'statsplusplus'`.)
 
 The only dependency is Flask. Everything else uses the Python standard library.
 
@@ -202,7 +209,7 @@ All scripts operate on the active league (set in `data/app_config.json` or via t
 
 ```bash
 # Full league refresh
-python3 scripts/refresh.py [year]
+python3 -m statsplusplus.data.refresh [year]   # or: spp-refresh [year]
 
 # Generate analysis scaffolds for your team
 python3 scripts/roster_analysis.py
@@ -262,9 +269,20 @@ Global config in `data/app_config.json`:
 
 MIT License. See [LICENSE](LICENSE) for details.
 
+## Getting Your StatsPlus API Token
+
+The recommended way to authenticate is with a StatsPlus **API token** — the [sanctioned method for tools](https://wiki.statsplus.net/web-tools/statsplus-api). It's more stable than a session cookie (which expires frequently). To get yours:
+
+1. Log in to [statsplus.net](https://statsplus.net/) and make sure you're linked to your team in the league.
+2. Click **Prefs** (top-right of the page, next to Logout) to open your User Settings page.
+3. In the **API Token** box, copy the **Current Token** (a 36-character value).
+4. Paste it into the onboarding wizard, or Settings → Connection → API Token.
+
+A token is valid for **one team in one league** — set it separately for each league you manage. Tokens **expire 90 days** after creation; if refreshes start failing with a token error, log in on StatsPlus to refresh your token and paste the new one. The token is stored locally and only sent to the StatsPlus API.
+
 ## Getting Your StatsPlus Cookie
 
-The StatsPlus API requires authentication via session cookie. To get yours:
+If you prefer (or as a fallback), the app also supports authenticating with a browser **session cookie**. To get yours:
 
 1. Log in to [statsplus.net](https://statsplus.net/) in your browser
 2. Open Developer Tools (F12) → Application tab → Cookies → `statsplus.net`
@@ -277,7 +295,9 @@ Cookies expire periodically — if refreshes start failing with authentication e
 
 ## Troubleshooting
 
-**"No module named flask"** — Run `.venv/bin/pip install -r requirements.txt` from the project root.
+**"No module named flask"** — Run `.venv/bin/pip install -e .` from the project root.
+
+**"No module named 'statsplusplus'"** — The package isn't installed. Run `.venv/bin/pip install -e .` from the project root (`pip install -r requirements.txt` alone installs Flask but not the package). The launcher (`start.sh`/`start.bat`) does this automatically.
 
 **Refresh fails or times out** — The StatsPlus API can be slow. Ratings exports in particular may take 45+ seconds. The refresh will retry automatically. If it consistently fails, check that your session cookie is still valid.
 

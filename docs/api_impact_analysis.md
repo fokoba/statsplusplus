@@ -35,11 +35,11 @@ This is a **heuristic** that systematically underestimates service time because:
 
 | API Field | Type | Precision |
 |---|---|---|
-| `mlb_service_years` | int | Exact years of service |
-| `mlb_service_days` | int | Exact days beyond full years |
+| `mlb_service_years` | int | Completed full years of MLB service (= floor(days/172)) |
+| `mlb_service_days` | int | **Cumulative total** days of MLB service (full year = 172 days) — NOT a 0-171 remainder |
 | `mlb_service_days_this_year` | int | Days accrued this season so far |
-| `pro_service_years` | int | Total professional service |
-| `pro_service_days` | int | Days beyond full pro years |
+| `pro_service_years` | int | Completed full years of professional service |
+| `pro_service_days` | int | Cumulative total days of pro service |
 
 ### Systems Impacted
 

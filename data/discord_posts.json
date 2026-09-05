@@ -1,8 +1,23 @@
 {
-  "last_posted_commit": "0982969",
-  "last_posted_date": "2026-08-10",
-  "last_posted_title": "Player Evaluation Model \u2014 Data-Driven Calibration",
+  "last_posted_commit": "72b38a6c1ab9cb9a687d652b7aabfe9c07679316",
+  "last_posted_date": "2026-09-02",
+  "last_posted_title": "v1.3.0 \u2014 Install & Upgrade Stability",
   "history": [
+    {
+      "date": "2026-09-02",
+      "commit": "f75d0be",
+      "title": "v1.3.0 \u2014 Install & Upgrade Stability"
+    },
+    {
+      "date": "2026-09-01",
+      "commit": "3cf7266",
+      "title": "Setup Fixes & Ratings Export Compatibility"
+    },
+    {
+      "date": "2026-08-10",
+      "commit": "0982969",
+      "title": "Player Evaluation Model \u2014 Data-Driven Calibration"
+    },
     {
       "date": "2026-07-22",
       "commit": "ff8087c",
@@ -74,9 +89,20 @@
       "title": "Complete Architecture Overhaul \u2014 All Shims Eliminated"
     },
     {
-      "date": "2026-08-10",
-      "commit": "0982969",
-      "title": "Player Evaluation Model \u2014 Data-Driven Calibration"
+      "commit": "7074a2bc066f4eb8c27436ececcadea4014a2698",
+      "date": "2026-09-03",
+      "title": "Player Evaluation Overhaul & Early-Season Fixes"
+    },
+    {
+      "commit": "efa74d0ebe50c7a3a9ecab6809b97428017efd5d",
+      "date": "2026-09-04",
+      "title": "StatsPlus API Tokens & Smarter Refreshes"
+    },
+    {
+      "commit": "72b38a6c1ab9cb9a687d652b7aabfe9c07679316",
+      "date": "2026-09-05",
+      "title": "Service Time & Team-Control Accuracy",
+      "version": "1.5.1"
     }
   ]
 }

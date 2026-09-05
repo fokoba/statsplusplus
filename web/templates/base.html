@@ -45,19 +45,25 @@
           <div id="search-results" class="search-dropdown"></div>
         </div>
         <button id="refresh-btn" class="nav-btn" title="Pull latest game data">⟳ Refresh</button>
-        <button id="session-btn" class="nav-btn" title="Session cookie">🔑</button>
+        <button id="session-btn" class="nav-btn" title="StatsPlus connection">🔑</button>
         <div id="session-panel" class="session-panel hidden">
           <div class="session-panel-header">
             <span>StatsPlus Session</span>
             <span id="session-status" class="session-status"></span>
           </div>
+          <label class="session-label">API Token <span style="font-weight:400; color:var(--text-dim)">(recommended)</span>
+            <input id="session-token-input" type="text" class="session-input" placeholder="Paste your team token" spellcheck="false">
+          </label>
+          <button id="token-save-btn" class="session-save">Save Token</button>
+          <div style="border-top:1px solid var(--border, #333); margin:10px 0 6px"></div>
+          <div style="font-size:11px; color:var(--text-dim); margin-bottom:4px">Session cookie (fallback — used only if no token)</div>
           <label class="session-label">Session ID
             <input id="session-id-input" type="text" class="session-input" placeholder="e.g. mr3vtazqsj7k7xa1..." spellcheck="false">
           </label>
           <label class="session-label">CSRF Token <span style="font-weight:400; color:var(--text-dim)">(optional)</span>
             <input id="session-csrf-input" type="text" class="session-input" placeholder="e.g. AsyNfceymN2c..." spellcheck="false">
           </label>
-          <button id="session-save-btn" class="session-save">Save</button>
+          <button id="session-save-btn" class="session-save">Save Cookie</button>
         </div>
       </nav>
     </div>
@@ -156,7 +162,9 @@
     const panel = document.getElementById('session-panel');
     const sidInput = document.getElementById('session-id-input');
     const csrfInput = document.getElementById('session-csrf-input');
+    const tokenInput = document.getElementById('session-token-input');
     const saveBtn = document.getElementById('session-save-btn');
+    const tokenSaveBtn = document.getElementById('token-save-btn');
     const statusEl = document.getElementById('session-status');
 
     btn.addEventListener('click', function(e) {
@@ -178,6 +186,7 @@
       fetch('/api/session-cookie').then(r => r.json()).then(d => {
         sidInput.value = d.session_id || '';
         csrfInput.value = d.csrf_token || '';
+        tokenInput.value = d.token || '';
       });
     }
 
@@ -189,7 +198,7 @@
         .then(d => {
           if (d.ok) {
             statusEl.className = 'session-status ok';
-            statusEl.textContent = '✓ active';
+            statusEl.textContent = '✓ active' + (d.method ? ' (' + d.method + ')' : '');
           } else {
             statusEl.className = 'session-status expired';
             statusEl.textContent = '✗ ' + (d.error || 'invalid').substring(0, 30);
@@ -211,11 +220,28 @@
         body: JSON.stringify({session_id: sid, csrf_token: csrf})
       }).then(r => r.json()).then(d => {
         saveBtn.textContent = d.ok ? '✓ Saved' : 'Error';
-        setTimeout(() => { saveBtn.textContent = 'Save'; }, 2000);
+        setTimeout(() => { saveBtn.textContent = 'Save Cookie'; }, 2000);
         if (d.ok) verifySession();
       }).catch(() => {
         saveBtn.textContent = 'Error';
-        setTimeout(() => { saveBtn.textContent = 'Save'; }, 2000);
+        setTimeout(() => { saveBtn.textContent = 'Save Cookie'; }, 2000);
+      });
+    });
+
+    tokenSaveBtn.addEventListener('click', function() {
+      const token = tokenInput.value.trim();
+      tokenSaveBtn.textContent = 'Saving…';
+      fetch('/api/save-token', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({token: token})
+      }).then(r => r.json()).then(d => {
+        tokenSaveBtn.textContent = d.ok ? '✓ Saved' : 'Error';
+        setTimeout(() => { tokenSaveBtn.textContent = 'Save Token'; }, 2000);
+        if (d.ok) verifySession();
+      }).catch(() => {
+        tokenSaveBtn.textContent = 'Error';
+        setTimeout(() => { tokenSaveBtn.textContent = 'Save Token'; }, 2000);
       });
     });
   })();

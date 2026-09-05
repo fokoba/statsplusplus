@@ -10,7 +10,7 @@ Produces config/model_weights.json with:
 
 Falls back to constants.py defaults when insufficient data.
 
-Usage: python3 scripts/calibrate.py [--dry-run]
+Usage: python3 -m statsplusplus.data.calibrate [--dry-run]   (or: spp-calibrate)
 """
 
 import json, os, sys, math
@@ -1770,6 +1770,12 @@ def calibrate(dry_run=False):
     return weights
 
 
-if __name__ == "__main__":
+def main():
+    from statsplusplus.utils.logging import setup_logging
+    setup_logging(Path(_PROJECT_ROOT) / "data" / "logs")
     dry_run = "--dry-run" in sys.argv
     calibrate(dry_run=dry_run)
+
+
+if __name__ == "__main__":
+    main()

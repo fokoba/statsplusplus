@@ -15,7 +15,7 @@ and presents it as an interactive local web dashboard.
 
 ## Design Principles
 
-- All data flows through `scripts/refresh.py` → SQLite. The web layer is read-only.
+- All data flows through the refresh pipeline (`statsplusplus.data.refresh`) → SQLite. The web layer is read-only.
 - League-specific config lives in `data/<league>/config/`. No hardcoded team IDs or league structure.
 - Extended OOTP ratings (BABIP, HRA, PBABIP, Prone) are supported when the league provides them.
 - Graceful degradation — features that depend on extended ratings simply don't render for leagues without them.

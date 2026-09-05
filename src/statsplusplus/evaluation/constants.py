@@ -117,6 +117,14 @@ ARB_DEEP_SALARY_THRESHOLD: int = 5_500_000
 # Service time
 # ---------------------------------------------------------------------------
 
+# Real MLB/OOTP rule: a full year of service = 172 days on the active roster
+# (or MLB IL). The StatsPlus API's `mlb_service_days` field is the *cumulative
+# total* days of MLB service (confirmed against league data — e.g. an 18-year
+# veteran carries ~3183 days). Completed full years = floor(days / 172), and
+# free agency is reached at 6 completed years. See docs/ootp/financial_model.md.
+SERVICE_DAYS_PER_YEAR: int = 172
+FREE_AGENCY_SERVICE_YEARS: int = 6
+
 SERVICE_GAMES_HITTER: int = 162
 SERVICE_STARTS_SP: int = 32
 SERVICE_GAMES_RP: int = 65

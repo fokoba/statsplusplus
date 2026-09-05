@@ -2500,9 +2500,11 @@ class TestCompositeDecompositionRoundTrip:
         # the floor) these can compound — an exhaustive/hill-climbing
         # search across the tool space found real gaps up to ~31 points on
         # the 20-80 scale (e.g. bucket=CF, contact=80/gap=80/speed=23/
-        # steal=23/stl_rt=56, rest at floor). 40 leaves real margin above
-        # that empirical worst case without being so wide it'd miss an
-        # actual regression.
+        # steal=23/stl_rt=56, rest at floor). The per-tool transform curves
+        # also amplify standout tools more than a flat transform would,
+        # widening the gap further for an extreme profile. 40 leaves real
+        # margin above the empirical worst case (both effects combined)
+        # without being so wide it'd miss an actual regression.
         assert abs(recomposed - composite) <= 40, (
             f"Round-trip mismatch for bucket={bucket}: "
             f"composite={composite}, recomposed={recomposed}, "

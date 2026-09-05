@@ -799,6 +799,9 @@ h2.league-header { color: #aaa; font-size: 0.95rem; text-transform: uppercase; l
 .tag-cold   { background: rgba(52,152,219,0.2); color: #3498db; }
 .tag-lucky  { background: rgba(46,204,113,0.2); color: #2ecc71; }
 .tag-unlucky{ background: rgba(155,89,182,0.2); color: #9b59b6; }
+.fa-tag { display: inline-block; padding: 0 5px; border-radius: 8px; font-size: 10px;
+          font-weight: 600; background: rgba(78,204,163,0.18); color: var(--green);
+          border: 1px solid var(--green); vertical-align: middle; }
 .pctile-year-select {
   font-size: 11px; background: var(--surface); color: var(--text);
   border: 1px solid rgba(255,255,255,0.15); border-radius: 4px;

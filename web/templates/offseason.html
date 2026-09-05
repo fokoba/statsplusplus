@@ -1,0 +1,277 @@
+{% extends "base.html" %}
+{% block content %}
+<div id="offseason-page">
+
+<h1 class="page-title">❄ Offseason — {{ team_name }}</h1>
+
+{# ── Phase stepper — click where you are in the offseason ── #}
+{% set phase_keys = phases|map(attribute='key')|list %}
+<div class="phase-stepper" aria-label="Offseason phase">
+  {% for ph in phases %}
+  <button class="phase-step{% if ph.key == current_phase %} current{% endif %}{% if current_phase and loop.index0 < phase_keys.index(current_phase) %} done{% endif %}"
+          data-phase="{{ ph.key }}" title="{{ ph.label }}">
+    <span class="phase-dot">{{ ph.icon }}</span>
+    <span class="phase-label">{{ ph.label }}</span>
+  </button>
+  {% endfor %}
+  <button class="phase-clear{% if not current_phase %} active{% endif %}" data-phase="" title="Show all panels">All</button>
+</div>
+<p style="color:var(--text-dim); font-size:12px; margin-top:2px">
+  {% if current_phase %}Focused on <strong>{{ (phases|selectattr('key','equalto',current_phase)|first).label }}</strong> — click another stage to change, or “All”.{% else %}Click where you are in the offseason to focus the page.{% endif %}
+</p>
+
+{# ── Arbitration ── #}
+{% if show.arbitration %}
+<div class="panel">
+  <h2>Arbitration <span style="font-weight:400;color:var(--text-dim);font-size:13px">— tender decisions</span></h2>
+  {% if arbitration %}
+  <table class="data-table sortable">
+    <thead>
+      <tr>
+        <th class="left">Player</th><th data-sort="pos" class="left">Pos</th><th data-sort="num">Age</th><th class="left">Svc</th>
+        <th data-sort="num">Cur $</th><th data-sort="num">Proj $</th><th data-sort="num">Raise</th>
+        <th data-sort="num">Surplus</th><th class="left">Recommendation</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in arbitration %}
+      <tr>
+        <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
+        <td class="left" data-sort-value="{{ p.pos }}">{{ p.pos }}</td>
+        <td class="num">{{ p.age }}</td>
+        <td class="left">{{ p.service }}</td>
+        <td class="num">{{ p.cur_salary|money }}</td>
+        <td class="num">{{ p.proj_salary|money }}</td>
+        <td class="num">{{ p.raise|money }}</td>
+        <td class="num {{ 'pos' if p.surplus > 0 else 'neg' if p.surplus < 0 else '' }}">{{ p.surplus|money }}</td>
+        <td class="left"><span class="tag tag-{{ p.rec_class }}">{{ p.rec }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">No arb-eligible players this offseason.</p>
+  {% endif %}
+</div>
+{% endif %}
+
+{# ── Free Agency ── #}
+{% if show.free_agency %}
+<div class="panel">
+  <h2>Free Agency <span style="font-weight:400;color:var(--text-dim);font-size:13px">— available free agents</span></h2>
+  {% if market %}
+  <div class="fa-filters">
+    <label>Position
+      <select id="fa-pos">
+        <option value="">All</option>
+        {% for pos in market|map(attribute='pos')|unique|sort %}<option value="{{ pos }}">{{ pos }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Age <input type="number" id="fa-age-min" min="16" max="50" placeholder="min" style="width:64px"></label>
+    <label>to <input type="number" id="fa-age-max" min="16" max="50" placeholder="max" style="width:64px"></label>
+    <label class="fa-check"><input type="checkbox" id="fa-needs-only"> Fills a need only</label>
+  </div>
+  <div class="fa-scroll">
+  <table class="sortable" id="fa-table">
+    <thead><tr>
+      <th class="left">Player</th><th data-sort="pos" class="left">Pos</th><th data-sort="num">Age</th><th class="left">B/T</th>
+      <th data-sort="num">Comp</th><th data-sort="num">Ceil</th>
+      <th data-sort="num" title="Model's projected WAR at peak/full playing time">Proj WAR</th>
+      <th data-sort="num" title="Actual WAR last season">WAR</th>
+      <th class="left">Last Season</th>
+    </tr></thead>
+    <tbody>
+      {% for p in market %}
+      <tr class="fa-row{% if p.fills_need %} fa-need{% endif %}"
+          data-pos="{{ p.pos }}" data-age="{{ p.age }}" data-need="{{ 1 if p.fills_need else 0 }}">
+        <td class="left">
+          <a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a>
+          {% if p.fills_need %}<span class="need-badge" title="Fills a positional need for your team">★</span>{% endif %}
+        </td>
+        <td class="left" data-sort-value="{{ p.pos }}">{{ p.pos }}</td>
+        <td>{{ p.age }}</td>
+        <td class="left">{{ p.bats }}/{{ p.throws }}</td>
+        <td>{{ p.composite }}</td>
+        <td>{{ p.ceiling }}</td>
+        <td>{{ p.proj_war if p.proj_war is not none else '—' }}</td>
+        <td>{{ p.last.war if p.last else '—' }}</td>
+        <td class="left fa-stats">{% if p.last %}{{ p.last.line }} <span class="fa-sample">({{ p.last.sample }})</span>{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p style="color:var(--text-dim);font-size:12px">
+    <span class="need-badge">★</span> = below-league-average depth at this position <em>and</em> an upgrade over your current best there (or you have no one).
+    <strong>Proj WAR</strong> is the model's projected peak production; <strong>WAR</strong> is actual last season.
+  </p>
+  {% else %}
+  <p class="empty">No free agents on the market.</p>
+  {% endif %}
+</div>
+{% endif %}
+
+{# ── Extension Candidates ── #}
+{% if show.extensions %}
+<div class="panel">
+  <h2>Extension Candidates <span style="font-weight:400;color:var(--text-dim);font-size:13px">— high-surplus, nearing free agency</span></h2>
+  {% if extensions %}
+  <div class="fa-scroll ext-scroll">
+  <table class="sortable">
+    <thead><tr><th class="left">Player</th><th data-sort="pos" class="left">Pos</th><th data-sort="num">Age</th><th data-sort="num">Yrs Left</th><th data-sort="num">Comp</th><th data-sort="num">Surplus</th></tr></thead>
+    <tbody>
+      {% for p in extensions %}
+      <tr>
+        <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
+        <td class="left" data-sort-value="{{ p.pos }}">{{ p.pos }}</td>
+        <td>{{ p.age }}</td>
+        <td>{{ p.yrs_left }}</td>
+        <td>{{ p.composite }}</td>
+        <td class="pos">{{ p.surplus|money }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p style="color:var(--text-dim);font-size:12px">High surplus + few controlled years = candidates to lock up before arb escalation or free agency.</p>
+  {% else %}
+  <p class="empty">No clear extension candidates.</p>
+  {% endif %}
+</div>
+{% endif %}
+
+{# ── Coming-soon placeholder for phases with no dedicated panel yet ── #}
+{% if current_phase in ("playoffs", "options", "rule5", "spring") %}
+<div class="panel">
+  <h2>{{ (phases|selectattr('key','equalto',current_phase)|first).label }}</h2>
+  <p class="empty">
+    A dedicated view for this phase is on the way.
+    {% if current_phase == "rule5" %}Rule 5 protection/exposure needs the roster-eligibility fields (tracked).{% endif %}
+    In the meantime, trades are always in play below.
+  </p>
+</div>
+{% endif %}
+
+{# ── Trades ── #}
+<div class="panel">
+  <h2>Trades</h2>
+  <p style="color:var(--text-dim)">
+    The offseason is prime trading season. Use the existing trade tools:
+    <a href="/team/{{ tid }}">your roster &amp; surplus leaders</a>,
+    <a href="/league">league-wide prospects &amp; power rankings</a>.
+    Richer, situation-aware trade tooling is planned for this page.
+  </p>
+</div>
+
+</div>{# /#offseason-page #}
+
+<style>
+  /* Phase stepper */
+  .phase-stepper { display:flex; align-items:flex-start; gap:0; margin:8px 0 4px;
+                   padding:14px 18px; background:var(--surface); border:1px solid var(--border); border-radius:8px; }
+  .phase-step { flex:1 1 0; display:flex; flex-direction:column; align-items:center; gap:6px; cursor:pointer;
+                background:none; border:none; color:var(--text-dim); padding:0 4px; border-radius:6px;
+                font-size:11px; text-transform:uppercase; letter-spacing:.03em; transition:color .12s; position:relative; }
+  /* Connecting track line between dots (behind them) */
+  .phase-step:not(:first-child)::before { content:""; position:absolute; top:18px; right:50%; width:100%; height:2px;
+                background:var(--border); z-index:0; }
+  .phase-step.done::before, .phase-step.current::before { background:var(--green); opacity:0.5; }
+  .phase-step .phase-dot { width:36px; height:36px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+                font-size:17px; background:var(--bg); border:2px solid var(--border); transition:all .12s; position:relative; z-index:1; }
+  .phase-step:hover { color:var(--text); }
+  .phase-step:hover .phase-dot { border-color:var(--green); }
+  .phase-step.done { color:var(--text-dim); }
+  .phase-step.done .phase-dot { border-color:var(--green); opacity:0.6; }
+  .phase-step.current { color:var(--green); font-weight:600; }
+  .phase-step.current .phase-dot { border-color:var(--green); background:rgba(78,204,163,0.18); box-shadow:0 0 0 4px rgba(78,204,163,0.12); }
+  .phase-clear { align-self:center; margin-left:14px; background:none; border:1px solid var(--border);
+                 color:var(--text-dim); border-radius:6px; padding:6px 14px; cursor:pointer; font-size:11px; text-transform:uppercase; white-space:nowrap; }
+  .phase-clear:hover { color:var(--text); border-color:var(--green); }
+  .phase-clear.active { color:var(--green); border-color:var(--green); }
+
+  .split-2 { display:grid; grid-template-columns:1fr 1fr; gap:24px; }
+  @media (max-width: 900px) { .split-2 { grid-template-columns:1fr; } }
+  .split-2 h3 { margin:0 0 8px; font-size:14px; }
+  .tag { display:inline-block; padding:1px 7px; border-radius:10px; font-size:11px;
+         background:var(--surface); border:1px solid var(--border); }
+  .tag-good { background:rgba(78,204,163,0.15); border-color:var(--green); color:var(--green); }
+  .tag-ok   { background:var(--surface); border-color:var(--border); color:var(--text-dim); }
+  .tag-bad  { background:rgba(233,69,96,0.15); border-color:var(--red); color:var(--red); }
+  .empty { color:var(--text-dim); font-style:italic; }
+  .switch { display:inline-flex; align-items:center; gap:8px; }
+  .fa-filters { display:flex; align-items:center; gap:16px; flex-wrap:wrap; margin-bottom:12px;
+                padding:10px 12px; background:var(--surface); border:1px solid var(--border); border-radius:6px; }
+  .fa-filters label { font-size:13px; color:var(--text-dim); display:inline-flex; align-items:center; gap:6px; }
+  .fa-filters select, .fa-filters input[type=number] { background:var(--bg);
+                color:var(--text); border:1px solid var(--border); border-radius:4px; padding:3px 6px; }
+  .fa-check { cursor:pointer; }
+  .fa-count { margin-left:auto; font-size:12px; color:var(--text-dim); }
+  .need-badge { display:inline-block; margin-left:6px; padding:0 6px; border-radius:9px; font-size:11px;
+                background:rgba(78,204,163,0.15); border:1px solid var(--green); color:var(--green); vertical-align:middle; }
+  tr.fa-need td { background:rgba(78,204,163,0.07); }
+  .fa-scroll { max-height:360px; overflow-y:auto; border:1px solid var(--border); border-radius:6px; }
+  .ext-scroll { max-height:240px; }
+  .fa-scroll table { margin:0; }
+  .fa-scroll thead th { position:sticky; top:0; z-index:1; background:var(--surface); }
+  .fa-stats { color:var(--text-dim); font-size:12px; white-space:nowrap; }
+  .fa-sample { color:var(--text-dim); opacity:0.7; }
+  /* Consistent panel + heading spacing on this page */
+  #offseason-page .panel { margin-bottom:18px; padding:16px 18px; }
+  #offseason-page .panel h2 { margin-bottom:10px; }
+  #offseason-page .panel > p:last-child { margin-bottom:0; }
+</style>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Phase stepper — click a stage (or "All") to focus the page; persists server-side.
+(function () {
+  function select(phase) {
+    fetch('/api/set-offseason-phase', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phase: phase })
+    }).then(r => r.json()).then(function (d) {
+      if (d.ok) window.location.reload();
+      else alert('Could not set phase: ' + (d.error || 'unknown'));
+    }).catch(function () { alert('Phase request failed'); });
+  }
+  document.querySelectorAll('.phase-step, .phase-clear').forEach(function (btn) {
+    btn.addEventListener('click', function () { select(btn.getAttribute('data-phase')); });
+  });
+})();
+
+// Free-agency market board — client-side filtering (position / age / needs).
+(function () {
+  var table = document.getElementById('fa-table');
+  if (!table) return;
+  var posSel = document.getElementById('fa-pos');
+  var ageMin = document.getElementById('fa-age-min');
+  var ageMax = document.getElementById('fa-age-max');
+  var needsOnly = document.getElementById('fa-needs-only');
+  var rows = Array.prototype.slice.call(table.querySelectorAll('tbody tr.fa-row'));
+
+  function apply() {
+    var pos = posSel.value;
+    var lo = parseInt(ageMin.value, 10);
+    var hi = parseInt(ageMax.value, 10);
+    var needs = needsOnly.checked;
+    rows.forEach(function (tr) {
+      var age = parseInt(tr.getAttribute('data-age'), 10);
+      var ok = true;
+      if (pos && tr.getAttribute('data-pos') !== pos) ok = false;
+      if (ok && !isNaN(lo) && age < lo) ok = false;
+      if (ok && !isNaN(hi) && age > hi) ok = false;
+      if (ok && needs && tr.getAttribute('data-need') !== '1') ok = false;
+      tr.style.display = ok ? '' : 'none';
+    });
+  }
+  [posSel, ageMin, ageMax, needsOnly].forEach(function (el) {
+    el.addEventListener('change', apply);
+    el.addEventListener('input', apply);
+  });
+  apply();
+})();
+</script>
+{% endblock %}

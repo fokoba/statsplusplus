@@ -4,7 +4,89 @@ Completed and deferred work items, organized by session. Moved from `task_list.m
 
 ---
 
-## Session 84 (2026-09-04)
+## Session 85 (2026-09-05)
+
+### Season phase header — data-driven, league-adaptive
+
+- The league/team "Phase" header (Regular Season / Postseason / Offseason /
+  Spring Training) was a month heuristic with an ordering bug: `month >= 10`
+  greedily matched Oct–Dec as "Postseason," so December always showed
+  "Postseason" (the Offseason branch was unreachable). Replaced with a
+  data-driven `_determine_phase` (`team_queries.py`) that reads each league's
+  actual `games.game_type` boundaries (0 = regular season, 3 = postseason) and
+  the recency of the last played game. It **adapts per league** — PPL's short
+  playoff, emlb's longer one, and vmlb's schedule all resolve from their own
+  data, no hardcoded playoff length or calendar. Handles the reality that the
+  future schedule isn't stored for a live league (uses last-played-game recency,
+  not "today > last stored game", so a mid-season league reads Regular Season,
+  not Offseason). PPL Dec 5 now correctly reads Offseason. Regression tests in
+  `test_team_queries.py`.
+
+### Positional Rankings — empty-page fix + free agents included
+
+- **Fixed empty Rankings page** — `get_positional_rankings` filtered players
+  against `LeagueConfig().mlb_team_ids`, a fresh singleton that lazily caches
+  whichever league it first computed and never invalidates on `/switch-league`.
+  It returned another league's team IDs (e.g. emlb's 31-64 while viewing PPL's
+  1-16), rejecting every player → empty rankings. Now uses the request-scoped
+  `mlb_team_ids()`. (Committed 604c633.)
+- **Free agents in the rankings** — the positional rankings now interleave
+  unsigned free agents (`team_id=0, free_agent=1`, with prior in-league stats)
+  alongside rostered players, ranked by composite and tagged **FA**. Lets a GM
+  see where an available free agent stacks up at each position during the
+  offseason. (`web/queries.py`, `league.html`, `.fa-tag` style; regression test
+  `test_pos_rankings_includes_free_agents`.)
+
+### Dynamic Pages — phase-aware Offseason page (Phase A, proof-of-concept)
+
+First "dynamic page": a phase-aware `/offseason` view that surfaces the decisions
+a GM makes during the offseason, gated behind a manual toggle (Settings →
+Dynamic Pages) and a sub-phase selector. All panels reuse existing valuation
+data — no new models.
+
+- **Phase stepper** — full-width interactive timeline across the top (Playoffs →
+  Arbitration → Options → Free Agency → Rule 5 → Spring, plus "All"). Click a
+  stage to focus the page; persists to `state.json` (`offseason_phase`). Panels
+  are gated by phase (`offseason_queries.panels_for_phase`): Arbitration shows
+  during Arbitration; Free Agency + Extensions during Free Agency; Trades always
+  shows; phases without a dedicated panel show a "coming soon" placeholder.
+- **Arbitration panel** — arb-eligible players, projected salary (perpetual-arb
+  model, using the league's calibrated `ARB_SALARY_MODEL` + career WAR), and a
+  tender/non-tender recommendation. All dollar thresholds scale by the league's
+  `$/WAR` (works at any salary scale, incl. low-dollar retro leagues).
+- **Free Agency market board** — the actual open-market pool: unsigned players
+  (`team_id = 0, free_agent = 1`) that have **played in this league** (excludes
+  foreign-league/NPB players from the API's global dump). Columns: pos (game
+  listed position), age, B/T, composite, ceiling, **Proj WAR**, last-season WAR,
+  and last-season stat line with sample size. Client-side filters (position, age
+  min/max, "fills a need only") + column sorting. **★ need** badge flags FAs at a
+  position where org depth is below league average AND who are an upgrade over
+  the team's current best there (reuses `get_draft_org_depth`). Scrollable panel.
+- **Extension candidates** — high-surplus own players 1-2 years from FA
+  (threshold scaled by `$/WAR`). Scrollable, capped height.
+- **Proj WAR = single source of truth** — the board's projection calls the same
+  `compute_player_value` the player valuation page uses (first control-year of
+  its breakdown), rather than re-deriving. Fixes a mismatch where the board
+  showed raw `peak_war` (ignoring aging + development/confidence discount).
+- **Payroll Outlook panel dropped** — redundant with the team page and its
+  perpetual-arb projections were unreliable (arb estimates too high; no
+  continuation for expired multi-year deals).
+- New `web/offseason_queries.py`, `web/templates/offseason.html`; endpoints
+  `/api/toggle-offseason` and `/api/set-offseason-phase` in `api_routes.py`;
+  toggle UI in `settings.html`; nav link + `offseason_mode` context in `base.html`.
+- **Tests** — `tests/test_offseason.py` (11): market-board unsigned-only,
+  foreign-league exclusion, Proj-WAR-matches-player-value, need-flag-requires-
+  upgrade, phase gating, and endpoint persistence. Suite: 848 passing.
+
+### Bug fix — connection test no longer burns the /ratings rate limit
+
+- Saving/verifying a token or cookie was firing a real `/ratings` export to prime
+  a poll URL, consuming the once-per-5-min-per-team budget — so a refresh started
+  shortly after was refused with `RateLimitedError`. Connection validation now
+  uses only the cheap, non-rate-limited `/tokencheck` + `/date`; the refresh
+  kicks off its own ratings export when it needs one. (Committed 69f05b5.)
+
+---
 
 ### Service time — single source of truth + control fix
 

@@ -1228,28 +1228,42 @@ def get_positional_rankings():
     # this `cfg` name with each position group's own config dict.
     ratings_scale = cfg.ratings_scale
 
-    # Get MLB org IDs for filtering. LeagueConfig() with no base_dir silently
-    # falls back to whichever league it defaults to internally — not
-    # necessarily the currently-active one in this request — so every row
-    # was being filtered against the wrong league's team IDs and every
-    # group came back empty. Must pass this request's league_dir explicitly,
-    # same as everywhere else in the app.
+    # Get MLB org IDs for filtering. Use the request-scoped mlb_team_ids()
+    # (web_league_context), NOT LeagueConfig().mlb_team_ids — that fresh
+    # singleton lazily caches whichever league it first computed for the life
+    # of the process and never invalidates on /switch-league, so it can return
+    # another league's team IDs and reject every player here (empty rankings).
     try:
-        from statsplusplus.config.league_config import LeagueConfig
-        mlb_org_ids = LeagueConfig(base_dir=cfg.league_dir).mlb_team_ids
+        mlb_org_ids = set(mlb_team_ids())
     except Exception:
         mlb_org_ids = set(teams.keys())
 
-    # MLB players with composite scores
+    # MLB players with composite scores, PLUS unsigned free agents (team_id=0,
+    # free_agent=1) that have played in this league — so users can see where an
+    # available FA stacks up against rostered players at each position. FAs are
+    # tagged is_fa=1 for the template to badge; foreign-league players (no stats
+    # in this league) are excluded via the EXISTS check.
     mlb_rows = conn.execute("""
         SELECT p.player_id, p.name, p.age, p.pos, p.role, p.team_id,
                r.composite_score, r.true_ceiling, r.tool_only_score,
                r.offensive_grade, r.defensive_value, r.ctrl,
-               r.c, r.first_b, r.second_b, r.third_b, r.ss, r.lf, r.cf, r.rf
+               r.c, r.first_b, r.second_b, r.third_b, r.ss, r.lf, r.cf, r.rf,
+               0 AS is_fa
         FROM players p
         JOIN latest_ratings r ON r.player_id = p.player_id
         WHERE p.level = '1' AND r.composite_score IS NOT NULL
-        ORDER BY r.composite_score DESC
+        UNION ALL
+        SELECT p.player_id, p.name, p.age, p.pos, p.role, p.team_id,
+               r.composite_score, r.true_ceiling, r.tool_only_score,
+               r.offensive_grade, r.defensive_value, r.ctrl,
+               r.c, r.first_b, r.second_b, r.third_b, r.ss, r.lf, r.cf, r.rf,
+               1 AS is_fa
+        FROM players p
+        JOIN latest_ratings r ON r.player_id = p.player_id
+        WHERE p.free_agent = 1 AND p.team_id = 0 AND r.composite_score IS NOT NULL
+          AND (EXISTS (SELECT 1 FROM mlb_batting_stats b WHERE b.player_id = p.player_id)
+            OR EXISTS (SELECT 1 FROM mlb_pitching_stats pt WHERE pt.player_id = p.player_id))
+        ORDER BY composite_score DESC
     """).fetchall()
 
     # For pitchers, determine SP/RP from actual usage (GS ratio) rather than
@@ -1320,7 +1334,8 @@ def get_positional_rankings():
 
             if not matched:
                 continue
-            if r["team_id"] not in mlb_org_ids:
+            is_fa = bool(r["is_fa"])
+            if not is_fa and r["team_id"] not in mlb_org_ids:
                 continue
 
             all_composites.append(r["composite_score"])
@@ -1348,7 +1363,8 @@ def get_positional_rankings():
                 _perf = (r["composite_score"] - _base) if (r["composite_score"] is not None and _base is not None) else None
                 group["mlb"].append({
                     "pid": r["player_id"], "name": r["name"], "age": r["age"],
-                    "team": teams.get(r["team_id"], "?"),
+                    "team": "FA" if is_fa else teams.get(r["team_id"], "?"),
+                    "is_fa": is_fa,
                     "base": _base, "perf": _perf,
                     "composite": r["composite_score"], "ceiling": r["true_ceiling"],
                     "off": r["offensive_grade"],

@@ -156,7 +156,8 @@ def _pos_rankings_pitcher_db():
     conn.row_factory = sqlite3.Row
     conn.executescript("""
         CREATE TABLE players (player_id INTEGER PRIMARY KEY, name TEXT, age INTEGER,
-            pos INTEGER, role INTEGER, team_id INTEGER, parent_team_id INTEGER, level TEXT);
+            pos INTEGER, role INTEGER, team_id INTEGER, parent_team_id INTEGER, level TEXT,
+            free_agent INTEGER DEFAULT 0);
         CREATE TABLE latest_ratings (player_id INTEGER, composite_score INTEGER,
             true_ceiling INTEGER, tool_only_score INTEGER, offensive_grade INTEGER,
             defensive_value INTEGER,
@@ -164,17 +165,20 @@ def _pos_rankings_pitcher_db():
             ss INTEGER, lf INTEGER, cf INTEGER, rf INTEGER);
         CREATE TABLE pitching_stats (player_id INTEGER, year INTEGER, split_id INTEGER,
             league_id INTEGER, gs INTEGER, g INTEGER);
+        CREATE TABLE batting_stats (player_id INTEGER, year INTEGER, split_id INTEGER,
+            league_id INTEGER);
         CREATE TABLE prospect_fv (player_id INTEGER, bucket TEXT, fv INTEGER, fv_str TEXT,
             risk TEXT, prospect_surplus REAL);
         CREATE VIEW mlb_pitching_stats AS SELECT * FROM pitching_stats WHERE league_id IS NULL;
+        CREATE VIEW mlb_batting_stats AS SELECT * FROM batting_stats WHERE league_id IS NULL;
     """)
     # Ace starter: 2 starts in 2 appearances.
-    conn.execute("INSERT INTO players VALUES (20, 'Ace SP', 27, 1, 11, 1, NULL, '1')")
+    conn.execute("INSERT INTO players VALUES (20, 'Ace SP', 27, 1, 11, 1, NULL, '1', 0)")
     conn.execute("INSERT INTO latest_ratings VALUES (20, 70, 72, NULL, NULL, NULL, 60,"
                  "NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL)")
     conn.execute("INSERT INTO pitching_stats VALUES (20, ?, 1, NULL, 2, 2)", (YEAR,))
     # Reliever who made one spot start: 1 GS in 8 appearances -> gs/g = 0.125.
-    conn.execute("INSERT INTO players VALUES (21, 'Setup RP', 29, 1, 13, 1, NULL, '1')")
+    conn.execute("INSERT INTO players VALUES (21, 'Setup RP', 29, 1, 13, 1, NULL, '1', 0)")
     conn.execute("INSERT INTO latest_ratings VALUES (21, 55, 57, NULL, NULL, NULL, 55,"
                  "NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL)")
     conn.execute("INSERT INTO pitching_stats VALUES (21, ?, 1, NULL, 1, 8)", (YEAR,))
@@ -188,11 +192,32 @@ def _patch_pos_rankings(monkeypatch, conn):
     monkeypatch.setattr(queries, "team_abbr_map", lambda: {1: "TST"})
     monkeypatch.setattr(queries, "get_cfg",
                         lambda: SimpleNamespace(year=YEAR, ratings_scale=20))
-    # get_positional_rankings filters to LeagueConfig().mlb_team_ids; make our
-    # fixture team (id 1) an MLB org so the pitchers aren't filtered out.
+    # get_positional_rankings filters to the request-scoped mlb_team_ids();
+    # make our fixture team (id 1) an MLB org so players aren't filtered out.
+    monkeypatch.setattr(queries, "mlb_team_ids", lambda: {1})
     import statsplusplus.config.league_config as _lc
     monkeypatch.setattr(_lc, "LeagueConfig",
                         lambda *a, **k: SimpleNamespace(mlb_team_ids={1}))
+
+
+def test_pos_rankings_includes_free_agents(monkeypatch):
+    """Unsigned free agents (team_id=0, free_agent=1) with league stats appear
+    in the rankings, tagged is_fa, interleaved by composite."""
+    conn = _pos_rankings_pitcher_db()
+    # Add an unsigned FA reliever with a prior season of MLB pitching in-league.
+    conn.execute("INSERT INTO players VALUES (30, 'Free Reliever', 30, 1, 13, 0, NULL, '0', 1)")
+    conn.execute("INSERT INTO latest_ratings VALUES (30, 60, 60, NULL, NULL, NULL, 55,"
+                 "NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL)")
+    conn.execute("INSERT INTO pitching_stats VALUES (30, ?, 1, NULL, 0, 40)", (YEAR,))
+    conn.commit()
+    _patch_pos_rankings(monkeypatch, conn)
+    res = dict(queries.get_positional_rankings())
+    rp = {p["pid"]: p for p in res["RP"]["mlb"]}
+    assert 30 in rp, "unsigned FA reliever missing from RP rankings"
+    assert rp[30]["is_fa"] is True
+    assert rp[30]["team"] == "FA"
+    # a rostered player is not tagged FA
+    assert rp.get(21, {}).get("is_fa", False) is False
 
 
 def test_pos_rankings_ace_classified_sp_early_season(monkeypatch):

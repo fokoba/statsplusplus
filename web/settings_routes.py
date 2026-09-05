@@ -254,16 +254,17 @@ def onboard_step1():
 
     try:
         from statsplus import client
-        import re
-        # Prefer the token for validation via /tokencheck when provided.
+        # Validate credentials cheaply. Do NOT kick off a /ratings export here —
+        # /ratings is rate-limited to once per 5 min per team, and firing it on a
+        # save/verify burns that budget so the user's next refresh gets refused.
+        # The refresh kicks off its own ratings export when it actually needs it.
         if token:
             ok, detail = client.tokencheck(slug, token)
             if not ok:
                 return _err(f"Token check failed: {detail}")
         client.configure(slug, cookie, token)
-        resp = client._get("/ratings/")
-        match = re.search(r'https?://\S+', resp)
-        ratings_poll_url = match.group(0).rstrip(".)") if match else ""
+        client.get_date()  # cheap, non-rate-limited connectivity check
+        ratings_poll_url = ""
     except client.TokenExpiredError:
         return _err("Token expired or invalid — log in on StatsPlus to refresh it.")
     except client.CookieExpiredError:

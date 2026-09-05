@@ -136,6 +136,77 @@ def _surplus_horizons_live(fv_continuous, age, level, bucket, ovr=None, pot=None
         return None, None, None
 
 
+def _determine_phase(conn, game_date, year):
+    """Determine the season phase from actual game data, not month heuristics.
+
+    Adapts to each league's own schedule/format (playoff length, calendar)
+    because it reads that league's `games` rows rather than assuming month
+    boundaries. Uses `games.game_type` (0 = regular season, 3 = postseason).
+
+    IMPORTANT — the refresh only stores games UP TO the current sim date, so the
+    future schedule is generally NOT in the table for a live league. We can't
+    infer "season over" from "today is past the last stored game" (that's just
+    the current date). Instead we use recency: if the current date is close to
+    the most recent played game of a type, we're still in that phase; a large
+    gap after the last played game means that phase is complete.
+
+    Phases: Regular Season, Postseason, Offseason, Spring Training.
+    """
+    if not game_date or len(game_date) < 10:
+        return "Regular Season"
+
+    row = conn.execute("""
+        SELECT
+          MAX(CASE WHEN game_type=0 AND played=1 THEN date END) AS reg_last,
+          MIN(CASE WHEN game_type=0 AND played=1 THEN date END) AS reg_first,
+          MAX(CASE WHEN game_type=3 AND played=1 THEN date END) AS post_last,
+          MIN(CASE WHEN game_type=3 AND played=1 THEN date END) AS post_first
+        FROM games WHERE date LIKE ?
+    """, (f"{year}%",)).fetchone()
+
+    from datetime import date as _date
+
+    def _d(s):
+        try:
+            return _date(int(s[0:4]), int(s[5:7]), int(s[8:10]))
+        except Exception:
+            return None
+
+    today = _d(game_date)
+    reg_last, reg_first = _d(row["reg_last"]) if row else None, _d(row["reg_first"]) if row else None
+    post_last, post_first = _d(row["post_last"]) if row else None, _d(row["post_first"]) if row else None
+
+    # "Recent" = within this many days of the last played game of a phase; the
+    # sim advances a few times a week, so the current date trails the last game
+    # by only a handful of days while a phase is live.
+    _RECENT = 10
+
+    if today is None:
+        return "Regular Season"
+
+    # Postseason: playoff games have been played and the current date is at/after
+    # the first playoff game and still close to the latest played playoff game.
+    if post_first and post_last and today >= post_first:
+        if (today - post_last).days <= _RECENT:
+            return "Postseason"
+        return "Offseason"  # well past the last playoff game → season over
+
+    # Regular season: reg games played and today is close to the latest one
+    # (in-season). A large gap after the last reg game with no playoffs recorded
+    # means the season has ended (playoffs not yet pulled, or between reg & post).
+    if reg_last and today >= (reg_first or reg_last):
+        if (today - reg_last).days <= _RECENT:
+            return "Regular Season"
+        # Season ended; playoffs haven't been recorded (or are between rounds).
+        # If we're within a few weeks, call it Postseason; otherwise Offseason.
+        return "Postseason" if (today - reg_last).days <= 30 else "Offseason"
+
+    # No games played yet this year: preseason (Spring) if in the typical
+    # ramp-up window, else Offseason (deep winter before spring).
+    month = today.month
+    return "Spring Training" if 2 <= month <= 4 else "Offseason"
+
+
 def get_summary(team_id=None):
     state = _get_state()
     conn = get_db()
@@ -151,21 +222,8 @@ def get_summary(team_id=None):
     fv50 = conn.execute(
         "SELECT COUNT(*) FROM prospect_fv pf JOIN players p ON pf.player_id=p.player_id WHERE pf.eval_date=? AND {_FARM_ORG_SQL} AND pf.fv>=50 AND p.age<=25".format(_FARM_ORG_SQL=_FARM_ORG_SQL),
         (ed, *_farm_org_params(tid))).fetchone()[0]
-    # Determine season phase from game date
-    gd = state["game_date"]
-    month = int(gd[5:7]) if gd and len(gd) >= 7 else 0
-    # Check if any games have been played this year
-    games_played = conn.execute(
-        "SELECT COUNT(*) FROM games WHERE date LIKE ? AND played=1 AND game_type=0",
-        (f"{state['year']}%",)).fetchone()[0]
-    if games_played == 0 and month <= 4:
-        phase = "Spring Training"
-    elif month >= 10 or (month == 9 and games_played > 140 * 8):
-        phase = "Postseason"
-    elif month >= 11 or month <= 1:
-        phase = "Offseason"
-    else:
-        phase = "Regular Season"
+    # Determine season phase from actual game data (game_type boundaries).
+    phase = _determine_phase(conn, state["game_date"], state["year"])
 
     # Roster-wide Current/Next/3-Year surplus — same per-player horizons
     # shown on the Contracts tab, summed across every MLB roster player

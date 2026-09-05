@@ -16,6 +16,44 @@ from conftest import TEAM_ID, HITTER_ID, PITCHER_ID, YEAR
 
 # ── get_summary ──────────────────────────────────────────────────────────────
 
+def _phase_db(reg_first, reg_last, post_first=None, post_last=None):
+    """In-memory games table with played regular + (optional) postseason games."""
+    import sqlite3
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE games (date TEXT, game_type INTEGER, played INTEGER)")
+    conn.execute("INSERT INTO games VALUES (?,0,1)", (reg_first,))
+    conn.execute("INSERT INTO games VALUES (?,0,1)", (reg_last,))
+    if post_first:
+        conn.execute("INSERT INTO games VALUES (?,3,1)", (post_first,))
+    if post_last:
+        conn.execute("INSERT INTO games VALUES (?,3,1)", (post_last,))
+    return conn
+
+
+def test_phase_regular_season_in_progress():
+    # Current date close to the last played reg game → in-season.
+    conn = _phase_db("2034-03-30", "2034-04-09")
+    assert team_queries._determine_phase(conn, "2034-04-10", 2034) == "Regular Season"
+
+
+def test_phase_postseason_within_window():
+    conn = _phase_db("1954-04-12", "1954-09-26", "1954-09-29", "1954-10-04")
+    assert team_queries._determine_phase(conn, "1954-10-04", 1954) == "Postseason"
+
+
+def test_phase_offseason_after_playoffs():
+    # Well past the last playoff game → offseason (the December-Postseason bug).
+    conn = _phase_db("1954-04-12", "1954-09-26", "1954-09-29", "1954-10-04")
+    assert team_queries._determine_phase(conn, "1954-12-05", 1954) == "Offseason"
+
+
+def test_phase_spring_training_new_year_no_games():
+    conn = _phase_db("2033-04-01", "2033-09-28", "2033-10-01", "2033-10-10")
+    # New calendar year, no 2034 games yet → spring ramp-up.
+    assert team_queries._determine_phase(conn, "2034-03-15", 2034) == "Spring Training"
+
+
 def test_get_summary_returns_dict():
     result = team_queries.get_summary(TEAM_ID)
     assert isinstance(result, dict)

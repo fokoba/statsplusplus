@@ -137,6 +137,15 @@ def _inject_globals():
             money_unit, money_divisor = _mu(), _md()
         except Exception:
             pass
+    # Manual Offseason-mode flag (Phase A). Read from the active league's state.
+    offseason_mode = False
+    try:
+        if getattr(g, "league_dir", None):
+            _sp = Path(g.league_dir) / "config" / "state.json"
+            if _sp.exists():
+                offseason_mode = bool(_json.loads(_sp.read_text()).get("offseason_mode", False))
+    except Exception:
+        offseason_mode = False
     return {
         "statsplus_base": f"https://statsplus.net/{slug}",
         "all_teams": sorted(cfg.team_names_map.items(), key=lambda x: x[1]) if getattr(g, "league_ready", False) else [],
@@ -146,6 +155,7 @@ def _inject_globals():
         "league_ready": getattr(g, "league_ready", False),
         "money_unit": money_unit,
         "money_divisor": money_divisor,
+        "offseason_mode": offseason_mode,
     }
 
 
@@ -405,6 +415,50 @@ def league():
                            pos_rankings=pos_rankings,
                            standings=standings, h2h=h2h,
                            num_teams=len(cfg.mlb_team_ids))
+
+
+@app.route("/offseason")
+def offseason():
+    """Phase-aware Offseason page (Phase A). A manual sub-phase selector drives
+    which panels are surfaced; Trades stays visible across all phases."""
+    import offseason_queries as osq
+    import json as _json
+    cfg = _get_cfg()
+    tid = queries.get_my_team_id()
+    team_name = cfg.team_names_map.get(tid, "My Team")
+    arbitration = osq.get_arbitration(tid)
+    market = osq.get_market_board(tid)
+    extensions = osq.get_extension_candidates(tid)
+    ln = cfg.settings.get("league", "League")
+    # Current manual sub-phase (empty = show all panels)
+    phase = ""
+    try:
+        _sp = Path(g.league_dir) / "config" / "state.json"
+        if _sp.exists():
+            phase = (_json.loads(_sp.read_text()).get("offseason_phase") or "").lower()
+    except Exception:
+        phase = ""
+    # Chronological phases + display labels + which panels each surfaces.
+    phases = [
+        {"key": "playoffs", "label": "Playoffs", "icon": "🏆"},
+        {"key": "arbitration", "label": "Arbitration", "icon": "⚖️"},
+        {"key": "options", "label": "Options", "icon": "📄"},
+        {"key": "free_agency", "label": "Free Agency", "icon": "✍️"},
+        {"key": "rule5", "label": "Rule 5", "icon": "🔒"},
+        {"key": "spring", "label": "Spring", "icon": "🌱"},
+    ]
+    # Panel gating (pure helper — see offseason_queries.panels_for_phase).
+    # Trades is always shown separately in the template.
+    show = osq.panels_for_phase(phase)
+    return render_template(
+        "offseason.html",
+        breadcrumbs=[{"label": ln, "url": "/league"},
+                     {"label": "Offseason", "url": "/offseason"}],
+        team_name=team_name, tid=tid,
+        arbitration=arbitration,
+        market=market, extensions=extensions,
+        phases=phases, current_phase=phase, show=show,
+    )
 
 
 @app.route("/player/<int:pid>")

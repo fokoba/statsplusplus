@@ -6,6 +6,22 @@ Completed and deferred work items, organized by session. Moved from `task_list.m
 
 ## Session 85 (2026-09-05)
 
+### Season phase header — data-driven, league-adaptive
+
+- The league/team "Phase" header (Regular Season / Postseason / Offseason /
+  Spring Training) was a month heuristic with an ordering bug: `month >= 10`
+  greedily matched Oct–Dec as "Postseason," so December always showed
+  "Postseason" (the Offseason branch was unreachable). Replaced with a
+  data-driven `_determine_phase` (`team_queries.py`) that reads each league's
+  actual `games.game_type` boundaries (0 = regular season, 3 = postseason) and
+  the recency of the last played game. It **adapts per league** — PPL's short
+  playoff, emlb's longer one, and vmlb's schedule all resolve from their own
+  data, no hardcoded playoff length or calendar. Handles the reality that the
+  future schedule isn't stored for a live league (uses last-played-game recency,
+  not "today > last stored game", so a mid-season league reads Regular Season,
+  not Offseason). PPL Dec 5 now correctly reads Offseason. Regression tests in
+  `test_team_queries.py`.
+
 ### Positional Rankings — empty-page fix + free agents included
 
 - **Fixed empty Rankings page** — `get_positional_rankings` filtered players

@@ -1,5 +1,5 @@
 {
-  "last_posted_commit": "72b38a6c1ab9cb9a687d652b7aabfe9c07679316",
+  "last_posted_commit": "862864f9881e5d347940c02b7f9f75e2d07d37c9",
   "last_posted_date": "2026-09-02",
   "last_posted_title": "v1.3.0 \u2014 Install & Upgrade Stability",
   "history": [
@@ -103,6 +103,12 @@
       "date": "2026-09-05",
       "title": "Service Time & Team-Control Accuracy",
       "version": "1.5.1"
+    },
+    {
+      "commit": "862864f9881e5d347940c02b7f9f75e2d07d37c9",
+      "date": "2026-09-05",
+      "title": "Offseason Page & Rankings Improvements",
+      "version": "1.6.0"
     }
   ]
 }

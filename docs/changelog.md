@@ -6,6 +6,21 @@ Completed and deferred work items, organized by session. Moved from `task_list.m
 
 ## Session 85 (2026-09-05)
 
+### Positional Rankings — empty-page fix + free agents included
+
+- **Fixed empty Rankings page** — `get_positional_rankings` filtered players
+  against `LeagueConfig().mlb_team_ids`, a fresh singleton that lazily caches
+  whichever league it first computed and never invalidates on `/switch-league`.
+  It returned another league's team IDs (e.g. emlb's 31-64 while viewing PPL's
+  1-16), rejecting every player → empty rankings. Now uses the request-scoped
+  `mlb_team_ids()`. (Committed 604c633.)
+- **Free agents in the rankings** — the positional rankings now interleave
+  unsigned free agents (`team_id=0, free_agent=1`, with prior in-league stats)
+  alongside rostered players, ranked by composite and tagged **FA**. Lets a GM
+  see where an available free agent stacks up at each position during the
+  offseason. (`web/queries.py`, `league.html`, `.fa-tag` style; regression test
+  `test_pos_rankings_includes_free_agents`.)
+
 ### Dynamic Pages — phase-aware Offseason page (Phase A, proof-of-concept)
 
 First "dynamic page": a phase-aware `/offseason` view that surfaces the decisions

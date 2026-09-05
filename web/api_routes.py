@@ -40,6 +40,27 @@ def _get_cfg():
 # ── Simple data endpoints ──
 
 
+@api_bp.route("/api/toggle-offseason", methods=["POST"])
+def toggle_offseason():
+    """Flip the manual Offseason-mode flag for the active league.
+
+    Stored in the league's state.json (writable, league-scoped). Phase A uses a
+    manual toggle; auto-detection is future work.
+    """
+    import json
+    cfg = _get_cfg()
+    state_path = Path(cfg.league_dir) / "config" / "state.json"
+    try:
+        state = json.loads(state_path.read_text()) if state_path.exists() else {}
+        new_val = not bool(state.get("offseason_mode", False))
+        state["offseason_mode"] = new_val
+        state_path.write_text(json.dumps(state, indent=2) + "\n")
+        return jsonify({"ok": True, "offseason_mode": new_val})
+    except Exception as e:
+        log.error("toggle-offseason failed: %s", e)
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @api_bp.route("/api/prospect/<int:pid>")
 def api_prospect(pid):
     import queries
@@ -756,8 +777,7 @@ def api_test_connection():
         return jsonify({"ok": False, "error": "No token or cookie configured"})
     try:
         client.configure(slug, cookie, "")
-        date = client.get_date()
-        client._get("/ratings/")
+        date = client.get_date()  # cheap, non-rate-limited — do not spend /ratings budget on a test
         return jsonify({"ok": True, "method": "cookie", "game_date": date})
     except client.TokenExpiredError:
         return jsonify({"ok": False, "error": "Token expired or invalid — log in on StatsPlus to refresh it."})

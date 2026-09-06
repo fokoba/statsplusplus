@@ -484,7 +484,8 @@ def start_ratings_export() -> str:
     tell the user exactly how long to wait.
     """
     _RATINGS_MAX_BLOCKING_WAIT = 45  # sleep through brief waits; surface longer ones
-    for attempt in range(3):
+    resp = ""
+    for attempt in range(8):
         # _retries=0: inspect the wait ourselves instead of _fetch auto-sleeping.
         resp = _fetch(f"{_base_url()}/ratings/", _retries=0)
         m = _WAIT_RE.search(resp)
@@ -498,6 +499,15 @@ def start_ratings_export() -> str:
                 secs,
                 f"StatsPlus limits ratings pulls to once per 5 minutes per team. "
                 f"Try again in about {secs} seconds.")
+        # No numeric wait, but the league-side ratings update itself may still
+        # be running ("The ratings are being updated, please try again in a
+        # few minutes") — _fetch's own transient-retry is bypassed above by
+        # _retries=0, so handle this message here too instead of falling
+        # through to the "no poll URL found" ValueError below.
+        if _MSG_RATINGS_UPDATING in resp.lower() and attempt < 7:
+            log.info("ratings: still being updated league-side — waiting 60s... (attempt %d)", attempt + 1)
+            time.sleep(60)
+            continue
         break
     match = re.search(r'https?://\S+', resp)
     if not match:

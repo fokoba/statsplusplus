@@ -425,16 +425,38 @@ def _surplus_horizons(rows, game_year):
     return current, nxt, three_yr
 
 
+def _recent_mlb_war(conn, pid, is_pitcher):
+    """Most recent MLB season's WAR (blended for pitchers) — a simple, direct
+    proxy for "current production" used as the WAR input to a free agent's
+    recommended-contract estimate. Same single-season blend offseason_queries.
+    _recent_war() and _last_season() use; this fork doesn't store a
+    player_evaluation.peak_war to read instead.
+    """
+    if is_pitcher:
+        r = conn.execute(
+            "SELECT war, ra9war FROM mlb_pitching_stats "
+            "WHERE player_id=? AND split_id=1 AND ip > 0 ORDER BY year DESC LIMIT 1",
+            (pid,)).fetchone()
+        if not r:
+            return None
+        return round(((r[0] or 0) + (r[1] if r[1] is not None else r[0] or 0)) / 2.0, 1)
+    r = conn.execute(
+        "SELECT war FROM mlb_batting_stats WHERE player_id=? AND split_id=1 AND ab > 0 "
+        "ORDER BY year DESC LIMIT 1", (pid,)).fetchone()
+    return round(r[0], 1) if r and r[0] is not None else None
+
+
 def get_player(pid):
     conn = get_db()
     year = get_cfg().year
 
     # Bio
-    p = conn.execute("SELECT player_id, name, age, team_id, parent_team_id, level, pos, role FROM players WHERE player_id=?", (pid,)).fetchone()
+    p = conn.execute("SELECT player_id, name, age, team_id, parent_team_id, level, pos, role, free_agent FROM players WHERE player_id=?", (pid,)).fetchone()
     if not p:
         return None
 
     player_id, name, age, team_id, parent_team_id, level, pos, role = p["player_id"], p["name"], p["age"], p["team_id"], p["parent_team_id"], p["level"], p["pos"], p["role"]
+    is_free_agent = bool(p["free_agent"]) and team_id == 0
     is_pitcher = role in (11, 12, 13)
     org_id = team_id if parent_team_id == 0 else parent_team_id
     level_str = level_map().get(str(level), str(level))
@@ -1391,6 +1413,19 @@ def get_player(pid):
                     "total": {k: v for k, v in cv["total_surplus"].items()},
                     "flags": cv.get("flags", []),
                 }
+                # For free agents, add a recommended-contract estimate — the same
+                # value-based figure the offseason FA cart uses (single source of
+                # truth: finance_settings.recommended_contract). This fork sources
+                # the WAR input from the most recent MLB season directly (see
+                # offseason_queries._recent_war) rather than a stored
+                # player_evaluation.peak_war — this fork doesn't use that table.
+                if is_free_agent:
+                    from statsplusplus.config.finance_settings import recommended_contract as _rec_fn
+                    from statsplusplus.config.league_config import (
+                        dollars_per_war as _dpw_fn, league_minimum as _lm_fn)
+                    _pw = _recent_mlb_war(conn, pid, is_pitcher)
+                    _ld_rec = get_cfg().league_dir
+                    surplus_detail["recommended"] = _rec_fn(_pw, _dpw_fn(_ld_rec), age, _lm_fn(_ld_rec))
         elif valuation.get("type") == "prospect":
             import prospect_value as _pv
             fv = valuation.get("fv", 0)
@@ -1989,6 +2024,26 @@ def get_player(pid):
             _pr_conn = _pr_db.get_connection(_pr_league_dir)
             demotion_risk = compute_demotion_risk(pid, _pr_conn, _pr_league_dir)
             _pr_conn.close()
+        except Exception:
+            pass
+
+    # Free-agent recommended contract — a fair-market cost estimate, the SAME
+    # figure the offseason FA cart uses (finance_settings.recommended_contract).
+    # Unsigned FAs are level 0 and fall outside the MLB/prospect valuation types,
+    # so their surplus_detail is usually empty; attach the recommendation here so
+    # it shows on the player page too. WAR input from the most recent MLB
+    # season (this fork doesn't store a player_evaluation.peak_war).
+    if is_free_agent and "recommended" not in (surplus_detail or {}):
+        try:
+            from statsplusplus.config.finance_settings import recommended_contract as _rec_fa
+            from statsplusplus.config.league_config import (
+                dollars_per_war as _dpw_fa, league_minimum as _lm_fa)
+            _ld_fa = get_cfg().league_dir
+            _pw_fa = _recent_mlb_war(conn, pid, is_pitcher)
+            _rec = _rec_fa(_pw_fa, _dpw_fa(_ld_fa), age, _lm_fa(_ld_fa))
+            if surplus_detail is None:
+                surplus_detail = {"rows": [], "total": {"base": 0}, "flags": []}
+            surplus_detail.setdefault("recommended", _rec)
         except Exception:
             pass
 

@@ -45,6 +45,7 @@ def panels_for_phase(phase):
     show_all = not phase
     return {
         "arbitration": show_all or phase == "arbitration",
+        "options": show_all or phase == "options",
         "free_agency": show_all or phase == "free_agency",
         "extensions": show_all or phase in ("free_agency", "options"),
     }
@@ -389,6 +390,10 @@ def get_market_board(team_id, limit=60):
         proj_war = _proj_next_war(conn, r[0], r[2], bucket, comp, r[4],
                                   last["war"] if last else 0.0,
                                   1, dpw, min_sal, weights)
+        # Recommended contract — a simple value-based cost estimate the FA cart
+        # draws down against fa_budget (aav). Not the player's real demand.
+        from statsplusplus.config.finance_settings import recommended_contract
+        rec = recommended_contract(proj_war, dpw, r[2], min_sal)
         out.append({
             "pid": r[0], "name": r[1], "age": r[2],
             "pos": pos,
@@ -399,6 +404,9 @@ def get_market_board(team_id, limit=60):
             "throws": _hand.get(r[7], "?"),
             "last": last,
             "fills_need": fills_need,
+            "rec_aav": rec["aav"],
+            "rec_years": rec["years"],
+            "rec_total": rec["total"],
         })
     return out
 
@@ -442,3 +450,156 @@ def get_extension_candidates(team_id):
         })
     out.sort(key=lambda x: -x["surplus"])
     return out
+
+
+# ---------------------------------------------------------------------------
+# Contract options — this-offseason team/player/vesting option decisions
+# ---------------------------------------------------------------------------
+
+def _proj_value_at_year(conn, pid, age, bucket, composite, ceiling, stat_war,
+                        target_control_year, dpw, min_sal, weights):
+    """Projected market VALUE (dollars) for a player at a given control year
+    ahead, via the shared compute_player_value (single source of truth). Reads
+    the matching row of its breakdown. Returns None on failure.
+    """
+    from statsplusplus.evaluation.player_value import compute_player_value
+    cpa = conn.execute(
+        "SELECT COALESCE(SUM(ab + COALESCE(bb,0) + COALESCE(hbp,0) + COALESCE(sf,0)), 0) "
+        "FROM mlb_batting_stats WHERE player_id=? AND split_id=1", (pid,)).fetchone()[0]
+    cip = conn.execute(
+        "SELECT COALESCE(SUM(ip), 0) FROM mlb_pitching_stats WHERE player_id=? AND split_id=1",
+        (pid,)).fetchone()[0]
+    try:
+        res = compute_player_value(
+            fv_continuous=0.0, bucket=bucket, age=age, level="MLB",
+            composite=composite or 50, ceiling=ceiling or 50,
+            career_pa=int(cpa), career_ip=float(cip), stat_war=stat_war,
+            years_control=max(target_control_year, 1), salaries=None,
+            dpw=dpw, min_sal=min_sal, weights=weights)
+        bd = res.get("breakdown") or []
+        if not bd:
+            return None
+        idx = min(max(target_control_year - 1, 0), len(bd) - 1)
+        return bd[idx].get("market_value")
+    except Exception:
+        return None
+
+
+def get_option_decisions(team_id):
+    """Own-team players with a contract option, grouped by decision timing.
+
+    An option for year Y is decided in the offseason *before* Y. We can't
+    reliably read from the API whether this offseason's window has already
+    passed, so we relabel honestly rather than guess:
+
+    - **this_offseason** : option year == game_year + 1 (the decision that
+      belongs to the current offseason — may already be resolved in-game).
+    - **upcoming**        : option year >= game_year + 2 (future offseasons).
+
+    - **Team options**: recommend Exercise vs Decline via the shared valuation
+      model — exercising costs the option salary, declining costs the buyout, so
+      the breakeven is ``proj_value > option_salary - buyout``. Shown for
+      upcoming options too, framed as advance planning.
+    - **Player / vesting options**: informational (the team doesn't decide).
+
+    The option year is derived from the contract (``season_year + offset``), NOT
+    the game year — a last-year option resolves at ``season_year + years - 1``,
+    a next-last-year option one year earlier.
+
+    All dollar figures are raw league dollars (template uses the money filter).
+    """
+    conn = get_db()
+    ed = _eval_date(conn)
+    if ed is None:
+        return {"this_offseason": [], "upcoming": []}
+    cfg = get_cfg()
+    from statsplusplus.evaluation.constants import load_model_weights
+    from statsplusplus.config.league_config import dollars_per_war, league_minimum
+    weights = load_model_weights(cfg.league_dir)
+    dpw = dollars_per_war(cfg.league_dir)
+    min_sal = league_minimum(cfg.league_dir)
+
+    rows = conn.execute("""
+        SELECT c.player_id, p.name, p.age, c.years, c.current_year, c.season_year,
+               c.salary_0, c.salary_1, c.salary_2, c.salary_3, c.salary_4,
+               c.salary_5, c.salary_6, c.salary_7, c.salary_8, c.salary_9,
+               c.salary_10, c.salary_11, c.salary_12, c.salary_13, c.salary_14,
+               c.last_year_team_option, c.last_year_player_option,
+               c.last_year_vesting_option, c.last_year_option_buyout,
+               c.next_last_year_team_option, c.next_last_year_player_option,
+               c.next_last_year_vesting_option, c.next_last_year_option_buyout,
+               ps.ovr, ps.ovr, ps.bucket
+        FROM contracts c
+        JOIN players p ON p.player_id = c.player_id
+        JOIN player_surplus ps ON ps.player_id = c.player_id AND ps.eval_date = ?
+        WHERE c.contract_team_id = ? AND c.is_major = 1 AND p.level IN ('1', 1)
+          AND (c.last_year_team_option = 1 OR c.last_year_player_option = 1
+               OR c.last_year_vesting_option = 1
+               OR c.next_last_year_team_option = 1 OR c.next_last_year_player_option = 1
+               OR c.next_last_year_vesting_option = 1)
+    """, (ed, team_id)).fetchall()
+
+    game_year = int(cfg.year)
+    entries = []
+    for r in rows:
+        pid, name, age = r[0], r[1], r[2]
+        years, season_year = r[3] or 0, r[5] or game_year
+        salaries = list(r[6:21])
+        composite, ceiling, bucket = r[29], r[30], r[31] or "?"
+        pos = _display_pos(bucket) if bucket != "?" else "?"
+        stat_war = _recent_war(conn, pid, bucket)
+
+        def _sal(idx):
+            return (salaries[idx] or 0) if 0 <= idx < len(salaries) else 0
+
+        # (salary index within the contract, option year, T/P/V flags, buyout)
+        slots = [
+            (years - 1, (r[21], r[22], r[23]), r[24] or 0),   # last-year option
+            (years - 2, (r[25], r[26], r[27]), r[28] or 0),   # next-last-year option
+        ]
+        for opt_idx, (team_o, player_o, vesting_o), buyout in slots:
+            if opt_idx < 0 or not (team_o or player_o or vesting_o):
+                continue
+            option_year = season_year + opt_idx
+            opt_sal = _sal(opt_idx)
+            if team_o:
+                typ = "Team"
+            elif player_o:
+                typ = "Player"
+            else:
+                typ = "Vesting"
+            entry = {
+                "pid": pid, "name": name, "age": age, "pos": pos,
+                "type": typ, "year": option_year,
+                "option_salary": opt_sal, "buyout": buyout,
+                "proj_value": None, "rec": None, "rec_class": "ok",
+            }
+            if typ == "Team":
+                # control years from now (game_year) to the option year, 1-based
+                ctrl = max(option_year - game_year, 1)
+                pv = _proj_value_at_year(conn, pid, age, bucket, composite, ceiling,
+                                         stat_war, ctrl, dpw, min_sal, weights)
+                entry["proj_value"] = pv
+                if pv is not None:
+                    breakeven = opt_sal - buyout
+                    if pv >= opt_sal:
+                        entry["rec"], entry["rec_class"] = "Exercise", "good"
+                    elif pv > breakeven:
+                        entry["rec"], entry["rec_class"] = "Exercise (marginal)", "ok"
+                    else:
+                        entry["rec"], entry["rec_class"] = "Decline", "bad"
+            elif typ == "Player":
+                entry["rec"], entry["rec_class"] = "Player decides", "ok"
+            else:
+                entry["rec"], entry["rec_class"] = "Auto (performance)", "ok"
+            entries.append(entry)
+
+    # Split by decision timing: this offseason (option year == game_year + 1)
+    # vs upcoming (game_year + 2 and beyond). Anything with an option year at or
+    # before the current game year is a past/expiring edge case — group it with
+    # "this offseason" so it isn't silently dropped.
+    this_off = [e for e in entries if e["year"] <= game_year + 1]
+    upcoming = [e for e in entries if e["year"] >= game_year + 2]
+    this_off.sort(key=lambda x: (x["type"] != "Team", -(x["option_salary"] or 0)))
+    upcoming.sort(key=lambda x: (x["year"], x["type"] != "Team", -(x["option_salary"] or 0)))
+    return {"this_offseason": this_off, "upcoming": upcoming}

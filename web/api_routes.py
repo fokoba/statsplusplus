@@ -90,6 +90,51 @@ def set_offseason_phase():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+def finance_payload(team_id):
+    """The finance panel's data: the saved FA/extension budgets (the game's
+    authoritative figures) plus the derived available-for-FA (fa_budget less any
+    cart commitments — 0 until the FA cart exists).
+    """
+    from statsplusplus.config import finance_settings as fin
+    settings = fin.load_settings(get_league_dir())
+    return {
+        "settings": settings,
+        "available": fin.available_for_fa(settings),
+    }
+
+
+@api_bp.route("/api/finance-settings", methods=["GET"])
+def api_finance_settings_get():
+    """Return finance settings + derived available for the active league."""
+    try:
+        import queries
+        return jsonify({"ok": True, **finance_payload(queries.get_my_team_id())})
+    except Exception as e:
+        log.error("finance-settings GET failed: %s", e)
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@api_bp.route("/api/finance-settings", methods=["POST"])
+def api_finance_settings_post():
+    """Save finance settings for the active league and return the recomputed
+    figures (so the client can render the new available-to-spend without a
+    second request)."""
+    data = request.get_json(silent=True) or {}
+    settings = data.get("settings")
+    if settings is None:
+        return jsonify({"ok": False, "error": "Missing 'settings' in request body"}), 400
+    try:
+        import queries
+        from statsplusplus.config import finance_settings as fin
+        fin.save_settings(get_league_dir(), settings)
+        return jsonify({"ok": True, **finance_payload(queries.get_my_team_id())})
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except Exception as e:
+        log.error("finance-settings POST failed: %s", e)
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @api_bp.route("/api/prospect/<int:pid>")
 def api_prospect(pid):
     import queries

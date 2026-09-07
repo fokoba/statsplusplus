@@ -26,6 +26,7 @@ statsplusplus/
 │   ├── config/                     # League resolution, ratings normalization
 │   │   ├── league_config.py            # LeagueConfig class, dollars_per_war, league_minimum
 │   │   ├── league_context.py           # Active league resolution, cookie management
+│   │   ├── finance_settings.py         # Per-league offseason budget pools + available-to-spend calc
 │   │   └── ratings.py                  # norm(), norm_continuous(), norm_floor() (pure, explicit scale)
 │   ├── client/                     # StatsPlus API client
 │   │   └── statsplus.py
@@ -79,7 +80,7 @@ statsplusplus/
 │   ├── templates/                  # Jinja2 templates
 │   └── static/                     # CSS, JS, favicon assets
 │
-├── tests/                      # Test suite (674 tests)
+├── tests/                      # Test suite (908 tests)
 │   ├── models/                     # Model + utility tests
 │   ├── evaluation/                 # Pure computation tests
 │   ├── data/                       # DB integration tests

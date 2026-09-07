@@ -4,6 +4,108 @@ Completed and deferred work items, organized by session. Moved from `task_list.m
 
 ---
 
+## Session 86 (2026-09-06)
+
+### Offseason page — financial settings (budget scaffolding)
+
+- First piece of the "act as GM / arrive at a spendable number" offseason
+  tooling. New per-league finance settings + a budget panel on the `/offseason`
+  page. **The user enters the two figures the game already computes** on the
+  contract-offer screen — "money for free agents" (`fa_budget`) and "money for
+  extensions" (`ext_budget`). These are OOTP's authoritative numbers; the FA
+  cart (future) draws down from them.
+- **Design note — why not derive it:** the first cut tried to *compute*
+  available-for-FA from `total_budget − committed_payroll − Σpools − arb`.
+  Validated against the live game and it doesn't reconstruct OOTP's figure:
+  the game's "money for free agents" is cash-flow-based (starting balance +
+  revenue − all expenses + owner cash, across pools and multiple years) and not
+  fully recoverable from stored data — every closed-form fit matched some
+  observations and broke others. Reading the game's own number is accurate by
+  construction and can't drift. Dropped `total_budget`, the six budget pools,
+  `committed_payroll`, and the arb-projection machinery.
+- **`statsplusplus.config.finance_settings` (v2, pure logic, mypy-strict)** —
+  `load_settings`/`save_settings` (per-league `config/finance_settings.json`,
+  mirrors the draft-settings pattern; corrupt files → defaults; pre-v2
+  total_budget/pools files migrate by discarding the obsolete inputs), and the
+  pure `available_for_fa(settings, committed_spent=0)` = `fa_budget −
+  committed_spent`. Money coercion clamps negatives to 0, treats blanks/garbage
+  as unset (`None`, distinct from an explicit 0). Available can go negative.
+- **Web** — `GET`/`POST /api/finance-settings`; shared `finance_payload(team_id)`
+  returns settings + derived available. Offseason budget panel added to
+  `offseason.html`: two headline figures (Available for Free Agency /
+  Extensions) and a two-input edit form.
+- **Values are raw dollars in the league's own scale** — no assumption of MLB
+  millions, consistent with `$/WAR` and `fmt_money`.
+- Tests: `tests/test_finance_settings.py` (12 — round-trip, validation,
+  coercion, legacy-v1 migration, corrupt-file fallback, available calc incl.
+  draw-down/negative) + 3 finance-route tests in `test_offseason.py` (isolated
+  probe-app pattern). Suite: 890 passing.
+- **Deferred (next pass):** the FA cart / market board that consumes `fa_budget`
+  and draws it down per targeted player; the recommended-contract / demand +
+  pipeline-aware length engine.
+
+### Offseason page — FA targets cart (budget-aware market board)
+
+- The Free Agency panel is now a **budget-aware roster builder**, not a flat
+  table. Each FA row carries a **recommended contract** (value-based cost
+  estimate) and a "+ Target" button; targeting a player adds him to a **My
+  Targets cart** that draws down the `fa_budget` set above, with a live
+  Remaining figure that turns red if you overspend.
+- **Recommended contract** — `finance_settings.recommended_contract(proj_war,
+  dpw, age)` returns `{aav, years, total}`: `aav = max(proj_war, 0) × $/WAR`,
+  length from a coarse age curve (≤28→4yr, ≤32→3, ≤35→2, else 1). It is a
+  *value-based estimate used as a cost proxy* — **not the player's actual
+  demand** (the API doesn't expose FA demand; confirmed via a data-at-hand
+  review of `/players`, `/contract`, `/draftpool`). Labeled "est." in the UI.
+  The return shape is fixed so the deferred richer model (market tax,
+  pipeline-aware length, scarcity) slots in without UI/caller changes.
+- **Cart draws down by AAV**, not total contract value — `fa_budget` is the
+  game's single-offseason "money for free agents", so a multi-year deal
+  consumes its per-year figure, not the whole commitment. Total is shown for
+  context.
+- **Per-target override** — the user can edit AAV and years on any cart item
+  (e.g. to match an offer they've actually made in-game). The cart is
+  **localStorage, per-league** (`spp_fa_targets_<slug>`), so it persists across
+  sessions without server writes.
+- Tests: recommended-contract calc (value/floor/age-curve) in
+  `test_finance_settings.py`; market-board rows carry the rec-contract fields in
+  `test_offseason.py`. Suite: 902 passing.
+- **Follow-ups (same session):** min-salary floor added to
+  `recommended_contract` (`aav = max(proj_war × $/WAR, min_sal)` — a
+  replacement-level FA costs the league minimum, not $0); the recommended
+  contract also surfaces on the **player page** Surplus Projection panel for
+  free agents (single source of truth — same `recommended_contract`; unsigned
+  FAs are level 0 and fall outside the MLB/prospect valuation types, so it's
+  attached via an explicit FA fallback in `get_player`). Suite: 905 passing.
+- **Deferred:** needs-first positional-grid front door; the richer
+  demand/pipeline-aware length model (market tax, positional scarcity).
+
+### Offseason page — Contract Options panel
+
+- Replaced the "coming soon" placeholder for the **Options** stepper phase with
+  a working panel. `offseason_queries.get_option_decisions(team_id)` surfaces
+  the user's own players with a contract option, **grouped by decision timing**:
+  - **This offseason** — option year == `game_year + 1` (labeled "decision may
+    already be resolved in-game", since OOTP resolves options early in the
+    offseason and the API doesn't expose whether the window has passed).
+  - **Upcoming** — option year ≥ `game_year + 2`, future offseasons, sorted by
+    year; recommendation retained as advance planning ("if the call were today").
+  - The option year is derived from the **contract** (`season_year + offset`),
+    not the game year — a fix for an off-by-one that mislabeled decision timing
+    (options across several future years all showed as "this offseason").
+  - **Team options**: recommends **Exercise / Exercise (marginal) / Decline**
+    from the shared valuation model — breakeven `proj_value > option_salary −
+    buyout` (`_proj_value_at_year` reads the option-year row of
+    `compute_player_value`'s breakdown). **Player / Vesting** options are
+    informational.
+- `panels_for_phase` now includes `options`; the panel is gated to the Options
+  phase (or the All view). Uses the option fields already stored (Phase 4).
+- Tests: team-option recommendation, contract-derived option year (off-by-one
+  guard), and empty-case in `test_offseason.py`; phase-gating parametrize
+  updated. Suite: 908 passing.
+
+---
+
 ## Session 85 (2026-09-05)
 
 ### Season phase header — data-driven, league-adaptive

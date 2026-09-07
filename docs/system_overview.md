@@ -74,7 +74,32 @@ perpetual-arb-aware, `$/WAR`-scaled thresholds), Free Agency market board
 (unsigned + league-played FAs, need-flag via `get_draft_org_depth`, Proj WAR via
 the shared `compute_player_value`), Extension candidates, and always-on Trades —
 all reuse existing valuation data. Query module: `web/offseason_queries.py`.
-Endpoints: `/api/toggle-offseason`, `/api/set-offseason-phase`.
+Endpoints: `/api/toggle-offseason`, `/api/set-offseason-phase`. A **Contract
+Options** panel (`get_option_decisions`) surfaces own-team option decisions:
+team options get an Exercise/Decline rec (breakeven `proj_value > option_salary
+− buyout`, projected value from the shared `compute_player_value`), player/vesting
+options are informational, and `next_last_year_*` options show as a next-offseason
+heads-up.
+
+**Offseason budget (finance settings):** the `/offseason` page has an Offseason
+Budget panel driven by per-league finance settings
+(`statsplusplus.config.finance_settings`, stored as
+`config/finance_settings.json`). Rather than reconstruct OOTP's cash-flow-based
+budget math (which isn't fully recoverable from stored data), the user enters the
+two figures the game already shows on the contract-offer screen — "money for free
+agents" (`fa_budget`) and "money for extensions" (`ext_budget`). These are
+authoritative; the FA cart draws down from `fa_budget`
+(`finance_settings.available_for_fa`, pure). Each FA row carries a
+**recommended contract** (`finance_settings.recommended_contract` — value-based
+`aav = max(proj_war × $/WAR, min_salary)`, age-curve length; a cost *estimate*,
+not the player's demand, which the API doesn't expose). The same recommended
+contract shows on the **player page** Surplus Projection panel for free agents
+(single source of truth). A **localStorage per-league
+targets cart** (`spp_fa_targets_<slug>`) draws down `fa_budget` by each target's
+AAV (single-offseason money), with per-target AAV/years override. Endpoints:
+`GET`/`POST /api/finance-settings` (shared `finance_payload`). The
+pipeline-aware length / market-tax refinement of the estimate and a needs-first
+positional-grid front door are deferred.
 
 **Rule:** `fv_calc.py` is the sole writer of `prospect_fv` and `player_surplus`.
 All other analysis scripts are read-only against the DB.

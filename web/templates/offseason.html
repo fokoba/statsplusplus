@@ -20,6 +20,54 @@
   {% if current_phase %}Focused on <strong>{{ (phases|selectattr('key','equalto',current_phase)|first).label }}</strong> — click another stage to change, or “All”.{% else %}Click where you are in the offseason to focus the page.{% endif %}
 </p>
 
+{# ── Financial Settings ── #}
+<div class="panel" id="finance-panel">
+  <h2>Offseason Budget <span style="font-weight:400;color:var(--text-dim);font-size:13px">— what you have to spend</span></h2>
+
+  {# Headline: the money available for free agents #}
+  <div class="fin-headline">
+    <div class="fin-avail">
+      <span class="fin-avail-label">Available for Free Agency</span>
+      <span class="fin-avail-value{% if finance.available is not none and finance.available < 0 %} neg{% elif finance.available is none %} unset{% endif %}" id="fin-available">
+        {{ finance.available|money if finance.available is not none else '— enter your budget' }}
+      </span>
+    </div>
+    {% if finance.settings.ext_budget is not none %}
+    <div class="fin-avail">
+      <span class="fin-avail-label">Available for Extensions</span>
+      <span class="fin-avail-value fin-ext-value" id="fin-ext-display">{{ finance.settings.ext_budget|money }}</span>
+    </div>
+    {% endif %}
+    <button type="button" class="fin-edit-btn" id="fin-edit-btn">Edit budget</button>
+  </div>
+
+  {# Edit form — the game's own figures, entered directly #}
+  <div class="fin-edit" id="fin-edit" hidden>
+    <div class="fin-grid">
+      <label class="fin-field">Money for free agents
+        <input type="number" min="0" step="any" id="fin-fa"
+               value="{{ finance.settings.fa_budget if finance.settings.fa_budget is not none else '' }}"
+               placeholder="from the game">
+      </label>
+      <label class="fin-field">Money for extensions
+        <input type="number" min="0" step="any" id="fin-ext"
+               value="{{ finance.settings.ext_budget if finance.settings.ext_budget is not none else '' }}"
+               placeholder="from the game">
+      </label>
+    </div>
+    <div class="fin-actions">
+      <button type="button" class="fin-save-btn" id="fin-save-btn">Save</button>
+      <button type="button" class="fin-cancel-btn" id="fin-cancel-btn">Cancel</button>
+      <span class="fin-msg" id="fin-msg"></span>
+    </div>
+    <p class="fin-hint">
+      Enter the figures OOTP shows on the contract-offer screen (“money for free agents” /
+      “money for extensions”). These are the game’s authoritative numbers — free-agent
+      targeting will draw down from them.
+    </p>
+  </div>
+</div>
+
 {# ── Arbitration ── #}
 {% if show.arbitration %}
 <div class="panel">
@@ -55,11 +103,107 @@
 </div>
 {% endif %}
 
+{# ── Contract Options ── #}
+{% if show.options %}
+<div class="panel">
+  <h2>Contract Options <span style="font-weight:400;color:var(--text-dim);font-size:13px">— option decisions</span></h2>
+  {% if options.this_offseason %}
+  <h3 style="font-size:13px;margin:0 0 6px">This offseason <span style="font-weight:400;color:var(--text-dim)">— decision may already be resolved in-game</span></h3>
+  <table class="data-table sortable">
+    <thead>
+      <tr>
+        <th class="left">Player</th><th data-sort="pos" class="left">Pos</th><th data-sort="num">Age</th>
+        <th class="left">Type</th><th data-sort="num">Year</th>
+        <th data-sort="num">Option $</th><th data-sort="num">Buyout</th>
+        <th data-sort="num" title="Projected market value at the option year (shared valuation model)">Proj Value</th>
+        <th class="left">Recommendation</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for o in options.this_offseason %}
+      <tr>
+        <td class="left"><a class="player-link" href="/player/{{ o.pid }}">{{ o.name }}</a></td>
+        <td class="left" data-sort-value="{{ o.pos }}">{{ o.pos }}</td>
+        <td class="num">{{ o.age }}</td>
+        <td class="left">{{ o.type }}</td>
+        <td class="num">{{ o.year }}</td>
+        <td class="num">{{ o.option_salary|money }}</td>
+        <td class="num">{% if o.type == 'Team' and o.buyout %}{{ o.buyout|money }}{% else %}—{% endif %}</td>
+        <td class="num">{{ o.proj_value|money if o.proj_value is not none else '—' }}</td>
+        <td class="left">{% if o.rec %}<span class="tag tag-{{ o.rec_class }}">{{ o.rec }}</span>{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {% if options.upcoming %}
+  <h3 style="font-size:13px;margin:{% if options.this_offseason %}14px{% else %}0{% endif %} 0 6px">Upcoming <span style="font-weight:400;color:var(--text-dim)">— future offseasons (planning; recommendation if the call were today)</span></h3>
+  <table class="sortable">
+    <thead>
+      <tr>
+        <th class="left">Player</th><th data-sort="pos" class="left">Pos</th><th data-sort="num">Age</th>
+        <th class="left">Type</th><th data-sort="num">Year</th>
+        <th data-sort="num">Option $</th><th data-sort="num">Buyout</th>
+        <th data-sort="num">Proj Value</th><th class="left">If today</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for o in options.upcoming %}
+      <tr>
+        <td class="left"><a class="player-link" href="/player/{{ o.pid }}">{{ o.name }}</a></td>
+        <td class="left" data-sort-value="{{ o.pos }}">{{ o.pos }}</td>
+        <td class="num">{{ o.age }}</td>
+        <td class="left">{{ o.type }}</td>
+        <td class="num">{{ o.year }}</td>
+        <td class="num">{{ o.option_salary|money }}</td>
+        <td class="num">{% if o.type == 'Team' and o.buyout %}{{ o.buyout|money }}{% else %}—{% endif %}</td>
+        <td class="num">{{ o.proj_value|money if o.proj_value is not none else '—' }}</td>
+        <td class="left">{% if o.rec %}<span class="tag tag-{{ o.rec_class }}">{{ o.rec }}</span>{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {% if not options.this_offseason and not options.upcoming %}
+  <p class="empty">No contract options on your roster.</p>
+  {% endif %}
+  <p style="color:var(--text-dim);font-size:12px">
+    <strong>Team options</strong>: you decide — exercise if the player's projected value clears the option salary (net of buyout).
+    <strong>Player</strong> options are the player's call; <strong>Vesting</strong> options trigger on performance.
+  </p>
+</div>
+{% endif %}
+
 {# ── Free Agency ── #}
 {% if show.free_agency %}
 <div class="panel">
   <h2>Free Agency <span style="font-weight:400;color:var(--text-dim);font-size:13px">— available free agents</span></h2>
   {% if market %}
+
+  {# ── Targets cart — draws down fa_budget by each target's AAV ── #}
+  <div class="fa-cart" id="fa-cart"
+       data-fa-budget="{{ finance.settings.fa_budget if finance.settings.fa_budget is not none else '' }}"
+       data-league="{{ active_league_slug }}">
+    <div class="fa-cart-head">
+      <span class="fa-cart-title">My Targets <span id="fa-cart-count" class="fa-cart-count">(0)</span></span>
+      <div class="fa-cart-budget">
+        {% if finance.settings.fa_budget is not none %}
+        <span class="fa-cart-remaining-label">Remaining</span>
+        <span class="fa-cart-remaining" id="fa-cart-remaining">{{ finance.settings.fa_budget|money }}</span>
+        {% else %}
+        <span class="fa-cart-nobudget">Set your free-agent budget above to track spending.</span>
+        {% endif %}
+      </div>
+    </div>
+    <div class="fa-cart-list" id="fa-cart-list"><p class="fa-cart-empty">No targets yet — click “+ Target” on a free agent.</p></div>
+    <p class="fa-cart-note" id="fa-cart-note" hidden>
+      Costs are <strong>estimates</strong> (proj WAR × $/WAR) — the game doesn’t
+      publish free-agent demand. Edit AAV/years on any card to match a real offer.
+    </p>
+  </div>
+
   <div class="fa-filters">
     <label>Position
       <select id="fa-pos">
@@ -78,12 +222,17 @@
       <th data-sort="num">Comp</th><th data-sort="num">Ceil</th>
       <th data-sort="num" title="Model's projected WAR at peak/full playing time">Proj WAR</th>
       <th data-sort="num" title="Actual WAR last season">WAR</th>
-      <th class="left">Last Season</th>
+      <th data-sort="num" title="Recommended contract — value-based estimate (proj WAR × $/WAR), NOT the player's actual demand">Rec. AAV</th>
+      <th class="left">Rec.</th>
+      <th></th>
     </tr></thead>
     <tbody>
       {% for p in market %}
       <tr class="fa-row{% if p.fills_need %} fa-need{% endif %}"
-          data-pos="{{ p.pos }}" data-age="{{ p.age }}" data-need="{{ 1 if p.fills_need else 0 }}">
+          data-pos="{{ p.pos }}" data-age="{{ p.age }}" data-need="{{ 1 if p.fills_need else 0 }}"
+          data-pid="{{ p.pid }}" data-name="{{ p.name }}"
+          data-bt="{{ p.bats }}/{{ p.throws }}"
+          data-aav="{{ p.rec_aav }}" data-years="{{ p.rec_years }}">
         <td class="left">
           <a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a>
           {% if p.fills_need %}<span class="need-badge" title="Fills a positional need for your team">★</span>{% endif %}
@@ -95,7 +244,9 @@
         <td>{{ p.ceiling }}</td>
         <td>{{ p.proj_war if p.proj_war is not none else '—' }}</td>
         <td>{{ p.last.war if p.last else '—' }}</td>
-        <td class="left fa-stats">{% if p.last %}{{ p.last.line }} <span class="fa-sample">({{ p.last.sample }})</span>{% else %}—{% endif %}</td>
+        <td class="num" data-sort-value="{{ p.rec_aav }}">{{ p.rec_aav|money }}</td>
+        <td class="left fa-rec">{{ p.rec_years }}yr / {{ p.rec_total|money }}</td>
+        <td class="left"><button type="button" class="fa-add-btn" data-pid="{{ p.pid }}">+ Target</button></td>
       </tr>
       {% endfor %}
     </tbody>
@@ -103,7 +254,7 @@
   </div>
   <p style="color:var(--text-dim);font-size:12px">
     <span class="need-badge">★</span> = below-league-average depth at this position <em>and</em> an upgrade over your current best there (or you have no one).
-    <strong>Proj WAR</strong> is the model's projected peak production; <strong>WAR</strong> is actual last season.
+    <strong>Rec. AAV</strong> is a value-based estimate (proj WAR × $/WAR), not the player's actual demand — edit it in your targets.
   </p>
   {% else %}
   <p class="empty">No free agents on the market.</p>
@@ -141,7 +292,7 @@
 {% endif %}
 
 {# ── Coming-soon placeholder for phases with no dedicated panel yet ── #}
-{% if current_phase in ("playoffs", "options", "rule5", "spring") %}
+{% if current_phase in ("playoffs", "rule5", "spring") %}
 <div class="panel">
   <h2>{{ (phases|selectattr('key','equalto',current_phase)|first).label }}</h2>
   <p class="empty">
@@ -215,10 +366,75 @@
   .fa-scroll thead th { position:sticky; top:0; z-index:1; background:var(--surface); }
   .fa-stats { color:var(--text-dim); font-size:12px; white-space:nowrap; }
   .fa-sample { color:var(--text-dim); opacity:0.7; }
+  .fa-rec { color:var(--text-dim); font-size:12px; white-space:nowrap; }
+
+  /* FA targets cart */
+  .fa-cart { margin-bottom:14px; padding:12px 14px; background:var(--surface);
+             border:1px solid var(--border); border-radius:6px; }
+  .fa-cart-head { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:8px; }
+  .fa-cart-title { font-weight:600; font-size:14px; }
+  .fa-cart-count { color:var(--text-dim); font-weight:400; }
+  .fa-cart-budget { display:flex; align-items:baseline; gap:8px; }
+  .fa-cart-remaining-label { font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-dim); }
+  .fa-cart-remaining { font-size:18px; font-weight:700; color:var(--green); }
+  .fa-cart-remaining.over { color:var(--red); }
+  .fa-cart-nobudget { font-size:12px; color:var(--text-dim); font-style:italic; }
+  .fa-cart-empty { color:var(--text-dim); font-style:italic; font-size:12px; margin:4px 0; }
+  .fa-cart-note { color:var(--text-dim); font-size:11px; margin:10px 0 0; }
+
+  /* Target cards */
+  .fa-cart-list { display:grid; grid-template-columns:repeat(auto-fill, minmax(210px, 1fr)); gap:10px; }
+  .fa-tc { background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:10px 12px;
+           display:flex; flex-direction:column; gap:6px; }
+  .fa-tc-top { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .fa-tc-name { font-weight:600; font-size:13px; }
+  .fa-tc-remove { background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:18px; line-height:1; padding:0 2px; }
+  .fa-tc-remove:hover { color:var(--red); }
+  .fa-tc-meta { display:flex; gap:10px; font-size:11px; color:var(--text-dim); align-items:center; }
+  .fa-tc-pos { background:var(--surface); border:1px solid var(--border); border-radius:4px; padding:0 6px; color:var(--text); }
+  .fa-tc-cost { display:flex; gap:10px; }
+  .fa-tc-field { display:flex; flex-direction:column; gap:3px; flex:2 1 auto; }
+  .fa-tc-field.fa-tc-years { flex:1 1 56px; }
+  .fa-tc-label { font-size:10px; text-transform:uppercase; letter-spacing:.03em; color:var(--text-dim);
+                 display:flex; align-items:center; gap:4px; }
+  .fa-tc-field input { background:var(--surface); color:var(--text); border:1px solid var(--border);
+                 border-radius:4px; padding:3px 6px; font-size:13px; width:100%; box-sizing:border-box; }
+  .fa-tc-tag { display:inline-block; font-size:9px; text-transform:none; letter-spacing:0;
+               padding:0 5px; border-radius:8px; background:var(--surface); border:1px solid var(--border); color:var(--text-dim); }
+  .fa-tc-tag.fa-tc-set { border-color:var(--green); color:var(--green); }
+  .fa-tc-total { font-size:11px; color:var(--text-dim); text-align:right; }
+  .fa-tc-total strong { color:var(--text); }
+  .fa-add-btn { background:none; border:1px solid var(--border); color:var(--text-dim);
+             border-radius:4px; padding:2px 8px; cursor:pointer; font-size:11px; white-space:nowrap; }
+  .fa-add-btn:hover { border-color:var(--green); color:var(--text); }
+  .fa-add-btn.added { border-color:var(--green); color:var(--green); background:rgba(78,204,163,0.12); }
   /* Consistent panel + heading spacing on this page */
   #offseason-page .panel { margin-bottom:18px; padding:16px 18px; }
   #offseason-page .panel h2 { margin-bottom:10px; }
   #offseason-page .panel > p:last-child { margin-bottom:0; }
+
+  /* Finance panel */
+  .fin-headline { display:flex; align-items:center; gap:32px; flex-wrap:wrap; }
+  .fin-avail { display:flex; flex-direction:column; gap:2px; }
+  .fin-avail-label { font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-dim); }
+  .fin-avail-value { font-size:30px; font-weight:700; color:var(--green); line-height:1.1; }
+  .fin-avail-value.neg { color:var(--red); }
+  .fin-avail-value.unset { font-size:18px; font-weight:500; color:var(--text-dim); }
+  .fin-ext-value { font-size:22px; color:var(--text); }
+  .fin-edit-btn, .fin-save-btn, .fin-cancel-btn { background:none; border:1px solid var(--border);
+        color:var(--text-dim); border-radius:6px; padding:6px 14px; cursor:pointer; font-size:12px; margin-left:auto; }
+  .fin-edit-btn:hover, .fin-cancel-btn:hover { color:var(--text); border-color:var(--green); }
+  .fin-save-btn { border-color:var(--green); color:var(--green); margin-left:0; }
+  .fin-save-btn:hover { background:rgba(78,204,163,0.15); }
+  .fin-cancel-btn { margin-left:0; }
+  .fin-edit { margin-top:14px; padding-top:14px; border-top:1px solid var(--border); }
+  .fin-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; max-width:520px; }
+  .fin-field { display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--text-dim); }
+  .fin-field input { background:var(--bg); color:var(--text); border:1px solid var(--border);
+        border-radius:4px; padding:5px 8px; font-size:14px; }
+  .fin-actions { display:flex; align-items:center; gap:10px; margin-top:14px; }
+  .fin-msg { font-size:12px; color:var(--text-dim); }
+  .fin-hint { color:var(--text-dim); font-size:11px; margin:10px 0 0; }
 </style>
 
 {% endblock %}
@@ -272,6 +488,214 @@
     el.addEventListener('input', apply);
   });
   apply();
+})();
+
+// FA targets cart — localStorage per league, draws down fa_budget by AAV.
+(function () {
+  var cart = document.getElementById('fa-cart');
+  var table = document.getElementById('fa-table');
+  if (!cart || !table) return;
+
+  var league = cart.getAttribute('data-league') || 'default';
+  var faBudgetRaw = cart.getAttribute('data-fa-budget');
+  var faBudget = faBudgetRaw === '' ? null : parseFloat(faBudgetRaw);
+  var KEY = 'spp_fa_targets_' + league;
+
+  var listEl = document.getElementById('fa-cart-list');
+  var countEl = document.getElementById('fa-cart-count');
+  var remainEl = document.getElementById('fa-cart-remaining');
+  var noteEl = document.getElementById('fa-cart-note');
+
+  function fmtMoney(v) {
+    if (v === null || v === undefined || isNaN(v)) return '—';
+    var a = Math.abs(v);
+    if (a >= 1e6) return '$' + (v / 1e6).toFixed(1) + 'M';
+    if (a >= 1e3) return '$' + Math.round(v / 1e3) + 'K';
+    return '$' + Math.round(v).toLocaleString();
+  }
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function load() {
+    try { return JSON.parse(localStorage.getItem(KEY)) || {}; }
+    catch (e) { return {}; }
+  }
+  function save(t) { localStorage.setItem(KEY, JSON.stringify(t)); }
+
+  var targets = load();  // { pid: {name, pos, age, bt, aav, years, edited} }
+
+  // Live row lookup — pos/age/bt always come from the table row in the DOM, so
+  // carts saved before these fields existed still display correctly.
+  function rowInfo(pid) {
+    var row = table.querySelector('tr.fa-row[data-pid="' + pid + '"]');
+    if (!row) return {};
+    return {
+      name: row.getAttribute('data-name'),
+      pos: row.getAttribute('data-pos'),
+      age: row.getAttribute('data-age'),
+      bt: row.getAttribute('data-bt')
+    };
+  }
+
+  function render() {
+    var pids = Object.keys(targets);
+    countEl.textContent = '(' + pids.length + ')';
+    if (noteEl) noteEl.hidden = !pids.length;
+    if (!pids.length) {
+      listEl.innerHTML = '<p class="fa-cart-empty">No targets yet — click “+ Target” on a free agent.</p>';
+    } else {
+      var html = '';
+      pids.forEach(function (pid) {
+        var t = targets[pid];
+        var info = rowInfo(pid);
+        var name = info.name || t.name || 'Player';
+        var pos = info.pos || t.pos || '?';
+        var age = info.age || t.age || '?';
+        var bt = info.bt || t.bt || '?';
+        var estTag = t.edited
+          ? '<span class="fa-tc-tag fa-tc-set" title="You set this value">set</span>'
+          : '<span class="fa-tc-tag" title="Estimate: proj WAR × $/WAR — not the player\'s actual demand">est.</span>';
+        html += '' +
+          '<div class="fa-tc" data-pid="' + pid + '">' +
+            '<div class="fa-tc-top">' +
+              '<a class="fa-tc-name player-link" href="/player/' + pid + '">' + esc(name) + '</a>' +
+              '<button type="button" class="fa-tc-remove" title="Remove target">×</button>' +
+            '</div>' +
+            '<div class="fa-tc-meta">' +
+              '<span class="fa-tc-pos">' + esc(pos) + '</span>' +
+              '<span>Age ' + esc(age) + '</span>' +
+              '<span>' + esc(bt) + '</span>' +
+            '</div>' +
+            '<div class="fa-tc-cost">' +
+              '<label class="fa-tc-field">' +
+                '<span class="fa-tc-label">AAV ' + estTag + '</span>' +
+                '<input type="number" min="0" step="any" class="fa-cart-aav" value="' + (t.aav || 0) + '"></label>' +
+              '<label class="fa-tc-field fa-tc-years">' +
+                '<span class="fa-tc-label">Years</span>' +
+                '<input type="number" min="1" step="1" class="fa-cart-years" value="' + (t.years || 1) + '"></label>' +
+            '</div>' +
+            '<div class="fa-tc-total">Total <strong>' + fmtMoney((t.aav || 0) * (t.years || 1)) + '</strong></div>' +
+          '</div>';
+      });
+      listEl.innerHTML = html;
+      listEl.querySelectorAll('.fa-tc').forEach(function (card) {
+        var pid = card.getAttribute('data-pid');
+        card.querySelector('.fa-cart-aav').addEventListener('input', function (e) {
+          targets[pid].aav = Math.max(0, parseFloat(e.target.value) || 0);
+          targets[pid].edited = true; save(targets); render();
+        });
+        card.querySelector('.fa-cart-years').addEventListener('input', function (e) {
+          targets[pid].years = Math.max(1, parseInt(e.target.value, 10) || 1);
+          targets[pid].edited = true; save(targets); render();
+        });
+        card.querySelector('.fa-tc-remove').addEventListener('click', function () {
+          delete targets[pid]; save(targets); render(); syncButtons();
+        });
+      });
+    }
+    // draw-down against fa_budget (by AAV — single-offseason money)
+    if (remainEl && faBudget !== null && !isNaN(faBudget)) {
+      var spentAav = Object.keys(targets).reduce(function (s, pid) {
+        return s + (targets[pid].aav || 0); }, 0);
+      var remaining = faBudget - spentAav;
+      remainEl.textContent = fmtMoney(remaining);
+      remainEl.className = 'fa-cart-remaining' + (remaining < 0 ? ' over' : '');
+    }
+  }
+
+  function syncButtons() {
+    table.querySelectorAll('.fa-add-btn').forEach(function (btn) {
+      var pid = btn.getAttribute('data-pid');
+      var inCart = !!targets[pid];
+      btn.textContent = inCart ? '✓ Added' : '+ Target';
+      btn.classList.toggle('added', inCart);
+    });
+  }
+
+  table.querySelectorAll('.fa-add-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var row = btn.closest('tr');
+      var pid = row.getAttribute('data-pid');
+      if (targets[pid]) { delete targets[pid]; }
+      else {
+        targets[pid] = {
+          name: row.getAttribute('data-name'),
+          pos: row.getAttribute('data-pos'),
+          age: row.getAttribute('data-age'),
+          bt: row.getAttribute('data-bt'),
+          aav: parseFloat(row.getAttribute('data-aav')) || 0,
+          years: parseInt(row.getAttribute('data-years'), 10) || 1,
+          edited: false
+        };
+      }
+      save(targets); render(); syncButtons();
+    });
+  });
+
+  render();
+  syncButtons();
+})();
+
+// Finance panel — save the game's FA/extension figures.
+(function () {
+  var panel = document.getElementById('finance-panel');
+  if (!panel) return;
+
+  var editBtn = document.getElementById('fin-edit-btn');
+  var editBox = document.getElementById('fin-edit');
+  var saveBtn = document.getElementById('fin-save-btn');
+  var cancelBtn = document.getElementById('fin-cancel-btn');
+  var faInput = document.getElementById('fin-fa');
+  var extInput = document.getElementById('fin-ext');
+  var availEl = document.getElementById('fin-available');
+  var msg = document.getElementById('fin-msg');
+
+  function fmtMoney(v) {
+    if (v === null || v === undefined || isNaN(v)) return '—';
+    var a = Math.abs(v);
+    if (a >= 1e6) return '$' + (v / 1e6).toFixed(1) + 'M';
+    if (a >= 1e3) return '$' + Math.round(v / 1e3) + 'K';
+    return '$' + Math.round(v).toLocaleString();
+  }
+  function num(el) { var v = parseFloat(el.value); return isNaN(v) ? 0 : Math.max(0, v); }
+
+  // Reflect the FA figure in the headline as the user types (no cart yet, so
+  // available == fa_budget).
+  function preview() {
+    if (faInput.value === '' || isNaN(parseFloat(faInput.value))) {
+      availEl.textContent = '— enter your budget';
+      availEl.className = 'fin-avail-value unset';
+    } else {
+      availEl.textContent = fmtMoney(num(faInput));
+      availEl.className = 'fin-avail-value';
+    }
+  }
+
+  editBtn.addEventListener('click', function () {
+    editBox.hidden = !editBox.hidden;
+    editBtn.textContent = editBox.hidden ? 'Edit budget' : 'Close';
+  });
+  cancelBtn.addEventListener('click', function () { window.location.reload(); });
+  faInput.addEventListener('input', preview);
+
+  saveBtn.addEventListener('click', function () {
+    var payload = { settings: {
+      fa_budget: faInput.value === '' ? null : num(faInput),
+      ext_budget: extInput.value === '' ? null : num(extInput)
+    }};
+    msg.textContent = 'Saving…';
+    fetch('/api/finance-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (d.ok) { window.location.reload(); }
+      else { msg.textContent = 'Error: ' + (d.error || 'unknown'); }
+    }).catch(function () { msg.textContent = 'Save failed'; });
+  });
 })();
 </script>
 {% endblock %}

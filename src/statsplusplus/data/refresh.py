@@ -205,6 +205,28 @@ def _upsert_ratings(conn, ratings, snapshot_date, keep_history=True):
             f"UPDATE ratings SET {set_clause} WHERE player_id=? AND babip IS NULL",
             [tuple(r.get(api) for _, api in _EXT_COLS) + (r["ID"],) for r in ratings]
         )
+    # Backfill personality_type/adaptability from personality_overrides — the
+    # sanctioned API refresh never supplies either field (unlike every other
+    # personality trait, which comes through live above), so a freshly
+    # inserted snapshot row always has them NULL. Carry forward whatever the
+    # user's last Custom Upload → Sync Ratings recorded, keyed by player_id
+    # only (no snapshot_date match needed — that's the whole point).
+    try:
+        has_overrides = conn.execute("SELECT 1 FROM personality_overrides LIMIT 1").fetchone()
+    except Exception:
+        has_overrides = None
+    if has_overrides:
+        conn.execute("""
+            UPDATE ratings SET
+                personality_type = COALESCE(ratings.personality_type,
+                    (SELECT po.personality_type FROM personality_overrides po
+                     WHERE po.player_id = ratings.player_id)),
+                adaptability = COALESCE(ratings.adaptability,
+                    (SELECT po.adaptability FROM personality_overrides po
+                     WHERE po.player_id = ratings.player_id))
+            WHERE snapshot_date = ?
+              AND player_id IN (SELECT player_id FROM personality_overrides)
+        """, (snapshot_date,))
 
 def _snapshot_ratings_history(conn, ratings, snapshot_date):
     """Append a monthly snapshot to ratings_history (one per in-game month)."""

@@ -358,6 +358,25 @@ CREATE TABLE IF NOT EXISTS salary_estimates (
     PRIMARY KEY (player_id, year)
 );
 
+-- Personality archetype + adaptability, imported from a manually uploaded
+-- OOTP "All Columns" export via Custom Upload. The sanctioned StatsPlus API
+-- refresh does NOT expose these two fields at all (confirmed against the
+-- documented ratings CSV formats and the API client) — every other
+-- personality trait (Int/WrkEthic/Greed/Loy/Lead) comes through the API
+-- refresh live and needs no persistence here, but personality_type ("Type")
+-- and adaptability ("AD") would otherwise revert to NULL on every single
+-- refresh, since a fresh API-driven ratings row never sets them. Keyed by
+-- player_id only (not snapshot_date) so it survives every refresh; a
+-- post-refresh backfill step (_upsert_ratings) copies these onto each new
+-- snapshot row. uploaded_at also powers the "last valid upload" reminder
+-- on the Custom Upload page.
+CREATE TABLE IF NOT EXISTS personality_overrides (
+    player_id        INTEGER PRIMARY KEY,
+    personality_type TEXT,
+    adaptability     TEXT,
+    uploaded_at      TEXT
+);
+
 -- Rule 5 draft eligibility, imported from a manually uploaded OOTP
 -- "Rule 5 Draft Eligible" export. Not derivable from synced data — real
 -- Rule 5 status depends on internal roster-protection history the live

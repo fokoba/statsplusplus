@@ -810,7 +810,8 @@ def import_ratings_sync(file_bytes: bytes, league_dir=None) -> dict:
     import datetime
     conn = get_conn(league_dir)
     row = conn.execute("SELECT MAX(snapshot_date) FROM ratings").fetchone()
-    snapshot_date = row[0] if row and row[0] else datetime.date.today().isoformat()
+    today = datetime.date.today().isoformat()
+    snapshot_date = row[0] if row and row[0] else today
 
     rows = parse_rows(file_bytes)
     updated = 0
@@ -861,6 +862,25 @@ def import_ratings_sync(file_bytes: bytes, league_dir=None) -> dict:
             )
             inserted += 1
 
+        # personality_type/adaptability survive refreshes separately from the
+        # rest of `ratings` — the sanctioned API refresh never supplies either
+        # field (see personality_overrides' schema comment), so every refresh
+        # would otherwise blank them right back out. Persist here, keyed by
+        # player_id only; _upsert_ratings backfills them onto each new
+        # snapshot from this table.
+        po_values = {c: values[c] for c in ("personality_type", "adaptability") if c in values}
+        if po_values:
+            po_values["uploaded_at"] = today
+            cols = list(po_values.keys())
+            set_clause = ", ".join(f"{c}=excluded.{c}" for c in cols)
+            col_list = ", ".join(["player_id"] + cols)
+            placeholders = ", ".join(["?"] * (1 + len(cols)))
+            conn.execute(
+                f"INSERT INTO personality_overrides ({col_list}) VALUES ({placeholders}) "
+                f"ON CONFLICT(player_id) DO UPDATE SET {set_clause}",
+                [pid] + [po_values[c] for c in cols],
+            )
+
     conn.commit()
     conn.close()
     return {
@@ -868,6 +888,19 @@ def import_ratings_sync(file_bytes: bytes, league_dir=None) -> dict:
         "inserted": inserted, "skipped": skipped,
         "snapshot_date": snapshot_date,
     }
+
+
+def get_last_personality_upload(league_dir=None) -> dict:
+    """Most recent Sync Ratings upload date + how many players' personality
+    data it covers, for the "last valid upload" reminder on Custom Upload.
+    Returns {"date": str | None, "count": int}.
+    """
+    conn = get_conn(league_dir)
+    row = conn.execute(
+        "SELECT MAX(uploaded_at), COUNT(*) FROM personality_overrides"
+    ).fetchone()
+    conn.close()
+    return {"date": row[0] if row else None, "count": row[1] if row else 0}
 
 
 def _db_free_agent_status(pids: list[str]) -> dict[str, bool]:

@@ -32,6 +32,15 @@
   <div style="color:var(--text-dim); font-size:13px; margin-bottom:10px">
     Upload the same OOTP "All Columns" export to write real ratings back into this league's data — every field the file carries (tools, position current/potential, defense specialty, pitch arsenal, personality). Existing values are only replaced when the file has real data for them; blanks never clobber what's already on file. Works for both leagues.
   </div>
+  <div style="font-size:12px; margin-bottom:10px; padding:8px; border:1px solid var(--border); border-radius:6px">
+    {% if last_personality_upload and last_personality_upload.date %}
+      <span style="color:var(--text-dim)">Personality data (Type/Adaptability — the two fields the API refresh can't supply, so they're the only reason to re-upload) last synced</span>
+      <strong>{{ last_personality_upload.date }}</strong>
+      <span style="color:var(--text-dim)">for {{ last_personality_upload.count }} player{{ 's' if last_personality_upload.count != 1 else '' }}. It's carried forward automatically on every refresh — only re-upload when you want fresher reads (new personality reveals, more scouted players), not every sim advance.</span>
+    {% else %}
+      <span style="color:var(--text-dim)">No personality data synced yet for this league — upload once below to start tracking it (it'll survive future refreshes automatically).</span>
+    {% endif %}
+  </div>
   <form method="post" action="/sync-ratings" enctype="multipart/form-data">
     <input type="file" name="ratings_csv_file" accept=".csv" required>
     <button type="submit" class="btn btn-sm" style="margin-left:16px">Sync</button>

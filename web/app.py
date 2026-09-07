@@ -604,8 +604,11 @@ def custom_upload():
             except Exception as e:
                 error = f"Couldn't process that file: {e}"
 
+    last_personality_upload = _cu.get_last_personality_upload(league_dir=_get_cfg().league_dir)
+
     return render_template("custom_upload.html", results=results, error=error,
                            under_24_only=under_24_only,
+                           last_personality_upload=last_personality_upload,
                            breadcrumbs=[{"label": "Custom Upload", "url": "/custom-upload"}])
 
 

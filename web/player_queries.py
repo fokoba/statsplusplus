@@ -409,11 +409,12 @@ def get_player(pid):
     year = get_cfg().year
 
     # Bio
-    p = conn.execute("SELECT player_id, name, age, team_id, parent_team_id, level, pos, role FROM players WHERE player_id=?", (pid,)).fetchone()
+    p = conn.execute("SELECT player_id, name, age, team_id, parent_team_id, level, pos, role, free_agent FROM players WHERE player_id=?", (pid,)).fetchone()
     if not p:
         return None
 
     player_id, name, age, team_id, parent_team_id, level, pos, role = p["player_id"], p["name"], p["age"], p["team_id"], p["parent_team_id"], p["level"], p["pos"], p["role"]
+    is_free_agent = bool(p["free_agent"]) and team_id == 0
     is_pitcher = role in (11, 12, 13)
     org_id = team_id if parent_team_id == 0 else parent_team_id
     level_str = level_map().get(str(level), str(level))
@@ -1441,6 +1442,13 @@ def get_player(pid):
                     "total": {"base": _cv_result["surplus"]},
                     "flags": [],
                 }
+                # For free agents, add a recommended-contract estimate — the same
+                # value-based figure the offseason FA cart uses (single source of
+                # truth: finance_settings.recommended_contract).
+                if is_free_agent:
+                    from statsplusplus.config.finance_settings import recommended_contract as _rec_fn
+                    _pw = (_pe["peak_war"] if _pe else None)
+                    surplus_detail["recommended"] = _rec_fn(_pw, _dpw, age, _lm)
         elif valuation.get("type") == "prospect":
             from statsplusplus.evaluation.player_value import compute_player_value as _compute_player_value
             from statsplusplus.evaluation.constants import load_model_weights as _load_mw
@@ -2043,6 +2051,24 @@ def get_player(pid):
             _pr_conn = _pr_db.get_connection(_pr_league_dir)
             demotion_risk = compute_demotion_risk(pid, _pr_conn, _pr_league_dir)
             _pr_conn.close()
+        except Exception:
+            pass
+
+    # Free-agent recommended contract — a fair-market cost estimate, the SAME
+    # figure the offseason FA cart uses (finance_settings.recommended_contract).
+    # Unsigned FAs are level 0 and fall outside the MLB/prospect valuation types,
+    # so their surplus_detail is usually empty; attach the recommendation here so
+    # it shows on the player page too. Uses the eval row's peak_war.
+    if is_free_agent and (unified_row is not None):
+        try:
+            from statsplusplus.config.finance_settings import recommended_contract as _rec_fa
+            from statsplusplus.config.league_config import (
+                dollars_per_war as _dpw_fa, league_minimum as _lm_fa)
+            _ld_fa = get_cfg().league_dir
+            _rec = _rec_fa(unified_row["peak_war"], _dpw_fa(_ld_fa), age, _lm_fa(_ld_fa))
+            if surplus_detail is None:
+                surplus_detail = {"rows": [], "total": {"base": 0}, "flags": []}
+            surplus_detail.setdefault("recommended", _rec)
         except Exception:
             pass
 

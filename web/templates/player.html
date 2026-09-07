@@ -483,6 +483,17 @@
 {% if p.surplus_detail %}
 <div class="panel">
   <h2>Surplus Projection {% if p.surplus_detail.discount_note %}<span class="info-tip" title="{{ p.surplus_detail.discount_note }}">ⓘ</span>{% endif %}</h2>
+  {% if p.surplus_detail.recommended %}
+  <div class="rec-contract">
+    <span class="rec-contract-label">Recommended contract
+      <span class="info-tip" title="Value-based estimate: max(proj WAR × $/WAR, league minimum), age-based length. NOT the player's actual demand (the game doesn't publish it). A starting point — adjust to the real market.">ⓘ</span>
+    </span>
+    <span class="rec-contract-value">{{ p.surplus_detail.recommended.years }} yr / {{ p.surplus_detail.recommended.aav|money }} AAV
+      <span class="rec-contract-total">({{ p.surplus_detail.recommended.total|money }} total)</span>
+    </span>
+  </div>
+  {% endif %}
+  {% if p.surplus_detail.rows %}
   <table>
     <thead><tr><th>{% if p.surplus_detail.discount_note %}Year (est.){% else %}Year{% endif %}</th><th>Age</th><th>WAR</th><th>Value</th><th>Salary</th><th>Surplus</th></tr></thead>
     <tbody>
@@ -523,6 +534,7 @@
       {% endif %}
     </tfoot>
   </table>
+  {% endif %}
   {% if p.surplus_detail.flags %}
   <div style="margin-top:8px; font-size:11px; color:var(--text-dim)">
     {{ p.surplus_detail.flags|join(" · ") }}

@@ -403,6 +403,7 @@ def offseason():
     arbitration = osq.get_arbitration(tid)
     market = osq.get_market_board(tid)
     extensions = osq.get_extension_candidates(tid)
+    options = osq.get_option_decisions(tid)
     ln = cfg.settings.get("league", "League")
     # Current manual sub-phase (empty = show all panels)
     phase = ""
@@ -424,6 +425,9 @@ def offseason():
     # Panel gating (pure helper — see offseason_queries.panels_for_phase).
     # Trades is always shown separately in the template.
     show = osq.panels_for_phase(phase)
+    # Finance panel — budget pools + derived available-to-spend (Component 3).
+    from api_routes import finance_payload
+    finance = finance_payload(tid)
     return render_template(
         "offseason.html",
         breadcrumbs=[{"label": ln, "url": "/league"},
@@ -431,7 +435,9 @@ def offseason():
         team_name=team_name, tid=tid,
         arbitration=arbitration,
         market=market, extensions=extensions,
+        options=options,
         phases=phases, current_phase=phase, show=show,
+        finance=finance,
     )
 
 

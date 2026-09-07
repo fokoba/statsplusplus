@@ -411,6 +411,36 @@ a.ext-link:hover { color: var(--green); }
 .war-warm { color: #e0e0e0; }
 .war-cool { color: var(--text-dim); }
 
+/* Recommended contract (free-agent surplus panel) */
+.rec-contract {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.rec-contract-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+.rec-contract-value {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--green);
+}
+.rec-contract-total {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-dim);
+}
+
 /* Info tooltip icon */
 .info-tip {
   font-size: 12px;

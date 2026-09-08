@@ -440,6 +440,7 @@ def get_power_rankings():
     rows.sort(key=lambda x: -x["score"])
     for i, r in enumerate(rows):
         r["rank"] = i + 1
+        r["tier"] = _gr_tier(i + 1, len(rows), "pill")
     return rows
 
 
@@ -2764,7 +2765,31 @@ def get_farm_depth(team_id):
         "total_surplus": round(team_surplus / _money_divisor(), 1),
         "lg_avg": round(lg_avg / _money_divisor(), 1),
         "lg_rank": lg_rank, "lg_n": len(lg_vals),
+        "lg_rank_tier": _gr_tier(lg_rank, len(lg_vals), "pill") if lg_vals else "gr-pill-mid",
     }
+
+
+def _gr_tier(rank, n, suffix=""):
+    """5-tier green-to-red bucket name for `rank` out of `n`, by percentile
+    rather than a fixed rank cutoff so this reads sensibly at any group size
+    (a 10-team league vs a 30-team one, a 9-position table, etc). `suffix`
+    picks the CSS family: "" for gr-tier-* (row+cell tint), "pill" for
+    gr-pill-* (standalone badge), "bar" for gr-bar-* (rank-bar background).
+    Returns e.g. "gr-tier-elite" / "gr-pill-good" / "gr-bar-bad".
+    """
+    prefix = f"gr-{suffix}" if suffix else "gr-tier"
+    if n <= 1:
+        return f"{prefix}-mid"
+    pct = rank / n
+    if pct <= 0.15:
+        return f"{prefix}-elite"
+    if pct <= 0.40:
+        return f"{prefix}-good"
+    if pct <= 0.70:
+        return f"{prefix}-mid"
+    if pct <= 0.90:
+        return f"{prefix}-poor"
+    return f"{prefix}-bad"
 
 
 def get_farm_system_rankings():
@@ -2805,19 +2830,7 @@ def get_farm_system_rankings():
     for i, e in enumerate(entries):
         e["rank"] = i + 1
         e["is_mine"] = e["tid"] == my_tid
-        # 5-tier green-to-red, by percentile rather than a fixed rank cutoff
-        # so this reads sensibly at any league size (not just a 30-team one).
-        pct = (i + 1) / n if n else 1
-        if pct <= 0.15:
-            e["tier"] = "farm-tier-elite"
-        elif pct <= 0.40:
-            e["tier"] = "farm-tier-good"
-        elif pct <= 0.70:
-            e["tier"] = "farm-tier-mid"
-        elif pct <= 0.90:
-            e["tier"] = "farm-tier-poor"
-        else:
-            e["tier"] = "farm-tier-bad"
+        e["tier"] = _gr_tier(i + 1, n)
     return entries
 
 
@@ -3616,10 +3629,12 @@ def get_org_overview(team_id):
     lg_rankings = _league_pos_rankings(conn, year)
     num_teams = max(len(v) for v in lg_rankings.values()) if lg_rankings else 34
     pos_rank = {}
+    pos_rank_tier = {}
     for pos, tw in lg_rankings.items():
         for i, (tid, _war) in enumerate(tw):
             if tid == team_id:
                 pos_rank[pos] = i + 1
+                pos_rank_tier[pos] = _gr_tier(i + 1, len(tw), "pill")
                 break
 
     # ── Payroll shape (next 4 years) ──
@@ -3695,6 +3710,7 @@ def get_org_overview(team_id):
     return {
         "position_depth": position_depth,
         "pos_rank": pos_rank,
+        "pos_rank_tier": pos_rank_tier,
         "num_teams": num_teams,
         "surplus_leaders": all_surplus,
         "payroll_shape": payroll_shape,

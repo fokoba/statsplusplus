@@ -853,7 +853,7 @@ from team_queries import (get_summary, get_standings, get_division_standings,
                           get_org_minor_league_roster,
                           get_head_to_head_matrix, get_cut_candidates,
                           get_waiver_candidates, get_free_agent_candidates,
-                          get_defense_page, get_farm_system_rankings)
+                          get_defense_page, get_farm_system_rankings, _gr_tier)
 from player_queries import get_player
 from percentiles import get_hitter_percentiles, get_pitcher_percentiles
 
@@ -1378,8 +1378,10 @@ def get_positional_rankings():
             sorted_comps = sorted(all_composites)
             pos_median = sorted_comps[len(sorted_comps) // 2]
         group["median"] = pos_median
+        _n_mlb = len(group["mlb"])
         for p in group["mlb"]:
             p["vs_avg"] = p["composite"] - pos_median if p["composite"] and pos_median else 0
+            p["tier"] = _gr_tier(p["rank"], _n_mlb, "pill")
 
         # Assign prospects
         for r in prospect_rows:

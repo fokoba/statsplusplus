@@ -74,14 +74,16 @@
   <td>{% if fmt == "pct" %}{{ "%.3f"|format(s.val) }}{% elif fmt == "rate" %}{{ "%.1f"|format(s.val) }}%{% elif fmt == "dec2" %}{{ "%.2f"|format(s.val) }}{% elif fmt == "int" %}{{ s.val }}{% endif %}</td>
   <td class="rank-cell">
     {%- set r = s.rank -%}
-    {%- set pct = ((((s.n - r) * 100 / (s.n - 1)) * 0.85)|round|int) if s.n > 1 else 85 -%}
-    <span class="rank-track">
-    {%- if r <= 5 -%}<span class="rank-bar" style="width:{{ pct }}%;background:#50b4ff"></span><span class="rank-pill rank-elite">{{ r }}</span>
-    {%- elif r <= 12 -%}<span class="rank-bar" style="width:{{ pct }}%;background:#7ec8ff"></span><span class="rank-pill rank-good">{{ r }}</span>
-    {%- elif r <= 22 -%}<span class="rank-bar" style="width:{{ pct }}%;background:#8a8a9a"></span><span class="rank-pill rank-mid">{{ r }}</span>
-    {%- elif r <= 29 -%}<span class="rank-bar" style="width:{{ pct }}%;background:#ffa03c"></span><span class="rank-pill rank-poor">{{ r }}</span>
-    {%- else -%}<span class="rank-bar" style="width:{{ pct }}%;background:#ff5050"></span><span class="rank-pill rank-bad">{{ r }}</span>
+    {%- set bar_pct = ((((s.n - r) * 100 / (s.n - 1)) * 0.85)|round|int) if s.n > 1 else 85 -%}
+    {%- set rank_pct = (r / s.n) if s.n else 1 -%}
+    {%- if rank_pct <= 0.15 -%}{% set tier = 'elite' %}
+    {%- elif rank_pct <= 0.40 -%}{% set tier = 'good' %}
+    {%- elif rank_pct <= 0.70 -%}{% set tier = 'mid' %}
+    {%- elif rank_pct <= 0.90 -%}{% set tier = 'poor' %}
+    {%- else -%}{% set tier = 'bad' %}
     {%- endif -%}
+    <span class="rank-track">
+    <span class="rank-bar gr-bar-{{ tier }}" style="width:{{ bar_pct }}%"></span><span class="gr-pill gr-pill-{{ tier }}">{{ r }}</span>
     </span>
   </td>
 </tr>
@@ -279,9 +281,11 @@
         {% endfor %}
         <span class="dc-war-label" id="dc-war-label">{{ dc.by_year[dc_years[0]].total_war }} WAR</span>
         <span class="dc-heatmap-legend">
-          <span class="dc-hl-swatch" style="background:#1a4a8a"></span>Elite
+          <span class="dc-hl-swatch" style="background:#1a8a4a"></span>Elite
           <span class="dc-hl-swatch" style="background:#1a6b3a"></span>Above Avg
-          <span class="dc-hl-swatch" style="background:#8a2a2a"></span>Below Avg
+          <span class="dc-hl-swatch" style="background:#4a4a52"></span>Average
+          <span class="dc-hl-swatch" style="background:#8a5a1a"></span>Below Avg
+          <span class="dc-hl-swatch" style="background:#8a2a2a"></span>Weak
         </span>
       </div>
       <div class="dc-stat-selectors">
@@ -417,14 +421,16 @@
   }
 
   function rankColorClass(rank) {
-    // Color based on league-wide percentile rank (not absolute WAR thresholds).
-    // Top 25% = elite (blue), top 50% = good (green), bottom 25% = weak (red).
+    // Color based on league-wide percentile rank (not absolute WAR thresholds)
+    // — same 5-tier bright green-to-red scale used everywhere else in the app
+    // (Farm System Rankings, Position Depth, team stat ranks, Power Rankings).
     if (!rank || !NUM_TEAMS) return '';
     var pct = rank / NUM_TEAMS;  // 0.03 = best, 1.0 = worst
-    if (pct <= 0.25) return ' dc-war-elite';
-    if (pct <= 0.50) return ' dc-war-good';
-    if (pct > 0.75) return ' dc-war-weak';
-    return '';
+    if (pct <= 0.15) return ' dc-war-elite';
+    if (pct <= 0.40) return ' dc-war-good';
+    if (pct <= 0.70) return ' dc-war-mid';
+    if (pct <= 0.90) return ' dc-war-poor';
+    return ' dc-war-bad';
   }
 
   function render() {
@@ -584,12 +590,7 @@
             {%- if row.is_first -%}
               {%- set r = org.pos_rank.get(row.pos) -%}
               {%- if r -%}
-                {%- if r <= 5 -%}<span class="rank-pill rank-elite">{{ r }}</span>
-                {%- elif r <= 12 -%}<span class="rank-pill rank-good">{{ r }}</span>
-                {%- elif r <= 22 -%}<span class="rank-pill rank-mid">{{ r }}</span>
-                {%- elif r <= 29 -%}<span class="rank-pill rank-poor">{{ r }}</span>
-                {%- else -%}<span class="rank-pill rank-bad">{{ r }}</span>
-                {%- endif -%}
+              <span class="gr-pill {{ org.pos_rank_tier.get(row.pos, 'gr-pill-mid') }}">{{ r }}</span>
               {%- endif -%}
             {%- endif -%}
           </td>
@@ -1449,7 +1450,7 @@ function intlFilterPers() {
       <div class="farm-depth-summary">
         <span>Total: ${{ farm_depth.total_surplus }}{{ money_unit }}</span>
         <span>Lg Avg: ${{ farm_depth.lg_avg }}{{ money_unit }}</span>
-        <span>Rank: {{ farm_depth.lg_rank }}/{{ farm_depth.lg_n }}</span>
+        <span>Rank: <span class="gr-pill {{ farm_depth.lg_rank_tier }}">{{ farm_depth.lg_rank }}</span>/{{ farm_depth.lg_n }}</span>
       </div>
       <div class="columns team-stats-pair">
         <div>

@@ -290,6 +290,33 @@
 #tab-rankings td, #tab-rankings th { padding:4px 8px; }
 #tab-rankings h3 { font-size:14px; color:var(--text-dim); text-transform:uppercase; letter-spacing:1px; }
 </style>
+{% if farm_rankings %}
+<div class="panel" style="margin-bottom:16px">
+  <h2>Farm System Rankings <span style="color:var(--text-dim); font-weight:400; font-size:13px">— total surplus of each org's meaningfully-contributing prospects (FV 40+, age 25 or younger)</span></h2>
+  <div style="max-height:420px; overflow-y:auto">
+  <table class="pointed sortable" id="farm-rankings-table">
+    <thead>
+      <tr>
+        <th data-sort="num">#</th><th data-sort="str" class="left">Team</th>
+        <th data-sort="num" title="Number of players clearing the FV 40+ / age <=25 bar">Prospects</th>
+        <th data-sort="num">Farm Surplus</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for e in farm_rankings %}
+      <tr class="{{ e.tier }}{% if e.is_mine %} highlight{% endif %}">
+        <td>{{ e.rank }}</td>
+        <td class="left"><a class="team-link" href="/team/{{ e.tid }}">{{ e.name }}</a></td>
+        <td>{{ e.count }}</td>
+        <td class="farm-tier-cell">${{ e.surplus }}{{ money_unit }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+
 {% if pos_rankings %}
 <div style="margin-bottom:16px; display:flex; gap:4px; flex-wrap:wrap">
   {% for key, group in pos_rankings %}

@@ -853,7 +853,7 @@ from team_queries import (get_summary, get_standings, get_division_standings,
                           get_org_minor_league_roster,
                           get_head_to_head_matrix, get_cut_candidates,
                           get_waiver_candidates, get_free_agent_candidates,
-                          get_defense_page)
+                          get_defense_page, get_farm_system_rankings)
 from player_queries import get_player
 from percentiles import get_hitter_percentiles, get_pitcher_percentiles
 

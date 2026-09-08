@@ -1414,8 +1414,14 @@ function intlFilterPers() {
 <div class="tab-content" id="tab-dev">
   <div class="columns">
     <div class="panel">
-      <h2>Farm System — Top 15</h2>
-      <table>
+      <h2>Farm System <span style="color:var(--text-dim); font-weight:400; font-size:13px">({{ farm|length }} contributing — FV 40+, age 25 or younger)</span></h2>
+      <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px">
+        {% if farm|length > 15 %}
+        <button type="button" class="btn btn-sm" id="farm-toggle-btn" onclick="toggleFarmRows()">Show all {{ farm|length }}</button>
+        {% endif %}
+        <button type="button" class="btn btn-sm" onclick="exportTableCSV('farm-system-table', 'farm_system.csv')" title="Export every currently-shown row as CSV">⬇ CSV</button>
+      </div>
+      <table id="farm-system-table">
         <thead>
           <tr>
             <th data-sort="num">#</th><th data-sort="pos">Pos</th><th data-sort="str" class="left">Name</th><th data-sort="num" data-sort-best="low">Age</th>
@@ -1424,7 +1430,7 @@ function intlFilterPers() {
         </thead>
         <tbody>
           {% for p in farm %}
-          <tr>
+          <tr{% if p.rank > 15 %} class="farm-row-extra" style="display:none"{% endif %}>
             <td>{{ p.rank }}</td>
             <td data-sort-value="{{ p.pos_order }}">{{ p.bucket }}</td>
             <td><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
@@ -1511,6 +1517,17 @@ function intlFilterPers() {
     <div></div>
   </div>
 </div>
+
+<script>
+function toggleFarmRows() {
+  var btn = document.getElementById('farm-toggle-btn');
+  var extra = document.querySelectorAll('#farm-system-table .farm-row-extra');
+  var showing = btn.dataset.expanded === '1';
+  extra.forEach(function(tr) { tr.style.display = showing ? 'none' : ''; });
+  btn.dataset.expanded = showing ? '0' : '1';
+  btn.textContent = showing ? 'Show all ' + (extra.length + 15) : 'Show top 15';
+}
+</script>
 
 {# ══════ Cut Candidates ══════ #}
 <div class="tab-content" id="tab-cuts">

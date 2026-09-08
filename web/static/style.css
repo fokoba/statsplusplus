@@ -351,6 +351,15 @@ a.ext-link:hover { color: var(--green); }
 .rank-poor  { background: rgba(255, 160, 60, 0.20); color: #ffa03c; }
 .rank-bad   { background: rgba(255, 80, 80, 0.25); color: #ff5050; }
 
+/* Farm System Rankings — explicit bright green-to-red gradient (distinct
+   from the blue-toned .rank-pill scale above; this one specifically reads
+   as "good farm system" vs "bad farm system", not a neutral tier). */
+.farm-tier-elite td.farm-tier-cell { background: rgba(60, 220, 100, 0.28); color: #3cdc64; font-weight: 700; }
+.farm-tier-good   td.farm-tier-cell { background: rgba(120, 210, 110, 0.16); color: #78d26e; }
+.farm-tier-mid    td.farm-tier-cell { background: rgba(138, 138, 154, 0.12); color: var(--text-dim); }
+.farm-tier-poor   td.farm-tier-cell { background: rgba(255, 150, 70, 0.18); color: #ff9646; }
+.farm-tier-bad    td.farm-tier-cell { background: rgba(255, 70, 70, 0.28); color: #ff4646; font-weight: 700; }
+
 /* Grade bars — label chip + bar track */
 .grade {
   display: inline-flex;

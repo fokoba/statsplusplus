@@ -2027,7 +2027,17 @@ def get_free_agent_candidates(team_id=None):
             "draft_pool_excluded": draft_pool_excluded, "signable_pool": signable_pool}
 
 
-def get_farm(team_id=None):
+def get_farm(team_id=None, limit=None):
+    """Farm system players who meaningfully contribute to farm surplus —
+    age <= 25 (this app's standard prospect cutoff) and FV >= 40 (same
+    "real prospect" bar the Farm Depth panel's counts already use), so this
+    stays consistent with every other "prospect" list in the app rather than
+    including every replacement-level farmhand with a prospect_fv row.
+
+    limit=None returns the full list (sorted, ranked); pass a number to cap
+    it (the Player Development tab's table defaults to showing the top 15
+    client-side but loads the full list for its "show all" toggle).
+    """
     conn = get_db()
     tid = team_id or my_team_id()
     ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
@@ -2039,15 +2049,16 @@ def get_farm(team_id=None):
         JOIN players p ON pf.player_id=p.player_id
         LEFT JOIN latest_ratings r ON pf.player_id=r.player_id
         WHERE pf.eval_date=? AND {_FARM_ORG_SQL}
-              AND p.age <= 25
-        ORDER BY pf.fv DESC, p.age ASC
+              AND p.age <= 25 AND pf.fv >= 40
     """.format(_FARM_ORG_SQL=_FARM_ORG_SQL), (ed, *_farm_org_params(tid))).fetchall()
 
     def sort_key(r):
         fv_val = r[3] + (0.1 if r[4].endswith("+") else 0)
         return (-fv_val, -(r[6] or 0))
 
-    rows = sorted(rows, key=sort_key)[:15]
+    rows = sorted(rows, key=sort_key)
+    if limit:
+        rows = rows[:limit]
     return [{"rank": i + 1, "name": r[0], "age": r[1],
              "level": level_map().get(str(r[2]), str(r[2])),
              "fv": r[3], "fv_str": r[4],
@@ -2726,10 +2737,13 @@ def get_farm_depth(team_id):
     """.format(_FARM_ORG_SQL=_FARM_ORG_SQL), (ed, *_farm_org_params(team_id))).fetchall()
 
     mlb_tids = mlb_team_ids()
+    # Same FV >= 40 + age <= 25 "meaningfully contributes" bar get_farm() and
+    # get_farm_system_rankings() use, so a team's rank agrees everywhere it's
+    # shown (this panel's own Rank line, and the League page's full ranking).
     lg = conn.execute("""
         SELECT COALESCE(NULLIF(p.parent_team_id,0), p.team_id), SUM(pf.prospect_surplus)
         FROM prospect_fv pf JOIN players p ON pf.player_id = p.player_id
-        WHERE pf.eval_date=? AND p.age <= 25
+        WHERE pf.eval_date=? AND p.age <= 25 AND pf.fv >= 40
         GROUP BY COALESCE(NULLIF(p.parent_team_id,0), p.team_id)
     """, (ed,)).fetchall()
 
@@ -2751,6 +2765,60 @@ def get_farm_depth(team_id):
         "lg_avg": round(lg_avg / _money_divisor(), 1),
         "lg_rank": lg_rank, "lg_n": len(lg_vals),
     }
+
+
+def get_farm_system_rankings():
+    """Every MLB org's farm system, ranked by total surplus of its
+    meaningfully-contributing prospects (age <= 25, FV >= 40 — same bar
+    get_farm()/get_farm_depth() use). Powers the League page's Farm System
+    Rankings table, color-tiered green (best) to red (worst).
+    """
+    conn = get_db()
+    ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
+    mlb_tids = mlb_team_ids()
+
+    rows = conn.execute("""
+        SELECT COALESCE(NULLIF(p.parent_team_id,0), p.team_id) AS org_tid,
+               COUNT(*), SUM(pf.prospect_surplus)
+        FROM prospect_fv pf JOIN players p ON pf.player_id = p.player_id
+        WHERE pf.eval_date=? AND p.age <= 25 AND pf.fv >= 40
+        GROUP BY org_tid
+    """, (ed,)).fetchall()
+
+    names = team_names_map()
+    abbrs = team_abbr_map()
+    my_tid = my_team_id()
+
+    entries = [{"tid": tid, "name": names.get(tid, str(tid)), "abbr": abbrs.get(tid, "?"),
+                "count": count, "surplus": round((surplus or 0) / _money_divisor(), 1)}
+               for tid, count, surplus in rows if tid in mlb_tids]
+    # Orgs with zero qualifying prospects don't show up in the GROUP BY at
+    # all — include them at the bottom rather than silently omitting them.
+    seen = {e["tid"] for e in entries}
+    for tid in mlb_tids:
+        if tid not in seen:
+            entries.append({"tid": tid, "name": names.get(tid, str(tid)),
+                             "abbr": abbrs.get(tid, "?"), "count": 0, "surplus": 0})
+
+    entries.sort(key=lambda e: -e["surplus"])
+    n = len(entries)
+    for i, e in enumerate(entries):
+        e["rank"] = i + 1
+        e["is_mine"] = e["tid"] == my_tid
+        # 5-tier green-to-red, by percentile rather than a fixed rank cutoff
+        # so this reads sensibly at any league size (not just a 30-team one).
+        pct = (i + 1) / n if n else 1
+        if pct <= 0.15:
+            e["tier"] = "farm-tier-elite"
+        elif pct <= 0.40:
+            e["tier"] = "farm-tier-good"
+        elif pct <= 0.70:
+            e["tier"] = "farm-tier-mid"
+        elif pct <= 0.90:
+            e["tier"] = "farm-tier-poor"
+        else:
+            e["tier"] = "farm-tier-bad"
+    return entries
 
 
 def _resolve_depth_score(row, is_pitcher=False):

@@ -115,3 +115,61 @@ function exportTableCSV(tableId, filename) {
   link.click();
   document.body.removeChild(link);
 }
+
+/**
+ * Export visible rows from MULTIPLE tables (same column layout) into one
+ * combined CSV — e.g. a "confirmed" + "needs scouting" table pair that
+ * should download as a single file. Header is taken from the first table
+ * found; later tables contribute only their data rows.
+ * @param {string[]} tableIds - IDs of the table elements, in output order
+ * @param {string} filename - Download filename (default: 'export.csv')
+ */
+function exportTablesCSV(tableIds, filename) {
+  filename = filename || 'export.csv';
+  var rows = [];
+  var headerWritten = false;
+
+  tableIds.forEach(function(tableId) {
+    var table = document.getElementById(tableId);
+    if (!table) return;
+
+    var thead = table.querySelector('thead tr');
+    var skipFirst = false;
+    if (thead) {
+      var firstTh = thead.querySelector('th');
+      skipFirst = !!firstTh && firstTh.textContent.trim() === '';
+      if (!headerWritten) {
+        var headers = [];
+        thead.querySelectorAll('th').forEach(function(th, i) {
+          if (skipFirst && i === 0) return;
+          var text = th.textContent.trim();
+          headers.push('"' + text.replace(/"/g, '""') + '"');
+        });
+        rows.push(headers.join(','));
+        headerWritten = true;
+      }
+    }
+
+    table.querySelectorAll('tbody tr').forEach(function(tr) {
+      if (tr.style.display === 'none') return;
+      var cells = [];
+      tr.querySelectorAll('td').forEach(function(td, i) {
+        if (skipFirst && i === 0) return;
+        var val = td.getAttribute('data-sort-value') || td.textContent.trim();
+        cells.push('"' + val.replace(/"/g, '""') + '"');
+      });
+      if (cells.length > 0) rows.push(cells.join(','));
+    });
+  });
+
+  if (rows.length === 0) return;
+  var csv = rows.join('\n');
+  var blob = new Blob([csv], {type: 'text/csv;charset=utf-8;'});
+  var link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.style.display = 'none';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}

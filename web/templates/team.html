@@ -1735,8 +1735,20 @@ function intlFilterPers() {
         <input type="file" name="fa_csv_file" accept=".csv" required>
         <button type="submit" class="btn btn-sm">Upload</button>
       </form>
-      {% if request.args.get('fa_ask_count') %}<span style="color:#4caf50">Imported {{ request.args.get('fa_ask_count') }} asking prices.</span>{% endif %}
+      {% if request.args.get('fa_ask_count') %}
+      <span style="color:#4caf50">
+        Checked {{ request.args.get('fa_ask_count') }} asking prices —
+        {% if request.args.get('fa_ask_changed') and request.args.get('fa_ask_changed')|int > 0 %}{{ request.args.get('fa_ask_changed') }} changed.{% else %}no change from last upload.{% endif %}
+      </span>
+      {% endif %}
       {% if request.args.get('fa_ask_error') %}<span style="color:#f44336">Upload failed — check the file and try again.</span>{% endif %}
+      <div style="margin-top:6px">
+        {% if last_fa_ask_upload and last_fa_ask_upload.date %}
+          <span>Asks last actually moved <strong>{{ last_fa_ask_upload.date[:10] }}</strong> ({{ last_fa_ask_upload.count }} player{{ 's' if last_fa_ask_upload.count != 1 else '' }} tracked). Asks typically start high and decay through the offseason — re-upload periodically to catch that, not every sim advance.</span>
+        {% else %}
+          <span>No asking prices tracked yet for this league — upload the export above to start.</span>
+        {% endif %}
+      </div>
     </div>
     <div style="margin-bottom:8px">
       <label style="font-size:13px" title="Specialist/Generalist measures the spread between a player's best and worst core tool — 0 = perfectly balanced, 100 = one standout carrying tool. Specialist is 50+.">

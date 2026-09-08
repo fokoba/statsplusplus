@@ -936,19 +936,30 @@ def _db_free_agent_status(pids: list[str]) -> dict[str, bool]:
     return status
 
 
-def import_fa_asking_prices(file_bytes: bytes, league_dir=None) -> int:
+def import_fa_asking_prices(file_bytes: bytes, league_dir=None) -> dict:
     """Import salary demands from an uploaded OOTP "All Free Agents" export
     (the DEM column, e.g. "$9.0m") into fa_asking_prices, keyed by player_id.
 
     The live statsplus.net sync has no asking-price field at all, so this
     manual-upload table is the only way the app can show a free agent's
-    current ask. Returns the number of rows with a real (non "-") demand.
+    current ask.
+
+    Tracks two timestamps per row: uploaded_at (bumped every time this file
+    is processed, whether or not the ask moved) and changed_at (bumped only
+    when the ask actually differs from what was on file — asks routinely
+    start high and decay through the offseason, so this is what the "last
+    valid upload" reminder should reflect, not re-upload noise from
+    re-processing an unchanged export).
+
+    Returns {"count": rows with a real (non "-") demand, "changed": how many
+    of those had a new/different ask this time}.
     """
     import datetime
     rows = parse_rows(file_bytes)
     conn = get_conn(league_dir)
     now = datetime.datetime.now().isoformat()
     count = 0
+    changed = 0
     for d in rows:
         pid = (d.get("ID") or "").strip()
         if not pid:
@@ -956,15 +967,42 @@ def import_fa_asking_prices(file_bytes: bytes, league_dir=None) -> int:
         dem = (d.get("DEM") or "").strip()
         if not dem or dem == "-":
             continue
-        conn.execute(
-            "INSERT INTO fa_asking_prices (player_id, ask_raw, uploaded_at) VALUES (?, ?, ?) "
-            "ON CONFLICT(player_id) DO UPDATE SET ask_raw=excluded.ask_raw, uploaded_at=excluded.uploaded_at",
-            (int(pid), dem, now),
-        )
         count += 1
+        cur = conn.execute(
+            "UPDATE fa_asking_prices SET ask_raw=?, uploaded_at=?, "
+            "changed_at=CASE WHEN ask_raw IS NOT ? THEN ? ELSE changed_at END "
+            "WHERE player_id=?",
+            (dem, now, dem, now, int(pid)),
+        )
+        if cur.rowcount == 0:
+            conn.execute(
+                "INSERT INTO fa_asking_prices (player_id, ask_raw, uploaded_at, changed_at) "
+                "VALUES (?, ?, ?, ?)",
+                (int(pid), dem, now, now),
+            )
+            changed += 1
+        else:
+            row = conn.execute(
+                "SELECT changed_at FROM fa_asking_prices WHERE player_id=?", (int(pid),)
+            ).fetchone()
+            if row and row[0] == now:
+                changed += 1
     conn.commit()
     conn.close()
-    return count
+    return {"count": count, "changed": changed}
+
+
+def get_last_fa_ask_upload(league_dir=None) -> dict:
+    """Most recent time a free-agent asking price actually changed (not just
+    when the export was last re-uploaded), for the "last valid upload"
+    reminder. Returns {"date": str | None, "count": int}.
+    """
+    conn = get_conn(league_dir)
+    row = conn.execute(
+        "SELECT MAX(changed_at), COUNT(*) FROM fa_asking_prices"
+    ).fetchone()
+    conn.close()
+    return {"date": row[0] if row else None, "count": row[1] if row else 0}
 
 
 def _parse_money_short(text):

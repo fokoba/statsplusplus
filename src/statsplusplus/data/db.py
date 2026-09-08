@@ -341,7 +341,8 @@ CREATE TABLE IF NOT EXISTS org_reports (
 CREATE TABLE IF NOT EXISTS fa_asking_prices (
     player_id   INTEGER PRIMARY KEY,
     ask_raw     TEXT,
-    uploaded_at TEXT
+    uploaded_at TEXT,
+    changed_at  TEXT
 );
 
 -- Real per-year salary/arbitration figures, imported from a manually
@@ -520,6 +521,18 @@ def _migrate_misc(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE games ADD COLUMN runs0 INTEGER")
     if "runs1" not in g_cols:
         conn.execute("ALTER TABLE games ADD COLUMN runs1 INTEGER")
+
+    # fa_asking_prices.changed_at — separate from uploaded_at (bumped on every
+    # upload regardless) so the "last valid upload" reminder reflects when an
+    # ask actually moved, not just when the file was re-uploaded unchanged.
+    fa_cols = {r[1] for r in conn.execute("PRAGMA table_info(fa_asking_prices)").fetchall()}
+    if "changed_at" not in fa_cols:
+        conn.execute("ALTER TABLE fa_asking_prices ADD COLUMN changed_at TEXT")
+        # Backfill: rows written before this column existed have no real
+        # change history to recover, so uploaded_at is the best available
+        # proxy — without this the "last valid upload" reminder would show
+        # nothing at all until the next actual price change.
+        conn.execute("UPDATE fa_asking_prices SET changed_at = uploaded_at WHERE changed_at IS NULL")
 
     # players.retired — not part of the base schema or _migrate_players'
     # StatsPlus-API column set, but used by our own free-agent tracking.

@@ -278,6 +278,8 @@ def team(tid):
     waiver_candidates = queries.get_waiver_candidates(tid)
     fa_candidates = queries.get_free_agent_candidates(tid)
     defense = queries.get_defense_page(tid)
+    import custom_upload as _cu
+    last_fa_ask_upload = _cu.get_last_fa_ask_upload(league_dir=cfg.league_dir)
     return render_template("team.html",
                            tid=tid, team_name=name,
                            breadcrumbs=[{"label": cfg.settings.get("league", "League"), "url": "/league"},
@@ -302,6 +304,7 @@ def team(tid):
                            cut_candidates=cut_candidates,
                            waiver_candidates=waiver_candidates,
                            fa_candidates=fa_candidates,
+                           last_fa_ask_upload=last_fa_ask_upload,
                            defense=defense)
 
 
@@ -635,8 +638,8 @@ def upload_fa_asks(tid):
     if not f or not f.filename:
         return redirect(f"/team/{tid}?fa_ask_error=1#tab-adds")
     try:
-        count = _cu.import_fa_asking_prices(f.read(), league_dir=_get_cfg().league_dir)
-        return redirect(f"/team/{tid}?fa_ask_count={count}#tab-adds")
+        summary = _cu.import_fa_asking_prices(f.read(), league_dir=_get_cfg().league_dir)
+        return redirect(f"/team/{tid}?fa_ask_count={summary['count']}&fa_ask_changed={summary['changed']}#tab-adds")
     except Exception:
         return redirect(f"/team/{tid}?fa_ask_error=1#tab-adds")
 

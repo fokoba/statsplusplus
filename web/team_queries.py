@@ -1465,7 +1465,7 @@ def get_waiver_candidates(team_id=None):
                r.int_, r.wrk_ethic, r.lead, r.loy, r.greed, r.acc,
                r.composite_score, r.ceiling_score, r.true_ceiling,
                pf.fv, pf.fv_str, pf.bucket, t.name, ps.surplus, pf.prospect_surplus,
-               pf.fv_continuous,
+               pf.fv_continuous, ps.fv,
                r.cntct, r.gap, r.pow, r.eye, r.stf, r.mov, r.ctrl, r.bats,
                r.pot_cntct, r.pot_gap, r.pot_pow, r.pot_stf, r.pot_mov, r.pot_ctrl,
                r.adaptability, r.personality_type,
@@ -1533,7 +1533,7 @@ def get_waiver_candidates(team_id=None):
     for r in rows:
         (pid, name, age, level, pos, role, cur_tid, intel, wrk_ethic, lead, loy,
          greed, acc, comp, ceil_score, true_ceil, fv, fv_str, pf_bucket, cur_name,
-         surplus_raw, prospect_surplus_raw, fv_continuous,
+         surplus_raw, prospect_surplus_raw, fv_continuous, ps_fv,
          cntct, gap, pow_, eye, stf, mov, ctrl, bats,
          pot_cntct, pot_gap, pot_pow, pot_stf, pot_mov, pot_ctrl,
          adaptability, ptype,
@@ -1613,8 +1613,29 @@ def get_waiver_candidates(team_id=None):
             if _value_pct is not None and _park_val_basis is not None:
                 park_value = round((_park_val_basis * _value_pct) / _money_divisor(), 1)
 
-        _cur_s, _next_s, _three_s = _surplus_horizons_live(fv_continuous, age, level_disp,
-                                                            pf_bucket, ovr=comp, pot=potential)
+        # Waiver-wire players are established, currently-rostered MLB players
+        # (real contracts) — prospect_fv has no row for them at all (that
+        # table is prospects/FAs/rookie-eligible only), so fv_continuous is
+        # always None here and _surplus_horizons_live/_peak_surplus (both
+        # FV-projection based) would silently return None for every one of
+        # these columns. Prefer the same real-contract-schedule calculation
+        # the Contracts tab uses (contract_surplus_horizons); fall back to
+        # the FV-based live estimate — using player_surplus.fv (ps_fv) as the
+        # fv_continuous input, same substitution get_contracts already uses
+        # for peak_surplus — only if no contract is on file.
+        _fv_for_horizons = fv_continuous if fv_continuous is not None else ps_fv
+        try:
+            from contract_value import contract_surplus_horizons as _csh
+            _cur_raw, _next_raw, _three_raw = _csh(pid, get_cfg().year, league_dir=get_cfg().league_dir)
+        except Exception:
+            _cur_raw = _next_raw = _three_raw = None
+        if _cur_raw is None and _next_raw is None and _three_raw is None:
+            _cur_s, _next_s, _three_s = _surplus_horizons_live(
+                _fv_for_horizons, age, level_disp, bucket, ovr=comp, pot=potential)
+        else:
+            _cur_s = round(_cur_raw / _money_divisor(), 1) if _cur_raw is not None else None
+            _next_s = round(_next_raw / _money_divisor(), 1) if _next_raw is not None else None
+            _three_s = round(_three_raw / _money_divisor(), 1) if _three_raw is not None else None
         out.append({
             "pid": pid, "name": name, "age": age,
             "level": level_disp,
@@ -1627,7 +1648,7 @@ def get_waiver_candidates(team_id=None):
             "park_fit": park_fit, "park_value": park_value,
             "surplus": round((surplus_raw if surplus_raw is not None else prospect_surplus_raw) / _money_divisor(), 1)
                        if (surplus_raw is not None or prospect_surplus_raw is not None) else None,
-            "peak_surplus": _peak_surplus(fv_continuous, age, level_disp, pf_bucket, ovr=comp, pot=potential),
+            "peak_surplus": _peak_surplus(_fv_for_horizons, age, level_disp, bucket, ovr=comp, pot=potential),
             "current_year_surplus": _cur_s, "next_year_surplus": _next_s, "three_year_surplus": _three_s,
         })
     confirmed, unconfirmed = _split_acc(out, lambda e: -(e["composite_score"] or 0))
@@ -1750,7 +1771,7 @@ def get_free_agent_candidates(team_id=None):
                r.int_, r.wrk_ethic, r.lead, r.loy, r.greed, r.acc,
                r.composite_score, r.ceiling_score, r.true_ceiling,
                pf.fv, pf.fv_str, pf.bucket, ps.surplus, pf.prospect_surplus,
-               pf.fv_continuous, fap.ask_raw,
+               pf.fv_continuous, fap.ask_raw, ps.fv,
                r.cntct, r.gap, r.pow, r.eye, r.stf, r.mov, r.ctrl, r.bats,
                r.pot_cntct, r.pot_gap, r.pot_pow, r.pot_stf, r.pot_mov, r.pot_ctrl,
                r.adaptability, r.personality_type,
@@ -1820,7 +1841,7 @@ def get_free_agent_candidates(team_id=None):
     for r in rows:
         (pid, name, age, level, pos, role, intel, wrk_ethic, lead, loy, greed,
          acc, comp, ceil_score, true_ceil, fv, fv_str, pf_bucket, surplus_raw,
-         prospect_surplus_raw, fv_continuous, ask_raw,
+         prospect_surplus_raw, fv_continuous, ask_raw, ps_fv,
          cntct, gap, pow_, eye, stf, mov, ctrl, bats,
          pot_cntct, pot_gap, pot_pow, pot_stf, pot_mov, pot_ctrl,
          adaptability, ptype,
@@ -1906,8 +1927,18 @@ def get_free_agent_candidates(team_id=None):
             if _value_pct is not None and _park_val_basis is not None:
                 park_value = round((_park_val_basis * _value_pct) / _money_divisor(), 1)
 
-        _cur_s, _next_s, _three_s = _surplus_horizons_live(fv_continuous, age, level_disp,
-                                                            pf_bucket, ovr=comp, pot=potential)
+        # Established MLB free agents (a released veteran, say) have no
+        # prospect_fv row (that table is prospects/FAs/rookie-eligible by FV,
+        # not established vets) so fv_continuous is None and the FV-based
+        # horizon/peak projections would silently come back empty — fall back
+        # to player_surplus.fv (ps_fv), same substitution get_contracts uses
+        # for peak_surplus on the Contracts tab. True free agents have no
+        # contract on file (contract_surplus_horizons would find nothing), so
+        # unlike waiver candidates this always uses the FV-based estimate,
+        # just with the right fv_continuous input for established players too.
+        _fv_for_horizons = fv_continuous if fv_continuous is not None else ps_fv
+        _cur_s, _next_s, _three_s = _surplus_horizons_live(_fv_for_horizons, age, level_disp,
+                                                            bucket, ovr=comp, pot=potential)
         entry = {
             "pid": pid, "name": name, "age": age,
             "level": level_disp,
@@ -1917,7 +1948,7 @@ def get_free_agent_candidates(team_id=None):
             "vr_composite": vr_composite, "vl_composite": vl_composite, "def_rating": def_rating,
             "surplus": round((surplus_raw if surplus_raw is not None else prospect_surplus_raw) / _money_divisor(), 1)
                        if (surplus_raw is not None or prospect_surplus_raw is not None) else None,
-            "peak_surplus": _peak_surplus(fv_continuous, age, level_disp, pf_bucket, ovr=comp, pot=potential),
+            "peak_surplus": _peak_surplus(_fv_for_horizons, age, level_disp, bucket, ovr=comp, pot=potential),
             "current_year_surplus": _cur_s, "next_year_surplus": _next_s, "three_year_surplus": _three_s,
             "ask": ask_raw or "MiLC",
             "specialist_score": spec_score, "specialist_label": _spec_label(spec_score),

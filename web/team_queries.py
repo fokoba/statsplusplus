@@ -3479,12 +3479,19 @@ def get_org_overview(team_id):
 
     # Top prospects per bucket (collect all, sorted by FV then surplus)
     prospect_by_pos = defaultdict(list)
+    # age <= 25 matches this app's standard "prospect" cutoff everywhere else
+    # (Top Prospects, Farm Surplus's prospect counts, etc.) — prospect_fv
+    # itself deliberately has NO age cap (org-depth players over 25 with no
+    # MLB track record still get valued there), so this query needs its own
+    # filter or a 26+ org-depth arm/bat would show up in a "Top Prospect"
+    # slot, which isn't what that label means.
     prosp_rows = conn.execute("""
         SELECT pf.player_id, p.name, pf.bucket, pf.fv, pf.fv_str, pf.level,
                p.age, p.pos, pf.prospect_surplus, pf.risk
         FROM prospect_fv pf
         JOIN players p ON pf.player_id = p.player_id
         WHERE pf.eval_date = ? AND p.parent_team_id = ? AND p.level != '1'
+          AND p.age <= 25
         ORDER BY pf.fv DESC, pf.prospect_surplus DESC, p.age ASC
     """, (ed_f, team_id)).fetchall()
     for r in prosp_rows:

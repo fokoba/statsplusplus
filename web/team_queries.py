@@ -1354,22 +1354,34 @@ _ADD_COMPOSITE_DEF_BUCKET = {"C": "C", "SS": "SS", "2B": "2B", "3B": "3B",
 
 def _add_candidate_vr_vl_def(ratings_scale, hitter_weights_by_bucket, bucket, fit,
                               cntct_r, gap_r, pow_r, eye_r, cntct_l, gap_l, pow_l, eye_l,
+                              speed, steal, stl_rt,
                               c_frm, c_blk, c_arm, ifr, ife, ifa, tdp, ofr, ofe, ofa,
-                              c, first_b, second_b, third_b, ss, lf, cf, rf):
+                              c, first_b, second_b, third_b, ss, lf, cf, rf,
+                              transforms=None):
     """vR/vL composite (same compute_composite_hitter blend Best Available/
     Defense use) plus a raw Def Rating at the "Fits At" position — only
     computed when a fit position exists at all, since Def Rating is
     meaningless without knowing which position to grade. A combined
     "LF/RF" fit shows whichever corner grades higher.
+
+    speed/steal/stl_rt don't vary by pitcher handedness, so the same values
+    go into both vr_tools and vl_tools — omitting them entirely (as this
+    function used to) silently drops the whole baserunning share of the
+    composite (compute_composite_hitter treats an absent tool as "no data"
+    and skips it rather than renormalizing around it) and never lets the
+    speed×contact synergy bonus fire, systematically understating any
+    real base-stealing threat's vR/vL relative to his actual overall Comp.
     """
     from statsplusplus.config.ratings import norm as _norm_rating, norm_continuous as _normc2
     from statsplusplus.evaluation.composite import compute_composite_hitter
     from statsplusplus.evaluation.constants import DEFENSIVE_WEIGHTS
 
     weights = hitter_weights_by_bucket.get(bucket, hitter_weights_by_bucket.get("COF", {}))
-    vr_tools = {"contact": _normc2(cntct_r, ratings_scale), "gap": _normc2(gap_r, ratings_scale),
+    _base = {"speed": _normc2(speed, ratings_scale), "steal": _normc2(steal, ratings_scale),
+              "stl_rt": _normc2(stl_rt, ratings_scale)}
+    vr_tools = {**_base, "contact": _normc2(cntct_r, ratings_scale), "gap": _normc2(gap_r, ratings_scale),
                 "power": _normc2(pow_r, ratings_scale), "eye": _normc2(eye_r, ratings_scale)}
-    vl_tools = {"contact": _normc2(cntct_l, ratings_scale), "gap": _normc2(gap_l, ratings_scale),
+    vl_tools = {**_base, "contact": _normc2(cntct_l, ratings_scale), "gap": _normc2(gap_l, ratings_scale),
                 "power": _normc2(pow_l, ratings_scale), "eye": _normc2(eye_l, ratings_scale)}
     def_bucket = _ADD_COMPOSITE_DEF_BUCKET.get(bucket)
     if def_bucket:
@@ -1382,8 +1394,8 @@ def _add_candidate_vr_vl_def(ratings_scale, hitter_weights_by_bucket, bucket, fi
     else:
         def_weights, defense = {}, {}
     try:
-        vr = compute_composite_hitter(vr_tools, weights, defense, def_weights)
-        vl = compute_composite_hitter(vl_tools, weights, defense, def_weights)
+        vr = compute_composite_hitter(vr_tools, weights, defense, def_weights, transforms)
+        vl = compute_composite_hitter(vl_tools, weights, defense, def_weights, transforms)
     except Exception:
         vr = vl = None
 
@@ -1396,6 +1408,42 @@ def _add_candidate_vr_vl_def(ratings_scale, hitter_weights_by_bucket, bucket, fi
         if grades:
             def_rating = max(grades)
     return vr, vl, def_rating
+
+
+def _add_candidate_pitcher_vr_vl(ratings_scale, pitcher_weights, role,
+                                  stf, mov, ctrl, stf_r, mov_r, ctrl_r, stf_l, mov_l, ctrl_l,
+                                  arsenal, stamina, transforms=None):
+    """Pitcher vR/vL composite — same compute_composite_pitcher blend Custom
+    Upload/Scouting Targets use. Previously not computed at all on this page
+    (every pitcher showed blank vR/vL here despite the data existing
+    elsewhere in the app); this fills that gap.
+    """
+    from statsplusplus.config.ratings import norm_continuous as _normc2
+    from statsplusplus.evaluation.composite import compute_composite_pitcher
+
+    weights = pitcher_weights.get(role, {})
+    _base = {"stuff": _normc2(stf, ratings_scale), "movement": _normc2(mov, ratings_scale),
+             "control": _normc2(ctrl, ratings_scale)}
+    vr_tools = dict(_base)
+    if stf_r is not None:
+        vr_tools["stuff"] = _normc2(stf_r, ratings_scale)
+    if mov_r is not None:
+        vr_tools["movement"] = _normc2(mov_r, ratings_scale)
+    if ctrl_r is not None:
+        vr_tools["control"] = _normc2(ctrl_r, ratings_scale)
+    vl_tools = dict(_base)
+    if stf_l is not None:
+        vl_tools["stuff"] = _normc2(stf_l, ratings_scale)
+    if mov_l is not None:
+        vl_tools["movement"] = _normc2(mov_l, ratings_scale)
+    if ctrl_l is not None:
+        vl_tools["control"] = _normc2(ctrl_l, ratings_scale)
+    try:
+        vr = compute_composite_pitcher(vr_tools, weights, arsenal or {}, stamina or 50, role, transforms)
+        vl = compute_composite_pitcher(vl_tools, weights, arsenal or {}, stamina or 50, role, transforms)
+    except Exception:
+        vr = vl = None
+    return vr, vl
 
 
 def get_waiver_candidates(team_id=None):
@@ -1422,6 +1470,9 @@ def get_waiver_candidates(team_id=None):
                r.pot_cntct, r.pot_gap, r.pot_pow, r.pot_stf, r.pot_mov, r.pot_ctrl,
                r.adaptability, r.personality_type,
                r.cntct_r, r.gap_r, r.pow_r, r.eye_r, r.cntct_l, r.gap_l, r.pow_l, r.eye_l,
+               r.speed, r.steal, r.stl_rt,
+               r.stf_r, r.mov_r, r.ctrl_r, r.stf_l, r.mov_l, r.ctrl_l, r.stm,
+               r.fst, r.snk, r.crv, r.sld, r.chg, r.splt, r.cutt, r.cir_chg, r.scr, r.frk, r.kncrv, r.knbl,
                r.c_frm, r.c_blk, r.c_arm, r.ifr, r.ife, r.ifa, r.tdp, r.ofr, r.ofe, r.ofa,
                r.c, r.first_b, r.second_b, r.third_b, r.ss, r.lf, r.cf, r.rf
         FROM players p
@@ -1440,7 +1491,16 @@ def get_waiver_candidates(team_id=None):
     )
     ratings_scale = get_cfg().ratings_scale
     park = load_park_factors(get_cfg().league_dir)
-    hitter_weights_by_bucket = load_tool_weights(get_cfg().league_dir).get("hitter", {}) if park else {}
+    # Tool weights (and the per-tool transform curves nested inside) drive
+    # every vR/vL and Comp calc below — unrelated to whether park factors
+    # loaded, so must NOT be gated behind `if park` (that used to silently
+    # zero out every hitter's vR/vL/def rating whenever park factors were
+    # unavailable, e.g. a brand-new league).
+    _all_weights = load_tool_weights(get_cfg().league_dir)
+    hitter_weights_by_bucket = _all_weights.get("hitter", {})
+    pitcher_weights = _all_weights.get("pitcher", {})
+    _transforms = _all_weights.get("tool_transforms", {}) or {}
+    hitter_transforms = _transforms.get("hitter")
 
     # Same real-observed-vs-tools-proxy fallback as get_free_agent_candidates()
     # — home park fit for any waiver-wire pitcher with a real track record.
@@ -1478,6 +1538,9 @@ def get_waiver_candidates(team_id=None):
          pot_cntct, pot_gap, pot_pow, pot_stf, pot_mov, pot_ctrl,
          adaptability, ptype,
          cntct_r, gap_r, pow_r, eye_r, cntct_l, gap_l, pow_l, eye_l,
+         speed, steal, stl_rt,
+         stf_r, mov_r, ctrl_r, stf_l, mov_l, ctrl_l, stamina,
+         fst, snk, crv, sld, chg, splt, cutt, cir_chg, scr, frk, kncrv, knbl,
          c_frm, c_blk, c_arm, ifr, ife, ifa, tdp, ofr, ofe, ofa,
          def_c, def_1b, def_2b, def_3b, def_ss, def_lf, def_cf, def_rf) = r
         bucket = _bucket_for_display(pf_bucket, role, pos)
@@ -1490,15 +1553,27 @@ def get_waiver_candidates(team_id=None):
         if is_pitcher:
             _tools = {"stuff": _normc(stf, ratings_scale), "movement": _normc(mov, ratings_scale),
                       "control": _normc(ctrl, ratings_scale)}
-            vr_composite = vl_composite = def_rating = None
+            role_key = "RP" if ROLE_MAP[role] in ("RP", "CL") else "SP"
+            _arsenal = {n: nv for n, v in (
+                ("Fst", fst), ("Snk", snk), ("Crv", crv), ("Sld", sld), ("Chg", chg),
+                ("Splt", splt), ("Cutt", cutt), ("CirChg", cir_chg), ("Scr", scr),
+                ("Frk", frk), ("Kncrv", kncrv), ("Knbl", knbl)) for nv in [_normc(v, ratings_scale)] if nv is not None}
+            _pitcher_transforms = _transforms.get(role_key)
+            vr_composite, vl_composite = _add_candidate_pitcher_vr_vl(
+                ratings_scale, pitcher_weights, role_key,
+                stf, mov, ctrl, stf_r, mov_r, ctrl_r, stf_l, mov_l, ctrl_l,
+                _arsenal, _normc(stamina, ratings_scale), _pitcher_transforms)
+            def_rating = None
         else:
             _tools = {"contact": _normc(cntct, ratings_scale), "gap": _normc(gap, ratings_scale),
                       "power": _normc(pow_, ratings_scale), "eye": _normc(eye, ratings_scale)}
             vr_composite, vl_composite, def_rating = _add_candidate_vr_vl_def(
                 ratings_scale, hitter_weights_by_bucket, bucket, _fit,
                 cntct_r, gap_r, pow_r, eye_r, cntct_l, gap_l, pow_l, eye_l,
+                speed, steal, stl_rt,
                 c_frm, c_blk, c_arm, ifr, ife, ifa, tdp, ofr, ofe, ofa,
-                def_c, def_1b, def_2b, def_3b, def_ss, def_lf, def_cf, def_rf)
+                def_c, def_1b, def_2b, def_3b, def_ss, def_lf, def_cf, def_rf,
+                hitter_transforms)
 
         # Not-yet-MLB players are scored on potential tools (their current
         # tools are barely developed and not the real signal) — same
@@ -1680,6 +1755,9 @@ def get_free_agent_candidates(team_id=None):
                r.pot_cntct, r.pot_gap, r.pot_pow, r.pot_stf, r.pot_mov, r.pot_ctrl,
                r.adaptability, r.personality_type,
                r.cntct_r, r.gap_r, r.pow_r, r.eye_r, r.cntct_l, r.gap_l, r.pow_l, r.eye_l,
+               r.speed, r.steal, r.stl_rt,
+               r.stf_r, r.mov_r, r.ctrl_r, r.stf_l, r.mov_l, r.ctrl_l, r.stm,
+               r.fst, r.snk, r.crv, r.sld, r.chg, r.splt, r.cutt, r.cir_chg, r.scr, r.frk, r.kncrv, r.knbl,
                r.c_frm, r.c_blk, r.c_arm, r.ifr, r.ife, r.ifa, r.tdp, r.ofr, r.ofe, r.ofa,
                r.c, r.first_b, r.second_b, r.third_b, r.ss, r.lf, r.cf, r.rf
         FROM players p
@@ -1700,7 +1778,12 @@ def get_free_agent_candidates(team_id=None):
     )
     ratings_scale = get_cfg().ratings_scale
     park = load_park_factors(get_cfg().league_dir)
-    hitter_weights_by_bucket = load_tool_weights(get_cfg().league_dir).get("hitter", {}) if park else {}
+    # See get_waiver_candidates for why this must not be gated behind `if park`.
+    _all_weights = load_tool_weights(get_cfg().league_dir)
+    hitter_weights_by_bucket = _all_weights.get("hitter", {})
+    pitcher_weights = _all_weights.get("pitcher", {})
+    _transforms = _all_weights.get("tool_transforms", {}) or {}
+    hitter_transforms = _transforms.get("hitter")
 
     # Real observed GB%/K%/BB% (all levels, career-to-date) for every free
     # agent pitcher in this pool — preferred over the scouting-tool proxy
@@ -1742,6 +1825,9 @@ def get_free_agent_candidates(team_id=None):
          pot_cntct, pot_gap, pot_pow, pot_stf, pot_mov, pot_ctrl,
          adaptability, ptype,
          cntct_r, gap_r, pow_r, eye_r, cntct_l, gap_l, pow_l, eye_l,
+         speed, steal, stl_rt,
+         stf_r, mov_r, ctrl_r, stf_l, mov_l, ctrl_l, stamina,
+         fst, snk, crv, sld, chg, splt, cutt, cir_chg, scr, frk, kncrv, knbl,
          c_frm, c_blk, c_arm, ifr, ife, ifa, tdp, ofr, ofe, ofa,
          def_c, def_1b, def_2b, def_3b, def_ss, def_lf, def_cf, def_rf) = r
         bucket = _bucket_for_display(pf_bucket, role, pos)
@@ -1753,15 +1839,27 @@ def get_free_agent_candidates(team_id=None):
         if is_pitcher:
             _tools = {"stuff": _normc(stf, ratings_scale), "movement": _normc(mov, ratings_scale),
                       "control": _normc(ctrl, ratings_scale)}
-            vr_composite = vl_composite = def_rating = None
+            role_key = "RP" if ROLE_MAP[role] in ("RP", "CL") else "SP"
+            _arsenal = {n: nv for n, v in (
+                ("Fst", fst), ("Snk", snk), ("Crv", crv), ("Sld", sld), ("Chg", chg),
+                ("Splt", splt), ("Cutt", cutt), ("CirChg", cir_chg), ("Scr", scr),
+                ("Frk", frk), ("Kncrv", kncrv), ("Knbl", knbl)) for nv in [_normc(v, ratings_scale)] if nv is not None}
+            _pitcher_transforms = _transforms.get(role_key)
+            vr_composite, vl_composite = _add_candidate_pitcher_vr_vl(
+                ratings_scale, pitcher_weights, role_key,
+                stf, mov, ctrl, stf_r, mov_r, ctrl_r, stf_l, mov_l, ctrl_l,
+                _arsenal, _normc(stamina, ratings_scale), _pitcher_transforms)
+            def_rating = None
         else:
             _tools = {"contact": _normc(cntct, ratings_scale), "gap": _normc(gap, ratings_scale),
                       "power": _normc(pow_, ratings_scale), "eye": _normc(eye, ratings_scale)}
             vr_composite, vl_composite, def_rating = _add_candidate_vr_vl_def(
                 ratings_scale, hitter_weights_by_bucket, bucket, _fit,
                 cntct_r, gap_r, pow_r, eye_r, cntct_l, gap_l, pow_l, eye_l,
+                speed, steal, stl_rt,
                 c_frm, c_blk, c_arm, ifr, ife, ifa, tdp, ofr, ofe, ofa,
-                def_c, def_1b, def_2b, def_3b, def_ss, def_lf, def_cf, def_rf)
+                def_c, def_1b, def_2b, def_3b, def_ss, def_lf, def_cf, def_rf,
+                hitter_transforms)
         spec_score = compute_specialist_score(_tools, is_pitcher)
 
         # Park fit/value for a not-yet-MLB player should reflect what he'll

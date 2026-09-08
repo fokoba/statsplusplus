@@ -97,7 +97,7 @@ _ROW_COLUMNS_SQL = """
     r.fst, r.snk, r.crv, r.sld, r.chg, r.splt, r.cutt, r.cir_chg, r.scr, r.frk, r.kncrv, r.knbl,
     r.stm, ps.surplus, pf.prospect_surplus,
     r.int_, r.wrk_ethic, r.lead, r.loy, r.greed, fap.ask_raw,
-    r.speed, r.steal, r.adaptability, r.personality_type
+    r.speed, r.steal, r.stl_rt, r.adaptability, r.personality_type
 """
 
 
@@ -167,13 +167,14 @@ def _newly_confirmed_pids(conn):
     return latest_high - prior_high
 
 
-def _build_entries(rows, ratings_scale, park, hitter_weights, pitcher_weights, newly_confirmed, is_mine, is_theirs=False):
+def _build_entries(rows, ratings_scale, park, hitter_weights, pitcher_weights, newly_confirmed, is_mine, is_theirs=False, tool_transforms=None):
     """Turn raw _ROW_COLUMNS_SQL rows into player entry dicts — the exact
     same computation (tools, park fit, defensive rating, vR/vL composite,
     surplus) regardless of whether the source is the free-agent pool or a
     roster-comparison query, so "mine" and "target" entries are always
     directly comparable.
     """
+    tool_transforms = tool_transforms or {}
     out = []
     for r in rows:
         (pid, name, age, pos, role, level, bats, acc, comp, ceil_score, true_ceil,
@@ -185,7 +186,7 @@ def _build_entries(rows, ratings_scale, park, hitter_weights, pitcher_weights, n
          fst, snk, crv, sld, chg, splt, cutt, cir_chg, scr, frk, kncrv, knbl,
          stm, surplus_raw, prospect_surplus_raw,
          intel, wrk_ethic, lead, loy, greed, ask_raw,
-         speed_raw, steal_raw, adaptability, ptype) = r
+         speed_raw, steal_raw, stl_rt_raw, adaptability, ptype) = r
         group, is_pitcher = _pos_group(pos, role)
         if group is None:
             continue
@@ -225,13 +226,22 @@ def _build_entries(rows, ratings_scale, park, hitter_weights, pitcher_weights, n
             if ctrl_l is not None:
                 vl_tools["control"] = n(ctrl_l)
             try:
-                vr_score = compute_composite_pitcher(vr_tools, weights, arsenal, stamina, role_key)
-                vl_score = compute_composite_pitcher(vl_tools, weights, arsenal, stamina, role_key)
+                pitcher_transforms = tool_transforms.get(role_key)
+                vr_score = compute_composite_pitcher(vr_tools, weights, arsenal, stamina, role_key, pitcher_transforms)
+                vl_score = compute_composite_pitcher(vl_tools, weights, arsenal, stamina, role_key, pitcher_transforms)
             except Exception:
                 vr_score = vl_score = None
         else:
             weights = hitter_weights.get(group, hitter_weights.get("COF", {}))
-            _tools = {"contact": n(cntct), "gap": n(gap), "power": n(pow_), "eye": n(eye)}
+            # speed/gap/steal/stl_rt don't vary by pitcher handedness, so they
+            # carry through vr_tools/vl_tools unchanged below via dict(_tools)
+            # — omitting them here would silently drop the whole baserunning
+            # share of compute_composite_hitter's blend (it skips any tool
+            # category with no data rather than renormalizing around it) and
+            # never let the speed×contact synergy bonus fire, systematically
+            # understating any real base-stealing threat's vR/vL.
+            _tools = {"contact": n(cntct), "gap": n(gap), "power": n(pow_), "eye": n(eye),
+                      "speed": n(speed_raw), "steal": n(steal_raw), "stl_rt": n(stl_rt_raw)}
             park_fit = compute_batter_park_fit(_tools, bats, weights, park) if park else None
             park_value_pct = compute_batter_park_value_pct(_tools, bats, weights, park) if park else None
             def_raw = {"C": c_def, "1B": first_b, "2B": second_b, "3B": third_b,
@@ -266,8 +276,8 @@ def _build_entries(rows, ratings_scale, park, hitter_weights, pitcher_weights, n
             if eye_l is not None:
                 vl_tools["eye"] = n(eye_l)
             try:
-                vr_score = compute_composite_hitter(vr_tools, weights, defense, def_weights)
-                vl_score = compute_composite_hitter(vl_tools, weights, defense, def_weights)
+                vr_score = compute_composite_hitter(vr_tools, weights, defense, def_weights, tool_transforms.get("hitter"))
+                vl_score = compute_composite_hitter(vl_tools, weights, defense, def_weights, tool_transforms.get("hitter"))
             except Exception:
                 vr_score = vl_score = None
 
@@ -332,6 +342,7 @@ def get_scouting_targets(high_confidence=False, team_id=None, roster_view=None):
     all_weights = load_tool_weights(get_cfg().league_dir)
     hitter_weights = all_weights.get("hitter", {})
     pitcher_weights = all_weights.get("pitcher", {})
+    tool_transforms = all_weights.get("tool_transforms", {}) or {}
 
     ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
     ed_surplus = conn.execute("SELECT MAX(eval_date) FROM player_surplus").fetchone()[0]
@@ -340,14 +351,14 @@ def get_scouting_targets(high_confidence=False, team_id=None, roster_view=None):
     fa_rows = _fetch_rows(conn, fa_where, fa_params, ed, ed_surplus)
     newly_confirmed = _newly_confirmed_pids(conn) if high_confidence else set()
     players = _build_entries(fa_rows, ratings_scale, park, hitter_weights, pitcher_weights,
-                              newly_confirmed, is_mine=False)
+                              newly_confirmed, is_mine=False, tool_transforms=tool_transforms)
 
     mine_players = []
     if roster_view in ("mlb", "org") and team_id:
         org_where, org_params = _org_where(team_id, roster_view)
         org_rows = _fetch_rows(conn, org_where, org_params, ed, ed_surplus)
         mine_players = _build_entries(org_rows, ratings_scale, park, hitter_weights, pitcher_weights,
-                                       set(), is_mine=True)
+                                       set(), is_mine=True, tool_transforms=tool_transforms)
 
     by_group = {}
     for p in players:
@@ -737,6 +748,7 @@ def get_team_compare(my_team_id, my_scope, their_team_id, their_scope):
     all_weights = load_tool_weights(get_cfg().league_dir)
     hitter_weights = all_weights.get("hitter", {})
     pitcher_weights = all_weights.get("pitcher", {})
+    tool_transforms = all_weights.get("tool_transforms", {}) or {}
 
     ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
     ed_surplus = conn.execute("SELECT MAX(eval_date) FROM player_surplus").fetchone()[0]
@@ -744,12 +756,12 @@ def get_team_compare(my_team_id, my_scope, their_team_id, their_scope):
     my_where, my_params = _org_where(my_team_id, my_scope)
     my_rows = _fetch_rows(conn, my_where, my_params, ed, ed_surplus)
     mine = _build_entries(my_rows, ratings_scale, park, hitter_weights, pitcher_weights,
-                           set(), is_mine=True)
+                           set(), is_mine=True, tool_transforms=tool_transforms)
 
     their_where, their_params = _org_where(their_team_id, their_scope)
     their_rows = _fetch_rows(conn, their_where, their_params, ed, ed_surplus)
     theirs = _build_entries(their_rows, ratings_scale, park, hitter_weights, pitcher_weights,
-                             set(), is_mine=False, is_theirs=True)
+                             set(), is_mine=False, is_theirs=True, tool_transforms=tool_transforms)
 
     by_group = {}
     for p in mine + theirs:

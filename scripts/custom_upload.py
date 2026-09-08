@@ -511,13 +511,16 @@ def evaluate_row(d: dict, league_dir=None) -> dict | None:
 
     bucket = _bucket_for_assign(d, is_pitcher, role_str, stamina)
 
+    _tool_transforms = tool_weights.get("tool_transforms", {}) or {}
+
     if is_pitcher:
         role = "RP" if role_str in ("RP", "CL") else "SP"
         weights = tool_weights.get("pitcher", DEFAULT_TOOL_WEIGHTS["pitcher"])[role]
+        _transforms = _tool_transforms.get(role)
         tools = _pitcher_tools(d, scale)
         pot_tools = _pitcher_potential_tools(d, scale)
         arsenal = _arsenal(d, scale)
-        composite = compute_composite_pitcher(tools, weights, arsenal, stamina, role)
+        composite = compute_composite_pitcher(tools, weights, arsenal, stamina, role, _transforms)
         ceiling = compute_ceiling(
             pot_tools, weights, composite, accuracy=acc, work_ethic=wrk_ethic,
             is_pitcher=True, arsenal=arsenal, stamina=stamina, role=role, age=age or 25,
@@ -530,20 +533,21 @@ def evaluate_row(d: dict, league_dir=None) -> dict | None:
         offensive_ceiling = None
         stf_l, stf_r = tools.get("stuff_l"), tools.get("stuff_r")
         composite_vs_l = compute_composite_pitcher(
-            _pitcher_side_tools(d, scale, tools, "L"), weights, arsenal, stamina, role)
+            _pitcher_side_tools(d, scale, tools, "L"), weights, arsenal, stamina, role, _transforms)
         composite_vs_r = compute_composite_pitcher(
-            _pitcher_side_tools(d, scale, tools, "R"), weights, arsenal, stamina, role)
+            _pitcher_side_tools(d, scale, tools, "R"), weights, arsenal, stamina, role, _transforms)
         # No game logs in an uploaded roster CSV — always the scouting-tool
         # proxy (Movement/Control) here, never real observed GB%/K%/BB%.
         park_fit = compute_pitcher_park_fit_from_tools(tools, park) if park else None
     else:
         hitter_weights = tool_weights.get("hitter", DEFAULT_TOOL_WEIGHTS["hitter"])
         weights = hitter_weights.get(bucket, hitter_weights.get("COF", {}))
+        _transforms = _tool_transforms.get("hitter")
         tools = _hitter_tools(d, scale)
         pot_tools = _hitter_potential_tools(d, scale)
         defense, def_weights = _defense_for_bucket(d, bucket, scale)
         pot_defense = defense  # no granular defensive *potential* fields exist in this export either
-        composite = compute_composite_hitter(tools, weights, defense, def_weights)
+        composite = compute_composite_hitter(tools, weights, defense, def_weights, _transforms)
         ceiling = compute_ceiling(
             pot_tools, weights, composite, accuracy=acc, work_ethic=wrk_ethic,
             defense=pot_defense, def_weights=def_weights, age=age or 25,
@@ -556,9 +560,9 @@ def evaluate_row(d: dict, league_dir=None) -> dict | None:
         offensive_ceiling = ceiling
         stf_l = stf_r = None
         composite_vs_l = compute_composite_hitter(
-            _hitter_side_tools(d, scale, tools, "L"), weights, defense, def_weights)
+            _hitter_side_tools(d, scale, tools, "L"), weights, defense, def_weights, _transforms)
         composite_vs_r = compute_composite_hitter(
-            _hitter_side_tools(d, scale, tools, "R"), weights, defense, def_weights)
+            _hitter_side_tools(d, scale, tools, "R"), weights, defense, def_weights, _transforms)
         park_fit = compute_batter_park_fit(tools, bats, weights, park) if park else None
 
     spec_score = compute_specialist_score(tools, is_pitcher)

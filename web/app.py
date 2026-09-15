@@ -305,7 +305,7 @@ def team(tid):
                            waiver_candidates=waiver_candidates,
                            fa_candidates=fa_candidates,
                            last_fa_ask_upload=last_fa_ask_upload,
-                           defense=defense)
+                           defense=defense, has_dh=cfg.has_dh)
 
 
 @app.route("/team/<int:tid>/minors")
@@ -661,4 +661,4 @@ def upload_salary(tid):
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5001)
+    app.run(debug=True, port=5001, threaded=True)

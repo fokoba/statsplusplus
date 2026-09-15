@@ -544,6 +544,40 @@ def get_player(pid):
                                    "greed": _char_label(p_greed), "loy": _char_label(p_loy), "lead": _char_label(p_lead)},
                    "prone": prone if prone else None}
 
+        # Simple pure Contact/Gap/Power/Eye weighted average ("Batting
+        # Composite") — no defense/speed/transforms/recombination, unlike
+        # composite_score. Used for hitters (and the hitting side of
+        # two-way players below). Bucket derived the same way
+        # get_player_card() does for players without a tracked bucket.
+        _hitter_bucket_weights = None
+        try:
+            from statsplusplus.utils.positions import assign_bucket as _ab_hit
+            from statsplusplus.data.evaluation_engine import load_tool_weights as _ltw, DEFAULT_TOOL_WEIGHTS as _dtw
+            _p_dict_bc = {
+                "Age": age, "Pos": str(pos or ""), "_role": "position_player",
+                "_is_pitcher": False, "Pot": pot or 0,
+                "PotC": g("pot_c") or 0, "PotSS": g("pot_ss") or 0, "Pot2B": g("pot_second_b") or 0,
+                "Pot3B": g("pot_third_b") or 0, "Pot1B": g("pot_first_b") or 0,
+                "PotCF": g("pot_cf") or 0, "PotLF": g("pot_lf") or 0, "PotRF": g("pot_rf") or 0,
+            }
+            _bucket_bc = _ab_hit(_p_dict_bc)
+            _hw_all = _ltw(get_cfg().league_dir).get("hitter", _dtw["hitter"])
+            _hitter_bucket_weights = _hw_all.get(_bucket_bc, _hw_all.get("COF", {}))
+        except Exception:
+            _hitter_bucket_weights = None
+
+        def _batting_composite_trio(_cntct, _gap, _pow, _eye, _cntct_l, _gap_l, _pow_l, _eye_l,
+                                     _cntct_r, _gap_r, _pow_r, _eye_r, _pot_cntct, _pot_gap, _pot_pow, _pot_eye):
+            if not _hitter_bucket_weights:
+                return None
+            from statsplusplus.evaluation.composite import compute_batting_composite as _cbc
+            return {
+                "ovr": _cbc(_norm(_cntct), _norm(_gap), _norm(_pow), _norm(_eye), _hitter_bucket_weights),
+                "pot": _cbc(_norm(_pot_cntct), _norm(_pot_gap), _norm(_pot_pow), _norm(_pot_eye), _hitter_bucket_weights),
+                "vl": _cbc(_norm(_cntct_l), _norm(_gap_l), _norm(_pow_l), _norm(_eye_l), _hitter_bucket_weights),
+                "vr": _cbc(_norm(_cntct_r), _norm(_gap_r), _norm(_pow_r), _norm(_eye_r), _hitter_bucket_weights),
+            }
+
         if is_pitcher:
             ctrl = ctrl_ovr or (round((ctrl_r + ctrl_l) / 2) if ctrl_r and ctrl_l else ctrl_r or ctrl_l)
             ratings["stuff"] = (_norm(stf), _norm(g("pot_stf")))
@@ -619,6 +653,10 @@ def get_player(pid):
             }
             if babip_l is not None:
                 ratings["splits"]["babip"] = (_norm(babip_l), _norm(babip_r))
+            ratings["batting_composite"] = _batting_composite_trio(
+                cntct, gap, pw, eye, g("cntct_l"), g("gap_l"), g("pow_l"), g("eye_l"),
+                g("cntct_r"), g("gap_r"), g("pow_r"), g("eye_r"),
+                g("pot_cntct"), g("pot_gap"), g("pot_pow"), g("pot_eye"))
             c_def, ss_def = g("c"), g("ss")
             second_b, third_b, first_b = g("second_b"), g("third_b"), g("first_b")
             lf, cf_def, rf = g("lf"), g("cf"), g("rf")
@@ -678,6 +716,10 @@ def get_player(pid):
                 "krate": (_norm(g("ks_l")), _norm(g("ks_r"))),
                 **({"babip": (_norm(babip_l), _norm(babip_r))} if babip_l is not None else {}),
             },
+            "batting_composite": _batting_composite_trio(
+                cntct, gap, pw, eye, g("cntct_l"), g("gap_l"), g("pow_l"), g("eye_l"),
+                g("cntct_r"), g("gap_r"), g("pow_r"), g("eye_r"),
+                g("pot_cntct"), g("pot_gap"), g("pot_pow"), g("pot_eye")),
             "defense": [{"pos": lbl, "cur": _norm(c), "fut": _norm(f)}
                         for lbl, c, f in [("C", c_def, pot_c), ("1B", first_b, pot_1b), ("2B", second_b, pot_2b),
                                            ("3B", third_b, pot_3b), ("SS", ss_def, pot_ss),
@@ -1440,11 +1482,11 @@ def get_player(pid):
                             durability_score=eval_data.get("durability_score"))
             pv = _pv.prospect_surplus(fv_for_surplus, age, level_val, bucket_val,
                                       ovr=valuation.get("ovr"), pot=valuation.get("pot"),
-                                      def_rating=_dr)
+                                      def_rating=_dr, league_dir=get_cfg().league_dir)
             opt_total = _pv.prospect_surplus_with_option(
                 fv_for_surplus, age, level_val, bucket_val,
                 ovr=valuation.get("ovr"), pot=valuation.get("pot"),
-                def_rating=_dr, **_comp_kw)
+                def_rating=_dr, league_dir=get_cfg().league_dir, **_comp_kw)
             # Use stored surplus as authoritative when available (computed by
             # fv_calc.py with full context: fv_continuous + component scores).
             # Fall back to live calculation for on-the-fly evaluations.
@@ -1539,10 +1581,12 @@ def get_player(pid):
                     outcome_probs = _pv.career_outcome_probs(
                         _fv, age, _lvl_key, _bucket, ovr=_p["Ovr"], pot=_p["Pot"], def_rating=_dr)
                     pv = _pv.prospect_surplus(_fv_continuous, age, _lvl_key, _bucket,
-                                              ovr=_p["Ovr"], pot=_p["Pot"], def_rating=_dr)
+                                              ovr=_p["Ovr"], pot=_p["Pot"], def_rating=_dr,
+                                              league_dir=get_cfg().league_dir)
                     opt_total = _pv.prospect_surplus_with_option(
                         _fv_continuous, age, _lvl_key, _bucket,
-                        ovr=_p["Ovr"], pot=_p["Pot"], def_rating=_dr)
+                        ovr=_p["Ovr"], pot=_p["Pot"], def_rating=_dr,
+                        league_dir=get_cfg().league_dir)
                     if pv and pv.get("breakdown"):
                         cert = pv.get("certainty_mult", 1.0)
                         scar = pv.get("scarcity_mult", 1.0)

@@ -105,6 +105,7 @@
 <div class="tab-bar">
   <button class="tab active" data-tab="main">Main</button>
   <button class="tab" data-tab="depth">Depth Chart</button>
+  <button class="tab" data-tab="roles">Depth Chart Roles</button>
   <button class="tab" data-tab="org">Organization</button>
   <button class="tab" data-tab="hitters">Hitters</button>
   <button class="tab" data-tab="pitchers">Pitchers</button>
@@ -352,10 +353,12 @@
   {# Right: stat selectors + SP, RP #}
   <div class="dc-sidebar">
     <div class="dc-subtitle">Projections based on estimated playing time.</div>
+    {% if has_dh %}
     <div class="dc-section">
       <div class="dc-section-header">DH <span class="dc-pos-war" id="dc-dh-war"></span></div>
       <div class="dc-section-body" id="dc-dh"></div>
     </div>
+    {% endif %}
     <div class="dc-section">
       <div class="dc-section-header">SP <span class="dc-pos-war" id="dc-sp-war"></span></div>
       <div class="dc-section-body" id="dc-sp"></div>
@@ -374,6 +377,7 @@
   var DC = {{ dc.by_year | tojson }};
   var YEARS = {{ dc_years | tojson }};
   var POS_RANK = {{ dc.pos_rank | tojson }};
+  var HAS_DH = {{ 'true' if has_dh else 'false' }};
   var NUM_TEAMS = {{ dc.num_teams }};
   var idx = 0;
   var SP_SHOW = 9, RP_SHOW = 9;
@@ -505,17 +509,19 @@
       card.querySelector('.dc-players').innerHTML = html;
     });
 
-    // DH
-    var dhPw = pw['DH'] || 0;
-    var dhHdr = document.getElementById('dc-dh-war').parentNode;
-    dhHdr.className = 'dc-section-header' + rankColorClass((idx === 0) ? POS_RANK['DH'] : null);
-    document.getElementById('dc-dh-war').textContent = dhPw.toFixed(1);
-    var dhPlayers = d.positions['DH'] || [];
-    var dhHtml = '', dhCum = 0;
-    dhPlayers.forEach(function(p, i) {
-      if (i === 0 || dhCum < 95) { dhHtml += playerRow(p, hitStat, true, i === 0); dhCum += p.pt_pct; }
-    });
-    document.getElementById('dc-dh').innerHTML = dhHtml || '<div class="dc-empty">—</div>';
+    // DH (no-DH leagues, e.g. PPL, don't render this section at all)
+    if (HAS_DH) {
+      var dhPw = pw['DH'] || 0;
+      var dhHdr = document.getElementById('dc-dh-war').parentNode;
+      dhHdr.className = 'dc-section-header' + rankColorClass((idx === 0) ? POS_RANK['DH'] : null);
+      document.getElementById('dc-dh-war').textContent = dhPw.toFixed(1);
+      var dhPlayers = d.positions['DH'] || [];
+      var dhHtml = '', dhCum = 0;
+      dhPlayers.forEach(function(p, i) {
+        if (i === 0 || dhCum < 95) { dhHtml += playerRow(p, hitStat, true, i === 0); dhCum += p.pt_pct; }
+      });
+      document.getElementById('dc-dh').innerHTML = dhHtml || '<div class="dc-empty">—</div>';
+    }
 
     // SP
     var spPw = pw['SP'] || 0;
@@ -553,6 +559,89 @@
   render();
 })();
 </script>
+{% endif %}
+</div>
+
+{# ══════ Depth Chart Roles ══════ #}
+<div class="tab-content" id="tab-roles">
+{% if depth_chart and depth_chart.role_candidates %}
+<div class="dcr-intro">
+  Designate an everyday starter or vR/vL platoon specialists per position for
+  the current year ({{ depth_chart.years[0] }}). Setting any role at a
+  position fully replaces the automatic WAR-ranked allocation shown on the
+  Depth Chart tab for that position — leave players on <strong>Auto</strong>
+  to keep the algorithm's own ranking. Future years always stay automatic.
+</div>
+<div class="dcr-grid">
+  {% for pos in ["C","1B","2B","3B","SS","LF","CF","RF","DH"] %}
+  {% set cands = depth_chart.role_candidates.get(pos, []) %}
+  {% if cands %}
+  <div class="dcr-pos-card">
+    <div class="dcr-pos-header">{{ pos }}</div>
+    <table class="dcr-table">
+      <thead>
+        <tr><th>Player</th><th>Age</th><th>WAR</th><th>OPS+ vL</th><th>OPS+ vR</th><th>Role</th></tr>
+      </thead>
+      <tbody>
+        {% for c in cands %}
+        <tr>
+          <td>
+            <a class="player-link" href="/player/{{ c.pid }}">{{ c.name }}</a>
+            {% if c.level != 'MLB' %}<span class="dc-lvl">{{ c.level }}</span>{% endif %}
+          </td>
+          <td>{{ c.age }}</td>
+          <td>{{ c.war }}</td>
+          <td>{{ c.ops_vs_l if c.ops_vs_l is not none else '—' }}</td>
+          <td>{{ c.ops_vs_r if c.ops_vs_r is not none else '—' }}</td>
+          <td>
+            <select class="dcr-role-select" data-team="{{ tid }}" data-pos="{{ pos }}" data-pid="{{ c.pid }}">
+              <option value="auto" {% if c.role == 'auto' %}selected{% endif %}>Auto</option>
+              <option value="starter" {% if c.role == 'starter' %}selected{% endif %}>Everyday Starter</option>
+              <option value="platoon_vr" {% if c.role == 'platoon_vr' %}selected{% endif %}>Platoon (vs RHP)</option>
+              <option value="platoon_vl" {% if c.role == 'platoon_vl' %}selected{% endif %}>Platoon (vs LHP)</option>
+              <option value="bench" {% if c.role == 'bench' %}selected{% endif %}>Bench / Reserve</option>
+            </select>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% endfor %}
+</div>
+<script>
+(function() {
+  document.querySelectorAll('.dcr-role-select').forEach(function(sel) {
+    sel.addEventListener('change', function() {
+      var body = {
+        team_id: +sel.dataset.team,
+        position: sel.dataset.pos,
+        player_id: +sel.dataset.pid,
+        role: sel.value,
+      };
+      sel.disabled = true;
+      fetch('/api/depth-chart-role', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body),
+      }).then(function(r) { return r.json(); }).then(function(res) {
+        if (res.ok) {
+          location.reload();
+        } else {
+          alert('Failed to save role: ' + (res.error || 'unknown error'));
+          sel.disabled = false;
+        }
+      }).catch(function(err) {
+        alert('Failed to save role: ' + err);
+        sel.disabled = false;
+      });
+    });
+  });
+})();
+</script>
+{% else %}
+<div class="dcr-empty">No depth chart data available.</div>
 {% endif %}
 </div>
 
@@ -1622,6 +1711,9 @@ function toggleFarmRows() {
         <th data-sort="num" title="Composite computed using vs-RHP/vs-RHB split tool ratings where available">vR</th>
         <th data-sort="num" title="Composite computed using vs-LHP/vs-LHB split tool ratings where available">vL</th>
         <th data-sort="num" title="Raw defense grade at the position shown in Fits At (whichever corner grades higher for a combined LF/RF fit). Blank for pitchers or when there's no fit position.">Def</th>
+        <th data-sort="num" title="Simple weighted average of Contact/Gap/Power/Eye only (no defense/speed/transforms) using position weights renormalized to just those four tools. Current/Potential. Hitters only.">Bat OVR</th>
+        <th data-sort="num" title="Same simple weighted average, using vs-RHP split Contact/Gap/Power/Eye. Hitters only.">Bat vR</th>
+        <th data-sort="num" title="Same simple weighted average, using vs-LHP split Contact/Gap/Power/Eye. Hitters only.">Bat vL</th>
         {% endif %}
         <th data-sort="str">FV</th>
         <th data-sort="str">Scout</th>
@@ -1665,6 +1757,9 @@ function toggleFarmRows() {
         <td>{% if p.vr_composite is not none %}<span class="ovr-color" data-g="{{ p.vr_composite }}">{{ p.vr_composite|round|int }}</span>{% else %}-{% endif %}</td>
         <td>{% if p.vl_composite is not none %}<span class="ovr-color" data-g="{{ p.vl_composite }}">{{ p.vl_composite|round|int }}</span>{% else %}-{% endif %}</td>
         <td>{% if p.def_rating is not none %}<span class="ovr-color" data-g="{{ p.def_rating }}">{{ p.def_rating }}</span>{% else %}-{% endif %}</td>
+        <td>{% if p.bat_ovr is not none %}<span class="ovr-color" data-g="{{ p.bat_ovr }}">{{ p.bat_ovr }}</span>/{% if p.bat_pot is not none %}<span class="ovr-color" data-g="{{ p.bat_pot }}">{{ p.bat_pot }}</span>{% else %}-{% endif %}{% else %}-{% endif %}</td>
+        <td>{% if p.bat_vr is not none %}<span class="ovr-color" data-g="{{ p.bat_vr }}">{{ p.bat_vr }}</span>{% else %}-{% endif %}</td>
+        <td>{% if p.bat_vl is not none %}<span class="ovr-color" data-g="{{ p.bat_vl }}">{{ p.bat_vl }}</span>{% else %}-{% endif %}</td>
         {% endif %}
         <td>{{ p.fv_str or '-' }}</td>
         <td>{{ p.acc or '-' }}</td>

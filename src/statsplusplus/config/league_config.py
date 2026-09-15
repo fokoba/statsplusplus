@@ -173,6 +173,11 @@ class LeagueConfig:
         return self._s.get("perpetual_arb", False)
 
     @property
+    def has_dh(self) -> bool:
+        """Whether this league uses a DH (e.g. eMLB universal DH vs. PPL's no-DH rule)."""
+        return "no dh" not in self._s.get("dh_rule", "").lower()
+
+    @property
     def state_path(self) -> Path:
         _, sp = self._resolve_paths()
         return sp

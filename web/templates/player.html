@@ -89,6 +89,9 @@
       <tr><td>Gap</td><td>{{ grade(r.gap[0], r.gap[1]) }}</td></tr>
       <tr><td>Power</td><td>{{ grade(r.power[0], r.power[1]) }}</td></tr>
       <tr><td>Eye</td><td>{{ grade(r.eye[0], r.eye[1]) }}</td></tr>
+      {% if r.batting_composite %}
+      <tr title="Simple weighted average of Contact/Gap/Power/Eye only (no defense/speed/transforms) using position weights renormalized to just those four tools"><td>Bat Composite</td><td>{{ grade(r.batting_composite.ovr, r.batting_composite.pot) }}</td></tr>
+      {% endif %}
     </tbody>
   </table>
   {% if r.splits %}
@@ -101,6 +104,9 @@
       <tr><td>Gap</td><td>{{ grade(r.splits.gap[0]) }}</td><td>{{ grade(r.splits.gap[1]) }}</td></tr>
       <tr><td>Power</td><td>{{ grade(r.splits.power[0]) }}</td><td>{{ grade(r.splits.power[1]) }}</td></tr>
       <tr><td>Eye</td><td>{{ grade(r.splits.eye[0]) }}</td><td>{{ grade(r.splits.eye[1]) }}</td></tr>
+      {% if r.batting_composite %}
+      <tr class="grade-sub" title="Simple weighted average of Contact/Gap/Power/Eye only (no defense/speed/transforms) using position weights renormalized to just those four tools"><td>Bat Composite</td><td>{{ grade(r.batting_composite.vl) }}</td><td>{{ grade(r.batting_composite.vr) }}</td></tr>
+      {% endif %}
     </tbody>
   </table>
   {% endif %}

@@ -102,6 +102,57 @@ def specialist_label(score: int) -> str:
     return "Specialist" if score >= SPECIALIST_SCORE_THRESHOLD else "Generalist"
 
 
+def compute_batting_composite(
+    contact: float | int | None,
+    gap: float | int | None,
+    power: float | int | None,
+    eye: float | int | None,
+    weights: dict[str, float],
+) -> Optional[int]:
+    """Weighted average of Contact/Gap/Power/Eye ONLY (no defense/speed/steal).
+
+    A deliberately simpler sibling of compute_composite_hitter: no transforms,
+    no defense, no baserunning, no recombination/imbalance logic. Just a
+    straight weighted average of the four core hitting tools, using the
+    player's position-bucket hitter weights renormalized so that contact +
+    gap + power + eye sum to 1 (i.e. speed/steal/stl_rt/defense weights are
+    dropped and the remaining four are rescaled proportionally).
+
+    Args:
+        contact, gap, power, eye: Tool ratings on the league's canonical
+            scale (20-80 or 1-100). None values are skipped with renorm.
+        weights: Positional weight profile (same dict used elsewhere), must
+            contain "contact"/"gap"/"power"/"eye" keys.
+
+    Returns:
+        Integer weighted average, or None if all four inputs are None.
+    """
+    tool_vals = {
+        "contact": contact,
+        "gap": gap,
+        "power": power,
+        "eye": eye,
+    }
+
+    available: list[tuple[float, float]] = []
+    for key, val in tool_vals.items():
+        if val is None:
+            continue
+        w = weights.get(key, 0.0)
+        if w > 0:
+            available.append((float(val), w))
+
+    if not available:
+        return None
+
+    total_weight = sum(w for _, w in available)
+    if total_weight <= 0:
+        return None
+
+    raw = sum(val * (w / total_weight) for val, w in available)
+    return round(raw)
+
+
 # ---------------------------------------------------------------------------
 # Tool transform
 # ---------------------------------------------------------------------------

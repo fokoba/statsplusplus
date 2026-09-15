@@ -846,6 +846,7 @@ from team_queries import (get_summary, get_standings, get_division_standings,
                           get_age_distribution, get_farm_depth, get_stat_leaders,
                           get_power_rankings, get_recent_games, get_payroll_summary,
                           get_record_breakdown, get_depth_chart,
+                          get_depth_chart_roles, set_depth_chart_role,
                           get_roster_hitters, get_roster_pitchers,
                           get_org_overview, get_draft_org_depth,
                           get_minor_league_team, get_minor_league_roster,
@@ -934,15 +935,151 @@ def get_draft_pool():
 
     from statsplusplus.data.fv_calc import RATINGS_SQL
     from statsplusplus.utils.positions import assign_bucket, LEVEL_NORM_AGE; from statsplusplus.evaluation.fv import calc_fv_from_dict as calc_fv; from statsplusplus.config.ratings import norm
+    from statsplusplus.evaluation.composite import compute_batting_composite
+    from statsplusplus.data.evaluation_engine import load_tool_weights, DEFAULT_TOOL_WEIGHTS
 
     # Extend RATINGS_SQL with bats/throws which aren't in the base query
     _DRAFT_SQL = RATINGS_SQL.replace("r.league_id AS LeagueId",
         "r.league_id AS LeagueId, r.bats AS Bats, r.throws AS Throws")
 
     n = _norm
+    _hitter_weights_by_bucket = load_tool_weights(get_cfg().league_dir).get(
+        "hitter", DEFAULT_TOOL_WEIGHTS["hitter"])
     role_map = {str(k): v for k, v in get_cfg().role_map.items()}
     _LVL_KEY = {'11': 'intl', '10': 'a', '0': 'dsl'}
     _POS_LABEL = {1:'P',2:'C',3:'1B',4:'2B',5:'3B',6:'SS',7:'LF',8:'CF',9:'RF',10:'DH'}
+
+    # --- Custom-Upload-parity helpers: tool weights / park factors, loaded
+    # once per call (not per player) — mirrors evaluate_row()'s per-league
+    # loading in scripts/custom_upload.py.
+    from statsplusplus.evaluation.composite import (
+        compute_composite_hitter, compute_composite_pitcher,
+        compute_specialist_score, specialist_label,
+    )
+    from statsplusplus.evaluation.constants import DEFENSIVE_WEIGHTS
+    from statsplusplus.evaluation.park_fit import (
+        load_park_factors, compute_batter_park_fit, compute_pitcher_park_fit_from_tools,
+    )
+    from statsplusplus.data.evaluation_engine import DEFAULT_TOOL_WEIGHTS, load_tool_weights
+    from statsplusplus.utils.positions import PITCH_FIELDS
+
+    # NOTE: must use get_cfg().league_dir (request/session-scoped), NOT
+    # statsplusplus.config.league_context.get_league_dir() — that falls back
+    # to the *global* app_config.json "active_league" (or env var) whenever
+    # no slug is passed, which any other browser tab/session can overwrite
+    # via /switch-league. Using it here caused prospect surplus/composite/
+    # park-fit calcs to silently use another session's league (wrong $/WAR,
+    # wrong ratings scale, wrong calibrated tables) whenever two leagues were
+    # active in different tabs at once.
+    try:
+        _league_dir = get_cfg().league_dir
+    except Exception:
+        _league_dir = None
+    _tool_weights = DEFAULT_TOOL_WEIGHTS
+    _park = None
+    if _league_dir is not None:
+        try:
+            _tool_weights = load_tool_weights(_league_dir)
+        except Exception:
+            pass
+        try:
+            _park = load_park_factors(_league_dir)
+        except Exception:
+            pass
+    _game_year = None
+    try:
+        _game_year = year()
+    except Exception:
+        pass
+
+    # Mirrors custom_upload.py's _TRAIT_NOTE_MAP / _trait_notes() — adaptability
+    # deliberately excluded (out of scope for the draft page per spec).
+    _TRAIT_NOTE_MAP = {
+        "we":    {"H": ("buff", "Hard Worker"), "L": ("concern", "Low Work Ethic")},
+        "int":   {"H": ("buff", "High IQ"), "L": ("concern", "Low IQ")},
+        "lead":  {"H": ("buff", "Leader"), "L": ("concern", "Low Leadership")},
+        "loy":   {"H": ("buff", "Loyal"), "L": ("concern", "Low Loyalty")},
+        "greed": {"H": ("concern", "Greedy"), "L": ("buff", "Not Greedy")},
+    }
+
+    def _trait_notes(we, intel, lead, loy, greed):
+        buffs, concerns = [], []
+        for field, value in (("we", we), ("int", intel), ("lead", lead),
+                             ("loy", loy), ("greed", greed)):
+            note = _TRAIT_NOTE_MAP.get(field, {}).get(value)
+            if not note:
+                continue
+            kind, label = note
+            (buffs if kind == "buff" else concerns).append(label)
+        return buffs, concerns
+
+    # Mirrors custom_upload.py's _BEST_POSITION_PRIORITY / _best_position(),
+    # applied to the draft entry's already-normalized (20-80) potential
+    # defensive ratings instead of raw CSV columns.
+    _BEST_POSITION_PRIORITY = [
+        ("SS", ("SS",), 60),
+        ("CF", ("CF",), 60),
+        ("C", ("C",), 55),
+        ("2B", ("2B",), 55),
+        ("3B", ("3B",), 55),
+        ("LF/RF", ("LF", "RF"), 55),
+        ("1B", ("1B",), 55),
+    ]
+
+    def _best_position(defense):
+        for label, keys, threshold in _BEST_POSITION_PRIORITY:
+            grade = max((defense.get(k) or 0) for k in keys)
+            if grade >= threshold:
+                return label, grade
+        return None, None
+
+    # Mirrors custom_upload.py's _defense_for_bucket() — current (not
+    # potential) defensive component ratings + weights for compute_composite_
+    # hitter()'s defense arg, built from RATINGS_SQL's raw column aliases.
+    def _current_defense_for_bucket(p, bucket, ng):
+        if bucket == "C":
+            defense = {"CFrm": ng(p.get("CFrm") or 0), "CBlk": ng(p.get("CBlk") or 0),
+                       "CArm": ng(p.get("CArm") or 0)}
+            return defense, DEFENSIVE_WEIGHTS.get("C", {})
+        if bucket in ("SS", "2B", "3B"):
+            defense = {"IFR": ng(p.get("IFR") or 0), "IFE": ng(p.get("IFE") or 0),
+                       "IFA": ng(p.get("IFA") or 0), "TDP": ng(p.get("TDP") or 0)}
+            return defense, DEFENSIVE_WEIGHTS.get(bucket, {})
+        if bucket in ("CF", "COF"):
+            defense = {"OFR": ng(p.get("OFR") or 0), "OFE": ng(p.get("OFE") or 0),
+                       "OFA": ng(p.get("OFA") or 0)}
+            if bucket == "CF":
+                return defense, DEFENSIVE_WEIGHTS.get("CF", {})
+            lf_w, rf_w = DEFENSIVE_WEIGHTS.get("COF_LF", {}), DEFENSIVE_WEIGHTS.get("COF_RF", {})
+            def _score(weights):
+                return sum((defense.get(k) or 0) * w for k, w in weights.items())
+            return defense, (lf_w if _score(lf_w) >= _score(rf_w) else rf_w)
+        return {}, {}
+
+    # Mirrors custom_upload.py's _platoon_split() — same tool pairs/threshold,
+    # applied to the draft entry's already-normalized split ratings.
+    _PLATOON_GAP_THRESHOLD = 10
+
+    def _platoon_strong_side(p, ng, is_pitcher):
+        if is_pitcher:
+            pairs = [("Stf_L", "Stf_R")]
+            strong_labels = ("vs LHB", "vs RHB")
+        else:
+            pairs = [("Cntct_L", "Cntct_R"), ("Pow_L", "Pow_R"),
+                     ("Gap_L", "Gap_R"), ("Eye_L", "Eye_R")]
+            strong_labels = ("vs LHP", "vs RHP")
+        max_gap, strong_side = 0, None
+        for l_col, r_col in pairs:
+            lv, rv = ng(p.get(l_col)), ng(p.get(r_col))
+            if not lv or not rv:
+                continue
+            gap = abs(lv - rv)
+            if gap > max_gap:
+                max_gap = gap
+                strong_side = strong_labels[0] if lv > rv else strong_labels[1]
+        if max_gap < _PLATOON_GAP_THRESHOLD:
+            return None
+        return strong_side
 
     def _build_prospect(rat):
         p = dict(rat)
@@ -985,7 +1122,11 @@ def get_draft_pool():
             "bats": p.get("Bats", ""), "throws": p.get("Throws", ""),
             "acc": p.get("Acc", ""), "we": p.get("WrkEthic", ""),
             "lead": p.get("Lead", ""), "int": p.get("Int", ""),
+            "loy": p.get("Loy", ""), "greed": p.get("Greed", ""),
         }
+        _buffs, _concerns = _trait_notes(p.get("WrkEthic"), p.get("Int"), p.get("Lead"),
+                                          p.get("Loy"), p.get("Greed"))
+        entry["buffs"], entry["concerns"] = _buffs, _concerns
         if p["_is_pitcher"]:
             # Count viable pitches (pot >= 45)
             from statsplusplus.utils.positions import PITCH_FIELDS
@@ -1011,6 +1152,48 @@ def get_draft_pool():
                 "best_pitch": best_p,
                 "pitches": pitch_data,
             }
+            entry["best_position"], entry["best_position_grade"] = None, None
+
+            # Specialist/Generalist balance score — current (not potential)
+            # stuff/movement/control, matching custom_upload.py's evaluate_row().
+            _cur_role = "RP" if role_str in ("reliever", "closer") else "SP"
+            _pit_tools_cur = {
+                "stuff": ng(p.get("Stf") or 0), "movement": ng(p.get("Mov") or 0),
+                "control": ng(p.get("Ctrl") or 0),
+            }
+            entry["specialist_score"] = compute_specialist_score(_pit_tools_cur, True)
+            entry["specialist_label"] = specialist_label(entry["specialist_score"])
+
+            # Comp vL/vR + platoon strong side — swap in the vL/vR split
+            # ratings for stuff/movement/control, same as
+            # custom_upload.py's _pitcher_side_tools().
+            try:
+                _pit_weights = _tool_weights.get("pitcher", DEFAULT_TOOL_WEIGHTS["pitcher"])[_cur_role]
+                _pit_transforms = (_tool_weights.get("tool_transforms", {}) or {}).get(_cur_role)
+                _arsenal_cur = {pf: ng(p.get(pf) or 0) for pf in PITCH_FIELDS if p.get(pf)}
+                _stamina_cur = ng(p.get("Stm") or 0) or 50
+                _tools_l = dict(_pit_tools_cur)
+                _v = ng(p.get("Stf_L")); _tools_l["stuff"] = _v if _v is not None else _tools_l["stuff"]
+                _v = ng(p.get("Mov_L")); _tools_l["movement"] = _v if _v is not None else _tools_l["movement"]
+                _v = ng(p.get("Ctrl_L")); _tools_l["control"] = _v if _v is not None else _tools_l["control"]
+                _tools_r = dict(_pit_tools_cur)
+                _v = ng(p.get("Stf_R")); _tools_r["stuff"] = _v if _v is not None else _tools_r["stuff"]
+                _v = ng(p.get("Mov_R")); _tools_r["movement"] = _v if _v is not None else _tools_r["movement"]
+                _v = ng(p.get("Ctrl_R")); _tools_r["control"] = _v if _v is not None else _tools_r["control"]
+                entry["composite_vs_l"] = compute_composite_pitcher(
+                    _tools_l, _pit_weights, _arsenal_cur, _stamina_cur, _cur_role, _pit_transforms)
+                entry["composite_vs_r"] = compute_composite_pitcher(
+                    _tools_r, _pit_weights, _arsenal_cur, _stamina_cur, _cur_role, _pit_transforms)
+            except Exception:
+                entry["composite_vs_l"] = entry["composite_vs_r"] = None
+            entry["platoon_strong_side"] = _platoon_strong_side(p, ng, True)
+
+            # Park fit vs the querying team's own park (unsigned prospects
+            # have no home park yet — "if we draft him" is the only fit that
+            # makes sense), scouting-tool fallback (no game logs pre-draft),
+            # matching custom_upload.py's always-tools-based pitcher path.
+            entry["park_fit"] = (compute_pitcher_park_fit_from_tools(_pit_tools_cur, _park)
+                                  if _park else None)
         else:
             entry["tools"] = {
                 "con": [ng(p.get("Cntct") or 0), ng(p.get("PotCntct") or 0)],
@@ -1019,6 +1202,18 @@ def get_draft_pool():
                 "eye": [ng(p.get("Eye") or 0), ng(p.get("PotEye") or 0)],
                 "spd": ng(p.get("Speed") or 0),
             }
+            # Simple pure Contact/Gap/Power/Eye weighted average — no
+            # defense/speed/transforms/recombination. Separate & simpler
+            # than the full compute_composite_hitter pipeline used elsewhere.
+            _bw = _hitter_weights_by_bucket.get(bucket, _hitter_weights_by_bucket.get("COF", {}))
+            entry["bat_ovr"] = compute_batting_composite(
+                ng(p.get("Cntct")), ng(p.get("Gap")), ng(p.get("Pow")), ng(p.get("Eye")), _bw)
+            entry["bat_pot"] = compute_batting_composite(
+                ng(p.get("PotCntct")), ng(p.get("PotGap")), ng(p.get("PotPow")), ng(p.get("PotEye")), _bw)
+            entry["bat_vr"] = compute_batting_composite(
+                ng(p.get("Cntct_R")), ng(p.get("Gap_R")), ng(p.get("Pow_R")), ng(p.get("Eye_R")), _bw)
+            entry["bat_vl"] = compute_batting_composite(
+                ng(p.get("Cntct_L")), ng(p.get("Gap_L")), ng(p.get("Pow_L")), ng(p.get("Eye_L")), _bw)
             _def_fields = [("C","PotC"),("1B","Pot1B"),("2B","Pot2B"),("3B","Pot3B"),
                            ("SS","PotSS"),("LF","PotLF"),("CF","PotCF"),("RF","PotRF")]
             defs = {}
@@ -1047,6 +1242,55 @@ def get_draft_pool():
             if not same:
                 entry["pos_note"] = bucket_display
 
+            entry["best_position"], entry["best_position_grade"] = _best_position(defs)
+
+            # Specialist/Generalist balance score — current (not potential)
+            # con/gap/pow/eye, matching custom_upload.py's evaluate_row().
+            _hit_tools_cur = {
+                "contact": ng(p.get("Cntct") or 0), "gap": ng(p.get("Gap") or 0),
+                "power": ng(p.get("Pow") or 0), "eye": ng(p.get("Eye") or 0),
+                "speed": ng(p.get("Speed") or 0),
+            }
+            entry["specialist_score"] = compute_specialist_score(_hit_tools_cur, False)
+            entry["specialist_label"] = specialist_label(entry["specialist_score"])
+
+            # Comp vL/vR + platoon strong side — swap in the vL/vR split
+            # ratings for contact/gap/power/eye, same as
+            # custom_upload.py's _hitter_side_tools().
+            try:
+                _hitter_weights = _tool_weights.get("hitter", DEFAULT_TOOL_WEIGHTS["hitter"])
+                _hw = _hitter_weights.get(bucket, _hitter_weights.get("COF", {}))
+                _hit_transforms = (_tool_weights.get("tool_transforms", {}) or {}).get("hitter")
+                _def_cur, _def_w = _current_defense_for_bucket(p, bucket, ng)
+                _tools_l = dict(_hit_tools_cur)
+                for key, col in (("contact", "Cntct_L"), ("gap", "Gap_L"),
+                                 ("power", "Pow_L"), ("eye", "Eye_L")):
+                    _v = ng(p.get(col))
+                    if _v is not None:
+                        _tools_l[key] = _v
+                _tools_r = dict(_hit_tools_cur)
+                for key, col in (("contact", "Cntct_R"), ("gap", "Gap_R"),
+                                 ("power", "Pow_R"), ("eye", "Eye_R")):
+                    _v = ng(p.get(col))
+                    if _v is not None:
+                        _tools_r[key] = _v
+                entry["composite_vs_l"] = compute_composite_hitter(
+                    _tools_l, _hw, _def_cur, _def_w, _hit_transforms)
+                entry["composite_vs_r"] = compute_composite_hitter(
+                    _tools_r, _hw, _def_cur, _def_w, _hit_transforms)
+            except Exception:
+                entry["composite_vs_l"] = entry["composite_vs_r"] = None
+            entry["platoon_strong_side"] = _platoon_strong_side(p, ng, False)
+
+            # Park fit vs the querying team's own park (unsigned prospects
+            # have no home park yet — "if we draft him" is the only fit that
+            # makes sense), matching custom_upload.py's compute_batter_park_fit call.
+            try:
+                entry["park_fit"] = (compute_batter_park_fit(
+                    _hit_tools_cur, entry["bats"], _hw, _park) if _park else None)
+            except Exception:
+                entry["park_fit"] = None
+
         # Career outcome summary for range indicator
         try:
             import prospect_value as _pv
@@ -1068,7 +1312,7 @@ def get_draft_pool():
                 }
             surplus_val = pf_surplus if pf_surplus else _pv.prospect_surplus_with_option(
                 fv_base, p["Age"], _oc_level, bucket,
-                ovr=_ovr, pot=_pot)
+                ovr=_ovr, pot=_pot, league_dir=_league_dir)
             # NOTE: stays in raw millions — feeds the draft board's JS
             # fmtSurplus(), which already does its own per-value adaptive
             # M/K formatting assuming millions-scale input.
@@ -1078,15 +1322,55 @@ def get_draft_pool():
             # Uses ceiling FV to represent the best-case outcome.
             _ceil_fv = _pv._ceiling_fv(_pot) if _pot else fv_base
             _raw_result = _pv.prospect_surplus(_ceil_fv, p["Age"], _oc_level, bucket,
-                                               ovr=_ovr, pot=_pot)
+                                               ovr=_ovr, pot=_pot, league_dir=_league_dir)
             if _raw_result and _raw_result.get("breakdown"):
+                # dollars_per_war() takes no args — reads the module-global
+                # league context that the prospect_surplus() call just above
+                # already refreshed via _ensure_league_context(_league_dir).
                 _dpw = _pv.dollars_per_war()
                 raw_total = sum(b["war"] * _dpw - b["salary"] for b in _raw_result["breakdown"])
                 entry["raw_surplus"] = max(entry["surplus"], round(max(0, raw_total) / 1e6, 3))
             else:
                 entry["raw_surplus"] = entry["surplus"]
+
+            # Surplus horizons + peak-year surplus — same functions
+            # custom_upload.py's evaluate_row() calls, using the same
+            # ovr/pot/level/bucket already resolved above for this entry.
+            try:
+                _peak = _pv.peak_year_surplus(
+                    fv_base, p["Age"], _oc_level, bucket, ovr=_ovr, pot=_pot, league_dir=_league_dir)
+                entry["peak_surplus"] = round(_peak["surplus"] / 1e6, 3) if _peak["surplus"] else 0
+                entry["peak_age"] = _peak["age"]
+            except Exception:
+                entry["peak_surplus"] = entry["peak_age"] = None
+            entry["current_year_surplus"] = entry["next_year_surplus"] = entry["three_year_surplus"] = None
+            if _game_year is not None:
+                try:
+                    _cur, _nxt, _three = _pv.prospect_surplus_horizons(
+                        fv_base, p["Age"], _oc_level, bucket, _game_year,
+                        ovr=_ovr, pot=_pot, league_dir=_league_dir)
+                    entry["current_year_surplus"] = round(_cur / 1e6, 3) if _cur else (0 if _cur == 0 else None)
+                    entry["next_year_surplus"] = round(_nxt / 1e6, 3) if _nxt else (0 if _nxt == 0 else None)
+                    entry["three_year_surplus"] = round(_three / 1e6, 3) if _three else (0 if _three == 0 else None)
+                except Exception:
+                    pass
         except Exception:
             entry["surplus"] = 0
+            entry.setdefault("peak_surplus", None); entry.setdefault("peak_age", None)
+            entry.setdefault("current_year_surplus", None)
+            entry.setdefault("next_year_surplus", None)
+            entry.setdefault("three_year_surplus", None)
+
+        entry.setdefault("best_position", None)
+        entry.setdefault("best_position_grade", None)
+        entry.setdefault("specialist_score", None)
+        entry.setdefault("specialist_label", None)
+        entry.setdefault("composite_vs_l", None)
+        entry.setdefault("composite_vs_r", None)
+        entry.setdefault("platoon_strong_side", None)
+        entry.setdefault("park_fit", None)
+        entry.setdefault("buffs", [])
+        entry.setdefault("concerns", [])
 
         return entry
 

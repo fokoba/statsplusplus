@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from statsplusplus.evaluation.composite import (
     compute_composite_hitter, compute_composite_pitcher,
-    compute_specialist_score, specialist_label,
+    compute_specialist_score, specialist_label, compute_batting_composite,
 )
 from statsplusplus.evaluation.ceiling import compute_ceiling, compute_true_ceiling
 from statsplusplus.data.evaluation_engine import DEFAULT_TOOL_WEIGHTS, load_tool_weights
@@ -564,6 +564,24 @@ def evaluate_row(d: dict, league_dir=None) -> dict | None:
         composite_vs_r = compute_composite_hitter(
             _hitter_side_tools(d, scale, tools, "R"), weights, defense, def_weights, _transforms)
         park_fit = compute_batter_park_fit(tools, bats, weights, park) if park else None
+        # Simple pure Contact/Gap/Power/Eye weighted averages — no defense,
+        # speed, transforms, or recombination logic (see compute_batting_composite
+        # docstring). Separate/simpler than composite_vs_l/composite_vs_r above.
+        _side_l_tools = _hitter_side_tools(d, scale, tools, "L")
+        _side_r_tools = _hitter_side_tools(d, scale, tools, "R")
+        batting_composite_ovr = compute_batting_composite(
+            tools.get("contact"), tools.get("gap"), tools.get("power"), tools.get("eye"), weights)
+        batting_composite_pot = compute_batting_composite(
+            pot_tools.get("contact"), pot_tools.get("gap"), pot_tools.get("power"), pot_tools.get("eye"), weights)
+        batting_composite_vl = compute_batting_composite(
+            _side_l_tools.get("contact"), _side_l_tools.get("gap"),
+            _side_l_tools.get("power"), _side_l_tools.get("eye"), weights)
+        batting_composite_vr = compute_batting_composite(
+            _side_r_tools.get("contact"), _side_r_tools.get("gap"),
+            _side_r_tools.get("power"), _side_r_tools.get("eye"), weights)
+    if is_pitcher:
+        batting_composite_ovr = batting_composite_pot = None
+        batting_composite_vl = batting_composite_vr = None
 
     spec_score = compute_specialist_score(tools, is_pitcher)
     spec_label = specialist_label(spec_score)
@@ -643,6 +661,8 @@ def evaluate_row(d: dict, league_dir=None) -> dict | None:
         "composite_score": composite, "ceiling_score": ceiling,
         "true_ceiling": true_ceiling, "fv": fv_grade, "risk": risk,
         "composite_vs_l": composite_vs_l, "composite_vs_r": composite_vs_r,
+        "batting_composite_ovr": batting_composite_ovr, "batting_composite_pot": batting_composite_pot,
+        "batting_composite_vl": batting_composite_vl, "batting_composite_vr": batting_composite_vr,
         "specialist_score": spec_score, "specialist_label": spec_label,
         "park_fit": park_fit,
         "acc": acc, "org": org_name, "org_abbr": org_abbr,

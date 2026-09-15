@@ -177,6 +177,32 @@ def api_waiver_wire():
     return jsonify({"players": get_waiver_wire()})
 
 
+@api_bp.route("/api/depth-chart-role", methods=["POST"])
+def api_depth_chart_role():
+    """Set (or clear) a manual depth-chart role for a player at a position.
+
+    Body: {team_id, position, player_id, role}. role="auto" (or omitted)
+    clears the override and falls back to the automatic algorithm.
+    """
+    import queries
+    data = request.get_json(silent=True) or {}
+    try:
+        team_id = int(data["team_id"])
+        position = str(data["position"])
+        player_id = int(data["player_id"])
+    except (KeyError, TypeError, ValueError):
+        return jsonify({"ok": False, "error": "Missing/invalid team_id, position, or player_id"}), 400
+    role = data.get("role") or "auto"
+    try:
+        queries.set_depth_chart_role(team_id, position, player_id, role)
+        return jsonify({"ok": True})
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except Exception as e:
+        log.error("depth-chart-role POST failed: %s", e)
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @api_bp.route("/api/org-players/<int:team_id>")
 def api_org_players(team_id):
     import trade_queries

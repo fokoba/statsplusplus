@@ -191,7 +191,8 @@ def viable_positions(ratings, use_pot=False):
     return positions
 
 
-def assign_diamond_positions(player, fielding_games=None, batting_games=0, use_pot=False):
+def assign_diamond_positions(player, fielding_games=None, batting_games=0, use_pot=False,
+                              has_dh=True):
     """Determine which diamond positions a player appears at and their weight.
 
     player: dict with ratings fields + 'role'. May also include:
@@ -201,9 +202,20 @@ def assign_diamond_positions(player, fielding_games=None, batting_games=0, use_p
     fielding_games: dict of {pos_num: games} from fielding_stats (year 1 only)
     batting_games: total batting games (to detect full-time DH)
     use_pot: use potential ratings for viability (future years / young prospects)
+    has_dh: whether the league uses a DH (False for PPL). When False, any DH
+        weight is dropped rather than redistributed — a pure-DH bat simply
+        isn't part of the lineup mix in a no-DH league, so that share of
+        playing time (and the WAR that would come with it) isn't counted
+        anywhere, rather than being spread onto other positions.
 
-    Returns list of (position_str, weight) tuples. Weights sum to 1.0.
+    Returns list of (position_str, weight) tuples. Weights sum to 1.0
+    (unless has_dh=False dropped a DH entry, in which case they sum to less).
     """
+    if not has_dh:
+        return [(pos, w) for pos, w in
+                assign_diamond_positions(player, fielding_games, batting_games, use_pot)
+                if pos != "DH"]
+
     role = player.get("role", 0)
     # A NULL games value (player with a stat row but no games logged) coalesces
     # to 0 rather than crashing the >= comparison below.
@@ -325,7 +337,78 @@ def identify_dh_candidates(players, position_assignments):
     return candidates[:5]
 
 
-def allocate_playing_time(players_by_pos, team_pa=None, team_ip=None):
+# Manual depth-chart role designations (see web/team_queries.py::get_depth_chart_roles).
+# When a position has any manual roles set, they fully replace the automatic
+# WAR-ranked allocation for that position — the user's call is used as-is.
+ROLE_STARTER = "starter"
+ROLE_PLATOON_VR = "platoon_vr"
+ROLE_PLATOON_VL = "platoon_vl"
+ROLE_BENCH = "bench"
+
+# Baseline share of a position's PA given to the "starter tier" (the
+# everyday starter, or the combined vR+vL platoon pair) before bench
+# players split the remainder. Matches the automatic algorithm's rough
+# starter_share ranges (0.85-0.95, catcher 0.65-0.75, DH 0.92-0.98).
+_MANUAL_BASELINE_SHARE = {"C": 0.70, "DH": 0.95}
+_MANUAL_BASELINE_DEFAULT = 0.90
+
+# Platoon split of the starter-tier bucket when both a vR and a vL
+# specialist are designated — matches the ~60/40 RHP/LHP split used as
+# the platoon-floor cap in the automatic algorithm below.
+_PLATOON_VR_FRACTION = 0.60
+_PLATOON_VL_FRACTION = 0.40
+
+
+def _manual_position_entries(players, roles, pos):
+    """Build (player, share) entries for a position from manual role overrides.
+
+    roles: dict of player_id -> role string (ROLE_STARTER/PLATOON_VR/PLATOON_VL/BENCH).
+    Players at this position with no role entry are dropped — a manual
+    designation is a full override, not a bias on top of the auto-ranking.
+    """
+    by_pid = {p["player_id"]: p for p in players}
+    starter_ids = [pid for pid in roles if roles[pid] == ROLE_STARTER and pid in by_pid]
+    vr_ids = [pid for pid in roles if roles[pid] == ROLE_PLATOON_VR and pid in by_pid]
+    vl_ids = [pid for pid in roles if roles[pid] == ROLE_PLATOON_VL and pid in by_pid]
+    bench_ids = [pid for pid in roles if roles[pid] == ROLE_BENCH and pid in by_pid]
+
+    baseline = _MANUAL_BASELINE_SHARE.get(pos, _MANUAL_BASELINE_DEFAULT)
+    entries = []
+    top_bucket = 0.0
+
+    if starter_ids:
+        share_each = baseline / len(starter_ids)
+        for pid in starter_ids:
+            entries.append((by_pid[pid], share_each))
+        top_bucket = baseline
+    elif vr_ids or vl_ids:
+        vr_total = baseline * _PLATOON_VR_FRACTION if vr_ids else 0.0
+        vl_total = baseline * _PLATOON_VL_FRACTION if vl_ids else 0.0
+        # Only one side of the platoon designated — it absorbs the whole bucket
+        # (the missing platoon partner shows up as a hole, same philosophy as
+        # departed players in the multi-year projection).
+        if vr_ids and not vl_ids:
+            vr_total = baseline
+        if vl_ids and not vr_ids:
+            vl_total = baseline
+        for pid in vr_ids:
+            entries.append((by_pid[pid], vr_total / len(vr_ids)))
+        for pid in vl_ids:
+            entries.append((by_pid[pid], vl_total / len(vl_ids)))
+        top_bucket = vr_total + vl_total
+
+    bench_bucket = max(1.0 - top_bucket, 0.0)
+    if bench_ids and bench_bucket > 0:
+        weights = [max(by_pid[pid].get("war_proj", 0) * by_pid[pid].get("level_discount", 1.0), 0.01)
+                   for pid in bench_ids]
+        total_w = sum(weights)
+        for pid, w in zip(bench_ids, weights):
+            entries.append((by_pid[pid], bench_bucket * (w / total_w)))
+
+    return entries
+
+
+def allocate_playing_time(players_by_pos, team_pa=None, team_ip=None, manual_roles=None):
     """Allocate playing time across positions.
 
     players_by_pos: dict of position -> list of player dicts, each with:
@@ -333,6 +416,9 @@ def allocate_playing_time(players_by_pos, team_pa=None, team_ip=None):
         'split_ops_plus', 'ovr_ops_plus', 'ops_vs_l', 'ops_vs_r'
     team_pa: total team PA for the season
     team_ip: total team IP for the season
+    manual_roles: optional dict of position -> {player_id: role}. A position
+        present here (with at least one role) fully overrides the automatic
+        ranking below — see _manual_position_entries.
 
     Two-pass algorithm:
     1. Allocate per-position (85/15 starter/backup split)
@@ -340,6 +426,7 @@ def allocate_playing_time(players_by_pos, team_pa=None, team_ip=None):
 
     Returns dict of position -> list of player dicts with 'pt_pct' and 'pa' added.
     """
+    manual_roles = manual_roles or {}
     team_pa = team_pa or DEFAULT_TEAM_PA
     team_ip = team_ip or DEFAULT_TEAM_IP
 
@@ -368,6 +455,11 @@ def allocate_playing_time(players_by_pos, team_pa=None, team_ip=None):
         players = players_by_pos.get(pos, [])
         if not players:
             raw[pos] = []
+            continue
+
+        pos_roles = manual_roles.get(pos)
+        if pos_roles:
+            raw[pos] = _manual_position_entries(players, pos_roles, pos)
             continue
 
         # Compute effective WAR for ranking at this position.
@@ -578,7 +670,8 @@ def allocate_pitcher_time(sp_list, rp_list, team_ip=None):
 # for each year in a multi-year projection window.
 # ---------------------------------------------------------------------------
 
-def roster_availability(players, year_offsets=(0, 1, 2)):
+def roster_availability(players, year_offsets=(0, 1, 2), perpetual_arb=False,
+                         perp_model=None, league_dir=None):
     """Determine which players are available in each projected year.
 
     Each player dict must include:
@@ -587,14 +680,31 @@ def roster_availability(players, year_offsets=(0, 1, 2)):
                    team_option, player_option},
         control: {ctrl_years, pre_arb_left} or None (for FA/unknown),
         war_proj (full-season WAR at current age),
-        ovr, pot, bucket
+        ovr, pot, bucket,
+        career_war (cumulative real-stats career WAR; only used when
+                    perpetual_arb=True — see below)
+
+    perpetual_arb: leagues like PPL have no free agency — a player stays
+    under (perpetually recalculated) arbitration control indefinitely,
+    departing only if non-tendered. This mirrors contract_value.py's own
+    perpetual-arb model exactly: salary is projected from accumulated
+    career WAR via arb_salary_perpetual() rather than the fixed 3-step FA
+    arb formula, and the retention gate is "diminishing returns" (drops a
+    player only once their year's surplus falls below 30% of their first
+    projected arb year's surplus, and only from year offset 3+) instead of
+    a hard "salary exceeds 2x market value" non-tender check. Within this
+    function's normal (0, 1, 2) depth-chart window, that gate never fires,
+    so perpetual-arb players never artificially drop off the roster —
+    year-over-year WAR change is driven purely by aging/development, which
+    matches how PPL actually works.
 
     Returns dict of {year_offset: [player_dict, ...]} with players available
     that year. Players gain 'salary' and 'ctrl_type' fields.
     """
     from statsplusplus.config.league_config import dollars_per_war, league_minimum
     from statsplusplus.config.league_context import get_league_dir, get_active_league_slug
-    _ld = get_league_dir(get_active_league_slug())
+    from statsplusplus.evaluation.arb import arb_salary_perpetual
+    _ld = league_dir or get_league_dir(get_active_league_slug())
     dpw = dollars_per_war(_ld)
     min_sal = league_minimum(_ld)
     import math
@@ -621,6 +731,11 @@ def roster_availability(players, year_offsets=(0, 1, 2)):
         yrs_left = yrs_total - cur_yr  # years remaining including current
         has_to = c.get("team_option", False)
         has_po = c.get("player_option", False)
+
+        # Perpetual-arb running state (see docstring) — accumulates across
+        # ascending year_offsets, so callers must pass them in order.
+        _career_war = p.get("career_war", 0.0)
+        _first_surplus = None
 
         for off in year_offsets:
             if off == 0:
@@ -653,17 +768,33 @@ def roster_availability(players, year_offsets=(0, 1, 2)):
 
             # 1-year contract: use estimated control
             if ctrl and ctrl.get("ctrl_years", 0) > off:
-                # Check non-tender gate for arb-eligible years
-                pre_arb = ctrl.get("pre_arb_left", 0)
-                if off >= pre_arb:
-                    from statsplusplus.evaluation.arb import arb_salary as _arb_salary
-                    arb_yr = off - pre_arb + 1  # 1-indexed
-                    base_sal = c["salaries"][0] if c["salaries"] else min_sal
-                    arb_sal = _arb_salary(ovr, bucket, arb_yr, base_sal, min_sal)
-                    future_war = project_war(ovr, pot, age, bucket, off)
-                    if arb_sal > max(future_war * dpw, min_sal):
-                        continue  # non-tendered
-                result[off].append(p)
+                future_war = project_war(ovr, pot, age, bucket, off)
+
+                if perpetual_arb:
+                    # Perpetual arb: no fixed arb-year step formula and no
+                    # market-value non-tender — see docstring.
+                    _career_war += future_war
+                    arb_sal = arb_salary_perpetual(
+                        age + off, future_war, dpw, min_sal,
+                        career_war=_career_war, model=perp_model)
+                    surplus = future_war * dpw - arb_sal
+                    if _first_surplus is None:
+                        _first_surplus = surplus
+                    if (off >= 3 and _first_surplus and _first_surplus > 0
+                            and surplus < _first_surplus * 0.30):
+                        continue  # non-tendered (diminishing returns)
+                    result[off].append(p)
+                else:
+                    # Check non-tender gate for arb-eligible years
+                    pre_arb = ctrl.get("pre_arb_left", 0)
+                    if off >= pre_arb:
+                        from statsplusplus.evaluation.arb import arb_salary as _arb_salary
+                        arb_yr = off - pre_arb + 1  # 1-indexed
+                        base_sal = c["salaries"][0] if c["salaries"] else min_sal
+                        arb_sal = _arb_salary(ovr, bucket, arb_yr, base_sal, min_sal)
+                        if arb_sal > max(future_war * dpw, min_sal):
+                            continue  # non-tendered
+                    result[off].append(p)
             elif ctrl is None:
                 # Unknown control (likely 1yr FA deal) — gone after this year
                 pass

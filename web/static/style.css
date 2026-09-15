@@ -1246,6 +1246,39 @@ td.stat-bad  { color: var(--red); }
   .dc-section { flex: 1; min-width: 200px; }
 }
 
+/* Depth Chart Roles tab */
+.dcr-intro {
+  font-size: 12px; color: var(--text-dim); max-width: 900px;
+  margin: 0 auto 16px; line-height: 1.5;
+}
+.dcr-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px; max-width: 1100px; margin: 0 auto;
+}
+.dcr-pos-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
+  overflow: hidden;
+}
+.dcr-pos-header {
+  background: var(--border); color: var(--text);
+  text-align: center; padding: 3px 10px;
+  font-size: 12px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.dcr-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.dcr-table th {
+  text-align: right; font-weight: 400; color: var(--text-dim);
+  padding: 4px 6px 2px; font-size: 10px;
+}
+.dcr-table th:first-child { text-align: left; }
+.dcr-table td { padding: 3px 6px; text-align: right; white-space: nowrap; }
+.dcr-table td:first-child { text-align: left; overflow: hidden; text-overflow: ellipsis; }
+.dcr-table tr:not(:last-child) td { border-bottom: 1px solid rgba(255,255,255,0.05); }
+.dcr-table select.dcr-role-select {
+  width: auto; margin: 0; padding: 2px 4px; font-size: 10px;
+}
+.dcr-empty { color: var(--text-dim); font-style: italic; text-align: center; }
+
 /* Settings page */
 .settings-page { max-width: 1100px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .settings-page > .settings-full { grid-column: 1 / -1; }
@@ -1456,6 +1489,8 @@ td.stat-bad  { color: var(--red); }
 .draft-row.draft-picked { opacity: 0.45; }
 .draft-row.draft-mine { opacity: 1; background: rgba(76, 175, 80, 0.08); }
 .draft-row.draft-picked .draft-status-cell { color: var(--text-dim); font-size: 11px; }
+.draft-row.draft-pers-dim:not(.draft-picked) { opacity: 0.45; }
+.draft-row.draft-pers-highlight:not(.draft-picked) { background: rgba(76, 175, 80, 0.08); box-shadow: inset 3px 0 0 var(--green); }
 .draft-tools { font-size: 11px; white-space: nowrap; color: var(--text-dim); }
 .draft-pos-note { margin-left: 4px; color: #e8a735; font-weight: 600; font-size: 11px; }
 .draft-detail-header { margin-bottom: 4px; }

@@ -387,6 +387,21 @@ CREATE TABLE IF NOT EXISTS rule5_eligible (
     uploaded_at TEXT
 );
 
+-- Manual depth-chart role designations (Everyday Starter / Platoon vR /
+-- Platoon vL / Bench), set by the user on the team page's Depth Chart Roles
+-- tab. Only applied to the current year of the 3-year depth chart projection
+-- (future years keep using the automatic WAR-ranked allocation, since roles
+-- may change as players age/depart). A position with no rows here falls
+-- back entirely to the automatic algorithm in allocate_playing_time().
+CREATE TABLE IF NOT EXISTS depth_chart_roles (
+    team_id     INTEGER NOT NULL,
+    position    TEXT NOT NULL,
+    player_id   INTEGER NOT NULL,
+    role        TEXT NOT NULL,
+    updated_at  TEXT,
+    PRIMARY KEY (team_id, position, player_id)
+);
+
 -- League-wide park factors (every team's home park), imported from a
 -- manually uploaded OOTP park-info export. Only the active team's own
 -- park is available any other way (config/park_factors.json) — this

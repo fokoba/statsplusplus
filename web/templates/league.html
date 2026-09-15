@@ -425,6 +425,7 @@
             title="{{ pos }}: MLB ${{ d.mlb }}M · Farm ${{ d.farm }}M · Total ${{ d.total }}M ({{ (d.ratio * 100)|int }}% of league avg)">{{ pos }}</button>
           {% endfor %}
           <button class="split-btn" id="draft-hide-picked-btn" onclick="toggleHideDrafted()" style="margin-left:8px">Hide Drafted</button>
+          <button class="split-btn" id="draft-personality-btn" onclick="togglePersonalityHighlight()" title="Dim rows with Low Work Ethic or Low IQ; highlight rows with High Work Ethic or High IQ">Highlight Personality</button>
         </div>
         <div class="draft-filters-row">
           <input type="text" id="draft-search" placeholder="Search name…" oninput="applyDraftFilters()" class="draft-search-input">
@@ -1872,6 +1873,24 @@ function toggleHideDrafted() {
   applyDraftFilters();
 }
 
+function togglePersonalityHighlight() {
+  document.getElementById('draft-personality-btn').classList.toggle('active');
+  applyDraftFilters();
+}
+
+// High Work Ethic / High IQ => positive; Low Work Ethic / Low IQ => negative.
+// Same H/VH/EH vs L/VL/EL/F scale as charClr().
+function _isHighTrait(v) {
+  if (!v) return false;
+  var u = v.toUpperCase();
+  return u === 'H' || u === 'VH' || u === 'EH';
+}
+function _isLowTrait(v) {
+  if (!v) return false;
+  var u = v.toUpperCase();
+  return u === 'L' || u === 'VL' || u === 'EL' || u === 'F';
+}
+
 function toggleToolFilters() {
   var panel = document.getElementById('draft-tool-filters');
   panel.style.display = panel.style.display === 'none' ? '' : 'none';
@@ -1912,12 +1931,28 @@ function renderDraftBoard(view) {
 
   var thead = document.getElementById('draft-thead');
   var base = '<th class="dd-cmp-th" title="Compare">⚖</th><th data-sort="num">Rk</th><th data-sort="str">Pos</th><th data-sort="str" class="left">Name</th>' +
-    '<th data-sort="num">Age</th><th data-sort="str">Lvl</th><th data-sort="num">Ovr</th><th data-sort="num">Pot</th><th data-sort="str">FV</th><th data-sort="num" title="Risk-adjusted surplus value over 6 years of team control. Hover cells for raw (undiscounted) value.">$Val</th><th data-sort="str">Acc</th>';
+    '<th data-sort="num">Age</th><th data-sort="num" title="Expected draft round based on POT rank">ExpRd</th><th data-sort="str">Lvl</th><th data-sort="num">Ovr</th><th data-sort="num">Pot</th><th data-sort="str">FV</th><th data-sort="num" title="Risk-adjusted surplus value over 6 years of team control. Hover cells for raw (undiscounted) value.">$Val</th><th data-sort="str">Acc</th>' +
+    '<th data-sort="str" class="col-sep">Risk</th>' +
+    '<th data-sort="str">Loy</th><th data-sort="str">Greed</th>' +
+    '<th data-sort="str" class="left">Notes</th>' +
+    '<th data-sort="str">Best Pos</th><th data-sort="num">Grade</th>' +
+    '<th data-sort="num" title="Composite computed using vs-LHP/vs-LHB split tool ratings where available">Comp vL</th>' +
+    '<th data-sort="num" title="Composite computed using vs-RHP/vs-RHB split tool ratings where available">Comp vR</th>' +
+    '<th data-sort="str">Platoon</th>' +
+    '<th data-sort="str">Skill</th><th data-sort="num" title="0 = perfectly balanced across core tools, 100 = one standout carrying tool">Bal</th>' +
+    '<th data-sort="num" title="-100 to 100: how well this player\'s skills match your home park\'s factors">Park Fit</th>' +
+    '<th data-sort="num" title="Value minus expected cost for this season only">Cur Yr $</th>' +
+    '<th data-sort="num" title="Value minus expected cost for next season">Next Yr $</th>' +
+    '<th data-sort="num" title="Summed value minus expected cost across the next 3 seasons">3-Yr $</th>' +
+    '<th data-sort="num" title="Best single projected year at his expected grade">Peak Yr $</th>';
   if (view === 'hit') {
     thead.innerHTML = '<tr>' + base +
       '<th data-sort="str">Bat</th><th data-sort="str">Thr</th>' +
       '<th data-sort="num" class="col-sep">Con</th><th data-sort="num">Gap</th><th data-sort="num">Pow</th>' +
       '<th data-sort="num">Eye</th><th data-sort="num">Spd</th>' +
+      '<th data-sort="num" class="col-sep" title="Simple weighted average of Contact/Gap/Power/Eye only (no defense/speed/transforms), using position weights renormalized to just those four tools. Current/Potential.">Bat OVR</th>' +
+      '<th data-sort="num" title="Same simple weighted average, using vs-RHP split Contact/Gap/Power/Eye">Bat vR</th>' +
+      '<th data-sort="num" title="Same simple weighted average, using vs-LHP split Contact/Gap/Power/Eye">Bat vL</th>' +
       '<th data-sort="num" class="col-sep">C</th><th data-sort="num">1B</th><th data-sort="num">2B</th><th data-sort="num">3B</th>' +
       '<th data-sort="num">SS</th><th data-sort="num">LF</th><th data-sort="num">CF</th><th data-sort="num">RF</th>' +
       '<th data-sort="num" class="col-sep">IFR</th><th data-sort="num">IFA</th><th data-sort="num">OFR</th><th data-sort="num">OFA</th>' +
@@ -1934,7 +1969,7 @@ function renderDraftBoard(view) {
       '<th data-sort="num">SCR</th><th data-sort="num">KC</th><th data-sort="num">KN</th><th data-sort="num">#P</th>' +
       '<th data-sort="str" class="col-sep">W/E</th><th data-sort="str">Lead</th><th data-sort="str">Int</th></tr>';
   } else {
-    thead.innerHTML = '<tr>' + base + '<th data-sort="str">Bat</th><th data-sort="str">Thr</th><th data-sort="num" class="col-sep" title="P(Contributor)">C%</th><th data-sort="num" title="P(Regular)">R%</th><th data-sort="num" title="P(All-Star)">AS%</th><th data-sort="num" title="Bust probability (1 - P(Contributor))">Bust%</th><th data-sort="str">Profile</th><th data-sort="num" class="col-sep" title="Expected draft round based on POT rank">ExpRd</th><th data-sort="str" title="Value gap vs other GMs">ADP</th></tr>';
+    thead.innerHTML = '<tr>' + base + '<th data-sort="str">Bat</th><th data-sort="str">Thr</th><th data-sort="num" class="col-sep" title="P(Contributor)">C%</th><th data-sort="num" title="P(Regular)">R%</th><th data-sort="num" title="P(All-Star)">AS%</th><th data-sort="num" title="Bust probability (1 - P(Contributor))">Bust%</th><th data-sort="str">Profile</th><th data-sort="str" class="col-sep" title="Value gap vs other GMs">ADP</th></tr>';
   }
   applyDraftFilters();
   initDraftSort();
@@ -1945,7 +1980,11 @@ var DRAFT_SORT_MAP = {
   'Rk': 'rank', 'Pos': 'pos', 'Name': 'name', 'Age': 'age', 'Lvl': 'type',
   'Ovr': 'ovr', 'Pot': 'pot', 'FV': 'fv', '$Val': 'surplus', 'Acc': 'acc',
   'ExpRd': 'exp_round',
-  'C%': 'contrib_pct', 'R%': 'regular_pct', 'AS%': 'allstar_pct', 'Bust%': 'bust_pct'
+  'C%': 'contrib_pct', 'R%': 'regular_pct', 'AS%': 'allstar_pct', 'Bust%': 'bust_pct',
+  'Risk': 'risk', 'Loy': 'loy', 'Greed': 'greed', 'Grade': 'best_position_grade',
+  'Comp vL': 'composite_vs_l', 'Comp vR': 'composite_vs_r', 'Bal': 'specialist_score',
+  'Park Fit': 'park_fit', 'Cur Yr $': 'current_year_surplus', 'Next Yr $': 'next_year_surplus',
+  '3-Yr $': 'three_year_surplus', 'Peak Yr $': 'peak_surplus'
 };
 
 function _draftSortVal(p, key) {
@@ -1961,6 +2000,15 @@ function _draftSortVal(p, key) {
     case 'regular_pct': return p.outcome && p.outcome.thresholds ? (p.outcome.thresholds.Regular || 0) : 0;
     case 'allstar_pct': return p.outcome && p.outcome.thresholds ? (p.outcome.thresholds['All-Star'] || 0) : 0;
     case 'bust_pct': return p.outcome && p.outcome.thresholds ? (1 - (p.outcome.thresholds.Contributor || 0)) : 1;
+    case 'best_position_grade': return p.best_position_grade || 0;
+    case 'composite_vs_l': return p.composite_vs_l || 0;
+    case 'composite_vs_r': return p.composite_vs_r || 0;
+    case 'specialist_score': return p.specialist_score || 0;
+    case 'park_fit': return p.park_fit || 0;
+    case 'current_year_surplus': return p.current_year_surplus || 0;
+    case 'next_year_surplus': return p.next_year_surplus || 0;
+    case 'three_year_surplus': return p.three_year_surplus || 0;
+    case 'peak_surplus': return p.peak_surplus || 0;
     default: return 0;
   }
 }
@@ -2000,6 +2048,7 @@ function initDraftSort() {
 function applyDraftFilters() {
   var search = (document.getElementById('draft-search').value || '').toLowerCase();
   var hidePicked = document.getElementById('draft-hide-picked-btn').classList.contains('active');
+  var showPersonality = document.getElementById('draft-personality-btn').classList.contains('active');
   var levelFilter = document.getElementById('draft-level-filter').value;
   var view = currentDraftView;
   var posFilter = currentPosFilter;
@@ -2057,6 +2106,9 @@ function applyDraftFilters() {
       if (sk === 'pos') return sd * (a.pos || '').localeCompare(b.pos || '');
       if (sk === 'type') return sd * (a.type || '').localeCompare(b.type || '');
       if (sk === 'acc') return sd * (a.acc || '').localeCompare(b.acc || '');
+      if (sk === 'risk') return sd * (a.risk || '').localeCompare(b.risk || '');
+      if (sk === 'loy') return sd * (a.loy || '').localeCompare(b.loy || '');
+      if (sk === 'greed') return sd * (a.greed || '').localeCompare(b.greed || '');
       return (_draftSortVal(a, sk) - _draftSortVal(b, sk)) * sd;
     });
   }
@@ -2064,7 +2116,14 @@ function applyDraftFilters() {
   filtered.forEach(function(p) {
     var picked = draftPicks[p.pid];
     var isMine = picked && picked.tid === MY_TEAM_ID;
-    var cls = 'draft-row' + (picked ? ' draft-picked' : '') + (isMine ? ' draft-mine' : '');
+    var persCls = '';
+    if (showPersonality) {
+      var negTrait = _isLowTrait(p.we) || _isLowTrait(p.int);
+      var posTrait = _isHighTrait(p.we) || _isHighTrait(p.int);
+      if (negTrait) persCls = ' draft-pers-dim';
+      else if (posTrait) persCls = ' draft-pers-highlight';
+    }
+    var cls = 'draft-row' + (picked ? ' draft-picked' : '') + (isMine ? ' draft-mine' : '') + persCls;
     var isPit = p.pos === 'SP' || p.pos === 'RP' || p.pos === 'CL';
     var posNote = p.pos_note ? ' <span class="draft-pos-note" title="Defense suggests ' + p.pos_note + '">→' + p.pos_note + '</span>' : '';
     var tr = '<tr class="' + cls + '" data-pid="' + p.pid + '" data-rank="' + p.rank + '" data-fv="' + p.fv_str + '">';
@@ -2077,10 +2136,34 @@ function applyDraftFilters() {
     if (p.acc === 'L') flags += ' <span class="draft-flag draft-flag-acc" title="Low accuracy — development uncertain">⚠</span>';
     if (p.risk === 'Extreme') flags += ' <span class="draft-flag draft-flag-risk" title="Extreme bust risk">☠</span>';
     tr += '<td class="left"><a class="player-link" href="/player/' + p.pid + '">' + p.name + '</a>' + flags + '</td>';
-    tr += '<td>' + p.age + '</td><td>' + lvlPill(p.type) + '</td>';
+    var _adp = p.adp || {};
+    tr += '<td>' + p.age + '</td><td data-sort-value="' + (_adp.exp_round || 99) + '">' + (_adp.exp_round ? 'Rd' + _adp.exp_round : '-') + '</td><td>' + lvlPill(p.type) + '</td>';
     tr += gtd(p.ovr) + gtd(p.pot) + '<td>' + fvPill(p.fv_str) + '</td>';
     tr += '<td class="text-dim" style="font-size:12px" data-sort-value="' + (p.surplus || 0) + '" title="Adj: ' + fmtSurplus(p.surplus) + ' · Ceiling: ' + fmtSurplus(p.raw_surplus) + '">' + fmtSurplus(p.surplus) + '</td>';
     tr += '<td>' + charPill(p.acc) + '</td>';
+    var riskClr = p.risk === 'Low' ? 'pos' : p.risk === 'Extreme' ? 'neg' : '';
+    tr += '<td class="col-sep ' + riskClr + '">' + (p.risk || '-') + '</td>';
+    tr += '<td>' + charPill(p.loy) + '</td><td>' + charPill(p.greed, true) + '</td>';
+    var buffs = (p.buffs || []).join(', '), concerns = (p.concerns || []).join(', ');
+    var notesHtml = '<span style="color:var(--text-dim)">—</span>';
+    if (buffs || concerns) {
+      notesHtml = (buffs ? '<span class="buff">' + buffs + '</span>' : '') +
+        (buffs && concerns ? '<br>' : '') +
+        (concerns ? '<span class="concern">' + concerns + '</span>' : '');
+    }
+    tr += '<td class="left pers-notes">' + notesHtml + '</td>';
+    tr += '<td>' + (p.best_position || '-') + '</td><td>' + (p.best_position_grade != null ? p.best_position_grade : '-') + '</td>';
+    tr += p.composite_vs_l != null ? gtd(p.composite_vs_l) : '<td>-</td>';
+    tr += p.composite_vs_r != null ? gtd(p.composite_vs_r) : '<td>-</td>';
+    tr += '<td>' + (p.platoon_strong_side || '-') + '</td>';
+    tr += '<td style="color:' + (p.specialist_label === 'Specialist' ? '#ffc107' : 'var(--text-dim)') + '">' + (p.specialist_label || '-') + '</td>';
+    tr += '<td>' + (p.specialist_score != null ? p.specialist_score : '-') + '</td>';
+    var pfClr = p.park_fit > 0 ? 'pos' : p.park_fit < 0 ? 'neg' : '';
+    tr += '<td class="' + pfClr + '">' + (p.park_fit != null ? p.park_fit : '-') + '</td>';
+    tr += '<td class="text-dim" style="font-size:12px">' + fmtSurplus(p.current_year_surplus) + '</td>';
+    tr += '<td class="text-dim" style="font-size:12px">' + fmtSurplus(p.next_year_surplus) + '</td>';
+    tr += '<td class="text-dim" style="font-size:12px">' + fmtSurplus(p.three_year_surplus) + '</td>';
+    tr += '<td class="text-dim" style="font-size:12px" title="' + (p.peak_age != null ? 'Age ' + p.peak_age : '') + '">' + fmtSurplus(p.peak_surplus) + '</td>';
     if (view === 'hit' && !isPit) {
       var t = p.tools;
       var d = p.defense || {};
@@ -2088,6 +2171,10 @@ function applyDraftFilters() {
       tr += '<td>' + (p.bats||'') + '</td><td>' + (p.throws||'') + '</td>';
       tr += '<td class="col-sep ' + gradeClr(t.con[1]) + '">' + t.con[1] + '</td>';
       tr += gtd(t.gap[1]) + gtd(t.pow[1]) + gtd(t.eye[1]) + gtd(t.spd);
+      var batOvrTxt = (p.bat_ovr != null ? p.bat_ovr : '-') + '/' + (p.bat_pot != null ? p.bat_pot : '-');
+      tr += '<td class="col-sep ' + (p.bat_ovr != null ? gradeClr(p.bat_ovr) : '') + '">' + batOvrTxt + '</td>';
+      tr += p.bat_vr != null ? gtd(p.bat_vr) : '<td>-</td>';
+      tr += p.bat_vl != null ? gtd(p.bat_vl) : '<td>-</td>';
       ['C','1B','2B','3B','SS','LF','CF','RF'].forEach(function(pos) {
         var v = d[pos];
         tr += v ? '<td class="' + (pos==='C' ? 'col-sep ' : '') + gradeClr(v) + '">' + v + '</td>' : '<td' + (pos==='C' ? ' class="col-sep"' : '') + '>-</td>';
@@ -2121,8 +2208,7 @@ function applyDraftFilters() {
       tr += '<td>' + bustPct(p.outcome) + '</td>';
       tr += '<td>' + profilePill(p.outcome, p) + '</td>';
       var adp = p.adp || {};
-      tr += '<td class="col-sep" data-sort-value="' + (adp.exp_round || 99) + '">' + (adp.exp_round ? 'Rd' + adp.exp_round : '-') + '</td>';
-      tr += '<td>' + adpLabel(adp.label) + '</td>';
+      tr += '<td class="col-sep">' + adpLabel(adp.label) + '</td>';
     }
     tr += '</tr>';
     tbody.insertAdjacentHTML('beforeend', tr);

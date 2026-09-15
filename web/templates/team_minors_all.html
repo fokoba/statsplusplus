@@ -106,6 +106,9 @@
         <th data-sort="num">Gap</th>
         <th data-sort="num">Pow</th>
         <th data-sort="num">Eye</th>
+        <th data-sort="num" title="Simple weighted average of Contact/Gap/Power/Eye only (no defense/speed/transforms) using position weights renormalized to just those four tools. Current/Potential.">Bat OVR</th>
+        <th data-sort="num" title="Same simple weighted average, using vs-RHP split Contact/Gap/Power/Eye">Bat vR</th>
+        <th data-sort="num" title="Same simple weighted average, using vs-LHP split Contact/Gap/Power/Eye">Bat vL</th>
         <th data-sort="num">Spd</th>
         <th data-sort="num">Def</th>
         <th class="left" title="Every position this player currently grades 65/80 or higher at — a quick check for who can play the field vs. who's a DH-only bat.">Viable Positions</th>
@@ -139,6 +142,9 @@
         <td>{% if p.gap %}<span class="ovr-color" data-g="{{ p.gap }}">{{ p.gap }}</span>{% if p.pot_gap and p.pot_gap != p.gap %}/<span class="ovr-color" data-g="{{ p.pot_gap }}">{{ p.pot_gap }}</span>{% endif %}{% else %}—{% endif %}</td>
         <td>{% if p.pow %}<span class="ovr-color" data-g="{{ p.pow }}">{{ p.pow }}</span>{% if p.pot_pow and p.pot_pow != p.pow %}/<span class="ovr-color" data-g="{{ p.pot_pow }}">{{ p.pot_pow }}</span>{% endif %}{% else %}—{% endif %}</td>
         <td>{% if p.eye %}<span class="ovr-color" data-g="{{ p.eye }}">{{ p.eye }}</span>{% if p.pot_eye and p.pot_eye != p.eye %}/<span class="ovr-color" data-g="{{ p.pot_eye }}">{{ p.pot_eye }}</span>{% endif %}{% else %}—{% endif %}</td>
+        <td>{% if p.bat_ovr is not none %}<span class="ovr-color" data-g="{{ p.bat_ovr }}">{{ p.bat_ovr }}</span>{% if p.bat_pot is not none and p.bat_pot != p.bat_ovr %}/<span class="ovr-color" data-g="{{ p.bat_pot }}">{{ p.bat_pot }}</span>{% endif %}{% else %}—{% endif %}</td>
+        <td>{% if p.bat_vr is not none %}<span class="ovr-color" data-g="{{ p.bat_vr }}">{{ p.bat_vr }}</span>{% else %}—{% endif %}</td>
+        <td>{% if p.bat_vl is not none %}<span class="ovr-color" data-g="{{ p.bat_vl }}">{{ p.bat_vl }}</span>{% else %}—{% endif %}</td>
         <td>{% if p.spd %}<span class="ovr-color" data-g="{{ p.spd }}">{{ p.spd }}</span>{% else %}—{% endif %}</td>
         <td>{% if p.def %}<span class="ovr-color" data-g="{{ p.def }}">{{ p.def }}</span>{% else %}—{% endif %}</td>
         <td class="left" style="font-size:12px">{{ p.viable_positions|join(", ") if p.viable_positions else '—' }}</td>

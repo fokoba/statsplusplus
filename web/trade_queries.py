@@ -141,7 +141,7 @@ def get_trade_value(player_id, retention_pct=0.0):
 
         base = prospect_surplus_with_option(fv_for_surplus, age, level, bucket,
                                             ovr=ovr, pot=pot, fv_plus=fv_plus_for_surplus,
-                                            def_rating=def_rating)
+                                            def_rating=def_rating, league_dir=get_cfg().league_dir)
         surplus = {s: max(0, round(base * m)) for s, m in SENSITIVITY.items()}
 
         outcome = career_outcome_probs(fv, age, level, bucket,

@@ -15,6 +15,7 @@ from statsplusplus.config.league_config import dollars_per_war as _dpw_pkg, leag
 from statsplusplus.utils.positions import ROLE_MAP
 from statsplusplus.evaluation.constants import DEFAULT_MINIMUM_SALARY
 from statsplusplus.data.evaluation_engine import load_tool_weights
+from statsplusplus.evaluation.composite import compute_batting_composite
 from web_league_context import (get_db, get_cfg, team_abbr_map, team_names_map,
                                  level_map, pos_map, pos_order, pyth_exp, my_team_id,
                                  mlb_team_ids, league_averages as _load_la,
@@ -1475,7 +1476,7 @@ def get_waiver_candidates(team_id=None):
                r.stf_r, r.mov_r, r.ctrl_r, r.stf_l, r.mov_l, r.ctrl_l, r.stm,
                r.fst, r.snk, r.crv, r.sld, r.chg, r.splt, r.cutt, r.cir_chg, r.scr, r.frk, r.kncrv, r.knbl,
                r.c_frm, r.c_blk, r.c_arm, r.ifr, r.ife, r.ifa, r.tdp, r.ofr, r.ofe, r.ofa,
-               r.c, r.first_b, r.second_b, r.third_b, r.ss, r.lf, r.cf, r.rf
+               r.c, r.first_b, r.second_b, r.third_b, r.ss, r.lf, r.cf, r.rf, r.pot_eye
         FROM players p
         LEFT JOIN latest_ratings r ON p.player_id = r.player_id
         LEFT JOIN prospect_fv pf ON pf.player_id = p.player_id AND pf.eval_date = ?
@@ -1543,13 +1544,14 @@ def get_waiver_candidates(team_id=None):
          stf_r, mov_r, ctrl_r, stf_l, mov_l, ctrl_l, stamina,
          fst, snk, crv, sld, chg, splt, cutt, cir_chg, scr, frk, kncrv, knbl,
          c_frm, c_blk, c_arm, ifr, ife, ifa, tdp, ofr, ofe, ofa,
-         def_c, def_1b, def_2b, def_3b, def_ss, def_lf, def_cf, def_rf) = r
+         def_c, def_1b, def_2b, def_3b, def_ss, def_lf, def_cf, def_rf, pot_eye) = r
         bucket = _bucket_for_display(pf_bucket, role, pos)
         potential = true_ceil if true_ceil is not None else ceil_score
         _pers = _personality_fields(intel, wrk_ethic, lead, loy, greed, adaptability, ptype)
         level_disp = level_map().get(str(level)) or ("FA" if str(level)=="0" else str(level))
         is_pitcher = role in ROLE_MAP
         _fit = _fit_position(bucket, weak_positions)
+        bat_ovr = bat_pot = bat_vr = bat_vl = None
 
         if is_pitcher:
             _tools = {"stuff": _normc(stf, ratings_scale), "movement": _normc(mov, ratings_scale),
@@ -1575,6 +1577,22 @@ def get_waiver_candidates(team_id=None):
                 c_frm, c_blk, c_arm, ifr, ife, ifa, tdp, ofr, ofe, ofa,
                 def_c, def_1b, def_2b, def_3b, def_ss, def_lf, def_cf, def_rf,
                 hitter_transforms)
+            # Simple pure Contact/Gap/Power/Eye weighted average (no
+            # defense/speed/transforms) — separate & simpler than
+            # vr_composite/vl_composite above.
+            _bw = hitter_weights_by_bucket.get(bucket, hitter_weights_by_bucket.get("COF", {}))
+            bat_ovr = compute_batting_composite(
+                _normc(cntct, ratings_scale), _normc(gap, ratings_scale),
+                _normc(pow_, ratings_scale), _normc(eye, ratings_scale), _bw)
+            bat_pot = compute_batting_composite(
+                _normc(pot_cntct, ratings_scale), _normc(pot_gap, ratings_scale),
+                _normc(pot_pow, ratings_scale), _normc(pot_eye, ratings_scale), _bw)
+            bat_vr = compute_batting_composite(
+                _normc(cntct_r, ratings_scale), _normc(gap_r, ratings_scale),
+                _normc(pow_r, ratings_scale), _normc(eye_r, ratings_scale), _bw)
+            bat_vl = compute_batting_composite(
+                _normc(cntct_l, ratings_scale), _normc(gap_l, ratings_scale),
+                _normc(pow_l, ratings_scale), _normc(eye_l, ratings_scale), _bw)
 
         # Not-yet-MLB players are scored on potential tools (their current
         # tools are barely developed and not the real signal) — same
@@ -1646,6 +1664,7 @@ def get_waiver_candidates(team_id=None):
             "acc": acc, **_pers,
             "fit": _fit,
             "vr_composite": vr_composite, "vl_composite": vl_composite, "def_rating": def_rating,
+            "bat_ovr": bat_ovr, "bat_pot": bat_pot, "bat_vr": bat_vr, "bat_vl": bat_vl,
             "park_fit": park_fit, "park_value": park_value,
             "surplus": round((surplus_raw if surplus_raw is not None else prospect_surplus_raw) / _money_divisor(), 1)
                        if (surplus_raw is not None or prospect_surplus_raw is not None) else None,
@@ -1781,7 +1800,7 @@ def get_free_agent_candidates(team_id=None):
                r.stf_r, r.mov_r, r.ctrl_r, r.stf_l, r.mov_l, r.ctrl_l, r.stm,
                r.fst, r.snk, r.crv, r.sld, r.chg, r.splt, r.cutt, r.cir_chg, r.scr, r.frk, r.kncrv, r.knbl,
                r.c_frm, r.c_blk, r.c_arm, r.ifr, r.ife, r.ifa, r.tdp, r.ofr, r.ofe, r.ofa,
-               r.c, r.first_b, r.second_b, r.third_b, r.ss, r.lf, r.cf, r.rf
+               r.c, r.first_b, r.second_b, r.third_b, r.ss, r.lf, r.cf, r.rf, r.pot_eye
         FROM players p
         LEFT JOIN latest_ratings r ON p.player_id = r.player_id
         LEFT JOIN prospect_fv pf ON pf.player_id = p.player_id AND pf.eval_date = ?
@@ -1851,13 +1870,14 @@ def get_free_agent_candidates(team_id=None):
          stf_r, mov_r, ctrl_r, stf_l, mov_l, ctrl_l, stamina,
          fst, snk, crv, sld, chg, splt, cutt, cir_chg, scr, frk, kncrv, knbl,
          c_frm, c_blk, c_arm, ifr, ife, ifa, tdp, ofr, ofe, ofa,
-         def_c, def_1b, def_2b, def_3b, def_ss, def_lf, def_cf, def_rf) = r
+         def_c, def_1b, def_2b, def_3b, def_ss, def_lf, def_cf, def_rf, pot_eye) = r
         bucket = _bucket_for_display(pf_bucket, role, pos)
         potential = true_ceil if true_ceil is not None else ceil_score
         _pers = _personality_fields(intel, wrk_ethic, lead, loy, greed, adaptability, ptype)
         level_disp = level_map().get(str(level)) or ("FA" if str(level)=="0" else str(level))
         is_pitcher = role in ROLE_MAP
         _fit = _fit_position(bucket, weak_positions)
+        bat_ovr = bat_pot = bat_vr = bat_vl = None
         if is_pitcher:
             _tools = {"stuff": _normc(stf, ratings_scale), "movement": _normc(mov, ratings_scale),
                       "control": _normc(ctrl, ratings_scale)}
@@ -1882,6 +1902,19 @@ def get_free_agent_candidates(team_id=None):
                 c_frm, c_blk, c_arm, ifr, ife, ifa, tdp, ofr, ofe, ofa,
                 def_c, def_1b, def_2b, def_3b, def_ss, def_lf, def_cf, def_rf,
                 hitter_transforms)
+            _bw = hitter_weights_by_bucket.get(bucket, hitter_weights_by_bucket.get("COF", {}))
+            bat_ovr = compute_batting_composite(
+                _normc(cntct, ratings_scale), _normc(gap, ratings_scale),
+                _normc(pow_, ratings_scale), _normc(eye, ratings_scale), _bw)
+            bat_pot = compute_batting_composite(
+                _normc(pot_cntct, ratings_scale), _normc(pot_gap, ratings_scale),
+                _normc(pot_pow, ratings_scale), _normc(pot_eye, ratings_scale), _bw)
+            bat_vr = compute_batting_composite(
+                _normc(cntct_r, ratings_scale), _normc(gap_r, ratings_scale),
+                _normc(pow_r, ratings_scale), _normc(eye_r, ratings_scale), _bw)
+            bat_vl = compute_batting_composite(
+                _normc(cntct_l, ratings_scale), _normc(gap_l, ratings_scale),
+                _normc(pow_l, ratings_scale), _normc(eye_l, ratings_scale), _bw)
         spec_score = compute_specialist_score(_tools, is_pitcher)
 
         # Park fit/value for a not-yet-MLB player should reflect what he'll
@@ -1947,6 +1980,7 @@ def get_free_agent_candidates(team_id=None):
             "fv": fv, "fv_str": fv_str, "acc": acc, **_pers,
             "fit": _fit,
             "vr_composite": vr_composite, "vl_composite": vl_composite, "def_rating": def_rating,
+            "bat_ovr": bat_ovr, "bat_pot": bat_pot, "bat_vr": bat_vr, "bat_vl": bat_vl,
             "surplus": round((surplus_raw if surplus_raw is not None else prospect_surplus_raw) / _money_divisor(), 1)
                        if (surplus_raw is not None or prospect_surplus_raw is not None) else None,
             "peak_surplus": _peak_surplus(_fv_for_horizons, age, level_disp, bucket, ovr=comp, pot=potential),
@@ -3029,6 +3063,43 @@ def get_draft_org_depth(team_id):
     return out
 
 
+DEPTH_CHART_ROLES = ("starter", "platoon_vr", "platoon_vl", "bench")
+
+
+def get_depth_chart_roles(team_id):
+    """Manual depth-chart role overrides for a team: {position: {player_id: role}}."""
+    conn = get_db()
+    rows = conn.execute(
+        'SELECT position, player_id, role FROM depth_chart_roles WHERE team_id=?',
+        (team_id,)
+    ).fetchall()
+    out = {}
+    for r in rows:
+        out.setdefault(r["position"], {})[r["player_id"]] = r["role"]
+    return out
+
+
+def set_depth_chart_role(team_id, position, player_id, role):
+    """Set (or clear, if role is falsy/'auto') a manual depth-chart role."""
+    import datetime
+    conn = get_db()
+    if not role or role == "auto":
+        conn.execute(
+            'DELETE FROM depth_chart_roles WHERE team_id=? AND position=? AND player_id=?',
+            (team_id, position, player_id)
+        )
+    else:
+        if role not in DEPTH_CHART_ROLES:
+            raise ValueError(f"Unknown depth chart role: {role!r}")
+        conn.execute('''
+            INSERT INTO depth_chart_roles (team_id, position, player_id, role, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(team_id, position, player_id)
+            DO UPDATE SET role=excluded.role, updated_at=excluded.updated_at
+        ''', (team_id, position, player_id, role, datetime.datetime.now().isoformat()))
+    conn.commit()
+
+
 def get_depth_chart(team_id):
     """Build 3-year depth chart for a team.
 
@@ -3046,10 +3117,12 @@ def get_depth_chart(team_id):
         roster_availability, LEVEL_DISCOUNT, DEFAULT_TEAM_PA, DEFAULT_TEAM_IP,
     )
     from statsplusplus.evaluation.war import stat_peak_war, load_stat_history
-    from contract_value import contract_value as _cv
+    from contract_value import contract_value as _cv, _load_perp_arb_model
     from statsplusplus.evaluation.arb import estimate_control as _ec_raw
     _lmin2 = league_minimum()
     _perp2 = get_cfg().perpetual_arb
+    _perp_model2 = _load_perp_arb_model() if _perp2 else None
+    _has_dh = get_cfg().has_dh
     def _estimate_control(conn, pid, age, sal, bucket=None):
         return _ec_raw(conn, pid, age, sal, min_sal=_lmin2, perpetual_arb=_perp2, bucket=bucket)
     from prospect_value import prospect_surplus as _pv
@@ -3057,6 +3130,24 @@ def get_depth_chart(team_id):
     state = _get_state()
     year = state.get("stats_year", state["year"])
     conn = get_db()
+
+    # Cumulative real-stats career WAR — only needed for perpetual-arb
+    # leagues (PPL), where future arb salary is projected from career
+    # production rather than a fixed 3-step formula. See roster_availability.
+    _career_war_by_pid = {}
+    if _perp2:
+        for r in conn.execute(
+            "SELECT player_id, COALESCE(SUM(war), 0) AS w FROM mlb_batting_stats "
+            "WHERE split_id=1 GROUP BY player_id"
+        ).fetchall():
+            _career_war_by_pid[r["player_id"]] = _career_war_by_pid.get(r["player_id"], 0.0) + (r["w"] or 0.0)
+        for r in conn.execute(
+            "SELECT player_id, COALESCE(SUM((war + COALESCE(ra9war, war)) / 2.0), 0) AS w "
+            "FROM mlb_pitching_stats WHERE split_id=1 GROUP BY player_id"
+        ).fetchall():
+            _career_war_by_pid[r["player_id"]] = _career_war_by_pid.get(r["player_id"], 0.0) + (r["w"] or 0.0)
+
+    manual_roles = get_depth_chart_roles(team_id)
 
     lg = _load_la()
     lg_era = lg["pitching"]["era"]
@@ -3129,7 +3220,7 @@ def get_depth_chart(team_id):
             {"role": role, "war_proj": war,
              **{k: row[k] for k in ("c", "ss", "second_b", "third_b",
                                      "first_b", "lf", "cf", "rf")}},
-            fg, bg)
+            fg, bg, has_dh=_has_dh)
         dh_primary = any(pos == "DH" and w >= 0.5 for pos, w in yr1_pos)
         primary_pos = max(yr1_pos, key=lambda x: x[1])[0] if yr1_pos else None
         yr1_positions = {pos for pos, _ in yr1_pos}
@@ -3175,13 +3266,14 @@ def get_depth_chart(team_id):
                          "team_option": bool(row["last_year_team_option"]),
                          "player_option": bool(row["last_year_player_option"])},
             "control": ctrl,
+            "career_war": _career_war_by_pid.get(pid, 0.0),
         })
 
     # ── Pre-compute WAR curves from surplus model ───────────────────────
     war_curves = {}  # {player_id: {year: war}}
     hist = (bat_hist, pit_hist)
     for p in all_players:
-        cv = _cv(p["player_id"], _conn=conn, _hist=hist)
+        cv = _cv(p["player_id"], _conn=conn, _hist=hist, league_dir=get_cfg().league_dir)
         if cv and cv.get("breakdown"):
             war_curves[p["player_id"]] = {
                 b["year"]: round(b["war_base"], 2) for b in cv["breakdown"]
@@ -3275,7 +3367,8 @@ def get_depth_chart(team_id):
                 war_curves[p["player_id"]] = curve
 
     # ── Roster availability across 3 years ──────────────────────────────
-    avail = roster_availability(all_players, (0, 1, 2))
+    avail = roster_availability(all_players, (0, 1, 2), perpetual_arb=_perp2,
+                                 perp_model=_perp_model2, league_dir=get_cfg().league_dir)
 
     LEVEL_ORDER = ["Intl", "Rookie", "A", "A-Short", "AA", "AAA", "MLB"]
 
@@ -3286,6 +3379,7 @@ def get_depth_chart(team_id):
     # ── Per-year assembly ───────────────────────────────────────────────
     by_year = {}
     prev_names = set()
+    year1_players_by_pos = {}
 
     for off in (0, 1, 2):
         yr = year + off
@@ -3343,9 +3437,10 @@ def get_depth_chart(team_id):
             # Position assignment
             use_pot = off > 0 or level != "MLB"
             if off == 0 and level == "MLB":
-                positions = assign_diamond_positions(p, p.get("fielding"), p.get("bat_games", 0))
+                positions = assign_diamond_positions(p, p.get("fielding"), p.get("bat_games", 0),
+                                                       has_dh=_has_dh)
             else:
-                positions = assign_diamond_positions(p, use_pot=use_pot)
+                positions = assign_diamond_positions(p, use_pot=use_pot, has_dh=_has_dh)
                 # MLB players: constrain to year-1 positions so they don't
                 # suddenly appear at new positions via potential ratings
                 yr1p = p.get("yr1_positions")
@@ -3366,15 +3461,24 @@ def get_depth_chart(team_id):
         players_by_pos = {}
         for pos, e in hitter_entries:
             players_by_pos.setdefault(pos, []).append(e)
-        pos_result = allocate_playing_time(players_by_pos)
+        # Manual role overrides only apply to the current year (off == 0) —
+        # future years keep using the automatic WAR-ranked allocation, since
+        # roles may change as players age/depart.
+        pos_result = allocate_playing_time(
+            players_by_pos, manual_roles=manual_roles if off == 0 else None)
+        if off == 0:
+            year1_players_by_pos = players_by_pos
 
         # Backfill DH: when the primary DH rests, a field player DHs.
         # Prefer bat-first players (high OPS+) at non-premium positions.
         # Elite defenders at CF/SS/C should almost never DH.
+        # No-DH leagues (PPL) skip this entirely — there is no DH slot to
+        # backfill, and doing so would double-count a fielder's WAR (once
+        # at their real position, again in a fabricated DH share).
         dh_players = pos_result.get("DH", [])
         dh_used = sum(p["pt_pct"] for p in dh_players)
         dh_gap = 100.0 - dh_used
-        if dh_gap > 1.0:
+        if _has_dh and dh_gap > 1.0:
             # Defensive position penalty: DHing an elite CF wastes his glove
             _DEF_PEN = {"C": 15, "SS": 12, "CF": 12, "2B": 6, "3B": 4,
                         "LF": 2, "RF": 2, "1B": 0}
@@ -3454,7 +3558,10 @@ def get_depth_chart(team_id):
 
         positions = {}
         pos_war_map = {}
-        for pos in ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"]:
+        _field_positions = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF"]
+        if _has_dh:
+            _field_positions.append("DH")
+        for pos in _field_positions:
             players = [_fmt_hitter(p) for p in pos_result.get(pos, [])
                        if p["pa"] > 0 and round(p.get("pt_pct", 0)) >= 2]
             positions[pos] = players
@@ -3480,8 +3587,27 @@ def get_depth_chart(team_id):
             "departed": departed,
         }
 
+    # ── Role candidates (current year only) for the Depth Chart Roles tab ──
+    role_candidates = {}
+    for pos, players in year1_players_by_pos.items():
+        cands = []
+        for p in players:
+            pid = p["player_id"]
+            cands.append({
+                "pid": pid, "name": p["name"],
+                "level": p.get("_level", "MLB"), "age": p["age"],
+                "war": round(p.get("war_proj", 0), 1),
+                "ops_vs_l": round(p["ops_vs_l"]) if p.get("ops_vs_l") else None,
+                "ops_vs_r": round(p["ops_vs_r"]) if p.get("ops_vs_r") else None,
+                "ovr_ops_plus": round(p["ovr_ops_plus"]) if p.get("ovr_ops_plus") else None,
+                "role": manual_roles.get(pos, {}).get(pid, "auto"),
+            })
+        cands.sort(key=lambda x: x["war"], reverse=True)
+        role_candidates[pos] = cands
+
     return {"years": [year, year + 1, year + 2], "by_year": by_year,
-            "pos_rank": pos_rank, "num_teams": num_teams}
+            "pos_rank": pos_rank, "num_teams": num_teams,
+            "role_candidates": role_candidates}
 
 
 def get_org_overview(team_id):
@@ -3850,6 +3976,7 @@ def get_minor_league_roster(team_id):
     _role_pos = {11: "SP", 12: "SP", 13: "RP"}
     _pos_order = {"C": 1, "1B": 2, "2B": 3, "3B": 4, "SS": 5, "LF": 6, "CF": 7, "RF": 8, "OF": 9, "DH": 10}
     _role_order = {"SP": 1, "RP": 2}
+    _hitter_weights_by_bucket = load_tool_weights(get_cfg().league_dir).get("hitter", {})
 
     hitters = []
     pitchers = []
@@ -3916,12 +4043,18 @@ def get_minor_league_roster(team_id):
             _pos_def_map = {"C": c, "SS": ss, "2B": second_b, "3B": third_b,
                             "1B": first_b, "LF": lf, "CF": cf, "RF": rf}
             pos_def = _pos_def_map.get(display_p)
+            _bc_bucket = bucket or ("COF" if display_p in ("LF", "RF") else display_p)
+            _bw = _hitter_weights_by_bucket.get(_bc_bucket, _hitter_weights_by_bucket.get("COF", {}))
             base.update({
                 "con": n(cntct), "pot_con": n(pot_cntct),
                 "gap": n(gap), "pot_gap": n(pot_gap),
                 "pow": n(pw), "pot_pow": n(pot_pw),
                 "eye": n(eye), "pot_eye": n(pot_eye),
                 "spd": n(speed), "def": n(pos_def) if pos_def else None,
+                # Simple pure Contact/Gap/Power/Eye weighted average — no
+                # defense/speed/transforms/recombination.
+                "bat_ovr": compute_batting_composite(n(cntct), n(gap), n(pw), n(eye), _bw),
+                "bat_pot": compute_batting_composite(n(pot_cntct), n(pot_gap), n(pot_pw), n(pot_eye), _bw),
                 "_sort": (-_pos_order.get(display_p, 0), -(composite or 0)),
                 "_pos_sort": _pos_order.get(display_p, 99),
             })
@@ -3945,21 +4078,37 @@ def get_minor_league_roster(team_id):
 
 
 def _org_vr_vl_composites(conn, team_id):
-    """{pid: {"vr":, "vl":}} for EVERY player in the whole org (MLB +
-    every affiliate, hitters and pitchers alike) — same underlying
-    computation as _defense_hit_composites(), just not filtered down to
-    position players only, since All Minor Leaguers needs both.
+    """{pid: {"vr":, "vl":, "bat_vr":, "bat_vl":}} for EVERY player in the
+    whole org (MLB + every affiliate, hitters and pitchers alike) — same
+    underlying computation as _defense_hit_composites(), just not filtered
+    down to position players only, since All Minor Leaguers needs both.
+
+    bat_vr/bat_vl are the simple Contact/Gap/Power/Eye-only weighted average
+    (see compute_batting_composite) — built from the same vr_tools/vl_tools
+    split dicts _build_entries() already assembles for the full composite,
+    so no extra querying is needed. Hitters only; None for pitchers.
     """
     from scouting_queries import _fetch_rows, _org_where, _build_entries
+    from statsplusplus.evaluation.composite import compute_batting_composite
     ratings_scale = get_cfg().ratings_scale
     all_weights = load_tool_weights(get_cfg().league_dir)
+    hitter_weights = all_weights.get("hitter", {})
     ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
     ed_surplus = conn.execute("SELECT MAX(eval_date) FROM player_surplus").fetchone()[0]
     where, params = _org_where(team_id, "org")
     rows = _fetch_rows(conn, where, params, ed, ed_surplus)
-    entries = _build_entries(rows, ratings_scale, None, all_weights.get("hitter", {}),
+    entries = _build_entries(rows, ratings_scale, None, hitter_weights,
                               all_weights.get("pitcher", {}), set(), is_mine=True)
-    return {e["pid"]: {"vr": e["vr_score"], "vl": e["vl_score"]} for e in entries}
+    out = {}
+    for e in entries:
+        d = {"vr": e["vr_score"], "vl": e["vl_score"], "bat_vr": None, "bat_vl": None}
+        vrt, vlt = e.get("vr_tools"), e.get("vl_tools")
+        if not e["is_pitcher"] and vrt and vlt:
+            w = hitter_weights.get(e["group"], hitter_weights.get("COF", {}))
+            d["bat_vr"] = compute_batting_composite(vrt.get("contact"), vrt.get("gap"), vrt.get("power"), vrt.get("eye"), w)
+            d["bat_vl"] = compute_batting_composite(vlt.get("contact"), vlt.get("gap"), vlt.get("power"), vlt.get("eye"), w)
+        out[e["pid"]] = d
+    return out
 
 
 def get_org_minor_league_roster(parent_team_id):
@@ -4026,7 +4175,7 @@ def get_org_minor_league_roster(parent_team_id):
     )
     _rscale_c = get_cfg().ratings_scale
     park = load_park_factors(get_cfg().league_dir)
-    hitter_weights_by_bucket = load_tool_weights(get_cfg().league_dir).get("hitter", {}) if park else {}
+    hitter_weights_by_bucket = load_tool_weights(get_cfg().league_dir).get("hitter", {})
 
     # Real observed GB%/K%/BB% (all levels — this is exclusively a minor
     # league roster) for every org pitcher with a real track record,
@@ -4187,12 +4336,20 @@ def get_org_minor_league_roster(parent_team_id):
                 vp for vp in _VIABLE_POS_ORDER
                 if (n(_pos_def_map.get(vp)) or 0) >= _VIABLE_POS_THRESHOLD
             ]
+            _bc_bucket = bucket or ("COF" if display_p in ("LF", "RF") else display_p)
+            _bw = hitter_weights_by_bucket.get(_bc_bucket, hitter_weights_by_bucket.get("COF", {}))
             base.update({
                 "con": n(cntct), "pot_con": n(pot_cntct),
                 "gap": n(gap), "pot_gap": n(pot_gap),
                 "pow": n(pw), "pot_pow": n(pot_pw),
                 "eye": n(eye), "pot_eye": n(pot_eye),
                 "spd": n(speed), "def": n(pos_def) if pos_def else None,
+                # Simple pure Contact/Gap/Power/Eye weighted average — no
+                # defense/speed/transforms/recombination (separate from the
+                # vr/vl full-composite scores in vr_vl above).
+                "bat_ovr": compute_batting_composite(n(cntct), n(gap), n(pw), n(eye), _bw) if _bw else None,
+                "bat_pot": compute_batting_composite(n(pot_cntct), n(pot_gap), n(pot_pw), n(pot_eye), _bw) if _bw else None,
+                "bat_vr": _vrvl.get("bat_vr"), "bat_vl": _vrvl.get("bat_vl"),
                 "viable_positions": viable_positions,
                 "_sort": (lvl_sort, _pos_order.get(display_p, 99), -(composite or 0)),
                 "_pos_sort": _pos_order.get(display_p, 99),

@@ -243,8 +243,10 @@ def _json(path: str, params: dict = {}) -> dict | list:
 
 # --- Endpoints ---
 
-def get_players() -> list[dict]:
-    return _csv("/players/")
+def get_players(retired: int = None) -> list[dict]:
+    """Fetch all players. Pass retired=0 to exclude retired players
+    (`/players?retired=0`, documented July 2026). None omits the param."""
+    return _csv("/players/", {"retired": retired})
 
 def get_player_batting_stats(year: int = None, pid: int = None, split: int = None, lid: int = None) -> list[dict]:
     return _csv("/playerbatstatsv2/", {"year": year, "pid": pid, "split": split, "lid": lid})

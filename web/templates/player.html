@@ -1301,7 +1301,7 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
     {% set all_bat = [] %}
     {% for s in p.bat_stats %}{% set _ = all_bat.append({"src":"mlb","year":s.year,"g":s.g,"pa":s.pa,"avg":s.avg,"obp":s.obp,"slg":s.slg,"ops":s.ops,"iso":s.iso,"bb_pct":s.bb_pct,"so_pct":s.so_pct,"babip":s.babip,"hr":s.hr,"rbi":s.rbi,"sb":s.sb,"cs":s.cs,"ops_plus":s.ops_plus,"war":s.war,"team":s.team,"stints":s.stints if s.stints is defined else none}) %}{% endfor %}
     {% for s in p.milb_bat_stats %}{% set _ = all_bat.append({"src":"milb","year":s.year,"g":s.g,"pa":s.pa,"avg":s.avg,"obp":s.obp,"slg":s.slg,"ops":s.ops,"iso":s.iso,"bb_pct":s.bb_pct,"so_pct":s.so_pct,"babip":s.babip,"hr":s.hr,"rbi":s.rbi,"sb":s.sb,"cs":none,"ops_plus":none,"war":s.war,"team":s.team_name,"level_label":s.level_label,"league_name":s.league_name,"stints":none}) %}{% endfor %}
-    {% for s in all_bat|sort(attribute='year', reverse=true) %}
+    {% for s in all_bat|sort(attribute='year') %}
     <tr{% if s.stints %} class="totals-row"{% endif %} data-level="{% if s.src == 'mlb' %}MLB{% else %}{{ s.level_label }}{% endif %}">
       <td>{{ s.year }}{% if s.stints %} <span class="stint-count">({{ s.stints|length }} teams)</span>{% endif %}</td>
       <td class="left">{% if s.src == 'mlb' %}MLB{% else %}{{ s.level_label }}{% endif %}</td>
@@ -1404,7 +1404,7 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
     {% set all_pit = [] %}
     {% for s in p.pit_stats %}{% set _ = all_pit.append({"src":"mlb","year":s.year,"g":s.g,"gs":s.gs,"ip":s.ip,"era":s.era,"era_plus":s.era_plus,"fip":s.fip,"siera":s.siera,"k_pct":s.k_pct,"bb_pct":s.bb_pct,"k_bb_pct":s.k_bb_pct,"gb_pct":s.gb_pct,"babip":s.babip,"w":s.w,"l":s.l,"sv":s.sv,"hld":s.hld,"war":s.war,"team":s.team,"stints":s.stints if s.stints is defined else none}) %}{% endfor %}
     {% for s in p.milb_pit_stats %}{% set _ = all_pit.append({"src":"milb","year":s.year,"g":s.g,"gs":s.gs,"ip":s.ip,"era":s.era,"era_plus":none,"fip":none,"siera":none,"k_pct":s.k_pct,"bb_pct":s.bb_pct,"k_bb_pct":s.k_bb_pct,"gb_pct":s.gb_pct,"babip":s.babip,"w":s.w,"l":s.l,"sv":s.sv,"hld":s.hld,"war":s.war,"team":s.team_name,"level_label":s.level_label,"league_name":s.league_name,"stints":none}) %}{% endfor %}
-    {% for s in all_pit|sort(attribute='year', reverse=true) %}
+    {% for s in all_pit|sort(attribute='year') %}
     <tr{% if s.stints %} class="totals-row"{% endif %} data-level="{% if s.src == 'mlb' %}MLB{% else %}{{ s.level_label }}{% endif %}">
       <td>{{ s.year }}{% if s.stints %} <span class="stint-count">({{ s.stints|length }} teams)</span>{% endif %}</td>
       <td class="left">{% if s.src == 'mlb' %}MLB{% else %}{{ s.level_label }}{% endif %}</td>
@@ -1781,8 +1781,10 @@ function loadPctileHistory(pid, splitId, btn) {
       data.stats.forEach(function(s) { html += '<th>' + s.label + '</th>'; });
       html += '</tr></thead><tbody>';
 
-      // Build rows
-      data.years.forEach(function(yr) {
+      // Build rows — ascending year (oldest first) to match the Stats page
+      // and the server-rendered advanced table.
+      var years_asc = data.years.slice().sort(function(a, b) { return a - b; });
+      years_asc.forEach(function(yr) {
         html += '<tr><td class="ph-year">' + yr + '</td>';
         html += '<td class="ph-sample">' + (data.sample_label === 'IP' ? fmtIp(data.sample_sizes[String(yr)]) : (data.sample_sizes[String(yr)] || '\u2014')) + '</td>';
         data.stats.forEach(function(s) {

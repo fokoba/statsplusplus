@@ -11,22 +11,54 @@ from web_league_context import get_db, get_cfg, has_extended_ratings
 
 _LEVEL_LABELS = {1: "MLB", 2: "AAA", 3: "AA", 4: "A", 5: "A-Short", 6: "Rookie"}
 
+# Synthetic bucket for MiLB league_ids whose level can't be resolved (a league
+# that was reorganized or removed since the stats were recorded). Sorts below
+# all real levels.
+UNKNOWN_MILB_LEVEL = -1
+
 
 def _get_level_league_ids(level):
     """Return list of league_ids that belong to a given minor league level.
 
-    Reads from league_settings.json minor_leagues list.
+    Reads the cumulative league map (includes historical/removed leagues).
+    `level == UNKNOWN_MILB_LEVEL` is the synthetic "unknown MiLB" bucket: every
+    minor-league id referenced by the stat tables whose level can't be resolved
+    (a reorganized or removed league that is no longer in the current /lgdata
+    structure). It is sourced from the DB, not the map, so already-orphaned
+    league_ids from before the cumulative map existed are still captured.
+    Grouping them lets historical seasons surface in the percentile views
+    rather than being silently dropped.
     """
-    cfg = get_cfg()
-    path = cfg.league_dir / "config" / "league_settings.json"
-    if not path.exists():
+    lmap = _milb_league_map()
+    if level == UNKNOWN_MILB_LEVEL:
+        known = set(lmap)
+        conn = get_db()
+        rows = conn.execute(
+            "SELECT DISTINCT league_id FROM batting_stats WHERE league_id IS NOT NULL "
+            "UNION SELECT DISTINCT league_id FROM pitching_stats WHERE league_id IS NOT NULL"
+        ).fetchall()
+        # Unknown = referenced by stats but not resolvable to a real level.
+        return [r[0] for r in rows
+                if r[0] not in known or not lmap.get(r[0], {}).get("level")]
+    if not lmap:
         return []
-    ls = json.loads(path.read_text())
-    return [ml["lid"] for ml in ls.get("minor_leagues", []) if ml.get("level") == level]
+    return [lid for lid, info in lmap.items() if info.get("level") == level]
+
+
+def _milb_league_map():
+    """Cumulative {league_id(int): {"name","level"}} — shared accessor.
+
+    Delegates to web_league_context.milb_league_map (merges the persistent
+    `milb_league_map` over the current-snapshot `minor_leagues` list).
+    """
+    from web_league_context import milb_league_map as _mlm
+    return _mlm()
 
 
 def _level_label(level):
     """Human-readable label for a level number."""
+    if level == UNKNOWN_MILB_LEVEL:
+        return "MiLB"
     cfg = get_cfg()
     lmap = cfg.level_map if hasattr(cfg, "level_map") else {}
     return lmap.get(str(level), _LEVEL_LABELS.get(level, f"Level {level}"))
@@ -105,24 +137,30 @@ def available_pctile_levels(pid, is_pitcher=False):
     if has_mlb:
         levels.append((1, "MLB"))
 
-    # Check each MiLB level
-    cfg = get_cfg()
-    path = cfg.league_dir / "config" / "league_settings.json"
-    if path.exists():
-        ls = json.loads(path.read_text())
-        level_lids = {}
-        for ml in ls.get("minor_leagues", []):
-            level_lids.setdefault(ml["level"], []).append(ml["lid"])
-        for lv in sorted(level_lids.keys()):
-            lids = level_lids[lv]
-            placeholders = ",".join("?" * len(lids))
-            has_data = conn.execute(
-                f"SELECT 1 FROM {table} WHERE player_id=? AND split_id=1 "
-                f"AND league_id IN ({placeholders}) LIMIT 1",
-                (pid, *lids)
-            ).fetchone()
-            if has_data:
-                levels.append((lv, _level_label(lv)))
+    # Check each MiLB level (cumulative map, including historical leagues).
+    # league_ids whose level can't be resolved are grouped under the synthetic
+    # "MiLB" bucket so historical seasons still appear in the level dropdown.
+    lmap = _milb_league_map()
+    level_lids = {}
+    for lid, info in lmap.items():
+        lv = info.get("level")
+        if lv:
+            level_lids.setdefault(lv, []).append(lid)
+    # Unknown bucket is data-driven (captures orphaned league_ids not in the map).
+    unknown_lids = _get_level_league_ids(UNKNOWN_MILB_LEVEL)
+    if unknown_lids:
+        level_lids[UNKNOWN_MILB_LEVEL] = unknown_lids
+    # Real levels ascending (AAA=2 before Rookie=6), unknown MiLB last.
+    for lv in sorted(level_lids.keys(), key=lambda x: (x == UNKNOWN_MILB_LEVEL, x)):
+        lids = level_lids[lv]
+        placeholders = ",".join("?" * len(lids))
+        has_data = conn.execute(
+            f"SELECT 1 FROM {table} WHERE player_id=? AND split_id=1 "
+            f"AND league_id IN ({placeholders}) LIMIT 1",
+            (pid, *lids)
+        ).fetchone()
+        if has_data:
+            levels.append((lv, _level_label(lv)))
 
     return levels
 
@@ -1002,7 +1040,8 @@ def get_percentile_history_all_levels(pid, is_pitcher=False):
     if not rows:
         return None
 
-    # Sort: year ascending, then level descending (MiLB before MLB within same year)
+    # Sort: year ascending (oldest first — matches the season-by-season Stats
+    # table and the split/handedness view), then highest level first within a year.
     rows.sort(key=lambda r: (r["year"], -r["level"]))
 
     # Determine stat labels from the first row that has data
@@ -1028,13 +1067,13 @@ def get_fielding_percentile_history(pid):
     """Compute fielding percentile rankings for all available years.
 
     Returns dict with:
-      - years: [list of years descending]
+      - years: [list of years ascending — oldest first, matches other stat tables]
       - positions: [{pos, stats: [{label, values: {year: {value, pctile, qualified}}}]}]
     """
     conn = get_db()
     # Get years this player has fielding data
     years = [r[0] for r in conn.execute(
-        "SELECT DISTINCT year FROM mlb_fielding_stats WHERE player_id=? ORDER BY year DESC",
+        "SELECT DISTINCT year FROM mlb_fielding_stats WHERE player_id=? ORDER BY year ASC",
         (pid,)).fetchall()]
     if not years:
         return None

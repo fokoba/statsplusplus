@@ -74,8 +74,8 @@ All players across all orgs and levels. Supports `?retired=0` filter.
 | `free_agent` | int | Free agent flag |
 | `nation_id` | int | Nationality ID |
 | `last_team_id` | int | Previous team (before trade/FA) |
-| `years_protected_from_rule_5` | int | Rule 5 protection remaining |
-| `draft_eligible` | int | Eligible for upcoming draft |
+| `years_protected_from_rule_5` | int | Years before must-protect / Rule 5 exposure. **0 = eligible this offseason** (confirmed vs vMLB data); 4/5 = young signees still shielded |
+| `draft_eligible` | int | Amateur-draft eligibility flag (confirmed — dormant outside the pre-draft window; NOT a Rule 5 signal) |
 | `injury_is_injured` | int | **Currently injured** |
 | `injury_dl_left` | int | Days left on DL |
 | `injury_left` | int | Days until fully healthy |

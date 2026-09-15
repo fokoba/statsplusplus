@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.join(BASE, "scripts"))
 
 from statsplusplus.config.league_context import get_league_dir, get_active_league_slug
 from statsplusplus.config.league_config import LeagueConfig
-from statsplusplus.data.db import get_connection
+from statsplusplus.data.db import get_connection, ORG_ID_SQL
 
 league_dir = get_league_dir(get_active_league_slug())
 _cfg = LeagueConfig(base_dir=league_dir)
@@ -32,8 +32,8 @@ _cfg = LeagueConfig(base_dir=league_dir)
 def _get_conn():
     return get_connection(league_dir)
 
-EMLB_FILTER = """
-    p.parent_team_id IN (
+EMLB_FILTER = f"""
+    {ORG_ID_SQL} IN (
         SELECT DISTINCT team_id FROM players WHERE level='1'
     )
 """
@@ -87,7 +87,7 @@ def cmd_top(args):
                pf.fv + CASE WHEN pf.fv_str LIKE '%+' THEN 2.5 ELSE 0 END as fv_sort
         FROM prospect_fv pf
         JOIN players p ON pf.player_id = p.player_id
-        LEFT JOIN teams t ON p.parent_team_id = t.team_id
+        LEFT JOIN teams t ON COALESCE(NULLIF(p.organization_id,0), NULLIF(p.parent_team_id,0), p.team_id) = t.team_id
         WHERE {' AND '.join(where)}
         ORDER BY {order}
         LIMIT ?
@@ -107,7 +107,7 @@ def cmd_systems(args):
     game_date = get_game_date(conn)
 
     rows = conn.execute(f"""
-        SELECT p.parent_team_id as tid, t.name as team,
+        SELECT COALESCE(NULLIF(p.organization_id,0), NULLIF(p.parent_team_id,0), p.team_id) as tid, t.name as team,
                SUM(CASE WHEN pf.fv >= 60 THEN 1 ELSE 0 END) as fv60,
                SUM(CASE WHEN pf.fv >= 55 AND pf.fv < 60 THEN 1 ELSE 0 END) as fv55,
                SUM(CASE WHEN pf.fv >= 50 AND pf.fv < 55 THEN 1 ELSE 0 END) as fv50,
@@ -116,9 +116,9 @@ def cmd_systems(args):
                SUM(COALESCE(CASE WHEN pf.fv >= 40 THEN pf.prospect_surplus ELSE 0 END, 0)) as total_surplus
         FROM prospect_fv pf
         JOIN players p ON pf.player_id = p.player_id
-        JOIN teams t ON p.parent_team_id = t.team_id
+        JOIN teams t ON COALESCE(NULLIF(p.organization_id,0), NULLIF(p.parent_team_id,0), p.team_id) = t.team_id
         WHERE pf.eval_date=? AND p.level != '1' AND {EMLB_FILTER}
-        GROUP BY p.parent_team_id, t.name
+        GROUP BY COALESCE(NULLIF(p.organization_id,0), NULLIF(p.parent_team_id,0), p.team_id), t.name
         ORDER BY total_surplus DESC
     """, (game_date,)).fetchall()
 
@@ -170,7 +170,7 @@ def cmd_team(args):
                pf.fv + CASE WHEN pf.fv_str LIKE '%+' THEN 2.5 ELSE 0 END as fv_sort
         FROM prospect_fv pf
         JOIN players p ON pf.player_id = p.player_id
-        JOIN teams t ON p.parent_team_id = t.team_id
+        JOIN teams t ON COALESCE(NULLIF(p.organization_id,0), NULLIF(p.parent_team_id,0), p.team_id) = t.team_id
         WHERE {' AND '.join(where)}
         ORDER BY {order}
         LIMIT ?

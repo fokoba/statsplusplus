@@ -16,6 +16,7 @@ from statsplusplus.utils.positions import ROLE_MAP
 from statsplusplus.evaluation.constants import DEFAULT_MINIMUM_SALARY
 from statsplusplus.data.evaluation_engine import load_tool_weights
 from statsplusplus.evaluation.composite import compute_batting_composite
+from statsplusplus.data.db import ORG_ID_SQL
 from web_league_context import (get_db, get_cfg, team_abbr_map, team_names_map,
                                  level_map, pos_map, pos_order, pyth_exp, my_team_id,
                                  mlb_team_ids, league_averages as _load_la,
@@ -37,10 +38,10 @@ def league_minimum():
 # players-table check (their actual current team_id/parent_team_id) already
 # correctly identifies them as belonging to this org.
 _CONTRACT_ORG_SQL = (
-    "AND (p.parent_team_id = ? OR (p.parent_team_id = 0 AND p.team_id = ?))"
+    f"AND {ORG_ID_SQL} = ?"
 )
 def _contract_org_params(team_id):
-    return (team_id, team_id)
+    return (team_id,)
 
 # SQL fragment for farm/prospect queries (prospect_fv-driven): affiliate
 # levels (AAA/AA/A/etc) get their own team_id with parent_team_id pointing
@@ -48,11 +49,9 @@ def _contract_org_params(team_id):
 # has no affiliate team of its own in OOTP's structure at all, its players
 # just sit directly on the MLB team_id with level='8' (parent_team_id=0),
 # the same way a young MLB-level rookie still graded on the prospect scale
-# does with level='1'. Without the level='8' branch here, international
+# does with level='1'. Without org attribution here, international
 # prospects were silently excluded from Farm Surplus and the farm lists.
-_FARM_ORG_SQL = "(p.parent_team_id = ? OR (p.team_id = ? AND p.level IN ('1', '8')))"
-def _farm_org_params(team_id):
-    return (team_id, team_id)
+# ORG_ID_SQL (organization_id -> parent_team_id -> team_id) handles this.
 
 
 def _pap_context(conn, tid, year):
@@ -218,11 +217,11 @@ def get_summary(team_id=None):
         "SELECT COALESCE(SUM(surplus),0) FROM player_surplus WHERE eval_date=? AND team_id=?",
         (ed, tid)).fetchone()[0]
     farm_surplus = conn.execute(
-        "SELECT COALESCE(SUM(prospect_surplus),0) FROM prospect_fv pf JOIN players p ON pf.player_id=p.player_id WHERE pf.eval_date=? AND {_FARM_ORG_SQL}".format(_FARM_ORG_SQL=_FARM_ORG_SQL),
-        (ed, *_farm_org_params(tid))).fetchone()[0]
+        f"SELECT COALESCE(SUM(prospect_surplus),0) FROM prospect_fv pf JOIN players p ON pf.player_id=p.player_id WHERE pf.eval_date=? AND {ORG_ID_SQL}=?",
+        (ed, tid)).fetchone()[0]
     fv50 = conn.execute(
-        "SELECT COUNT(*) FROM prospect_fv pf JOIN players p ON pf.player_id=p.player_id WHERE pf.eval_date=? AND {_FARM_ORG_SQL} AND pf.fv>=50 AND p.age<=25".format(_FARM_ORG_SQL=_FARM_ORG_SQL),
-        (ed, *_farm_org_params(tid))).fetchone()[0]
+        f"SELECT COUNT(*) FROM prospect_fv pf JOIN players p ON pf.player_id=p.player_id WHERE pf.eval_date=? AND {ORG_ID_SQL}=? AND pf.fv>=50 AND p.age<=25",
+        (ed, tid)).fetchone()[0]
     # Determine season phase from actual game data (game_type boundaries).
     phase = _determine_phase(conn, state["game_date"], state["year"])
 
@@ -370,11 +369,11 @@ def get_power_rankings():
     surplus_map = dict(conn.execute(
         "SELECT team_id, SUM(surplus) FROM player_surplus WHERE eval_date=? GROUP BY team_id",
         (ed,)).fetchall())
-    farm_map = dict(conn.execute("""
-        SELECT COALESCE(NULLIF(p.parent_team_id,0), p.team_id), SUM(pf.prospect_surplus)
+    farm_map = dict(conn.execute(f"""
+        SELECT {ORG_ID_SQL}, SUM(pf.prospect_surplus)
         FROM prospect_fv pf JOIN players p ON pf.player_id=p.player_id
         WHERE pf.eval_date=?
-        GROUP BY COALESCE(NULLIF(p.parent_team_id,0), p.team_id)
+        GROUP BY {ORG_ID_SQL}
     """, (ed,)).fetchall())
 
     # Last-10 record and streak
@@ -2077,15 +2076,15 @@ def get_farm(team_id=None, limit=None):
     tid = team_id or my_team_id()
     ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
 
-    rows = conn.execute("""
+    rows = conn.execute(f"""
         SELECT p.name, p.age, p.level, pf.fv, pf.fv_str, pf.bucket, pf.prospect_surplus, p.player_id, p.pos,
                r.composite_score, r.ceiling_score, pf.risk
         FROM prospect_fv pf
         JOIN players p ON pf.player_id=p.player_id
         LEFT JOIN latest_ratings r ON pf.player_id=r.player_id
-        WHERE pf.eval_date=? AND {_FARM_ORG_SQL}
+        WHERE pf.eval_date=? AND {ORG_ID_SQL}=?
               AND p.age <= 25 AND pf.fv >= 40
-    """.format(_FARM_ORG_SQL=_FARM_ORG_SQL), (ed, *_farm_org_params(tid))).fetchall()
+    """, (ed, tid)).fetchall()
 
     def sort_key(r):
         fv_val = r[3] + (0.1 if r[4].endswith("+") else 0)
@@ -2112,7 +2111,7 @@ def get_intl_complex(team_id=None):
     the parent team_id with level='8' (parent_team_id=0), the same way a
     young MLB-level rookie still on the prospect scale does with level='1'.
     That's why it never showed up as a browsable affiliate before, and why
-    it was silently excluded from Farm Surplus (see _FARM_ORG_SQL).
+    it was silently excluded from Farm Surplus (see ORG_ID_SQL).
     """
     conn = get_db()
     tid = team_id or my_team_id()
@@ -2447,10 +2446,10 @@ def get_surplus_leaders(team_id):
         WHERE ps.eval_date = ? AND ps.team_id = ?
     """, (ed, team_id)).fetchall()
 
-    farm = conn.execute("""
+    farm = conn.execute(f"""
         SELECT pf.player_id, p.name, pf.bucket, pf.prospect_surplus, 'Farm' as src
         FROM prospect_fv pf JOIN players p ON pf.player_id = p.player_id
-        WHERE pf.eval_date = ? AND p.parent_team_id = ? AND p.level != '1'
+        WHERE pf.eval_date = ? AND {ORG_ID_SQL} = ? AND p.level != '1'
     """, (ed, team_id)).fetchall()
 
     combined = []
@@ -2493,10 +2492,10 @@ def get_age_distribution(team_id):
     """, (team_id, year, year)).fetchall()
 
     ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
-    farm_ages = conn.execute("""
+    farm_ages = conn.execute(f"""
         SELECT p.age FROM prospect_fv pf
         JOIN players p ON pf.player_id = p.player_id
-        WHERE pf.eval_date=? AND p.parent_team_id=? AND p.level!='1' AND pf.fv >= 40
+        WHERE pf.eval_date=? AND {ORG_ID_SQL}=? AND p.level!='1' AND pf.fv >= 40
     """, (ed, team_id)).fetchall()
 
     mlb = bucket(mlb_ages, mlb_breaks)
@@ -2511,7 +2510,7 @@ def get_age_distribution(team_id):
     """, (year, year)).fetchall()
 
     all_farm = conn.execute("""
-        SELECT COALESCE(NULLIF(p.parent_team_id,0), p.team_id), p.age FROM prospect_fv pf
+        SELECT COALESCE(NULLIF(p.organization_id,0), NULLIF(p.parent_team_id,0), p.team_id), p.age FROM prospect_fv pf
         JOIN players p ON pf.player_id = p.player_id
         WHERE pf.eval_date=? AND pf.fv >= 40
     """, (ed,)).fetchall()
@@ -2755,31 +2754,31 @@ def get_farm_depth(team_id):
     conn = get_db()
     ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
 
-    by_bucket = conn.execute("""
+    by_bucket = conn.execute(f"""
         SELECT pf.bucket, COUNT(*), COALESCE(SUM(pf.prospect_surplus), 0)
         FROM prospect_fv pf JOIN players p ON pf.player_id = p.player_id
-        WHERE pf.eval_date=? AND {_FARM_ORG_SQL} AND pf.fv >= 40
+        WHERE pf.eval_date=? AND {ORG_ID_SQL}=? AND pf.fv >= 40
               AND p.age <= 25
         GROUP BY pf.bucket
-    """.format(_FARM_ORG_SQL=_FARM_ORG_SQL), (ed, *_farm_org_params(team_id))).fetchall()
+    """, (ed, team_id)).fetchall()
 
-    by_level = conn.execute("""
+    by_level = conn.execute(f"""
         SELECT pf.level, COUNT(*)
         FROM prospect_fv pf JOIN players p ON pf.player_id = p.player_id
-        WHERE pf.eval_date=? AND {_FARM_ORG_SQL} AND pf.fv >= 40
+        WHERE pf.eval_date=? AND {ORG_ID_SQL}=? AND pf.fv >= 40
               AND p.age <= 25
         GROUP BY pf.level
-    """.format(_FARM_ORG_SQL=_FARM_ORG_SQL), (ed, *_farm_org_params(team_id))).fetchall()
+    """, (ed, team_id)).fetchall()
 
     mlb_tids = mlb_team_ids()
     # Same FV >= 40 + age <= 25 "meaningfully contributes" bar get_farm() and
     # get_farm_system_rankings() use, so a team's rank agrees everywhere it's
     # shown (this panel's own Rank line, and the League page's full ranking).
     lg = conn.execute("""
-        SELECT COALESCE(NULLIF(p.parent_team_id,0), p.team_id), SUM(pf.prospect_surplus)
+        SELECT COALESCE(NULLIF(p.organization_id,0), NULLIF(p.parent_team_id,0), p.team_id), SUM(pf.prospect_surplus)
         FROM prospect_fv pf JOIN players p ON pf.player_id = p.player_id
         WHERE pf.eval_date=? AND p.age <= 25 AND pf.fv >= 40
-        GROUP BY COALESCE(NULLIF(p.parent_team_id,0), p.team_id)
+        GROUP BY COALESCE(NULLIF(p.organization_id,0), NULLIF(p.parent_team_id,0), p.team_id)
     """, (ed,)).fetchall()
 
     lg_vals = sorted([s for tid, s in lg if s and tid in mlb_tids], reverse=True)
@@ -3002,10 +3001,10 @@ def get_draft_org_depth(team_id):
             result[key]["mlb"] += (r[1] or 0) / _money_divisor()
 
     # Farm: positive prospect_surplus by bucket
-    for r in conn.execute("""
+    for r in conn.execute(f"""
         SELECT pf.bucket, SUM(pf.prospect_surplus)
         FROM prospect_fv pf JOIN players p ON pf.player_id = p.player_id
-        WHERE pf.eval_date=? AND p.parent_team_id=? AND p.level != '1'
+        WHERE pf.eval_date=? AND {ORG_ID_SQL}=? AND p.level != '1'
           AND pf.prospect_surplus > 0
         GROUP BY pf.bucket
     """, (ed_f, team_id)).fetchall():
@@ -3280,7 +3279,7 @@ def get_depth_chart(team_id):
             }
 
     # ── Query org prospects ─────────────────────────────────────────────
-    prospect_rows = conn.execute('''
+    prospect_rows = conn.execute(f'''
         SELECT pf.player_id, p.name, p.age, p.role, pf.fv, pf.level, pf.bucket,
                r.ovr, r.pot, r.composite_score,
                r.cntct, r.gap, r.pow, r.eye,
@@ -3294,14 +3293,14 @@ def get_depth_chart(team_id):
         FROM prospect_fv pf
         JOIN players p ON pf.player_id = p.player_id
         JOIN latest_ratings r ON pf.player_id = r.player_id
-        WHERE (p.parent_team_id = ? OR p.team_id = ?)
+        WHERE {ORG_ID_SQL} = ?
           AND pf.level != 'MLB'
           AND (pf.fv >= 50 OR (pf.fv >= 40 AND pf.level IN ('AAA', 'AA')))
           AND r.league_id > 0
           AND pf.eval_date = (SELECT MAX(pf2.eval_date) FROM prospect_fv pf2
                               WHERE pf2.player_id = pf.player_id)
         GROUP BY pf.player_id
-    ''', (team_id, team_id)).fetchall()
+    ''', (team_id,)).fetchall()
 
     # League-wide position rankings (lightweight, ~0.02s)
     lg_rankings = _league_pos_rankings(conn, year)
@@ -3637,9 +3636,9 @@ def get_org_overview(team_id):
         LEFT JOIN mlb_batting_stats b ON f.player_id = b.player_id AND b.year = ? AND b.split_id = 1
         LEFT JOIN mlb_pitching_stats pt ON f.player_id = pt.player_id AND pt.year = ? AND pt.split_id = 1
         WHERE f.team_id = ? AND f.year = ? AND f.position != 1
-          AND (p.team_id = ? OR p.parent_team_id = ?)
+          AND (p.team_id = ? OR p.parent_team_id = ? OR p.organization_id = ?)
         ORDER BY f.player_id, f.g DESC
-    """, (ed_s, year, year, team_id, year, team_id, team_id)).fetchall()
+    """, (ed_s, year, year, team_id, year, team_id, team_id, team_id)).fetchall()
     seen_fld = set()
     for r in fld_rows:
         if r["player_id"] in seen_fld:
@@ -3659,9 +3658,9 @@ def get_org_overview(team_id):
             LEFT JOIN player_surplus ps ON b.player_id = ps.player_id AND ps.eval_date = ?
             WHERE b.team_id = ? AND b.year = ? AND b.split_id = 1
               AND p.pos != 1 AND p.role NOT IN (11, 12, 13)
-              AND (p.team_id = ? OR p.parent_team_id = ?)
+              AND (p.team_id = ? OR p.parent_team_id = ? OR p.organization_id = ?)
             ORDER BY b.war DESC
-        """, (ed_s, team_id, year, team_id, team_id)).fetchall()
+        """, (ed_s, team_id, year, team_id, team_id, team_id)).fetchall()
         for r in bat_rows:
             pos = pos_map().get(r["position"])
             if pos:
@@ -3674,9 +3673,9 @@ def get_org_overview(team_id):
         JOIN players p ON pt.player_id = p.player_id
         LEFT JOIN player_surplus ps ON pt.player_id = ps.player_id AND ps.eval_date = ?
         WHERE pt.team_id = ? AND pt.year = ? AND pt.split_id = 1
-          AND (p.team_id = ? OR p.parent_team_id = ?)
+          AND (p.team_id = ? OR p.parent_team_id = ? OR p.organization_id = ?)
         ORDER BY pt.war DESC
-    """, (ed_s, team_id, year, team_id, team_id)).fetchall()
+    """, (ed_s, team_id, year, team_id, team_id, team_id)).fetchall()
     for r in pit_rows:
         bucket = "SP" if r["role"] == 11 else "RP"
         mlb_by_pos[bucket].append(_entry(r))
@@ -3692,12 +3691,12 @@ def get_org_overview(team_id):
     # MLB track record still get valued there), so this query needs its own
     # filter or a 26+ org-depth arm/bat would show up in a "Top Prospect"
     # slot, which isn't what that label means.
-    prosp_rows = conn.execute("""
+    prosp_rows = conn.execute(f"""
         SELECT pf.player_id, p.name, pf.bucket, pf.fv, pf.fv_str, pf.level,
                p.age, p.pos, pf.prospect_surplus, pf.risk
         FROM prospect_fv pf
         JOIN players p ON pf.player_id = p.player_id
-        WHERE pf.eval_date = ? AND p.parent_team_id = ? AND p.level != '1'
+        WHERE pf.eval_date = ? AND {ORG_ID_SQL} = ? AND p.level != '1'
           AND p.age <= 25
         ORDER BY pf.fv DESC, pf.prospect_surplus DESC, p.age ASC
     """, (ed_f, team_id)).fetchall()
@@ -3813,10 +3812,10 @@ def get_org_overview(team_id):
         FROM player_surplus ps JOIN players p ON ps.player_id = p.player_id
         WHERE ps.eval_date = ? AND ps.team_id = ?
     """, (ed_s, team_id)).fetchall()
-    farm_surp = conn.execute("""
+    farm_surp = conn.execute(f"""
         SELECT pf.player_id, p.name, pf.bucket, pf.prospect_surplus, p.role, pf.level
         FROM prospect_fv pf JOIN players p ON pf.player_id = p.player_id
-        WHERE pf.eval_date = ? AND p.parent_team_id = ? AND p.level != '1'
+        WHERE pf.eval_date = ? AND {ORG_ID_SQL} = ? AND p.level != '1'
     """, (ed_f, team_id)).fetchall()
     all_surplus = []
     for r in mlb_surp:
@@ -4162,8 +4161,8 @@ def get_org_minor_league_roster(parent_team_id):
     # 40-man roster lookup (contract with is_major=1 under this parent org)
     forty_man_pids = set()
     for r in conn.execute(
-        "SELECT c.player_id FROM contracts c JOIN players p ON c.player_id=p.player_id "
-        "WHERE p.parent_team_id=? AND c.is_major=1", (parent_team_id,)
+        f"SELECT c.player_id FROM contracts c JOIN players p ON c.player_id=p.player_id "
+        f"WHERE {ORG_ID_SQL}=? AND c.is_major=1", (parent_team_id,)
     ).fetchall():
         forty_man_pids.add(r[0])
 

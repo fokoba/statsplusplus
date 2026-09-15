@@ -114,6 +114,28 @@ def mlb_team_ids():
 def level_map():
     return get_cfg().level_map
 
+def milb_league_map():
+    """Return the cumulative {league_id(int): {"name", "level"}} map.
+
+    Reads the persistent `milb_league_map` from league_settings.json (written
+    by refresh, merged across refreshes so historical/removed league_ids keep
+    their level attribution). Falls back to the current-snapshot `minor_leagues`
+    list for leagues onboarded before the cumulative map existed.
+    """
+    import json as _json
+    path = get_cfg().league_dir / "config" / "league_settings.json"
+    if not path.exists():
+        return {}
+    ls = _json.loads(path.read_text())
+    out = {}
+    # Base layer: current-snapshot list (back-compat for pre-cumulative-map leagues)
+    for ml in ls.get("minor_leagues", []):
+        out[int(ml["lid"])] = {"name": ml["name"], "level": ml["level"]}
+    # Overlay: cumulative map (includes historical league_ids)
+    for lid_str, info in ls.get("milb_league_map", {}).items():
+        out[int(lid_str)] = {"name": info.get("name"), "level": info.get("level")}
+    return out
+
 def pos_map():
     return get_cfg().pos_map
 

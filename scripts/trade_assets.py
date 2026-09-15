@@ -116,7 +116,7 @@ def get_assets(team_id=None, bucket=None, min_surplus_m=0,
             JOIN players p ON pf.player_id = p.player_id
             JOIN latest_ratings r ON pf.player_id = r.player_id
             WHERE pf.eval_date = ?
-              AND p.parent_team_id = ?
+              AND COALESCE(NULLIF(p.organization_id,0), NULLIF(p.parent_team_id,0), p.team_id) = ?
             ORDER BY pf.prospect_surplus DESC
         """, (ed_f, team_id)).fetchall()
 

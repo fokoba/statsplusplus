@@ -255,21 +255,21 @@ Phase-1 (Session 69) subset but not these:
 
 | Field | Why it may matter |
 |---|---|
-| `Organization ID` | OOTP sometimes leaves Parent Team ID unset for MLB teams but sets Org ID — more reliable org attribution (could fix stray org-assignment edge cases). |
-| `League ID` (on player row) | **Negative for international-complex players** — a clean way to identify/segment intl players. |
-| `Retired` + `?retired=0` param | Pre-filter retired players → faster refresh (fewer rows fetched/parsed). |
-| `bats`, `throws` (now on /players; numeric 1=R/2=L/3=S) | We currently source handedness from ratings; /players is an alternative/validation source. |
+| ~~`Organization ID`~~ **(DONE Session 87)** | Stored + used as the canonical org key (`db.ORG_ID_SQL`, Organization ID → Parent Team ID → Team ID). OOTP sometimes leaves Parent Team ID unset for MLB teams but sets Org ID; the wiki Quickstart recommends joining teams on it. |
+| ~~`League ID` (on player row)~~ **(DONE Session 87)** | Stored as `player_league_id`; **negative for international-complex players** — now drives the level=8 intl reclassification (was a ratings-`League` heuristic). (`League ID`/`Team ID` = **0** means free agent/retired — distinct from the negative intl case.) |
+| ~~`Retired` + `?retired=0`~~ **(DONE Session 87)** | `?retired=0` on steady-state refreshes (full pull only on first refresh / `--full`). ~20-30% fewer player rows. |
+| ~~`bats`/`throws` (now on /players)~~ **(SKIPPED Session 87)** | Redundant with the ratings source consumed everywhere via `latest_ratings`. |
 | `secondary_service_*`, `pro_service_days_this_year` | Finer service-time tracking (secondary/40-man nuance). |
-| `years_protected_from_rule_5`, `draft_eligible` | Rule 5 / draft-eligibility logic for roster decisions. |
+| ~~`years_protected_from_rule_5`, `draft_eligible`~~ **(DONE Session 87)** | Stored; semantics confirmed vs vMLB data — `ypr 0` = Rule 5-eligible this offseason, `draft_eligible` = amateur-draft (dormant, not Rule 5). Consumed by the offseason Rule 5 panel (`get_rule5`). |
 | `last_team_id` | Prior team (recently released/traded context). |
 | `hall_of_fame`, `inducted`, `draft_supplemental`, `draft_league_id` | Lower value; historical/completeness. |
 
 **Recommended for a deeper session (in rough priority):**
-1. `Organization ID` — fix org attribution where Parent Team ID is unset.
-2. `?retired=0` refresh filter — a cheap refresh-speed win.
-3. `League ID` negative flag — clean intl-player identification.
-4. `bats`/`throws` from `/players` as the authoritative handedness source.
-5. Rule-5 / draft-eligible fields — feed roster/protection tooling.
+1. ~~`Organization ID` — fix org attribution where Parent Team ID is unset.~~ **DONE Session 87.**
+2. ~~`?retired=0` refresh filter — a cheap refresh-speed win.~~ **DONE Session 87** (full pull on first refresh / `--full`, active-only after).
+3. ~~`League ID` negative flag — clean intl-player identification.~~ **DONE Session 87** (`player_league_id`, drives level=8 reclassification).
+4. ~~`bats`/`throws` from `/players`.~~ **SKIPPED Session 87** — redundant with the ratings source.
+5. ~~Rule-5 / draft-eligible fields — feed roster/protection tooling.~~ **DONE Session 87** — stored, semantics confirmed vs vMLB, and consumed by the offseason Rule 5 panel.
 
 These are additive schema columns + `_upsert_players` field reads (same shape as
 the Phase-1 work), plus one refresh query-param change for `?retired=0`.

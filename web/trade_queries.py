@@ -6,7 +6,10 @@ BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, "scripts"))
 from statsplusplus.utils.positions import display_pos as _display_pos
 from contract_value import contract_value
-from prospect_value import prospect_surplus_with_option, find_player, career_outcome_probs
+from prospect_value import prospect_surplus_with_option, find_player
+from statsplusplus.evaluation.outcomes import career_outcome_probs
+from statsplusplus.evaluation.player_value import compute_player_value
+from statsplusplus.data.db import ORG_ID_SQL
 from web_league_context import get_db, get_cfg, team_abbr_map, level_map, year
 
 SENSITIVITY = {"pessimistic": 0.85, "base": 1.00, "optimistic": 1.15}
@@ -69,15 +72,15 @@ def get_org_players(team_id):
     # Prospects (includes rookie-eligible)
     prospects = []
     if ed_p:
-        pro_rows = conn.execute("""
+        pro_rows = conn.execute(f"""
             SELECT pf.player_id, p.name, pf.bucket, p.age, pf.fv, pf.fv_str,
                    pf.level, pf.prospect_surplus, r.ovr, r.pot, p.pos
             FROM prospect_fv pf
             JOIN players p ON pf.player_id = p.player_id
             LEFT JOIN latest_ratings r ON pf.player_id = r.player_id
             WHERE pf.eval_date = ?
-              AND (p.parent_team_id = ? OR (p.team_id = ? AND p.level = '1'))
-        """, (ed_p, team_id, team_id)).fetchall()
+              AND {ORG_ID_SQL} = ?
+        """, (ed_p, team_id)).fetchall()
 
         for r in pro_rows:
             prospects.append({
@@ -108,7 +111,7 @@ def get_trade_value(player_id, retention_pct=0.0):
     # Check prospect_fv first (covers rookie-eligible)
     pf = conn.execute("""
         SELECT pf.fv, pf.fv_str, pf.level, pf.bucket, p.age, p.name, p.team_id,
-               p.parent_team_id, p.pos, pf.fv_continuous
+               p.parent_team_id, p.organization_id, p.pos, pf.fv_continuous
         FROM prospect_fv pf JOIN players p ON p.player_id = pf.player_id
         WHERE pf.player_id = ? ORDER BY pf.eval_date DESC LIMIT 1
     """, (player_id,)).fetchone()
@@ -121,7 +124,7 @@ def get_trade_value(player_id, retention_pct=0.0):
         age = pf["age"]
         name = pf["name"]
         tid = pf["team_id"]
-        ptid = pf["parent_team_id"]
+        ptid = pf["organization_id"] or pf["parent_team_id"]
         pos_code = pf["pos"]
         fv_continuous = pf["fv_continuous"]
         fv_plus = str(fv_str).endswith("+")

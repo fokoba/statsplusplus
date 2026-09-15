@@ -291,13 +291,90 @@
 </div>
 {% endif %}
 
+{# ── Rule 5 ── #}
+{% if show.rule5 %}
+<div class="panel">
+  <h2>Rule 5 <span style="font-weight:400;color:var(--text-dim);font-size:13px">— protect &amp; draft targets</span></h2>
+  {% if not rule5.available %}
+  <p class="empty">
+    Rule 5 eligibility isn't populated yet. Run a refresh to pull the
+    <code>years_protected_from_rule_5</code> field, then this panel will show
+    your protection decisions and draftable targets.
+  </p>
+  {% else %}
+  <h3 style="font-size:13px;margin:0 0 6px">Protect <span style="font-weight:400;color:var(--text-dim)">— your Rule 5-eligible players (off the 40-man); add worth-keeping talent or expose it</span></h3>
+  {% if rule5.protect %}
+  <table class="data-table sortable">
+    <thead>
+      <tr>
+        <th class="left">Player</th><th data-sort="pos" class="left">Pos</th><th data-sort="num">Age</th>
+        <th data-sort="text" class="left">Level</th><th data-sort="num">FV</th>
+        <th data-sort="text" class="left">Risk</th><th data-sort="num">Surplus</th>
+        <th class="left">Recommendation</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in rule5.protect %}
+      <tr>
+        <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
+        <td class="left" data-sort-value="{{ p.pos }}">{{ p.pos }}</td>
+        <td class="num">{{ p.age }}</td>
+        <td class="left">{{ p.level }}</td>
+        <td class="num" data-sort-value="{{ p.fv }}">{{ p.fv_str }}</td>
+        <td class="left">{{ p.risk }}</td>
+        <td class="num" data-sort-value="{{ p.surplus }}">{{ p.surplus|money }}</td>
+        <td class="left"><span class="tag tag-{{ p.rec_class }}">{{ p.rec }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">No Rule 5-eligible players in your org this offseason.</p>
+  {% endif %}
+
+  <h3 style="font-size:13px;margin:14px 0 6px">Draft targets <span style="font-weight:400;color:var(--text-dim)">— other orgs' exposed, MLB-viable players (FV 45+). A Rule 5 pick must stay on the active roster all year.</span></h3>
+  {% if rule5.targets %}
+  <table class="sortable">
+    <thead>
+      <tr>
+        <th class="left">Player</th><th data-sort="text" class="left">Org</th>
+        <th data-sort="pos" class="left">Pos</th><th data-sort="num">Age</th>
+        <th data-sort="text" class="left">Level</th><th data-sort="num">FV</th>
+        <th data-sort="text" class="left">Risk</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in rule5.targets %}
+      <tr>
+        <td class="left"><a class="player-link" href="/player/{{ t.pid }}">{{ t.name }}</a></td>
+        <td class="left">{{ t.team }}</td>
+        <td class="left" data-sort-value="{{ t.pos }}">{{ t.pos }}</td>
+        <td class="num">{{ t.age }}</td>
+        <td class="left">{{ t.level }}</td>
+        <td class="num" data-sort-value="{{ t.fv }}">{{ t.fv_str }}</td>
+        <td class="left">{{ t.risk }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">No MLB-viable Rule 5-eligible players available across the league.</p>
+  {% endif %}
+  <p style="color:var(--text-dim);font-size:12px">
+    Eligible = out of Rule 5 protection years (<code>years_protected_from_rule_5 = 0</code>) and not on the 40-man.
+    A drafted player must stay on the active roster the whole season or be offered back, so realistic targets are
+    near-MLB-ready (relievers, bench bats).
+  </p>
+  {% endif %}
+</div>
+{% endif %}
+
 {# ── Coming-soon placeholder for phases with no dedicated panel yet ── #}
-{% if current_phase in ("playoffs", "rule5", "spring") %}
+{% if current_phase in ("playoffs", "spring") %}
 <div class="panel">
   <h2>{{ (phases|selectattr('key','equalto',current_phase)|first).label }}</h2>
   <p class="empty">
     A dedicated view for this phase is on the way.
-    {% if current_phase == "rule5" %}Rule 5 protection/exposure needs the roster-eligibility fields (tracked).{% endif %}
     In the meantime, trades are always in play below.
   </p>
 </div>

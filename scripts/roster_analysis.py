@@ -390,13 +390,13 @@ def main():
         SELECT p.player_id AS ID, p.role, p.name, p.age, r.*
         FROM players p
         JOIN ratings r ON r.player_id = p.player_id
-        WHERE (p.team_id = ? OR p.parent_team_id = ?)
+        WHERE (p.team_id = ? OR p.parent_team_id = ? OR p.organization_id = ?)
           AND p.level = 1
           AND (r.league_id IS NULL OR r.league_id >= 0)
           AND r.snapshot_date = (
               SELECT MAX(r2.snapshot_date) FROM ratings r2 WHERE r2.player_id = p.player_id
           )
-    """, (my_tid, my_tid)).fetchall()
+    """, (my_tid, my_tid, my_tid)).fetchall()
 
     mlb_ids = {r["ID"] for r in roster_rows}
 

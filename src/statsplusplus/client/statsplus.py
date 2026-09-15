@@ -268,9 +268,14 @@ def _json(path: str, params: Optional[dict[str, Any]] = None) -> Any:
 # Endpoints
 # ---------------------------------------------------------------------------
 
-def get_players() -> list[dict[str, Any]]:
-    """Fetch all players in the league."""
-    return _csv("/players/")
+def get_players(retired: Optional[int] = None) -> list[dict[str, Any]]:
+    """Fetch all players in the league.
+
+    Args:
+        retired: Pass 0 to exclude retired players (a documented `/players`
+            filter added July 2026). None omits the param (all players).
+    """
+    return _csv("/players/", {"retired": retired})
 
 
 def get_player_batting_stats(

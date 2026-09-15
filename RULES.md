@@ -58,6 +58,12 @@ computes league averages and $/WAR, and runs FV/surplus calculations.
 
 Re-running on the same game date is idempotent.
 
+**Retired players:** the first refresh of a league does a full player pull
+(including retired players) so historical/retired players are captured once.
+Subsequent refreshes pass `/players?retired=0` (active players only) for speed —
+a newly-retired player's final active state is already stored, and upserts never
+delete. Use `--full` to force a full re-pull (also bypasses the `/date` gate).
+
 ### Analysis scaffolds (separate from refresh)
 ```bash
 python3 scripts/farm_analysis.py      # Farm system report for your team

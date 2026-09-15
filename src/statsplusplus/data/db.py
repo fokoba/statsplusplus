@@ -80,6 +80,8 @@ CREATE TABLE IF NOT EXISTS players (
     age            INTEGER,
     team_id        INTEGER,
     parent_team_id INTEGER,
+    organization_id INTEGER,
+    player_league_id INTEGER,
     level          TEXT,
     pos            INTEGER,
     role           INTEGER,
@@ -426,6 +428,21 @@ CREATE VIEW IF NOT EXISTS mlb_fielding_stats AS
     SELECT * FROM fielding_stats WHERE league_id IS NULL;
 """
 
+
+# ---------------------------------------------------------------------------
+# Org attribution
+# ---------------------------------------------------------------------------
+#
+# The organization a player belongs to. StatsPlus added `Organization ID` in
+# April 2026 as the reliable org key — OOTP sometimes leaves `Parent Team ID`
+# unset (0) for major-league players, but `Organization ID` is still populated.
+# Resolution order: Organization ID → Parent Team ID → Team ID (the club he is
+# on right now). All three fall through 0 (OOTP writes 0, not NULL, for "none").
+#
+# `p` is the required table alias for the `players` row in the query.
+ORG_ID_SQL = "COALESCE(NULLIF(p.organization_id,0), NULLIF(p.parent_team_id,0), p.team_id)"
+
+
 # ---------------------------------------------------------------------------
 # Migrations (idempotent column additions)
 # ---------------------------------------------------------------------------
@@ -440,6 +457,8 @@ def _migrate_players(conn: sqlite3.Connection) -> None:
     """Add expanded player fields from StatsPlus API."""
     existing = {row[1] for row in conn.execute("PRAGMA table_info(players)").fetchall()}
     new_cols = [
+        ("organization_id", "INTEGER"),
+        ("player_league_id", "INTEGER"),
         ("injury_is_injured", "INTEGER"),
         ("injury_dl_left", "INTEGER"),
         ("injury_left", "INTEGER"),
@@ -460,6 +479,8 @@ def _migrate_players(conn: sqlite3.Connection) -> None:
         ("days_on_waivers", "INTEGER"),
         ("days_on_waivers_left", "INTEGER"),
         ("has_received_arbitration", "INTEGER"),
+        ("years_protected_from_rule_5", "INTEGER"),
+        ("draft_eligible", "INTEGER"),
         ("draft_year", "INTEGER"),
         ("draft_round", "INTEGER"),
         ("draft_pick", "INTEGER"),

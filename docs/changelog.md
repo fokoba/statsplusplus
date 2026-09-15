@@ -4,7 +4,155 @@ Completed and deferred work items, organized by session. Moved from `task_list.m
 
 ---
 
-## Session 86 (2026-09-06)
+## Session 87 (2026-09-15)
+
+### Offseason page — Rule 5 panel
+
+Built on the two `/players` Rule 5 fields (stored earlier this session). After a
+vMLB refresh populated real values, confirmed the semantics empirically:
+`years_protected_from_rule_5` is the **years remaining before a player must be
+added to the 40-man or is exposed to the Rule 5 draft** — `0` = eligible this
+offseason (the oldest cohort, most post-draft years, off the 40-man; 4/5 = young
+signees still shielded). `draft_eligible` is **amateur-draft eligibility**
+(all-zero in the Nov offseason snapshot) — **not** a Rule 5 signal, so it's
+stored but unused.
+
+- **`get_rule5(team_id)`** in `offseason_queries.py` returns `{protect, targets,
+  available}`. Eligible = `ypr == 0`, off the 40-man (`is_on_secondary != 1`),
+  minor-leaguer (`level != '1'`). **Protect**: your org's eligibles (joined to
+  `prospect_fv`, so it's genuine prospects not org filler), ranked by FV/surplus
+  with a Protect / Consider / Likely-expose rec by FV tier. **Targets**: other
+  orgs' eligible + MLB-viable (FV ≥ 45) players, ranked by FV, org abbrev
+  resolved. `available=False` (pre-refresh, field NULL) drives a "run a refresh"
+  hint instead of empty tables. Org attribution via `db.ORG_ID_SQL`.
+- Wired into the `rule5` stepper station (`panels_for_phase` + `offseason.html`
+  panel), replacing the coming-soon placeholder (now only playoffs/spring).
+- Tests: `tests/test_offseason.py` +4 (unavailable-when-NULL, protect lists
+  eligible prospect, on-40-man excluded, still-shielded excluded); phase-gating
+  expectations updated for the new `rule5` key.
+
+### `/players` fields — League ID (intl flag) + retired-player refresh filter
+
+Second batch of the "new `/players` fields" work (after Organization ID).
+
+- **`player_league_id`** stored on `players` (schema + migration). The `/players`
+  `League ID` is **negative for international-complex players** — authoritative
+  and available even for players without ratings. The intl-complex level=8
+  reclassification in refresh now derives from `player_league_id < 0`, with the
+  old ratings-`League` heuristic kept as a fallback for data refreshed before
+  the column populates.
+- **`?retired=0` steady-state refresh filter** (option 3 — full-on-onboard,
+  active-only after). `client.get_players(retired=...)` (both the live
+  `statsplus/client.py` and the package copy). `refresh_league(full=...)` decides
+  the pull: **first refresh of a league** (empty `players` table) does a full
+  pull incl. retired so retired players are captured once; **subsequent
+  refreshes** pass `retired=0` (~20-30% fewer player rows → faster refresh). Safe
+  because a newly-retired player's final active state is already stored and
+  `INSERT OR REPLACE` never deletes. `--full` CLI flag forces a full re-pull
+  (and bypasses the /date gate); web refresh auto-detects via the empty-table
+  check, so onboarding needs no special handling.
+- **`bats`/`throws` from `/players` — intentionally skipped.** Already sourced
+  reliably from the ratings CSV (text values) and consumed everywhere via
+  `latest_ratings`; a numeric duplicate on `players` would add ambiguity for no
+  consumer benefit.
+- **Rule 5 fields stored (step 1 of the Rule 5 panel).** `years_protected_from_rule_5`
+  and `draft_eligible` now stored on `players` (schema + migration + upsert). The
+  wiki documents only the field *names* (no per-field semantics), and we have no
+  data yet, so the **offseason Rule 5 panel is deliberately deferred** until a
+  refresh populates real values and their meaning can be confirmed empirically
+  (value distributions, correlation with service time / 40-man status). No
+  consumer reads them yet.
+- Tests: `tests/test_client_players_filter.py` (3) — `retired=0` adds the query
+  param, default/None omit it. Fixtures updated for `player_league_id`,
+  `years_protected_from_rule_5`, `draft_eligible`.
+
+### `/players` Organization ID — reliable org attribution
+
+First of the "new `/players` fields" (API roadmap). StatsPlus added
+`Organization ID` (April 2026) as the sanctioned org-join key — the wiki's own
+Quickstart says to "join to teams on Organization ID (more reliable than Parent
+Team ID)" because OOTP sometimes leaves `Parent Team ID` unset (0) for
+major-league players.
+
+- **Stored** `organization_id` on the `players` table (schema + idempotent
+  migration in `db.py`; `_upsert_players` reads `Organization ID`).
+- **Canonical attribution** — added `db.ORG_ID_SQL`
+  (`COALESCE(NULLIF(p.organization_id,0), NULLIF(p.parent_team_id,0), p.team_id)`):
+  resolution order Organization ID → Parent Team ID → Team ID, each falling
+  through 0 (OOTP writes 0, not NULL, for "none"). Threaded through every org
+  attribution/filter site: `queries.py` (top-100, all-prospects, systems,
+  prospect summary, search, positional-rankings prospect assignment, waivers),
+  `team_queries.py` (contract-org filter, PAP farm surplus/FV50, farm map, farm
+  ages, farm-summary/by-bucket/by-level, org prospect list, depth-chart MLB
+  guards, 40-man contract query), `trade_queries.py` (org roster + player value
+  display), `player_queries.py` (both org computations), `fv_calc.py`
+  (league-membership filter), and the CLI (`prospect_query.py` top/systems/team
+  + `EMLB_FILTER`, `farm_analysis.py`, `roster_analysis.py`, `team_needs.py`,
+  `trade_assets.py`, `draft_board.py` farm depth).
+- **Not touched:** `teams.parent_team_id` joins in `web/app.py` /
+  `routes/team.py` (affiliate → org, a team-level relationship — Organization ID
+  is a player field and doesn't apply). `player_evaluation`/views carry no org
+  attribution (all org joins go through `players`), so no view change needed.
+- **Behavior:** verified a no-op on existing PPL/EMLB/VMLB data — with
+  `organization_id` NULL (pre-refresh), the new expression is identical to the
+  old logic (0 rows differ). Populates on the next refresh. One deliberate
+  improvement once populated: international-complex players (Parent Team ID 0,
+  Team ID = the MLB club) now attribute to the org in farm/prospect rollups
+  where the old `parent_team_id`-only joins dropped them.
+- Test fixtures updated for the new column (`conftest.py`, `test_scripts.py`,
+  named-column inserts); full suite green (912 passed).
+
+### Bug fixes — historical MiLB level attribution + percentile views (PPL)
+
+Three related issues surfaced on PPL, a league whose minor-league structure has
+been reorganized over many seasons (teams promoted/demoted, leagues renamed and
+removed). Root cause for the first two was shared: `league_settings.json`'s
+`minor_leagues` list is a *current-snapshot* `league_id → level` map, but stat
+rows accumulate historical `league_id`s that no longer exist in the current
+structure — so those rows had no level mapping.
+
+- **"Mobile L0" career-stats level bug** — Historical MiLB stat rows played in a
+  since-removed league (e.g. PPL league 221, "Mobile") resolved to level 0 →
+  the "Draft"/"L0" label. Now: (1) refresh writes a **cumulative
+  `milb_league_map`** in `league_settings.json` that merges each refresh's
+  current minor leagues rather than overwriting, so league_ids retain their
+  level/name after they leave the current structure; (2) the player-page MiLB
+  career table reads that cumulative map and, for any still-unresolvable
+  league_id, labels the level "MiLB" instead of "L0". Shared web accessor
+  `milb_league_map()` in `web_league_context.py`.
+- **Percentile-year dropdown skipping seasons** — The percentile level/year
+  dropdowns dropped seasons played in orphaned leagues (Steve Murphy showed
+  1954/1951/1950/1949 but not 1952/1953, both played in the removed league 221).
+  `percentiles.py` now groups every stat-referenced `league_id` that can't be
+  resolved to a real level under a synthetic **"MiLB" bucket**
+  (`UNKNOWN_MILB_LEVEL`), sourced from the DB so already-orphaned IDs (which the
+  cumulative map can't recover) are still captured. `available_pctile_levels` /
+  `available_pctile_years` / `_get_level_league_ids` / `_level_label` updated.
+  Result: all six of Murphy's seasons now appear.
+- **Season ordering unified to ascending (oldest at top)** — The stat views
+  were inconsistent: the season-by-season Stats tables sorted newest-first, the
+  advanced-tab percentile table sorted oldest-first, and the JS handedness-split
+  percentile view sorted newest-first — so toggling vs L/vs R flipped the order.
+  Per user preference, all four now render **year ascending (oldest at top,
+  newest at bottom)** and agree: batting/pitching Stats tables, the vs L/vs R
+  split tables (already ascending), the advanced percentile table
+  (`get_percentile_history_all_levels`), the JS split view (sorts a local
+  ascending copy of `data.years`), and the fielding percentile history
+  (`get_fielding_percentile_history` now returns years ascending). The
+  season-summary card at the top still shows the newest season (reads the
+  underlying ascending list's last element).
+- Tests: `tests/test_pctile_levels.py` (4) covers orphaned-league bucketing,
+  no-year-dropped, DB-sourced unknown bucket, and cumulative-map overlay.
+
+**Migration note:** the cumulative `milb_league_map` populates on the user's
+next refresh. The unknown-MiLB bucket is data-driven, so historical seasons in
+orphaned leagues surface immediately (before any refresh). Levels for
+already-orphaned leagues show as "MiLB" — their true historical level isn't
+recoverable from the API (`/lgdata` only returns the current structure).
+
+---
+
+
 
 ### Offseason page — financial settings (budget scaffolding)
 

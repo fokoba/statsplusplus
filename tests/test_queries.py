@@ -156,7 +156,7 @@ def _pos_rankings_pitcher_db():
     conn.row_factory = sqlite3.Row
     conn.executescript("""
         CREATE TABLE players (player_id INTEGER PRIMARY KEY, name TEXT, age INTEGER,
-            pos INTEGER, role INTEGER, team_id INTEGER, parent_team_id INTEGER, level TEXT,
+            pos INTEGER, role INTEGER, team_id INTEGER, parent_team_id INTEGER, organization_id INTEGER, level TEXT,
             free_agent INTEGER DEFAULT 0);
         CREATE TABLE latest_ratings (player_id INTEGER, composite_score INTEGER,
             true_ceiling INTEGER, tool_only_score INTEGER, offensive_grade INTEGER,
@@ -173,12 +173,12 @@ def _pos_rankings_pitcher_db():
         CREATE VIEW mlb_batting_stats AS SELECT * FROM batting_stats WHERE league_id IS NULL;
     """)
     # Ace starter: 2 starts in 2 appearances.
-    conn.execute("INSERT INTO players VALUES (20, 'Ace SP', 27, 1, 11, 1, NULL, '1', 0)")
+    conn.execute("INSERT INTO players VALUES (20, 'Ace SP', 27, 1, 11, 1, NULL, NULL, '1', 0)")
     conn.execute("INSERT INTO latest_ratings VALUES (20, 70, 72, NULL, NULL, NULL, 60,"
                  "NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL)")
     conn.execute("INSERT INTO pitching_stats VALUES (20, ?, 1, NULL, 2, 2)", (YEAR,))
     # Reliever who made one spot start: 1 GS in 8 appearances -> gs/g = 0.125.
-    conn.execute("INSERT INTO players VALUES (21, 'Setup RP', 29, 1, 13, 1, NULL, '1', 0)")
+    conn.execute("INSERT INTO players VALUES (21, 'Setup RP', 29, 1, 13, 1, NULL, NULL, '1', 0)")
     conn.execute("INSERT INTO latest_ratings VALUES (21, 55, 57, NULL, NULL, NULL, 55,"
                  "NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL)")
     conn.execute("INSERT INTO pitching_stats VALUES (21, ?, 1, NULL, 1, 8)", (YEAR,))
@@ -205,7 +205,7 @@ def test_pos_rankings_includes_free_agents(monkeypatch):
     in the rankings, tagged is_fa, interleaved by composite."""
     conn = _pos_rankings_pitcher_db()
     # Add an unsigned FA reliever with a prior season of MLB pitching in-league.
-    conn.execute("INSERT INTO players VALUES (30, 'Free Reliever', 30, 1, 13, 0, NULL, '0', 1)")
+    conn.execute("INSERT INTO players VALUES (30, 'Free Reliever', 30, 1, 13, 0, NULL, NULL, '0', 1)")
     conn.execute("INSERT INTO latest_ratings VALUES (30, 60, 60, NULL, NULL, NULL, 55,"
                  "NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL)")
     conn.execute("INSERT INTO pitching_stats VALUES (30, ?, 1, NULL, 0, 40)", (YEAR,))

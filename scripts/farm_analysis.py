@@ -97,14 +97,14 @@ def load_level(level_key, game_date=None):
         SELECT r.player_id AS ID, p.name AS Name, p.age AS Age,
                r.ovr AS Ovr, r.pot AS Pot, r.*
         FROM ratings r JOIN players p ON r.player_id = p.player_id
-        WHERE (p.team_id = ? OR p.parent_team_id = ?) AND p.level = ?
+        WHERE (p.team_id = ? OR p.parent_team_id = ? OR p.organization_id = ?) AND p.level = ?
           AND r.snapshot_date = (SELECT MAX(r2.snapshot_date) FROM ratings r2 WHERE r2.player_id = r.player_id)
-    """, (ORG_ID, ORG_ID, level_int)).fetchall()]
+    """, (ORG_ID, ORG_ID, ORG_ID, level_int)).fetchall()]
     all_players = [dict(r) for r in conn.execute("""
         SELECT player_id, name AS Name, age AS Age, team_id, parent_team_id,
                level AS Level, pos AS Pos, role AS Role
-        FROM players WHERE team_id = ? OR parent_team_id = ?
-    """, (ORG_ID, ORG_ID)).fetchall()]
+        FROM players WHERE team_id = ? OR parent_team_id = ? OR organization_id = ?
+    """, (ORG_ID, ORG_ID, ORG_ID)).fetchall()]
     roster = {p["player_id"]: p for p in all_players if str(p.get("Level")) == str(level_int)}
 
     role_map = {str(k): v for k, v in _cfg.role_map.items()}

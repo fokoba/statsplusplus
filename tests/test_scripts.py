@@ -821,7 +821,7 @@ class TestComputeOrgNeeds:
             CREATE TABLE players (
                 player_id INTEGER PRIMARY KEY, name TEXT, age INTEGER,
                 team_id INTEGER, parent_team_id INTEGER, level TEXT,
-                pos INTEGER, role INTEGER
+                pos INTEGER, role INTEGER, organization_id INTEGER
             );
             CREATE TABLE ratings (
                 player_id INTEGER, snapshot_date TEXT,
@@ -845,12 +845,12 @@ class TestComputeOrgNeeds:
         return conn
 
     def _add_mlb_player(self, conn, pid, team_id, pos, role, composite, date="2033-06-01"):
-        conn.execute("INSERT INTO players VALUES (?,?,?,?,?,?,?,?)",
+        conn.execute("INSERT INTO players (player_id,name,age,team_id,parent_team_id,level,pos,role) VALUES (?,?,?,?,?,?,?,?)",
                      (pid, f"P{pid}", 28, team_id, team_id, "1", pos, role))
         conn.execute("INSERT INTO ratings VALUES (?,?,?)", (pid, date, composite))
 
     def _add_prospect(self, conn, pid, parent_team_id, bucket, fv, date="2033-06-01"):
-        conn.execute("INSERT INTO players VALUES (?,?,?,?,?,?,?,?)",
+        conn.execute("INSERT INTO players (player_id,name,age,team_id,parent_team_id,level,pos,role) VALUES (?,?,?,?,?,?,?,?)",
                      (pid, f"Prospect{pid}", 20, parent_team_id + 100, parent_team_id, "4", 6, 0))
         conn.execute("INSERT INTO prospect_fv VALUES (?,?,?,?,?,?,?,?,?)",
                      (pid, date, fv, f"{fv}", "aa", bucket, 5000000, "Medium", float(fv)))
@@ -940,7 +940,7 @@ class TestComputeOrgNeeds:
         conn = self._make_db()
 
         # Player leaving in 1 year (years=2, current_year=2), composite 50
-        conn.execute("INSERT INTO players VALUES (?,?,?,?,?,?,?,?)",
+        conn.execute("INSERT INTO players (player_id,name,age,team_id,parent_team_id,level,pos,role) VALUES (?,?,?,?,?,?,?,?)",
                      (1, "Leaving SS", 30, 1, 1, "1", 6, 0))
         conn.execute("INSERT INTO ratings VALUES (?,?,?)", (1, "2033-06-01", 50))
         conn.execute("INSERT INTO contracts VALUES (?,?,?,?)", (1, 1, 2, 2))
@@ -958,7 +958,7 @@ class TestComputeOrgNeeds:
         conn = self._make_db()
 
         # Player leaving
-        conn.execute("INSERT INTO players VALUES (?,?,?,?,?,?,?,?)",
+        conn.execute("INSERT INTO players (player_id,name,age,team_id,parent_team_id,level,pos,role) VALUES (?,?,?,?,?,?,?,?)",
                      (1, "Leaving SS", 30, 1, 1, "1", 6, 0))
         conn.execute("INSERT INTO ratings VALUES (?,?,?)", (1, "2033-06-01", 50))
         conn.execute("INSERT INTO contracts VALUES (?,?,?,?)", (1, 1, 2, 2))

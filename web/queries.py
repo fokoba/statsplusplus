@@ -104,7 +104,7 @@ def get_top_prospects(n=100):
     _po = pos_order()
     mlb_tids = mlb_team_ids()
     rows = conn.execute("""
-        SELECT p.name, p.age, COALESCE(NULLIF(p.parent_team_id,0), p.team_id) as org_id,
+        SELECT p.name, p.age, COALESCE(NULLIF(p.organization_id,0), NULLIF(p.parent_team_id,0), p.team_id) as org_id,
                pf.fv, pf.fv_str, pf.bucket,
                pf.level, pf.prospect_surplus, p.pos, p.player_id,
                r.height, r.bats, r.throws, r.ovr, r.pot,
@@ -265,7 +265,7 @@ def search_players(query):
     like = f"%{query}%"
     rows = conn.execute("""
         SELECT p.player_id, p.name, p.age, p.level,
-               COALESCE(NULLIF(p.parent_team_id,0), p.team_id) AS org_id,
+               COALESCE(NULLIF(p.organization_id,0), NULLIF(p.parent_team_id,0), p.team_id) AS org_id,
                r.ovr, pf.fv, COALESCE(pf.bucket, ps.bucket) AS bucket, p.pos,
                r.composite_score
         FROM players p
@@ -296,7 +296,7 @@ def get_all_prospects():
     _po = pos_order()
     mlb_tids = mlb_team_ids()
     rows = conn.execute("""
-        SELECT p.name, p.age, COALESCE(NULLIF(p.parent_team_id,0), p.team_id) as org_id,
+        SELECT p.name, p.age, COALESCE(NULLIF(p.organization_id,0), NULLIF(p.parent_team_id,0), p.team_id) as org_id,
                pf.fv, pf.fv_str, pf.bucket,
                pf.level, pf.prospect_surplus, p.pos, p.player_id,
                r.height, r.bats, r.throws, r.ovr, r.pot,
@@ -343,7 +343,9 @@ def get_prospect_summary(pid):
 
     pf = conn.execute("""
         SELECT pf.fv, pf.fv_str, pf.bucket, pf.level, pf.prospect_surplus,
-               p.name, p.age, p.parent_team_id, p.role, pf.risk
+               p.name, p.age,
+               COALESCE(NULLIF(p.organization_id,0), NULLIF(p.parent_team_id,0), p.team_id),
+               p.role, pf.risk
         FROM prospect_fv pf JOIN players p ON pf.player_id=p.player_id
         WHERE pf.eval_date=? AND pf.player_id=?
     """, (ed, pid)).fetchone()
@@ -483,13 +485,13 @@ def get_player_card(pid):
     _abbr = team_abbr_map()
 
     p = conn.execute("""
-        SELECT p.name, p.age, p.role, p.team_id, p.parent_team_id, p.level
+        SELECT p.name, p.age, p.role, p.team_id, p.parent_team_id, p.level, p.organization_id
         FROM players p WHERE p.player_id = ?
     """, (pid,)).fetchone()
     if not p:
         return None
-    name, age, role, tid, ptid, level = p
-    org_id = tid if not ptid else ptid
+    name, age, role, tid, ptid, level, org = p
+    org_id = org or ptid or tid
     is_pitcher = role in (11, 12, 13)
     bucket_row = conn.execute(
         "SELECT bucket FROM player_surplus WHERE player_id=? "
@@ -677,7 +679,7 @@ def get_prospect_comps(pid):
 
     mlb_rows = conn.execute(f"""
         SELECT ps.player_id, p.name, ps.ovr, p.age,
-               COALESCE(NULLIF(p.parent_team_id,0), p.team_id) AS org_id,
+               COALESCE(NULLIF(p.organization_id,0), NULLIF(p.parent_team_id,0), p.team_id) AS org_id,
                {tool_sql}
         FROM player_surplus ps
         JOIN players p ON ps.player_id = p.player_id
@@ -1580,7 +1582,7 @@ def get_positional_rankings():
 
     # Prospects with FV grades — only from MLB orgs
     prospect_rows = conn.execute("""
-        SELECT p.player_id, p.name, p.age, pf.bucket, p.team_id, p.parent_team_id,
+        SELECT p.player_id, p.name, p.age, pf.bucket, p.team_id, p.parent_team_id, p.organization_id,
                pf.fv, pf.fv_str, pf.risk, r.true_ceiling, pf.prospect_surplus
         FROM prospect_fv pf
         JOIN players p ON pf.player_id = p.player_id
@@ -1672,7 +1674,7 @@ def get_positional_rankings():
             if len(group["prospects"]) >= 20:
                 break
             if _BUCKET_TO_GROUP.get(r["bucket"]) == key:
-                org_id = r["parent_team_id"] if r["parent_team_id"] else r["team_id"]
+                org_id = r["organization_id"] or r["parent_team_id"] or r["team_id"]
                 if org_id not in mlb_org_ids:
                     continue
                 group["prospects"].append({
@@ -1714,7 +1716,7 @@ def get_waiver_wire():
                r.bats, r.throws,
                pf.fv, pf.bucket, pf.risk, pf.prospect_surplus,
                c.years AS contract_years, c.current_year AS contract_current_year,
-               c.salary_0
+               c.salary_0, p.organization_id
         FROM players p
         LEFT JOIN latest_ratings r ON p.player_id = r.player_id
         LEFT JOIN prospect_fv pf ON p.player_id = pf.player_id
@@ -1742,7 +1744,7 @@ def get_waiver_wire():
 
         composite = row[15] or row[18] or 0
         ceiling = row[16] or row[17] or row[19] or 0
-        org_id = row[9] if row[9] else row[10]
+        org_id = row[29] or row[9] or row[10]
 
         # Get most recent stats
         stat_row = conn.execute("""

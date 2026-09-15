@@ -368,9 +368,9 @@ def _compute_org_needs_departures(conn, my_team):
         SELECT pf.bucket, COUNT(*) as cnt
         FROM prospect_fv pf
         JOIN players p ON pf.player_id = p.player_id
-        WHERE (p.parent_team_id = ? OR p.team_id = ?) AND pf.fv >= 45
+        WHERE (p.parent_team_id = ? OR p.team_id = ? OR p.organization_id = ?) AND pf.fv >= 45
         GROUP BY pf.bucket
-    """, (my_team, my_team)).fetchall()
+    """, (my_team, my_team, my_team)).fetchall()
     farm = {r["bucket"]: r["cnt"] for r in farm_rows}
 
     needs = {}
@@ -449,9 +449,9 @@ def _compute_org_needs_weakness(conn, my_team):
         SELECT pf.bucket, COUNT(*) as cnt
         FROM prospect_fv pf
         JOIN players p ON pf.player_id = p.player_id
-        WHERE (p.parent_team_id = ? OR p.team_id = ?) AND pf.fv >= 50
+        WHERE (p.parent_team_id = ? OR p.team_id = ? OR p.organization_id = ?) AND pf.fv >= 50
         GROUP BY pf.bucket
-    """, (my_team, my_team)).fetchall()
+    """, (my_team, my_team, my_team)).fetchall()
     farm_50 = {r["bucket"]: r["cnt"] for r in farm_rows}
 
     # ── Score needs ──

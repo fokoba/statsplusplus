@@ -194,11 +194,11 @@ def test_market_board_carries_recommended_contract(q):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("phase,expect", [
-    ("", {"arbitration": True, "options": True, "free_agency": True, "extensions": True}),
-    ("arbitration", {"arbitration": True, "options": False, "free_agency": False, "extensions": False}),
-    ("options", {"arbitration": False, "options": True, "free_agency": False, "extensions": True}),
-    ("free_agency", {"arbitration": False, "options": False, "free_agency": True, "extensions": True}),
-    ("rule5", {"arbitration": False, "options": False, "free_agency": False, "extensions": False}),
+    ("", {"arbitration": True, "options": True, "free_agency": True, "extensions": True, "rule5": True}),
+    ("arbitration", {"arbitration": True, "options": False, "free_agency": False, "extensions": False, "rule5": False}),
+    ("options", {"arbitration": False, "options": True, "free_agency": False, "extensions": True, "rule5": False}),
+    ("free_agency", {"arbitration": False, "options": False, "free_agency": True, "extensions": True, "rule5": False}),
+    ("rule5", {"arbitration": False, "options": False, "free_agency": False, "extensions": False, "rule5": True}),
 ])
 def test_phase_panel_gating(phase, expect):
     """panels_for_phase surfaces only the panels relevant to the phase."""
@@ -335,3 +335,56 @@ def test_finance_post_then_derive(league, monkeypatch):
 def test_finance_post_missing_settings_400(league, monkeypatch):
     c, ld = _finance_client(monkeypatch)
     assert c.post("/api/finance-settings", json={}).status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Rule 5
+# ---------------------------------------------------------------------------
+
+def test_rule5_unavailable_when_field_null(q):
+    """With years_protected_from_rule_5 unpopulated (fresh fixture), the panel
+    reports available=False so the template shows a refresh hint rather than
+    empty tables."""
+    res = q.get_rule5(TEAM_ID)
+    assert res["available"] is False
+    assert res["protect"] == [] and res["targets"] == []
+
+
+def test_rule5_protect_lists_eligible_prospect(q):
+    """A prospect whose protection clock has run out (ypr=0) and who is off the
+    40-man surfaces on the protect side with a recommendation."""
+    conn = q.get_db()
+    # Bob Prospect (103): AA SS, FV 50, in prospect_fv, on TEAM_ID.
+    conn.execute(
+        "UPDATE players SET years_protected_from_rule_5=0, is_on_secondary=0 "
+        "WHERE player_id=103")
+    conn.commit()
+    res = q.get_rule5(TEAM_ID)
+    assert res["available"] is True
+    names = {p["name"]: p for p in res["protect"]}
+    assert "Bob Prospect" in names
+    assert names["Bob Prospect"]["rec"] == "Protect"  # FV 50 -> protect
+
+
+def test_rule5_on_40man_excluded_from_protect(q):
+    """A player already on the 40-man (is_on_secondary=1) is not exposed and
+    must not appear as a protect decision."""
+    conn = q.get_db()
+    conn.execute(
+        "UPDATE players SET years_protected_from_rule_5=0, is_on_secondary=1 "
+        "WHERE player_id=103")
+    conn.commit()
+    res = q.get_rule5(TEAM_ID)
+    assert "Bob Prospect" not in {p["name"] for p in res["protect"]}
+
+
+def test_rule5_shielded_prospect_excluded(q):
+    """A prospect still within the protection window (ypr>0) is not eligible."""
+    conn = q.get_db()
+    conn.execute(
+        "UPDATE players SET years_protected_from_rule_5=3, is_on_secondary=0 "
+        "WHERE player_id=103")
+    conn.commit()
+    res = q.get_rule5(TEAM_ID)
+    assert res["available"] is True
+    assert "Bob Prospect" not in {p["name"] for p in res["protect"]}

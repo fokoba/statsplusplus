@@ -282,7 +282,7 @@ def aaa_roster(team_id=None):
         FROM players p
         JOIN latest_ratings r ON p.player_id = r.player_id
         JOIN teams t ON p.team_id = t.team_id
-        WHERE p.parent_team_id = ? AND p.level = ?
+        WHERE COALESCE(NULLIF(p.organization_id,0), NULLIF(p.parent_team_id,0), p.team_id) = ? AND p.level = ?
         ORDER BY COALESCE(r.ovr, r.composite_score) DESC
     """, (team_id, aaa_level)).fetchall()
     conn.close()

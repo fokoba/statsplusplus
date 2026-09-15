@@ -436,6 +436,7 @@ def offseason():
     market = osq.get_market_board(tid)
     extensions = osq.get_extension_candidates(tid)
     options = osq.get_option_decisions(tid)
+    rule5 = osq.get_rule5(tid)
     ln = cfg.settings.get("league", "League")
     # Current manual sub-phase (empty = show all panels)
     phase = ""
@@ -468,6 +469,7 @@ def offseason():
         arbitration=arbitration,
         market=market, extensions=extensions,
         options=options,
+        rule5=rule5,
         phases=phases, current_phase=phase, show=show,
         finance=finance,
     )

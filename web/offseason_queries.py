@@ -18,6 +18,7 @@ not built here.
 
 from web_league_context import get_db, get_cfg, my_team_id
 from statsplusplus.utils.positions import display_pos as _display_pos
+from statsplusplus.data.db import ORG_ID_SQL
 
 # This fork keeps the contract_value.py/prospect_value.py table architecture
 # (player_surplus for MLB roster, prospect_fv for everyone else, including
@@ -48,6 +49,7 @@ def panels_for_phase(phase):
         "options": show_all or phase == "options",
         "free_agency": show_all or phase == "free_agency",
         "extensions": show_all or phase in ("free_agency", "options"),
+        "rule5": show_all or phase == "rule5",
     }
 
 
@@ -603,3 +605,99 @@ def get_option_decisions(team_id):
     this_off.sort(key=lambda x: (x["type"] != "Team", -(x["option_salary"] or 0)))
     upcoming.sort(key=lambda x: (x["year"], x["type"] != "Team", -(x["option_salary"] or 0)))
     return {"this_offseason": this_off, "upcoming": upcoming}
+
+
+# ---------------------------------------------------------------------------
+# Rule 5 — protect (your eligibles worth a 40-man spot) + targets (others')
+# ---------------------------------------------------------------------------
+#
+# `years_protected_from_rule_5` (from /players) is the years remaining before a
+# player must be added to the 40-man (secondary roster) or is exposed to the
+# Rule 5 draft. Confirmed against vMLB data (Session 87): value 0 = eligible
+# this offseason (oldest cohort, most post-draft years, off the 40-man); 4/5 =
+# still shielded (young signees/draftees). `draft_eligible` is amateur-draft
+# eligibility (dormant outside the pre-draft window) and is NOT a Rule 5 signal.
+#
+# Eligible & exposed = ypr == 0, not on the 40-man (is_on_secondary != 1), and a
+# minor-leaguer (level != '1' — MLB players aren't Rule 5-drafted).
+
+# MLB-viable floor for the target side: a Rule 5 pick must stick on the active
+# roster all year, so only players with real MLB projection are worth taking.
+_RULE5_TARGET_MIN_FV = 45
+
+
+def get_rule5(team_id):
+    """Rule 5 decisions for this offseason.
+
+    Returns {"protect": [...], "targets": [...], "available": bool}:
+      - protect  : your org's Rule 5-eligible players (ypr==0, off the 40-man),
+                   ranked by FV/surplus — candidates to add to the 40-man.
+      - targets  : other orgs' eligible + MLB-viable (FV >= 45) players you could
+                   draft, ranked by FV.
+
+    `available` is False when the field isn't populated yet (pre-refresh), so the
+    template can show an informative message rather than empty tables.
+    """
+    conn = get_db()
+    ed = _eval_date(conn)
+
+    # Has the ypr field been populated at all? (NULL everywhere pre-refresh.)
+    has_field = conn.execute(
+        "SELECT 1 FROM players WHERE years_protected_from_rule_5 IS NOT NULL LIMIT 1"
+    ).fetchone() is not None
+    if ed is None or not has_field:
+        return {"protect": [], "targets": [], "available": has_field}
+
+    # Base eligibility predicate (shared by both sides).
+    eligible = (
+        "p.years_protected_from_rule_5 = 0 "
+        "AND (p.is_on_secondary IS NULL OR p.is_on_secondary != 1) "
+        "AND p.level != '1'"
+    )
+
+    # Protect side — your org's eligibles, ranked by FV then surplus.
+    protect = []
+    for r in conn.execute(f"""
+        SELECT p.player_id, p.name, p.age, pf.fv, pf.fv_str, pf.bucket, pf.risk,
+               pf.prospect_surplus, pf.level
+        FROM prospect_fv pf
+        JOIN players p ON pf.player_id = p.player_id
+        WHERE pf.eval_date = ? AND {ORG_ID_SQL} = ? AND {eligible}
+        ORDER BY pf.fv DESC, pf.prospect_surplus DESC, p.age ASC
+    """, (ed, team_id)).fetchall():
+        fv = r["fv"] or 0
+        # A worth-protecting hint: FV 45+ is roster-worthy; below that it's a
+        # judgement call the GM makes with the roster crunch in mind.
+        rec, rec_class = (("Protect", "good") if fv >= 50
+                          else ("Consider", "ok") if fv >= 45
+                          else ("Likely expose", "bad"))
+        protect.append({
+            "pid": r["player_id"], "name": r["name"], "age": r["age"],
+            "pos": _display_pos(r["bucket"]) if r["bucket"] else "?",
+            "fv": fv, "fv_str": r["fv_str"] or str(fv), "risk": r["risk"] or "",
+            "level": r["level"] or "",
+            "surplus": r["prospect_surplus"] or 0,  # raw $ — template money filter
+            "rec": rec, "rec_class": rec_class,
+        })
+
+    # Target side — other orgs' eligible, MLB-viable players.
+    abbr = get_cfg().team_abbr_map
+    targets = []
+    for r in conn.execute(f"""
+        SELECT p.player_id, p.name, p.age, pf.fv, pf.fv_str, pf.bucket, pf.risk,
+               pf.level, {ORG_ID_SQL} AS org_id
+        FROM prospect_fv pf
+        JOIN players p ON pf.player_id = p.player_id
+        WHERE pf.eval_date = ? AND {ORG_ID_SQL} != ? AND {eligible}
+          AND pf.fv >= ?
+        ORDER BY pf.fv DESC, p.age ASC
+    """, (ed, team_id, _RULE5_TARGET_MIN_FV)).fetchall():
+        targets.append({
+            "pid": r["player_id"], "name": r["name"], "age": r["age"],
+            "pos": _display_pos(r["bucket"]) if r["bucket"] else "?",
+            "fv": r["fv"] or 0, "fv_str": r["fv_str"] or str(r["fv"] or 0),
+            "risk": r["risk"] or "", "level": r["level"] or "",
+            "team": abbr.get(r["org_id"], "?"),
+        })
+
+    return {"protect": protect, "targets": targets, "available": True}

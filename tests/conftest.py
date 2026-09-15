@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS teams (
 );
 CREATE TABLE IF NOT EXISTS players (
     player_id INTEGER PRIMARY KEY, name TEXT, age INTEGER,
-    team_id INTEGER, parent_team_id INTEGER, level TEXT,
+    team_id INTEGER, parent_team_id INTEGER, organization_id INTEGER, player_league_id INTEGER, level TEXT,
     pos INTEGER, role INTEGER,
     injury_is_injured INTEGER, injury_dl_left INTEGER, injury_left INTEGER,
     is_on_dl INTEGER, is_on_dl60 INTEGER, dl_days_this_year INTEGER,
@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS players (
     is_active INTEGER, is_on_secondary INTEGER, is_on_waivers INTEGER,
     designated_for_assignment INTEGER, free_agent INTEGER, was_traded INTEGER,
     days_on_waivers INTEGER, days_on_waivers_left INTEGER, has_received_arbitration INTEGER,
+    years_protected_from_rule_5 INTEGER, draft_eligible INTEGER,
     draft_year INTEGER, draft_round INTEGER, draft_pick INTEGER,
     draft_overall_pick INTEGER, draft_team_id INTEGER,
     date_of_birth TEXT, weight INTEGER, nation_id INTEGER, uniform_number INTEGER

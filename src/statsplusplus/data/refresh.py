@@ -42,7 +42,8 @@ def _upsert_teams(conn, teams):
 
 def _upsert_players(conn, players):
     _PLAYER_COLS = (
-        "player_id", "name", "age", "team_id", "parent_team_id", "level", "pos", "role",
+        "player_id", "name", "age", "team_id", "parent_team_id", "organization_id",
+        "player_league_id", "level", "pos", "role",
         # Injury
         "injury_is_injured", "injury_dl_left", "injury_left",
         "is_on_dl", "is_on_dl60", "dl_days_this_year",
@@ -53,6 +54,8 @@ def _upsert_players(conn, players):
         "is_active", "is_on_secondary", "is_on_waivers",
         "designated_for_assignment", "free_agent", "was_traded",
         "days_on_waivers", "days_on_waivers_left", "has_received_arbitration",
+        # Rule 5 / draft eligibility
+        "years_protected_from_rule_5", "draft_eligible",
         # Draft info
         "draft_year", "draft_round", "draft_pick", "draft_overall_pick", "draft_team_id",
         # Demographics
@@ -69,6 +72,8 @@ def _upsert_players(conn, players):
             p["ID"],
             f"{p.get('First Name', '')} {p.get('Last Name', '')}".strip(),
             p.get("Age"), p.get("Team ID"), p.get("Parent Team ID"),
+            p.get("Organization ID"),
+            p.get("League ID"),
             p.get("Level"), p.get("Pos"), p.get("Role"),
             # Injury
             p.get("injury_is_injured"), p.get("injury_dl_left"), p.get("injury_left"),
@@ -80,6 +85,8 @@ def _upsert_players(conn, players):
             p.get("is_active"), p.get("is_on_secondary"), p.get("is_on_waivers"),
             p.get("designated_for_assignment"), p.get("free_agent"), p.get("was_traded"),
             p.get("days_on_waivers"), p.get("days_on_waivers_left"), p.get("has_received_arbitration"),
+            # Rule 5 / draft eligibility
+            p.get("years_protected_from_rule_5"), p.get("draft_eligible"),
             # Draft info
             p.get("draft_year"), p.get("draft_round"), p.get("draft_pick"),
             p.get("draft_overall_pick"), p.get("draft_team_id"),
@@ -741,8 +748,18 @@ def _detect_league_structure(conn, year):
     return divisions_out, leagues_out, team_abbr_out, team_names_out
 
 
-def refresh_league(year, game_date=None):
-    """Pull all teams into DB for the active league."""
+def refresh_league(year, game_date=None, full=False):
+    """Pull all teams into DB for the active league.
+
+    Args:
+        full: When True, fetch *all* players including retired. When False
+            (the steady-state default), fetch only non-retired players
+            (`/players?retired=0`) for a faster refresh. A full pull is done
+            automatically on the first refresh of a league (empty players
+            table) so retired players are captured once; after that a retiring
+            player's final active state is already stored (INSERT OR REPLACE
+            never deletes), so subsequent refreshes never need them again.
+    """
     import time as _time
     log.info("=== refresh_league started (year=%s) ===", year)
     league_dir = get_league_dir()
@@ -763,9 +780,15 @@ def refresh_league(year, game_date=None):
     _upsert_teams(conn, client.get_teams())
 
     log.info("── players (all orgs)")
-    players = client.get_players()
+    # First refresh of a league (empty players table) always does a full pull so
+    # retired players are captured once. Steady-state refreshes skip retired
+    # players for speed (~20-30% fewer rows) — a newly-retired player's final
+    # active state is already stored, and INSERT OR REPLACE never deletes.
+    have_players = conn.execute("SELECT 1 FROM players LIMIT 1").fetchone() is not None
+    do_full = full or not have_players
+    players = client.get_players(retired=None if do_full else 0)
     _upsert_players(conn, players)
-    log.info(f"  {len(players)} players loaded")
+    log.info(f"  {len(players)} players loaded ({'full incl. retired' if do_full else 'active only (retired=0)'})")
 
     log.info("── contracts (all orgs)")
     contracts = client.get_contracts()
@@ -897,6 +920,22 @@ def refresh_league(year, game_date=None):
                                   for lg in lgdata.get("leagues", [])
                                   if lg["league_id"] in milb_lids]
             s["primary_league_id"] = primary_lid
+
+            # Cumulative league_id → {name, level} map. Leagues get reorganized
+            # over the years (renamed, promoted, removed), but historical stat
+            # rows keep referencing the league_id they were played in. We merge
+            # each refresh's current minor leagues into this persistent map so
+            # historical league_ids retain a level/name mapping even after they
+            # disappear from the current /lgdata structure. Current data wins on
+            # conflict (a league's present level/name is authoritative).
+            league_map = s.get("milb_league_map", {})
+            for lg in lgdata.get("leagues", []):
+                if lg["league_id"] in milb_lids:
+                    league_map[str(lg["league_id"])] = {
+                        "name": lg["name"], "level": lg["level"],
+                    }
+            s["milb_league_map"] = league_map
+
             settings_path.write_text(json.dumps(s, indent=2) + "\n")
 
         if milb_lids:
@@ -1015,14 +1054,23 @@ def refresh_league(year, game_date=None):
         log.warning("ratings: only %d rows received — skipping prune to preserve existing data",
                     len(all_ratings))
 
-    # Fix intl complex players: API reports level=1 but league_id is negative
-    intl_ids = [r["ID"] for r in all_ratings if (r.get("League") or 0) < 0]
-    if intl_ids:
+    # Fix intl complex players: /players reports level=1 but League ID is
+    # negative for international-complex players (authoritative, covers players
+    # without ratings too). Falls back to the ratings `League` field for older
+    # data where player_league_id isn't yet populated.
+    conn.execute(
+        "UPDATE players SET level = 8 WHERE level = '1' AND player_league_id < 0"
+    )
+    ratings_intl_ids = [r["ID"] for r in all_ratings if (r.get("League") or 0) < 0]
+    if ratings_intl_ids:
         conn.executemany(
             "UPDATE players SET level = 8 WHERE player_id = ? AND level = '1'",
-            [(pid,) for pid in intl_ids]
+            [(pid,) for pid in ratings_intl_ids]
         )
-        log.info(f"  reclassified {len(intl_ids)} intl complex players to level=8")
+    n_intl = conn.execute(
+        "SELECT COUNT(*) FROM players WHERE level = '8'"
+    ).fetchone()[0]
+    log.info(f"  intl complex players at level=8: {n_intl}")
 
     conn.commit()
 
@@ -1457,15 +1505,13 @@ def main():
     else:
         if args and args[0] == "--league":
             args = args[1:]
-        skip_fv = False
-        if args and args[0] == "--no-fv":
-            skip_fv = True
-            args = args[1:]
-        force = False
-        if args and args[0] == "--force":
-            # Bypass the /date gate and re-pull even when the game date is unchanged.
-            force = True
-            args = args[1:]
+        # Boolean flags may appear in any order before the optional year arg.
+        skip_fv = "--no-fv" in args
+        full = "--full" in args
+        # --full also bypasses the /date gate (an explicit full re-pull should
+        # run even if the game date is unchanged).
+        force = "--force" in args or full
+        args = [a for a in args if a not in ("--no-fv", "--force", "--full")]
         year = int(args[0]) if args else default_year
         game_date = client.get_date()
         # Derive year from API game date — state.json may be stale or uninitialized
@@ -1486,7 +1532,7 @@ def main():
             return
 
         log.info("=== Full pipeline: year=%s, game_date=%s ===", year, game_date)
-        refresh_league(year, game_date=game_date)
+        refresh_league(year, game_date=game_date, full=full)
         update_state(game_date, year)
         if not skip_fv:
             _run_evaluation_engine()

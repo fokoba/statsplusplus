@@ -79,7 +79,12 @@ Options** panel (`get_option_decisions`) surfaces own-team option decisions:
 team options get an Exercise/Decline rec (breakeven `proj_value > option_salary
 − buyout`, projected value from the shared `compute_player_value`), player/vesting
 options are informational, and `next_last_year_*` options show as a next-offseason
-heads-up.
+heads-up. A **Rule 5** panel (`get_rule5`) surfaces protection/draft decisions:
+built on the `/players` `years_protected_from_rule_5` field (`0` = eligible this
+offseason, off the 40-man) — a **protect** side (your eligible prospects, joined
+to `prospect_fv`, ranked by FV/surplus) and a **draft-targets** side (other orgs'
+eligible + MLB-viable FV ≥ 45 players). `draft_eligible` is amateur-draft
+eligibility, not a Rule 5 signal.
 
 **Offseason budget (finance settings):** the `/offseason` page has an Offseason
 Budget panel driven by per-league finance settings
@@ -138,7 +143,7 @@ All other analysis scripts are read-only against the DB.
 
 | Table | Owner | Description |
 |---|---|---|
-| `players` | `refresh.py` | All players across all orgs and levels. Expanded fields: injury (DL status, days), service time (exact years/days), roster status (DFA/waivers/traded/FA), draft history, demographics. |
+| `players` | `refresh.py` | All players across all orgs and levels. Expanded fields: injury (DL status, days), service time (exact years/days), roster status (DFA/waivers/traded/FA), draft history, demographics, `organization_id` (org attribution — see `db.ORG_ID_SQL`), `player_league_id` (negative = international-complex, drives level=8). Steady-state refresh pulls `?retired=0`; first refresh / `--full` pulls all. |
 | `teams` | `refresh.py` | Team ID → name mapping (34 MLB orgs) |
 | `ratings` | `refresh.py` | Scouting ratings (latest snapshot only). Full 121 columns. Old snapshots pruned on refresh. |
 | `ratings_history` | `refresh.py` | Monthly in-game rating snapshots (53 cols). Ovr/pot, hitter/pitcher tools (cur+pot), all pitch types (cur+pot), extended ratings. ~1.3MB/snapshot. |

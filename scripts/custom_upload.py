@@ -92,18 +92,31 @@ def _trait_notes(wrk_ethic, intel, lead, loy, greed, adaptability):
     return buffs, concerns
 
 
-def _personality_type_class(ptype):
-    if not ptype:
-        return "unscouted"
-    if ptype == "Normal":
+# Mirrors team_queries.py's _infer_personality_type() — see that copy for
+# the real-example rationale (Alex Rhodes/Armando Peraza/Gene Milam ->
+# Disruptive; Thomas Egan/Nate Morley -> Selfish). Duplicated, not imported,
+# since this module is deliberately DB-free.
+def _infer_personality_type(wrk_ethic, lead, loy, greed):
+    if wrk_ethic == "L" and lead == "L" and loy == "L":
+        return {"label": "Likely Disruptive", "class": "neg"}
+    if greed == "H" and lead == "L" and loy == "L":
+        return {"label": "Likely Selfish", "class": "neg"}
+    return None
+
+
+def _personality_type_class(ptype, wrk_ethic=None, lead=None, loy=None, greed=None):
+    if ptype and ptype != "Unknown":
+        if ptype == "Normal":
+            return "neutral"
+        if ptype in _PERSONALITY_TYPE_POSITIVE:
+            return "pos"
+        if ptype in _PERSONALITY_TYPE_NEGATIVE:
+            return "neg"
         return "neutral"
-    if ptype == "Unknown":
-        return "unknown"
-    if ptype in _PERSONALITY_TYPE_POSITIVE:
-        return "pos"
-    if ptype in _PERSONALITY_TYPE_NEGATIVE:
-        return "neg"
-    return "neutral"
+    inferred = _infer_personality_type(wrk_ethic, lead, loy, greed)
+    if inferred:
+        return inferred["class"]
+    return "unscouted" if not ptype else "unknown"
 
 
 def _dedupe_header(header: list[str]) -> list[str]:
@@ -502,7 +515,10 @@ def evaluate_row(d: dict, league_dir=None) -> dict | None:
     greed = (d.get("FIN") or "N").strip()
     adaptability = (d.get("AD") or "N").strip()
     personality_type = (d.get("Type") or "").strip()
-    personality_class = _personality_type_class(personality_type)
+    personality_class = _personality_type_class(personality_type, wrk_ethic, lead, loy, greed)
+    if personality_class == "neg" and (not personality_type or personality_type == "Unknown"):
+        _inferred = _infer_personality_type(wrk_ethic, lead, loy, greed)
+        personality_type = _inferred["label"] if _inferred else personality_type
     buffs, concerns = _trait_notes(wrk_ethic, intel, lead, loy, greed, adaptability)
     dev_good = "H" in (wrk_ethic, intel, adaptability)
     dev_bad = "L" in (wrk_ethic, intel, adaptability)

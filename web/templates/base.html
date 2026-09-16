@@ -46,6 +46,7 @@
           <div id="search-results" class="search-dropdown"></div>
         </div>
         <button id="refresh-btn" class="nav-btn" title="Pull latest game data">⟳ Refresh</button>
+        <span id="local-export-badge" class="nav-local-export"></span>
         <button id="session-btn" class="nav-btn" title="StatsPlus connection">🔑</button>
         <div id="session-panel" class="session-panel hidden">
           <div class="session-panel-header">
@@ -128,6 +129,28 @@
         }
       }).catch(() => {});
     }
+
+    function updateLocalExportBadge() {
+      var el = document.getElementById('local-export-badge');
+      if (!el) return;
+      fetch('/api/local-export-status').then(function(r) { return r.json(); }).then(function(d) {
+        if (d.age_hours == null) {
+          el.innerHTML = '';
+          return;
+        }
+        var h = d.age_hours;
+        var label = h < 1 ? Math.round(h * 60) + 'm ago'
+                  : h < 48 ? Math.round(h) + 'h ago'
+                  : Math.round(h / 24) + 'd ago';
+        var cls = d.stale ? 'sync-stale' : 'sync-ok';
+        var text = 'Local export: ' + label;
+        var title = d.stale
+          ? 'Local OOTP export data is ' + label + ' old — recommend re-exporting from OOTP for fresh ratings/contracts/park factors.'
+          : 'Local OOTP export data last updated ' + label + '.';
+        el.innerHTML = '<span class="sync-badge ' + cls + '" title="' + title + '">' + text + '</span>';
+      }).catch(function() { el.innerHTML = ''; });
+    }
+    updateLocalExportBadge();
 
     function poll() {
       fetch('/refresh/status').then(r => r.json()).then(d => {

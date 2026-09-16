@@ -798,6 +798,29 @@ def api_game_date():
     return jsonify({"local": local_date, "remote": remote_date})
 
 
+@api_bp.route("/api/local-export-status")
+def api_local_export_status():
+    """Age of the newest locally-ingested OOTP export for this league (see
+    scripts/local_ingest.py) — feeds a 'last exported' UI badge so a stale
+    local export (vs. just re-exporting from OOTP) is visible without
+    Forrest having to track it himself."""
+    import time
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
+    from local_ingest import get_freshness
+
+    info = get_freshness(_get_cfg().league_dir)
+    newest = info["newest_mtime"]
+    if newest is None:
+        return jsonify({"newest": None, "age_hours": None, "stale": None})
+    age_hours = (time.time() - newest) / 3600
+    return jsonify({
+        "newest": newest,
+        "age_hours": round(age_hours, 1),
+        "stale": age_hours > 24,
+        "categories": info["categories"],
+    })
+
+
 @api_bp.route("/api/session-cookie")
 def api_session_cookie():
     """Return current session cookie components + API token for the active league."""

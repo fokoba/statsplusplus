@@ -431,14 +431,26 @@ def offensive_grade_raw(
 def baserunning_value_raw(
     tools: dict[str, float | int | None],
     weights: dict[str, float],
+    transforms: dict[str, list[float]] | None = None,
 ) -> Optional[float]:
-    """Unclamped baserunning weighted average."""
+    """Unclamped baserunning weighted average.
+
+    ``transforms`` optionally maps a tool name to a per-tool transform curve
+    (from ``derive_tool_transform``), same as ``offensive_grade_raw``. Only
+    "speed" has a calibrated curve today (steal/stl_rt are left linear — no
+    curve was fit for them); a tool with no curve of its own passes through
+    unchanged rather than falling back to the global tool_transform, since
+    that default curve was derived from offensive-tool marginal-WAR data and
+    doesn't apply to baserunning tools.
+    """
     available: list[tuple[float, float]] = []
     for key in BASERUNNING_TOOL_KEYS:
         val = tools.get(key)
         w = weights.get(key, 0.0)
         if val is not None and w > 0:
-            available.append((float(val), w))
+            curve = (transforms or {}).get(key)
+            transformed = apply_tool_transform(float(val), curve) if curve else float(val)
+            available.append((transformed, w))
 
     if not available:
         return None
@@ -494,12 +506,13 @@ def compute_offensive_grade(
 def compute_baserunning_value(
     tools: dict[str, float | int | None],
     weights: dict[str, float],
+    transforms: dict[str, list[float]] | None = None,
 ) -> Optional[int]:
     """Compute baserunning component from speed/steal tools.
 
     Returns integer on 20-80 scale.
     """
-    raw = baserunning_value_raw(tools, weights)
+    raw = baserunning_value_raw(tools, weights, transforms)
     if raw is None:
         return None
     return max(20, min(80, round(raw)))
@@ -548,7 +561,7 @@ def compute_composite_hitter(
         Integer composite score in [20, 80].
     """
     off_raw = offensive_grade_raw(tools, weights, transforms)
-    br_raw = baserunning_value_raw(tools, weights)
+    br_raw = baserunning_value_raw(tools, weights, transforms)
     def_raw = defensive_value_raw(defense, def_weights)
 
     if off_raw is None and br_raw is None and def_raw is None:

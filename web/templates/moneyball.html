@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h1 class="page-title">{{ team_name }} — Moneyball</h1>
+
+{% set my = data.my_team %}
+{% set mtd = data.money_divisor %}
+{% macro fmt_money(v) %}${{ (v / mtd) | round(1) }}{{ money_unit }}{% endmacro %}
+{% macro fmt_dpw(v) %}{% if v is none %}—{% else %}${{ (v / 1000) | round(0, 'floor') | int }}K{% endif %}{% endmacro %}
+
+{% if not my %}
+<div class="panel"><p>No MLB roster data available for this team.</p></div>
+{% else %}
+
+{# ── Summary Bar — KPI Cards ── #}
+<div class="summary-bar">
+  <div class="summary-item kpi-accent">
+    <span class="label">$ / WAR</span>
+    <span class="value">{{ fmt_dpw(my.dollars_per_war) }}</span>
+    <span class="summary-rank" title="Lower is better — dollars spent per projected WAR this season">
+      {% if my.rank %}Rank {{ my.rank }}/{{ data.n_teams_ranked }}{% else %}Unranked (no WAR){% endif %}
+    </span>
+  </div>
+  <div class="summary-item">
+    <span class="label">League Avg $/WAR</span>
+    <span class="value">{{ fmt_dpw(data.league_avg_dpw) }}</span>
+    <span class="summary-rank">
+      {% if my.dollars_per_war and data.league_avg_dpw %}
+        {% set diff_pct = ((my.dollars_per_war - data.league_avg_dpw) / data.league_avg_dpw * 100) | round(1) %}
+        <span class="{{ 'neg' if diff_pct > 0 else 'pos' }}">{{ '+' if diff_pct > 0 else '' }}{{ diff_pct }}% vs league</span>
+      {% endif %}
+    </span>
+  </div>
+  <div class="summary-item">
+    <span class="label">Projected WAR</span>
+    <span class="value">{{ my.war | round(1) }}</span>
+  </div>
+  <div class="summary-item">
+    <span class="label">Payroll</span>
+    <span class="value">{{ fmt_money(my.payroll) }}</span>
+  </div>
+  <div class="summary-item kpi-accent">
+    <span class="label">Current-Yr Surplus</span>
+    <span class="value {{ 'pos' if my.surplus_yr1 > 0 else 'neg' if my.surplus_yr1 < 0 else '' }}">{{ fmt_money(my.surplus_yr1) }}</span>
+  </div>
+  <div class="summary-item">
+    <span class="label">Positive-Surplus Contracts</span>
+    <span class="value">{{ my.pos_pct }}%</span>
+    <span class="summary-rank">{{ my.pos_count }} of {{ my.n }} deals</span>
+  </div>
+</div>
+
+<div class="mb-subtitle">
+  "$/WAR" and surplus here use each player's projected <strong>current-season</strong> WAR and salary
+  (same model as the Contracts tab's surplus figures) — lower $/WAR and a higher positive-contract
+  share both mean you're getting more win value per dollar than the field.
+</div>
+
+<div class="columns" style="align-items:flex-start;">
+
+  {# ── League $/WAR ranking ── #}
+  <div class="panel" style="flex:1.3;">
+    <h2>League $/WAR Ranking</h2>
+    <table>
+      <thead>
+        <tr>
+          <th data-sort="num">#</th><th data-sort="str" class="left">Team</th>
+          <th data-sort="num">Payroll</th><th data-sort="num">WAR</th>
+          <th data-sort="num" data-sort-best="low">$/WAR</th>
+          <th data-sort="num">Efficiency</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in data.teams %}
+        <tr{% if t.team_id == tid %} class="highlight"{% endif %}>
+          <td>{{ t.rank or '—' }}</td>
+          <td class="left"><a class="team-link" href="/team/{{ t.team_id }}">{{ t.abbr }} — {{ t.name }}</a></td>
+          <td data-sort-value="{{ t.payroll }}">{{ fmt_money(t.payroll) }}</td>
+          <td>{{ t.war | round(1) }}</td>
+          <td data-sort-value="{{ t.dollars_per_war or 999999999 }}">{{ fmt_dpw(t.dollars_per_war) }}</td>
+          <td>
+            {% if data.league_avg_dpw and t.dollars_per_war %}
+            {% set rel = data.league_avg_dpw / t.dollars_per_war %}
+            <div class="mb-eff-bar-track">
+              <div class="mb-eff-bar {{ 'mb-eff-good' if rel >= 1 else 'mb-eff-bad' }}"
+                   style="width: {{ [rel * 50, 100] | min }}%;"
+                   title="{{ (rel * 100) | round(0) | int }}% of league-average efficiency"></div>
+            </div>
+            {% else %}—{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {# ── Contract efficiency split ── #}
+  <div class="panel" style="flex:1;">
+    <h2>Contract Efficiency</h2>
+    <table>
+      <thead>
+        <tr>
+          <th data-sort="num">#</th><th data-sort="str" class="left">Team</th>
+          <th data-sort="num" data-sort-best="high">% Positive</th>
+          <th data-sort="num">+ Deals</th><th data-sort="num" data-sort-best="low">- Deals</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in data.teams | sort(attribute='pos_pct', reverse=True) %}
+        <tr{% if t.team_id == tid %} class="highlight"{% endif %}>
+          <td>{{ loop.index }}</td>
+          <td class="left">{{ t.abbr }}</td>
+          <td data-sort-value="{{ t.pos_pct }}">
+            <div class="mb-eff-bar-track">
+              <div class="mb-eff-bar mb-eff-good" style="width: {{ t.pos_pct }}%;" title="{{ t.pos_pct }}% positive surplus"></div>
+            </div>
+            {{ t.pos_pct }}%
+          </td>
+          <td>{{ t.pos_count }}</td>
+          <td>{{ t.neg_count }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{# ── This team's contracts, best to worst value ── #}
+<div class="panel">
+  <h2>{{ team_name }} — Contracts by Current-Year Surplus</h2>
+  <table>
+    <thead>
+      <tr>
+        <th data-sort="str" class="left">Player</th><th data-sort="str">Pos</th>
+        <th data-sort="num">Age</th><th data-sort="num">Salary</th>
+        <th data-sort="num">WAR</th><th data-sort="num">Market Value</th>
+        <th data-sort="num" data-sort-selected="desc">Surplus</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in data.contracts %}
+      <tr>
+        <td class="left"><a class="player-link" href="/player/{{ c.pid }}">{{ c.name }}</a></td>
+        <td>{{ c.bucket }}</td>
+        <td>{{ c.age }}</td>
+        <td data-sort-value="{{ c.salary }}">{{ fmt_money(c.salary) }}</td>
+        <td>{{ c.war }}</td>
+        <td data-sort-value="{{ c.market_value }}">{{ fmt_money(c.market_value) }}</td>
+        <td data-sort-value="{{ c.surplus }}" class="{{ 'pos' if c.surplus > 0 else 'neg' if c.surplus < 0 else '' }}">{{ fmt_money(c.surplus) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endif %}
+{% endblock %}

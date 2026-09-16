@@ -1328,6 +1328,26 @@ td.stat-bad  { color: var(--red); }
 .sync-stale { background: #5a3a1a; color: #f0a030; }
 .sync-unknown { background: #3a3a3a; color: #888; }
 
+/* Moneyball page */
+.mb-subtitle {
+  font-size: 12px; color: var(--text-dim); margin: -6px 0 14px;
+  max-width: 900px; line-height: 1.5;
+}
+.mb-eff-bar-track {
+  display: inline-block; width: 70px; height: 8px; border-radius: 4px;
+  background: #2a3140; vertical-align: middle; margin-right: 6px; overflow: hidden;
+}
+.mb-eff-bar { height: 100%; border-radius: 4px; }
+.mb-eff-good { background: var(--green); }
+.mb-eff-bad { background: var(--red); }
+
+/* Local export freshness badge (nav bar) — same color semantics as
+   .sync-badge, but a text pill instead of a single-glyph circle. */
+.nav-local-export .sync-badge {
+  display: inline-flex; width: auto; height: auto; border-radius: 10px;
+  padding: 3px 8px; font-size: 0.72em; font-weight: 600; margin-left: 6px;
+}
+
 /* Structure editor */
 #structure-editor { font-size: 0.85em; }
 .se-league { margin-bottom: 4px; }

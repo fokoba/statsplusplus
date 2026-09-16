@@ -225,7 +225,7 @@ def compute_component_ceilings(
             result["offensive_ceiling"] = max(20, min(80, raw_pitching))
     else:
         raw_offensive = compute_offensive_grade(potential_tools, weights, transforms)
-        raw_baserunning = compute_baserunning_value(potential_tools, weights)
+        raw_baserunning = compute_baserunning_value(potential_tools, weights, transforms)
         raw_defensive = compute_defensive_value(defense or {}, def_weights or {})
 
         # Carrying tool bonus on potential offensive ceiling

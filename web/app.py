@@ -1,5 +1,6 @@
 """EMLB Dashboard — Flask app."""
 
+import os
 import sys
 from pathlib import Path
 
@@ -59,6 +60,38 @@ try:
             _db_mod.init_schema(_ld)
 except Exception:
     pass  # non-fatal on startup — queries will fail with clear error if schema is stale
+
+
+# Background auto-ingest: pick up fresh OOTP exports (ratings sync, FA asks,
+# park factors, Rule 5, draft pool, team salary) from the local folders
+# Forrest's OOTP app writes to, with no manual upload step. Runs in a daemon
+# thread so it never blocks requests; each pass is cheap when nothing's
+# changed (per-category file-mtime check in local_ingest.py). Guarded by
+# WERKZEUG_RUN_MAIN so the Flask debug reloader's parent/watcher process
+# (which also executes this module's top-level code once, before spawning
+# the real worker subprocess) doesn't also start a duplicate thread — only
+# the actual worker process (marked WERKZEUG_RUN_MAIN=true) should.
+if os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+    def _local_ingest_loop():
+        import time
+        sys.path.insert(0, str(Path(_PROJECT_ROOT, "scripts")))
+        from local_ingest import ingest_all_leagues
+        while True:
+            try:
+                results = ingest_all_leagues(Path(_PROJECT_ROOT, "data"))
+                changed = {
+                    lg: {k: v for k, v in cats.items() if not v.startswith(("unchanged", "not found"))}
+                    for lg, cats in results.items()
+                }
+                changed = {lg: cats for lg, cats in changed.items() if cats}
+                if changed:
+                    log.info("local_ingest: %s", changed)
+            except Exception as e:
+                log.error("local_ingest loop error: %s", e, exc_info=True)
+            time.sleep(90)
+
+    import threading
+    threading.Thread(target=_local_ingest_loop, daemon=True, name="local-ingest").start()
 
 
 _EXEMPT_PREFIXES = ("/settings", "/onboard", "/switch-league", "/refresh",
@@ -306,6 +339,23 @@ def team(tid):
                            fa_candidates=fa_candidates,
                            last_fa_ask_upload=last_fa_ask_upload,
                            defense=defense, has_dh=cfg.has_dh)
+
+
+@app.route("/team/<int:tid>/moneyball")
+def team_moneyball(tid):
+    """League-wide spend-efficiency comparison: $/WAR ranking, contract
+    efficiency (% of deals generating positive surplus), and this team's
+    own best/worst-value contracts."""
+    cfg = _get_cfg()
+    name = cfg.team_names_map.get(tid)
+    if not name:
+        return "Team not found", 404
+    import moneyball_queries as _mq
+    data = _mq.get_moneyball(tid)
+    return render_template("moneyball.html", tid=tid, team_name=name, data=data,
+                           breadcrumbs=[{"label": cfg.settings.get("league", "League"), "url": "/league"},
+                                        {"label": name, "url": f"/team/{tid}"},
+                                        {"label": "Moneyball", "url": f"/team/{tid}/moneyball"}])
 
 
 @app.route("/team/<int:tid>/minors")

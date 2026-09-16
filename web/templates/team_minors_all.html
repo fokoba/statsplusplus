@@ -322,6 +322,15 @@ updatePosFilter();
 // Active level filter
 var activeLevel = 'all';
 
+// Apply filters on load — the default-visible tab (hitters) otherwise never
+// gets its first filtering pass (only filterLevel() and switchMinorsTab()
+// call applyFilters(), and neither runs until the user interacts), so pro
+// players stayed visible under "All Minor Leaguers" until something else
+// happened to trigger a re-filter. Deferred to DOMContentLoaded because
+// applyFilters() calls applyPersDevFilters(), which is declared in a later
+// <script> block (base.html) that hasn't run yet at this point in the parse.
+document.addEventListener('DOMContentLoaded', applyFilters);
+
 function filterLevel(btn) {
   btn.parentNode.querySelectorAll('.filter-btn').forEach(function(b) { b.classList.remove('active'); });
   btn.classList.add('active');
@@ -337,7 +346,12 @@ function applyFilters() {
 
   // Dimming applies to every row, including whichever tab isn't currently
   // shown, so it's already correct the moment you switch tabs.
-  applyPersDevFilters('.roster-tab-table tbody tr', {
+  // Guarded: applyPersDevFilters is declared in a later <script> block
+  // (base.html), so an applyFilters() call that fires before that block
+  // has run (e.g. a browser-restored form control dispatching 'change'
+  // mid-parse) would otherwise throw before reaching the pro-player
+  // filtering below.
+  if (typeof applyPersDevFilters === 'function') applyPersDevFilters('.roster-tab-table tbody tr', {
     negId: 'negpers-filter', posId: 'pospers-filter',
     devGoodId: 'devgood-filter', devBadId: 'devbad-filter',
   });

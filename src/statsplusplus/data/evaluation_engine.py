@@ -2255,7 +2255,7 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
 
             # Component scores for two-way: compute hitter components
             offensive_grade = compute_offensive_grade(hitter_tools, h_weights, hitter_transforms)
-            baserunning_value = compute_baserunning_value(hitter_tools, h_weights)
+            baserunning_value = compute_baserunning_value(hitter_tools, h_weights, hitter_transforms)
             defensive_value = compute_defensive_value(defense_tools, def_weights)
 
             # Apply carrying tool bonus to offensive grade (two-way hitter side)
@@ -2389,7 +2389,7 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
 
             # Component scores for hitters
             offensive_grade = compute_offensive_grade(hitter_tools, h_weights, hitter_transforms)
-            baserunning_value = compute_baserunning_value(hitter_tools, h_weights)
+            baserunning_value = compute_baserunning_value(hitter_tools, h_weights, hitter_transforms)
             defensive_value = compute_defensive_value(defense_tools, def_weights)
 
             # Apply carrying tool bonus to offensive grade

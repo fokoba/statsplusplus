@@ -1237,29 +1237,54 @@ _PERSONALITY_TYPE_POSITIVE = {"Fan Fav", "Sparkplug", "Captain", "Humble", "Pran
 _PERSONALITY_TYPE_NEGATIVE = {"Selfish", "Outspoken", "Unmotivated", "Disruptive"}
 
 
-def _personality_type_info(ptype):
+# Trait-combo inference for players OOTP hasn't assigned a real Type to yet
+# (blank/"Never Scouted" or in-game "Unknown") — most valuable for 16-20
+# year olds who haven't been scouted long enough for a Type to pop, even
+# though the underlying traits driving it are already visible. A real
+# OOTP-assigned Type always wins over inference; this only fills the gap
+# when there isn't one yet. Confirmed by real examples that popped the
+# matching Type later: Low Work Ethic + Low Leadership + Low Loyalty ->
+# Alex Rhodes, Armando Peraza, Gene Milam all went Disruptive. High
+# Financial Ambition + Low Leadership + Low Loyalty -> Thomas Egan, Nate
+# Morley both went Selfish.
+def _infer_personality_type(wrk_ethic, lead, loy, greed):
+    if wrk_ethic == "L" and lead == "L" and loy == "L":
+        return {"label": "Likely Disruptive", "class": "neg"}
+    if greed == "H" and lead == "L" and loy == "L":
+        return {"label": "Likely Selfish", "class": "neg"}
+    return None
+
+
+def _personality_type_info(ptype, wrk_ethic=None, lead=None, loy=None, greed=None):
     """Classify a raw personality_type value for display + dim/highlight.
 
     Returns {"label", "class"} where class is one of:
       "pos"       - positive archetype (bold/highlight candidate)
-      "neg"       - negative archetype (dim candidate)
+      "neg"       - negative archetype (dim candidate) — real Type or
+                    trait-combo inference (see _infer_personality_type)
       "neutral"   - "Normal", genuinely no personality quirk
-      "unknown"   - OOTP itself hasn't determined a type yet ("Unknown")
+      "unknown"   - OOTP itself hasn't determined a type yet, and traits
+                    don't match an inference rule either
       "unscouted" - this app has never synced a Type for this player at all
                     (NULL/blank — distinct from OOTP's own "Unknown", since
-                    once a CSV sync covers them we'll know which it is)
+                    once a CSV sync covers them we'll know which it is),
+                    and traits don't match an inference rule either
     """
+    if ptype and ptype != "Unknown":
+        if ptype == "Normal":
+            return {"label": "Normal", "class": "neutral"}
+        if ptype in _PERSONALITY_TYPE_POSITIVE:
+            return {"label": ptype, "class": "pos"}
+        if ptype in _PERSONALITY_TYPE_NEGATIVE:
+            return {"label": ptype, "class": "neg"}
+        return {"label": ptype, "class": "neutral"}
+
+    inferred = _infer_personality_type(wrk_ethic, lead, loy, greed)
+    if inferred:
+        return inferred
     if not ptype:
         return {"label": "Never Scouted", "class": "unscouted"}
-    if ptype == "Normal":
-        return {"label": "Normal", "class": "neutral"}
-    if ptype == "Unknown":
-        return {"label": "Unknown", "class": "unknown"}
-    if ptype in _PERSONALITY_TYPE_POSITIVE:
-        return {"label": ptype, "class": "pos"}
-    if ptype in _PERSONALITY_TYPE_NEGATIVE:
-        return {"label": ptype, "class": "neg"}
-    return {"label": ptype, "class": "neutral"}
+    return {"label": "Unknown", "class": "unknown"}
 
 
 def _development_flags(wrk_ethic, intel, adaptability):
@@ -1276,7 +1301,7 @@ def _personality_fields(intel, wrk_ethic, lead, loy, greed, adaptability, ptype)
     personality_type_class (Type column + dim/highlight driver), and
     dev_good/dev_bad (the separate development dim/highlight driver)."""
     buffs, concerns = _personality_notes(intel, wrk_ethic, lead, loy, greed, adaptability)
-    type_info = _personality_type_info(ptype)
+    type_info = _personality_type_info(ptype, wrk_ethic, lead, loy, greed)
     dev_good, dev_bad = _development_flags(wrk_ethic, intel, adaptability)
     return {
         "buffs": buffs, "concerns": concerns,

@@ -78,7 +78,21 @@ def _find_latest(folders: list[Path], must_contain: list[str],
     for folder in folders:
         if not folder.exists():
             continue
-        for p in folder.iterdir():
+        # A folder can pass .exists() (its metadata is stat-able) while
+        # iterdir() still raises PermissionError — confirmed 2026-09-30:
+        # macOS denies listing inside a sandboxed App Sandbox Container path
+        # (eMLB's OOTP27 import_export folder) for a process without Full
+        # Disk Access, even though the folder itself "exists". Without this
+        # guard, one inaccessible folder aborted the ENTIRE per-league
+        # ingest pass (ingest_once's caller only catches at the top level),
+        # silently blocking every other category too — including the
+        # Downloads-sourced Team Salary check, which has nothing to do with
+        # this folder and would otherwise have succeeded independently.
+        try:
+            entries = list(folder.iterdir())
+        except (PermissionError, OSError):
+            continue
+        for p in entries:
             if not p.is_file():
                 continue
             name = p.name.lower()
@@ -285,7 +299,10 @@ def ingest_once(league_slug: str, league_dir) -> dict[str, str]:
     salary_candidates = list(DOWNLOADS.glob("Team Salary*.html")) if DOWNLOADS.exists() else []
     for folder in folders:
         if folder.exists():
-            salary_candidates += list(folder.glob("Team Salary*.html"))
+            try:
+                salary_candidates += list(folder.glob("Team Salary*.html"))
+            except (PermissionError, OSError):
+                pass  # see _find_latest's matching guard for why .exists() isn't enough
     salary_file, salary_ratio = _best_salary_match(salary_candidates, league_dir)
     if salary_file is None:
         summary["team_salary"] = "not found"

@@ -235,7 +235,6 @@ def find_targets(bucket, min_ovr=50, sellers_only=False, include_controlled=Fals
             AND pi.year = ? AND pi.split_id = 1
         WHERE p.level = '1'
           AND COALESCE(r.ovr, r.composite_score) >= ?
-          AND r.league_id > 0
           AND c.player_id IS NOT NULL
           AND c.salary_0 > ?
           {pos_filter}

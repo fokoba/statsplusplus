@@ -3210,7 +3210,7 @@ def _league_pos_rankings(conn, year):
         FROM mlb_fielding_stats f
         JOIN players p ON f.player_id = p.player_id
         JOIN latest_ratings r ON f.player_id = r.player_id
-        WHERE p.level = 1 AND f.year = ? AND f.position != 1 AND r.league_id > 0
+        WHERE p.level = 1 AND f.year = ? AND f.position != 1
         ORDER BY f.player_id, f.g DESC
     """, (year,)).fetchall():
         if r['player_id'] in seen:
@@ -3232,7 +3232,7 @@ def _league_pos_rankings(conn, year):
         FROM mlb_pitching_stats ps
         JOIN players p ON ps.player_id = p.player_id
         JOIN latest_ratings r ON ps.player_id = r.player_id
-        WHERE p.level = 1 AND ps.year = ? AND ps.split_id = 1 AND r.league_id > 0
+        WHERE p.level = 1 AND ps.year = ? AND ps.split_id = 1
         GROUP BY ps.player_id
     """, (year,)).fetchall():
         bucket = 'SP' if r['role'] == 11 else 'RP'
@@ -3466,7 +3466,7 @@ def get_depth_chart(team_id):
         FROM players p
         JOIN latest_ratings r ON p.player_id = r.player_id
         JOIN contracts c ON p.player_id = c.player_id
-        WHERE p.team_id = ? AND p.level = 1 AND r.league_id > 0
+        WHERE p.team_id = ? AND p.level = 1
     ''', (team_id,)).fetchall()
 
     # Fielding and batting games for year-1 position assignment
@@ -3588,7 +3588,6 @@ def get_depth_chart(team_id):
         WHERE {ORG_ID_SQL} = ?
           AND pf.level != 'MLB'
           AND (pf.fv >= 50 OR (pf.fv >= 40 AND pf.level IN ('AAA', 'AA')))
-          AND r.league_id > 0
           AND pf.eval_date = (SELECT MAX(pf2.eval_date) FROM prospect_fv pf2
                               WHERE pf2.player_id = pf.player_id)
         GROUP BY pf.player_id

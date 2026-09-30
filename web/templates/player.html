@@ -570,10 +570,12 @@
   </div>
   {% if p.pace_surplus_detail %}
   <div class="pace-surplus-compare">
+    {% if p.surplus_detail and p.surplus_detail.total %}
     <div class="pace-surplus-row">
       <span class="pace-surplus-label">Current valuation, full remaining control</span>
       <span class="value {% if p.surplus_detail.total.base > 0 %}pos{% elif p.surplus_detail.total.base < 0 %}neg{% endif %}">{{ p.surplus_detail.total.base|money }}</span>
     </div>
+    {% endif %}
     <div class="pace-surplus-row">
       <span class="pace-surplus-label">If this {{ p.war_pace.pace_war }}-WAR pace holds going forward
         <span class="info-tip" title="Same valuation engine, with this season's pace substituted as the assumed talent level for every remaining contract/control year — not just this season.">ⓘ</span>

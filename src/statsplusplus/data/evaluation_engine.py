@@ -219,6 +219,19 @@ DEFAULT_CARRYING_TOOL_CONFIG: dict[str, Any] = {
 }
 
 
+def _peak_age(bucket: str, weights) -> int:
+    """Per-league peak age (MODEL_PARAMS override in model_weights.json,
+    falling back to the PEAK_AGE_PITCHER/PEAK_AGE_HITTER defaults).
+    Empirically derived per-league from real career-WAR trajectories
+    (2026-09-30) — see contract_value.py's ``_peak_age`` for the same
+    pattern."""
+    from statsplusplus.evaluation.constants import PEAK_AGE_PITCHER, PEAK_AGE_HITTER
+    is_pitcher = bucket in ("SP", "RP")
+    key = "PEAK_AGE_PITCHER" if is_pitcher else "PEAK_AGE_HITTER"
+    default = PEAK_AGE_PITCHER if is_pitcher else PEAK_AGE_HITTER
+    return weights.get_param(key, default)
+
+
 # ---------------------------------------------------------------------------
 # Configuration loading
 # ---------------------------------------------------------------------------
@@ -2582,7 +2595,7 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
                     current_year=current_year,
                 )
                 if mlb_stat_2080_values:
-                    peak_age = 27 if is_pitcher else 28
+                    peak_age = _peak_age(bucket, _mw)
                     player_age = row_dict.get("age") or 28
                     composite_score = compute_composite_mlb(
                         tool_only_score, mlb_stat_2080_values,
@@ -2649,7 +2662,7 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
 
                     # Young player discount for negative MiLB signal
                     player_age = row_dict.get("age") or 28
-                    peak_age = 27 if is_pitcher else 28
+                    peak_age = _peak_age(bucket, _mw)
                     if player_age < peak_age and tool_only_score > milb_signal:
                         age_factor = max(0.3, 1.0 - (peak_age - player_age) * 0.12)
                         milb_blend *= age_factor

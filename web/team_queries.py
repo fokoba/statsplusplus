@@ -103,6 +103,56 @@ def _get_eval_date():
     return ed
 
 
+def _get_all_war_paces_cached(conn):
+    """Bulk {player_id: pace_dict} from war_pace.get_all_war_paces(), cached
+    per request+league. That function does a full league-wide scan across
+    mlb_batting_stats/mlb_pitching_stats; without this cache a single
+    /team/<id> render calls it independently from multiple call sites
+    (overview, league surplus rankings, hitters tab, pitchers tab)."""
+    from flask import g as _g, has_request_context as _hrc
+    league_dir = get_cfg().league_dir
+    if _hrc():
+        cache = getattr(_g, "_tq_war_paces_cache", None)
+        if cache is not None and cache.get("league_dir") == league_dir:
+            return cache["paces"]
+    from war_pace import get_all_war_paces as _get_all_war_paces
+    paces = _get_all_war_paces(league_dir=league_dir, conn=conn)
+    if _hrc():
+        _g._tq_war_paces_cache = {"league_dir": league_dir, "paces": paces}
+    return paces
+
+
+def _get_all_teams_combined_pace_cached(conn):
+    """{team_id: {combined_pace, n_qualifying}}, built from the cached bulk
+    WAR paces above instead of re-running war_pace.get_all_teams_combined_pace()
+    (which would otherwise re-scan via get_all_war_paces on every call)."""
+    from flask import g as _g, has_request_context as _hrc
+    league_dir = get_cfg().league_dir
+    if _hrc():
+        cache = getattr(_g, "_tq_combined_pace_cache", None)
+        if cache is not None and cache.get("league_dir") == league_dir:
+            return cache["combined"]
+    paces = _get_all_war_paces_cached(conn)
+    out = {}
+    if paces:
+        pid_qs = ",".join("?" * len(paces))
+        rows = conn.execute(
+            f"SELECT player_id, team_id FROM players WHERE level='1' AND player_id IN ({pid_qs})",
+            list(paces.keys()),
+        ).fetchall()
+        for r in rows:
+            tid = r["team_id"]
+            if not tid:
+                continue
+            pace = paces[r["player_id"]]["pace_war"]
+            entry = out.setdefault(tid, {"combined_pace": 0.0, "n_qualifying": 0})
+            entry["combined_pace"] = round(entry["combined_pace"] + pace, 2)
+            entry["n_qualifying"] += 1
+    if _hrc():
+        _g._tq_combined_pace_cache = {"league_dir": league_dir, "combined": out}
+    return out
+
+
 def _peak_surplus(fv_continuous, age, level, bucket, ovr=None, pot=None):
     """Best single expected-grade projected year of surplus (money-scaled),
     or None when there isn't enough data (no prospect_fv row for this
@@ -256,8 +306,9 @@ def get_summary(team_id=None):
     except Exception:
         have_any = False
 
-    from war_pace import get_team_combined_pace as _get_team_combined_pace
-    _pace = _get_team_combined_pace(tid, league_dir=get_cfg().league_dir, conn=conn)
+    _pace = _get_all_teams_combined_pace_cached(conn).get(
+        tid, {"combined_pace": 0.0, "n_qualifying": 0}
+    )
 
     return {
         "game_date": state["game_date"], "year": state["year"], "phase": phase,
@@ -350,9 +401,8 @@ def _league_surplus_rankings(team_id):
         d = divisor if divisor is not None else _money_divisor()
         return {"rank": rank, "n": n, "vs_median": round((my - med) / d, 1)}
 
-    from war_pace import get_all_teams_combined_pace as _get_all_teams_combined_pace
     pace_by_team = {t: 0.0 for t in org_tids}
-    for t, d in _get_all_teams_combined_pace(league_dir=get_cfg().league_dir, conn=conn).items():
+    for t, d in _get_all_teams_combined_pace_cached(conn).items():
         if t in pace_by_team:
             pace_by_team[t] = d["combined_pace"]
 
@@ -754,8 +804,7 @@ def get_roster_hitters(team_id=None):
                 round(100 * (s_k or 0) / s_pa, 1) if s_pa else None,
             )
 
-    from war_pace import get_all_war_paces as _get_all_war_paces
-    _paces = _get_all_war_paces(league_dir=get_cfg().league_dir, conn=conn)
+    _paces = _get_all_war_paces_cached(conn)
 
     result = []
     team_g, dpw, salaries = _pap_context(conn, tid, year)
@@ -929,8 +978,7 @@ def get_roster_pitchers(team_id=None):
             lob_denom = (s_ha + s_bb + s_hp) - 1.4 * s_hra
             career_lob[pid] = ((s_ha + s_bb + s_hp) - s_r) / lob_denom if lob_denom > 0 else None
 
-    from war_pace import get_all_war_paces as _get_all_war_paces
-    _paces = _get_all_war_paces(league_dir=get_cfg().league_dir, conn=conn)
+    _paces = _get_all_war_paces_cached(conn)
 
     result = []
     team_g, dpw, salaries = _pap_context(conn, tid, year)
@@ -4487,8 +4535,7 @@ def get_org_minor_league_roster(parent_team_id):
 
     # "On pace for a historic season" (2026-09-30) — bulk-computed once for
     # the whole org roster, not per-row, so the page load stays fast.
-    from war_pace import get_all_war_paces as _get_all_war_paces
-    _war_paces = _get_all_war_paces(league_dir=get_cfg().league_dir, conn=conn)
+    _war_paces = _get_all_war_paces_cached(conn)
 
     hitters = []
     pitchers = []

@@ -883,6 +883,39 @@ def _detect_amateur_levels(conn):
     return levels
 
 
+# An uploaded pool is considered "stale" (a prior draft's) when fewer than this
+# fraction of its players are still on the amateur (draft-eligible) levels — the
+# rest have been drafted and moved into org systems.
+_POOL_FRESH_MIN_AMATEUR_FRAC = 0.5
+
+
+def _pool_is_stale(conn, pool_ids, amateur_levels):
+    """True if the uploaded pool looks like a *prior* draft's pool — i.e. most of
+    its players are no longer draft-eligible (they've been drafted off the
+    amateur levels). Uses the league's detected amateur levels; falls back to the
+    standard set when detection is empty. Empty pool → not stale (nothing to
+    judge). Conservative: only flags stale when clearly so.
+
+    Sample the first 300 IDs (draft_pool.json is rank-ordered — see
+    _pool_is_stale in scripts/draft_board.py for the reasoning on why sampling
+    the front of the list beats scanning the whole pool).
+    Ported from upstream tfalsone/statsplusplus 59c5c5c.
+    """
+    if not pool_ids:
+        return False
+    levels = set(amateur_levels) or {'0', '10', '11'}
+    # Sample to bound the query for very large pools.
+    sample = pool_ids if len(pool_ids) <= 300 else pool_ids[:300]
+    ph = ",".join("?" * len(sample))
+    rows = conn.execute(
+        f"SELECT level FROM players WHERE player_id IN ({ph})", sample).fetchall()
+    if not rows:
+        # None of the pool IDs resolve in this DB — treat as stale/foreign.
+        return True
+    amateur = sum(1 for r in rows if str(r[0]) in levels)
+    return (amateur / len(rows)) < _POOL_FRESH_MIN_AMATEUR_FRAC
+
+
 def _annotate_adp(results):
     """Add expected draft position (ADP) data to each prospect entry.
 
@@ -1670,6 +1703,16 @@ def get_draft_pool():
             uploaded_pids = _json.loads(pool_path.read_text()).get("player_ids", [])
     except Exception:
         pass
+
+    if uploaded_pids:
+        # Staleness guard: an uploaded draft_pool.json persists on disk, but the
+        # players in a *prior* draft's pool get drafted and moved off the amateur
+        # levels (level 0/10/11 → org levels). If most of the uploaded pool is no
+        # longer draft-eligible, it's a stale pool from a past draft — discard it
+        # and fall through to the live/DB-derived pool (per draft-page spec
+        # State 3: "new season → previous draft's IDs don't match current pool").
+        if _pool_is_stale(conn, uploaded_pids, amateur_levels):
+            uploaded_pids = None
 
     # Try to get draft picks from API to determine state
     picks = []

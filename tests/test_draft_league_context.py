@@ -68,3 +68,47 @@ def test_no_arg_falls_back_to_global(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "get_league_dir", lambda slug=None: league_dir)
 
     assert db._load_pool_ids() == [7, 8]
+
+
+# ---------------------------------------------------------------------------
+# Stale-pool detection (auto-draft list showed a prior draft's players)
+# ---------------------------------------------------------------------------
+
+def _mk_conn_with_levels(tmp_path, id_levels):
+    """A minimal DB with a players(player_id, level) table seeded from a dict."""
+    import sqlite3
+    p = tmp_path / "league.db"
+    conn = sqlite3.connect(str(p))
+    conn.execute("CREATE TABLE players (player_id INTEGER, level TEXT)")
+    conn.executemany("INSERT INTO players VALUES (?,?)",
+                     [(pid, lvl) for pid, lvl in id_levels.items()])
+    conn.commit()
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def test_pool_is_stale_when_players_drafted(tmp_path):
+    """A pool whose players have mostly moved off amateur levels (drafted into
+    orgs) is stale."""
+    # 8 of 10 now on org levels (1/3/4), only 2 still amateur (0) → stale.
+    id_levels = {i: ("0" if i < 2 else str((i % 4) + 1)) for i in range(10)}
+    conn = _mk_conn_with_levels(tmp_path, id_levels)
+    assert db._pool_is_stale(conn, list(id_levels)) is True
+
+
+def test_pool_is_fresh_when_mostly_amateur(tmp_path):
+    """A pool that's mostly still draft-eligible is fresh (not stale)."""
+    id_levels = {i: ("0" if i < 8 else "1") for i in range(10)}  # 80% amateur
+    conn = _mk_conn_with_levels(tmp_path, id_levels)
+    assert db._pool_is_stale(conn, list(id_levels)) is False
+
+
+def test_pool_is_stale_when_ids_dont_resolve(tmp_path):
+    """Pool IDs that don't exist in this DB (foreign/wrong league) → stale."""
+    conn = _mk_conn_with_levels(tmp_path, {1: "0"})
+    assert db._pool_is_stale(conn, [9001, 9002, 9003]) is True
+
+
+def test_empty_pool_not_stale(tmp_path):
+    conn = _mk_conn_with_levels(tmp_path, {1: "0"})
+    assert db._pool_is_stale(conn, []) is False

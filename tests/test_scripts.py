@@ -829,8 +829,9 @@ class TestComputeOrgNeeds:
                 PRIMARY KEY (player_id, snapshot_date)
             );
             CREATE VIEW latest_ratings AS
-                SELECT * FROM ratings
-                WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM ratings);
+                SELECT r.* FROM ratings r
+                WHERE r.snapshot_date = (SELECT MAX(r2.snapshot_date) FROM ratings r2
+                    WHERE r2.player_id = r.player_id);
             CREATE TABLE prospect_fv (
                 player_id INTEGER, eval_date TEXT, fv INTEGER, fv_str TEXT,
                 level TEXT, bucket TEXT, prospect_surplus INTEGER, risk TEXT,

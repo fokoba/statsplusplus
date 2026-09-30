@@ -83,8 +83,9 @@ CREATE TABLE IF NOT EXISTS ratings (
     PRIMARY KEY (player_id, snapshot_date)
 );
 CREATE VIEW IF NOT EXISTS latest_ratings AS
-    SELECT * FROM ratings
-    WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM ratings);
+    SELECT r.* FROM ratings r
+    WHERE r.snapshot_date = (SELECT MAX(r2.snapshot_date) FROM ratings r2
+        WHERE r2.player_id = r.player_id);
 CREATE VIEW IF NOT EXISTS mlb_batting_stats AS
     SELECT * FROM batting_stats WHERE league_id IS NULL;
 CREATE VIEW IF NOT EXISTS mlb_pitching_stats AS

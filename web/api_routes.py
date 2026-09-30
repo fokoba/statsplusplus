@@ -617,12 +617,15 @@ def api_draft_sim():
     """Run a draft simulation."""
     data = request.get_json(silent=True) or {}
     try:
-        from draft_board import load_board, simulate_draft
+        from draft_board import load_board, simulate_draft, StalePoolError
         from draft_settings import load_settings
 
         # Session-aware league, not the process-global active league (upstream 0411fb0).
         league_dir = _get_cfg().league_dir
-        rows, adp, needs, num_teams, conn = load_board(league_dir)
+        try:
+            rows, adp, needs, num_teams, conn = load_board(league_dir)
+        except StalePoolError as e:
+            return jsonify({"error": str(e), "stale_pool": True}), 409
         pick_pos = data.get("pick", 30)
         num_rounds = data.get("rounds", 7)
         seed = data.get("seed")
@@ -657,12 +660,15 @@ def api_draft_upload_list():
     exclude_pids = set(data.get("exclude", []))
 
     try:
-        from draft_board import load_board, build_pick_list
+        from draft_board import load_board, build_pick_list, StalePoolError
         from draft_settings import load_settings
 
         # Session-aware league, not the process-global active league (upstream 0411fb0).
         league_dir = _get_cfg().league_dir
-        rows, adp, needs, num_teams, conn = load_board(league_dir)
+        try:
+            rows, adp, needs, num_teams, conn = load_board(league_dir)
+        except StalePoolError as e:
+            return jsonify({"ok": False, "error": str(e), "stale_pool": True}), 409
 
         if exclude_pids:
             rows = [r for r in rows if r["player_id"] not in exclude_pids]

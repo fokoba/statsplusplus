@@ -259,11 +259,15 @@ def calc_fv(
 
     fv = max(20.0, fv)
 
-    # Snap to nearest 5
-    if gap <= 3:
-        fv_grade = round(fv / 5) * 5
-    else:
-        fv_grade = int(fv / 5) * 5
+    # Snap to nearest 5. fv_continuous already discounts the unrealized ceiling
+    # (via the peak = ovr + gap*closure*bust blend and ceil_weight above), so we
+    # round consistently regardless of gap. Previously high-gap players were
+    # FLOORED (int()) while near-ceiling players were ROUNDED — a second penalty
+    # on upside that produced a full-grade cliff between two players 0.1 apart in
+    # continuous FV (e.g. a near-ceiling glove-first SS at 54.0 -> 55 vs a
+    # high-upside COF at 53.96 -> 50). The gap discount belongs in the continuous
+    # value, not the rounding step.
+    fv_grade = round(fv / 5) * 5
 
     # Continuous FV for surplus interpolation
     fv_continuous = fv

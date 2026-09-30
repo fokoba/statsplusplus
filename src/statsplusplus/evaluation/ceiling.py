@@ -56,6 +56,9 @@ def compute_ceiling(
     age: int = 25,
     ratings_scale: str = "1-100",
     transforms: dict[str, list[float]] | None = None,
+    run_space: dict | None = None,
+    bucket: str | None = None,
+    positional_models: dict | None = None,
 ) -> int:
     """Compute Ceiling_Score from potential tool ratings.
 
@@ -77,6 +80,10 @@ def compute_ceiling(
         role: Pitcher role "SP" or "RP" (pitchers only).
         age: Player's current age (for age-weighted blend).
         ratings_scale: League ratings scale for peak bonus cap.
+        run_space/bucket/positional_models: run-space calibration — when present
+            for a hitter, the raw ceiling is computed via the run-space spine on
+            POTENTIAL tools (consistent with the run-space composite; a maxed
+            player's ceiling then ≈ his composite, no phantom grade-space upside).
 
     Returns:
         Integer ceiling score in [20, 80], never below composite_score.
@@ -86,6 +93,17 @@ def compute_ceiling(
         raw_ceiling = compute_composite_pitcher(
             potential_tools, weights, arsenal or {}, stamina, role, transforms,
         )
+    elif run_space and bucket:
+        # Run-space ceiling: potential tools through the same run spine as the
+        # composite (no observed blend — ceiling is the tool-projected peak).
+        # Skip the grade-space peak-tool bonus below (a grade-space compensator).
+        raw_ceiling = compute_composite_hitter(
+            potential_tools, weights, defense or {}, def_weights or {}, transforms,
+            run_space=run_space, bucket=bucket, positional_models=positional_models,
+        )
+        pot_weight = _potential_weight(age)
+        raw_ceiling = round(raw_ceiling * pot_weight + composite_score * (1.0 - pot_weight))
+        return max(20, min(80, max(raw_ceiling, composite_score)))
     else:
         raw_ceiling = compute_composite_hitter(
             potential_tools, weights, defense or {}, def_weights or {}, transforms,
@@ -134,6 +152,9 @@ def compute_true_ceiling(
     stamina: int = 50,
     role: str = "SP",
     transforms: dict[str, list[float]] | None = None,
+    run_space: dict | None = None,
+    bucket: str | None = None,
+    positional_models: dict | None = None,
 ) -> int:
     """Compute the true ceiling from potential tools with no age blend.
 
@@ -149,6 +170,11 @@ def compute_true_ceiling(
     if is_pitcher:
         raw = compute_composite_pitcher(
             potential_tools, weights, arsenal or {}, stamina, role, transforms,
+        )
+    elif run_space and bucket:
+        raw = compute_composite_hitter(
+            potential_tools, weights, defense or {}, def_weights or {}, transforms,
+            run_space=run_space, bucket=bucket, positional_models=positional_models,
         )
     else:
         raw = compute_composite_hitter(

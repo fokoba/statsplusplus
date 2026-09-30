@@ -154,6 +154,17 @@ class LeagueConfig:
             self._mlb_tids = db_tids & configured if configured else db_tids
         return self._mlb_tids
 
+    @property
+    def primary_league_id(self) -> int | None:
+        """The primary (top-level MLB) league id, from /lgdata via refresh.
+
+        Used to scope evaluation/calibration to *our* MLB and exclude co-resident
+        top-level leagues (e.g. NPB in PPL). None when the universe has a single
+        top-level league (older DBs / leagues that don't need scoping) — callers
+        treat None as "no scoping" (see db.primary_league_predicate).
+        """
+        return self._s.get("primary_league_id")
+
     def team_name(self, tid: int) -> str:
         return self.team_names_map.get(tid, "?")
 
@@ -257,3 +268,33 @@ def league_minimum(league_dir: Path) -> int:
         except (json.JSONDecodeError, OSError, ValueError):
             pass
     return DEFAULT_MINIMUM_SALARY
+
+
+def games_per_season(league_dir: Path) -> int:
+    """Get the league's full-season schedule length (games).
+
+    Not a safe universal 162 — confirmed wrong for PPL specifically
+    (2026-09-30): PPL is set in 1955, the real-world 154-game-schedule era
+    (before the 1961/62 expansion to 162), and validating a WAR-pace
+    calculation against two real PPL players' known season-to-date WAR
+    only matched their expected full-season pace when prorated over 154
+    games, not 162. Most of this codebase still hardcodes 162 directly
+    (season_pct, service-time, playoff-odds remaining-games, etc.) — that's
+    a real latent bug for PPL beyond just this reader, not fixed here.
+
+    Args:
+        league_dir: Path to the league data directory.
+
+    Returns:
+        Games in a full season for this league (default 162).
+    """
+    import json
+
+    settings_path = league_dir / "config" / "league_settings.json"
+    if settings_path.exists():
+        try:
+            s = json.loads(settings_path.read_text())
+            return int(s.get("games_per_season", 162))
+        except (json.JSONDecodeError, OSError, ValueError):
+            pass
+    return 162

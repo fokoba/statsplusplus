@@ -19,7 +19,7 @@ from statsplusplus.config.ratings import norm as _norm_raw, norm_floor as _norm_
 from statsplusplus.utils.formatting import height_str as _height_str
 from statsplusplus.utils.positions import display_pos as _display_pos
 from statsplusplus.evaluation.surplus import calc_pap
-from statsplusplus.config.league_config import dollars_per_war as _dpw_pkg
+from statsplusplus.config.league_config import dollars_per_war as _dpw_pkg, games_per_season as _gps_pkg
 from statsplusplus.utils.positions import ROLE_MAP
 from percentiles import get_hitter_percentiles, get_pitcher_percentiles, get_fielding_percentiles, available_pctile_years, available_pctile_levels, get_percentile_history, get_percentile_history_all_levels, get_fielding_percentile_history
 from web_league_context import (get_db, get_cfg, team_abbr_map, team_names_map, level_map, pos_map,
@@ -28,11 +28,33 @@ from web_league_context import (get_db, get_cfg, team_abbr_map, team_names_map, 
 def _norm(val):
     return _norm_raw(val, get_cfg().ratings_scale)
 
+
+def _get_dev_speed(conn, pid):
+    """Fetch the stored development-speed metric for a player (latest eval_date),
+    or None if absent. Returns the dict the player template consumes."""
+    try:
+        cols = [c[1] for c in conn.execute("PRAGMA table_info(dev_speed)").fetchall()]
+        if not cols:
+            return None
+        row = conn.execute(
+            "SELECT * FROM dev_speed WHERE player_id=? ORDER BY eval_date DESC LIMIT 1",
+            (pid,)).fetchone()
+        if not row:
+            return None
+        d = dict(zip(cols, row))
+        d["available"] = bool(d.get("available"))
+        return d
+    except Exception:
+        return None
+
 def _norm_floor(val, floor=20):
     return _norm_floor_raw(val, get_cfg().ratings_scale, floor)
 
 def _dollars_per_war():
     return _dpw_pkg(get_cfg().league_dir)
+
+def _games_per_season():
+    return _gps_pkg(get_cfg().league_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -1441,6 +1463,8 @@ def get_player(pid):
     # Surplus breakdown
     surplus_detail = None
     outcome_probs = None
+    war_pace = None
+    pace_surplus_detail = None
     try:
         if valuation.get("type") == "MLB":
             import contract_value as _cv
@@ -1468,6 +1492,25 @@ def get_player(pid):
                     _pw = _recent_mlb_war(conn, pid, is_pitcher)
                     _ld_rec = get_cfg().league_dir
                     surplus_detail["recommended"] = _rec_fn(_pw, _dpw_fn(_ld_rec), age, _lm_fn(_ld_rec))
+
+            # WAR pace + pace-recalculated surplus (2026-09-30) — "if this
+            # player's current-season pace holds, what would his surplus be
+            # going forward" — every MLB player with a large enough
+            # current-season sample gets this, not just historic-pace ones,
+            # per the user's own scope choice.
+            from war_pace import get_war_pace as _get_war_pace
+            war_pace = _get_war_pace(pid, league_dir=get_cfg().league_dir, conn=conn)
+            if war_pace is not None:
+                cv_paced = _cv.contract_value(pid, league_dir=get_cfg().league_dir,
+                                               pace_war_override=war_pace["pace_war"])
+                if cv_paced and cv_paced.get("breakdown"):
+                    pace_surplus_detail = {
+                        "rows": [{"year": b["year"], "age": b["age"], "war": round(b["war_base"], 1),
+                                  "value": b["market_value"], "salary": b["salary_net"],
+                                  "surplus": b["surplus"]}
+                                 for b in cv_paced["breakdown"]],
+                        "total": {k: v for k, v in cv_paced["total_surplus"].items()},
+                    }
         elif valuation.get("type") == "prospect":
             import prospect_value as _pv
             fv = valuation.get("fv", 0)
@@ -1757,7 +1800,7 @@ def get_player(pid):
         if pit_stats and pit_stats[-1]["year"] == _pap_year:
             _war += pit_stats[-1]["war"]
         _dpw = _dollars_per_war()
-        pap = calc_pap(_war, _pap_sal, _pap_tg, _dpw)
+        pap = calc_pap(_war, _pap_sal, _pap_tg, _dpw, games_per_season=_games_per_season())
 
     # MLB context: percentile + tier for composite/ceiling vs MLB at position
     mlb_ctx = None
@@ -2101,6 +2144,7 @@ def get_player(pid):
         "bat_career": bat_career, "pit_career": pit_career,
         "bat_splits": bat_splits, "pit_splits": pit_splits,
         "surplus_detail": surplus_detail, "outcome_probs": outcome_probs, "percentiles": percentiles,
+        "war_pace": war_pace, "pace_surplus_detail": pace_surplus_detail,
         "pctile_splits": pctile_splits, "fielding_stats": fielding_stats, "fielding_career": fielding_career,
         "fielding_pctiles": fielding_pctiles, "fld_pctile_years": fld_pctile_years,
         "bat_percentiles": bat_percentiles, "bat_pctile_splits": bat_pctile_splits,
@@ -2109,6 +2153,7 @@ def get_player(pid):
         "prospect_comps": prospect_comps, "comp_stats": comp_stats, "pap": pap,
         "snapshot_deltas": snapshot_deltas,
         "dev_history": dev_history,
+        "dev_speed": _get_dev_speed(conn, pid),
         "composite_score": composite_score,
         "ceiling_score": ceiling_score,
         "true_ceiling": eval_data.get("true_ceiling"),
@@ -2235,7 +2280,7 @@ def get_player_popup(pid):
             (org_id, org_id, f"{year}-01-01")).fetchone()[0]
         _dpw = _dollars_per_war()
         _sal = conn.execute("SELECT salary_0 FROM contracts WHERE player_id=?", (pid,)).fetchone()
-        _pap = calc_pap(_war, _sal[0] if _sal else 0, _tg, _dpw)
+        _pap = calc_pap(_war, _sal[0] if _sal else 0, _tg, _dpw, games_per_season=_games_per_season())
 
 
     pos_str = ROLE_MAP.get(p["role"], pos_map().get(p["pos"], "?")) if is_pitcher else pos_map().get(p["pos"], "?")

@@ -1,0 +1,208 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h1 class="page-title">{{ team_name }} — Coaching Staff</h1>
+
+{% if data.n_total == 0 %}
+<div class="panel">
+  <p>No personnel data found. This page reads a manually-exported OOTP "All Personnel" file
+  (Custom Upload → Sync Personnel, or the automatic local-export pickup) — no live StatsPlus
+  API covers coaching staff, so this needs a fresh export to populate.</p>
+</div>
+{% else %}
+
+<div class="mb-subtitle">
+  Every coach and executive across the whole org (MLB + every affiliate), grouped by role.
+  Rating tiers are colored on OOTP's own Poor → LEGENDARY scale — bright green is a genuine
+  strength, orange/red is a real weakness worth knowing about before you lean on that skill.
+  Personality/style fields are shown as plain text since (per OOTP's own docs) most aren't
+  simply good-or-bad — a Controlling manager is a tradeoff, not a flaw. "Composite" is this
+  app's own weighted blend of each coach's most important rating(s) for their job — see the
+  code comment in coaching_queries.py for exactly how, it's a judgment call, not something
+  OOTP defines.
+</div>
+
+{# ── Staff Chemistry ── #}
+<div class="summary-bar">
+  <div class="summary-item kpi-accent">
+    <span class="label">Pro Staff Chemistry</span>
+    <span class="value pos">+{{ chemistry.buffs }}</span>
+    <span class="summary-rank">works-well-with buffs</span>
+  </div>
+  <div class="summary-item">
+    <span class="label">Clashes</span>
+    <span class="value {{ 'neg' if chemistry.nerfs > 0 else '' }}">{{ chemistry.nerfs }}</span>
+    <span class="summary-rank">struggles-with nerfs</span>
+  </div>
+  <div class="summary-item {{ 'kpi-win' if chemistry.net >= 0 else 'kpi-loss' }}">
+    <span class="label">Net Chemistry</span>
+    <span class="value {{ 'pos' if chemistry.net > 0 else 'neg' if chemistry.net < 0 else '' }}">{{ '+' if chemistry.net > 0 else '' }}{{ chemistry.net }}</span>
+    <span class="summary-rank">MLB-level staff only</span>
+  </div>
+</div>
+
+{# ── League-wide chemistry ranking ── #}
+<div class="panel">
+  <h2>Chemistry vs. the League <span style="color:var(--text-dim); font-weight:400; font-size:13px">— MLB-level staff, every team</span></h2>
+  <table>
+    <thead>
+      <tr>
+        <th data-sort="num">#</th><th data-sort="str" class="left">Team</th>
+        <th data-sort="num" data-sort-best="high">Buffs</th>
+        <th data-sort="num" data-sort-best="low">Nerfs</th>
+        <th data-sort="num" data-sort-best="high" data-sort-selected="desc">Net</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in league_chemistry %}
+      <tr{% if t.team_id == tid %} class="highlight"{% endif %}>
+        <td>{{ t.rank }}</td>
+        <td class="left"><a class="team-link" href="/team/{{ t.team_id }}/coaching">{{ t.team_name }}</a></td>
+        <td class="pos">+{{ t.buffs }}</td>
+        <td class="{{ 'neg' if t.nerfs > 0 else '' }}">{{ t.nerfs }}</td>
+        <td class="{{ 'pos' if t.net > 0 else 'neg' if t.net < 0 else '' }}">{{ '+' if t.net > 0 else '' }}{{ t.net }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% macro tier_pill(value, grade) %}
+{% if value %}<span class="gr-pill {{ 'gr-pill-' + grade if grade else 'gr-pill-mid' }}">{{ value }}</span>{% else %}—{% endif %}
+{% endmacro %}
+
+{% macro composite_pill(value, grade) %}
+{% if value is not none %}<span class="gr-pill {{ 'gr-pill-' + grade if grade else 'gr-pill-mid' }}">{{ value }}</span>{% else %}—{% endif %}
+{% endmacro %}
+
+{% macro staff_table(gname, coaches, role_groups, chem_per_coach, my_team_id, title=none) %}
+<div class="panel">
+  <h2>{{ title or gname }} <span style="color:var(--text-dim); font-weight:400; font-size:13px">({{ coaches|length }})</span></h2>
+  <table>
+    <thead>
+      <tr>
+        <th data-sort="str" class="left">Name</th>
+        <th data-sort="str" class="left">Level / Team</th>
+        <th data-sort="str">Job</th>
+        <th data-sort="num">Age</th>
+        <th data-sort="num" data-sort-best="high" data-sort-selected="desc">Composite</th>
+        <th data-sort="str" data-sort-best="high">Reputation</th>
+        <th data-sort="str" class="left">Personality</th>
+        {% if chem_per_coach is not none %}<th data-sort="str" class="left">Chemistry</th>{% endif %}
+        {% for field, label in role_groups[gname].rating_cols %}
+        <th data-sort="str" data-sort-best="high">{{ label }}</th>
+        {% endfor %}
+        <th data-sort="num">Salary</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in coaches %}
+      <tr{% if c.team_id == my_team_id %} class="highlight"{% endif %}>
+        <td class="left">{{ c.name }}</td>
+        <td class="left">{{ c.level }} — {{ c.team_name }}</td>
+        <td>{{ c.job }}</td>
+        <td>{{ c.age or '—' }}</td>
+        <td data-sort-value="{{ c.composite if c.composite is not none else -1 }}">{{ composite_pill(c.composite, c.composite_grade) }}</td>
+        <td data-sort-value="{{ c.reputation_sort }}">{{ tier_pill(c.reputation, c.reputation_grade) }}</td>
+        <td class="left">
+          {{ c.personality_type or '—' }}{% if c.manager_style %} · {{ c.manager_style }}{% endif %}
+        </td>
+        {% if chem_per_coach is not none %}
+        {% set cc = chem_per_coach.get(c.coach_key) %}
+        <td class="left">
+          {% if cc %}<span class="pos">+{{ cc.buffs }}</span> / <span class="{{ 'neg' if cc.nerfs > 0 else '' }}">-{{ cc.nerfs }}</span>{% else %}—{% endif %}
+        </td>
+        {% endif %}
+        {% for field, label in role_groups[gname].rating_cols %}
+        <td data-sort-value="{{ c.sorts[field] }}">{{ tier_pill(c[field], c.grades[field]) }}</td>
+        {% endfor %}
+        <td data-sort-value="{{ c.salary or 0 }}">{{ '$' + (c.salary | string) if c.salary else '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endmacro %}
+
+{% for gname, coaches in data.groups.items() %}
+{% if coaches %}
+{{ staff_table(gname, coaches, data.role_groups, chemistry.per_coach, data.team_id) }}
+{% endif %}
+{% endfor %}
+
+{# ── Compare ── #}
+<div class="panel">
+  <h2>Compare</h2>
+  <form method="get" style="display:flex; gap:24px; flex-wrap:wrap; align-items:flex-end; margin-bottom:4px;">
+    <div>
+      <label style="display:block; font-size:11px; color:var(--text-dim); margin-bottom:4px;">Compare full staff vs.</label>
+      <select name="vs" onchange="this.form.submit()">
+        <option value="">— Select a team —</option>
+        {% for t_id, t_name in compare_teams.items() %}
+        <option value="{{ t_id }}" {{ 'selected' if t_id == vs_tid else '' }}>{{ t_name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label style="display:block; font-size:11px; color:var(--text-dim); margin-bottom:4px;">Rank one role across the whole league</label>
+      <select name="role" onchange="this.form.submit()">
+        <option value="">— Select a role —</option>
+        {% for r in role_options %}
+        <option value="{{ r }}" {{ 'selected' if r == role else '' }}>{{ r }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </form>
+</div>
+
+{% if vs_data %}
+<div class="columns" style="align-items:flex-start;">
+  <div style="flex:1;">
+    <h3 style="margin:8px 0;">{{ team_name }}</h3>
+    {% for gname, coaches in data.groups.items() %}
+    {% if coaches %}{{ staff_table(gname, coaches, data.role_groups, none, data.team_id, title=gname + ' (' + team_name + ')') }}{% endif %}
+    {% endfor %}
+  </div>
+  <div style="flex:1;">
+    <h3 style="margin:8px 0;">{{ vs_data.team_name }}</h3>
+    {% for gname, coaches in vs_data.groups.items() %}
+    {% if coaches %}{{ staff_table(gname, coaches, vs_data.role_groups, none, vs_data.team_id, title=gname + ' (' + vs_data.team_name + ')') }}{% endif %}
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% if role_ranking is not none %}
+<div class="panel">
+  <h2>League-Wide Ranking — {{ role }}</h2>
+  <table>
+    <thead>
+      <tr>
+        <th data-sort="num">Rank</th>
+        <th data-sort="str" class="left">Team</th>
+        <th data-sort="str" class="left">Name</th>
+        <th data-sort="num">Age</th>
+        <th data-sort="num" data-sort-best="high" data-sort-selected="desc">Composite</th>
+        <th data-sort="str" data-sort-best="high">Reputation</th>
+        <th data-sort="str" class="left">Personality</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in role_ranking %}
+      <tr{% if c.team_id == tid %} class="highlight"{% endif %}>
+        <td>{{ c.rank or '—' }}</td>
+        <td class="left"><a class="team-link" href="/team/{{ c.team_id }}">{{ c.team_name }}</a></td>
+        <td class="left">{{ c.name }}</td>
+        <td>{{ c.age or '—' }}</td>
+        <td data-sort-value="{{ c.composite if c.composite is not none else -1 }}">{{ composite_pill(c.composite, c.composite_grade) }}</td>
+        <td data-sort-value="{{ c.reputation_sort }}">{{ tier_pill(c.reputation, c.reputation_grade) }}</td>
+        <td class="left">{{ c.personality_type or '—' }}{% if c.manager_style %} · {{ c.manager_style }}{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% endif %}
+{% endblock %}

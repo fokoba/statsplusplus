@@ -893,6 +893,20 @@ def refresh_league(year, game_date=None, full=False):
 
     log.info("── team stats")
     _upsert_team_stats(conn, year)
+    # Also ensure the PRIOR year's team stats exist — that's the last completed
+    # season, which standings/averages fall back to before the current season has
+    # played games (spring training). The historical loop only covers years
+    # BEFORE prior_year, and the current-year pull returns nothing in preseason,
+    # so without this the prior year is a gap and standings fall back a further
+    # year (e.g. showing 1953 when 1954 is the completed season). Skip the render
+    # if we already have it (an already-rendered fetch is free, but a re-render
+    # burns the 1/min limit).
+    have_prior_team = conn.execute(
+        "SELECT 1 FROM team_batting_stats WHERE year=? AND split_id=1 LIMIT 1",
+        (prior_year,)).fetchone() is not None
+    if not have_prior_team:
+        log.info(f"── prior-year team stats (year={prior_year})")
+        _upsert_team_stats(conn, prior_year)
 
     log.info("── game history")
     games = client.get_game_history(year=year)
@@ -920,6 +934,13 @@ def refresh_league(year, game_date=None, full=False):
                                   for lg in lgdata.get("leagues", [])
                                   if lg["league_id"] in milb_lids]
             s["primary_league_id"] = primary_lid
+
+            if primary_lid is not None:
+                conn.execute(
+                    "INSERT INTO league_meta (id, primary_league_id) VALUES (1, ?) "
+                    "ON CONFLICT(id) DO UPDATE SET primary_league_id = excluded.primary_league_id",
+                    (primary_lid,))
+                conn.commit()
 
             # Cumulative league_id → {name, level} map. Leagues get reorganized
             # over the years (renamed, promoted, removed), but historical stat
@@ -1085,8 +1106,8 @@ def refresh_league(year, game_date=None, full=False):
         if not s.get("manual_structure"):
             s["divisions"] = divisions
             s["leagues"] = leagues
-        # Always update team names/abbreviations (these come from the API)
-        s["team_abbr"] = team_abbr
+        # Keep league-specific corrections when the API reports an old abbreviation.
+        s["team_abbr"] = {**team_abbr, **s.get("team_abbr_overrides", {})}
         s["team_names"] = team_names
         settings_path.write_text(json.dumps(s, indent=2) + "\n")
         log.info(f"  {len(leagues)} leagues, {len(divisions)} divisions, {len(team_abbr)} teams")
@@ -1180,7 +1201,8 @@ def _avg(rows, field):
 
 def _write_json(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2))
+    from statsplusplus.config.league_context import atomic_write_text
+    atomic_write_text(path, json.dumps(data, indent=2))
     log.info(f"  → {path.relative_to(BASE)}")
 
 

@@ -114,6 +114,52 @@ def mlb_team_ids():
 def level_map():
     return get_cfg().level_map
 
+# Development-speed display helper (shared by queries.py + team_queries.py).
+_DEV_ICON = {"rising": "⚡", "onpace": "↗", "watch": "⚠",
+             "stalled": "⚠", "regressing": "↘"}
+
+# Schedule/risk tag (2026-09-29) — a second, independent badge alongside the
+# peer-relative icon above; see statsplusplus.evaluation.dev_speed.schedule_tag.
+# "on_track" intentionally renders no badge (kept quiet — only the notable
+# cases get flagged) and "ahead"/"ok" aren't warnings, unlike the other two.
+_SCHEDULE_BADGE = {
+    "ahead": {"text": "Ahead", "css": "sched-ahead"},
+    "behind": {"text": "Behind", "css": "sched-behind"},
+    "at_risk": {"text": "At Risk", "css": "sched-risk"},
+}
+
+
+def dev_cell(row, i):
+    """Build a compact dev-speed cell from a row slice starting at index i:
+    (available, css_class, label, confidence, z, schedule_status,
+    schedule_label, schedule_note). Returns None when unavailable so list
+    templates render an empty cell.
+
+    The trailing three fields carry the schedule/risk tag — a second signal
+    from the SAME dev_speed row, independent of the peer-relative
+    label/icon: that answers "is he outpacing peers right now", this
+    answers "is he actually closing his own gap to ceiling, broadly across
+    tools, before his runway to peak age runs out." A player can be
+    "Rising" (good peer-relative pace) and "Behind Schedule" (narrow,
+    one-tool progress) at the same time — that combination is the whole
+    point, not a contradiction to resolve.
+    """
+    try:
+        available, css, label, conf, z = row[i], row[i + 1], row[i + 2], row[i + 3], row[i + 4]
+        sched_status, sched_label, sched_note = row[i + 5], row[i + 6], row[i + 7]
+    except (IndexError, TypeError):
+        return None
+    if not available:
+        return None
+    badge = _SCHEDULE_BADGE.get(sched_status)
+    return {"icon": _DEV_ICON.get(css, ""), "css_class": css, "label": label,
+            "confidence": conf, "z": z, "dim": conf == "Low",
+            "schedule_status": sched_status, "schedule_label": sched_label,
+            "schedule_note": sched_note,
+            "schedule_badge_text": badge["text"] if badge else None,
+            "schedule_badge_css": badge["css"] if badge else None}
+
+
 def milb_league_map():
     """Return the cumulative {league_id(int): {"name", "level"}} map.
 

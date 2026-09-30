@@ -550,6 +550,42 @@
 {% endif %}
 {% endmacro %}
 
+{# WAR-pace panel (2026-09-30): current-season WAR prorated to a full
+   season, historic-pace tag, and "if this pace holds" surplus recalc fed
+   through the full remaining-contract valuation model. #}
+{% macro war_pace_panel() %}
+{% if p.war_pace %}
+<div class="panel"{% if p.war_pace.pace_confidence == 'Low' %} style="opacity:0.6"{% endif %}>
+  <h2>Season Pace
+    {% if p.war_pace.is_historic %}
+    <span class="pace-badge pace-historic" title="{{ p.war_pace.pace_war }} WAR pace clears the historic-season threshold (8.0+)">🔥 Historic Pace</span>
+    {% endif %}
+  </h2>
+  <div class="pace-line">
+    <span class="pace-current">{{ p.war_pace.war_to_date }} WAR through {{ p.war_pace.sample }} {{ p.war_pace.sample_unit }} ({{ p.war_pace.year }})</span>
+    <span class="pace-arrow">→</span>
+    <span class="pace-projected {% if p.war_pace.is_historic %}pace-historic-text{% endif %}">{{ p.war_pace.pace_war }} WAR pace</span>
+    <span class="info-tip" title="Prorated to a {{ p.war_pace.games_per_season }}-game full season for this league.">ⓘ</span>
+    <span style="font-size:10px; font-weight:400; color:var(--text-dim)" title="Confidence based on how far past the minimum trusted sample ({{ p.war_pace.sample_unit }}) this player's sample is.">({{ p.war_pace.pace_confidence }} confidence)</span>
+  </div>
+  {% if p.pace_surplus_detail %}
+  <div class="pace-surplus-compare">
+    <div class="pace-surplus-row">
+      <span class="pace-surplus-label">Current valuation, full remaining control</span>
+      <span class="value {% if p.surplus_detail.total.base > 0 %}pos{% elif p.surplus_detail.total.base < 0 %}neg{% endif %}">{{ p.surplus_detail.total.base|money }}</span>
+    </div>
+    <div class="pace-surplus-row">
+      <span class="pace-surplus-label">If this {{ p.war_pace.pace_war }}-WAR pace holds going forward
+        <span class="info-tip" title="Same valuation engine, with this season's pace substituted as the assumed talent level for every remaining contract/control year — not just this season.">ⓘ</span>
+      </span>
+      <span class="value {% if p.pace_surplus_detail.total.base > 0 %}pos{% elif p.pace_surplus_detail.total.base < 0 %}neg{% endif %}" style="font-weight:600">{{ p.pace_surplus_detail.total.base|money }}</span>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+{% endmacro %}
+
 {% block content %}
 
 {# ── Player Header ── #}
@@ -589,6 +625,24 @@
   <div class="summary-item" title="Future Value — ceiling quality relative to MLB positional median. Risk label indicates development probability (Low/Medium/High/Extreme).">
     <span class="label">FV</span>
     <span class="value">{{ p.valuation.fv_str }}{% if p.valuation.risk %} <span style="font-size:11px; font-weight:400; color:{% if p.valuation.risk == 'Low' %}#4caf50{% elif p.valuation.risk == 'Medium' %}#ffc107{% elif p.valuation.risk == 'High' %}#ff9800{% else %}#f44336{% endif %}">{{ p.valuation.risk }}</span>{% endif %}</span>
+  </div>
+  {% endif %}
+  {% if p.dev_speed and p.dev_speed.available %}
+  {% set _dc = {'rising':'#4caf50','onpace':'var(--text-dim)','watch':'#ffc107','stalled':'#f44336','regressing':'#ff9800'} %}
+  {% set _di = {'rising':'⚡','onpace':'↗','watch':'⚠','stalled':'⚠','regressing':'↘'} %}
+  <div class="summary-item" title="Development pace — how fast this player's {{ 'bat' if p.dev_speed.signal == 'off' else 'overall profile' }} is developing vs same-position, same-age peers in this league ({{ p.dev_speed.z }} SD). {{ p.dev_speed.note }}. Based on {{ p.dev_speed.window_years }}yr / {{ p.dev_speed.n_snaps }} snapshots — {{ p.dev_speed.confidence }} confidence. A pace flag, not a verdict — see the Development tab.">
+    <span class="label">Dev</span>
+    <span class="value" style="font-size:13px; color:{{ _dc.get(p.dev_speed.css_class, 'var(--text-dim)') }}">{{ _di.get(p.dev_speed.css_class, '') }} {{ p.dev_speed.label }} <span style="font-size:10px; font-weight:400; color:var(--text-dim)">({{ p.dev_speed.confidence }})</span></span>
+    {% set _sched_css = {'ahead': 'sched-ahead', 'behind': 'sched-behind', 'at_risk': 'sched-risk'} %}
+    {% if p.dev_speed.schedule_status in _sched_css %}
+    <div><span class="sched-badge {{ _sched_css[p.dev_speed.schedule_status] }}" title="{{ p.dev_speed.schedule_note }}">{{ p.dev_speed.schedule_label }}</span></div>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% if p.war_pace and p.war_pace.is_historic %}
+  <div class="summary-item" title="{{ p.war_pace.war_to_date }} WAR through {{ p.war_pace.sample }} {{ p.war_pace.sample_unit }} ({{ p.war_pace.year }}), prorated to a {{ p.war_pace.games_per_season }}-game season. {{ p.war_pace.pace_confidence }} confidence. See the Valuation tab for the pace-adjusted surplus recalc.">
+    <span class="label">Pace</span>
+    <span class="value"><span class="pace-badge pace-historic"{% if p.war_pace.pace_confidence == 'Low' %} style="opacity:0.6"{% endif %}>🔥 {{ p.war_pace.pace_war }} WAR pace</span> <span style="font-size:10px; font-weight:400; color:var(--text-dim)">({{ p.war_pace.pace_confidence }})</span></span>
   </div>
   {% endif %}
   <div class="summary-item" title="Projected on-field value minus salary cost over remaining team control — the full-horizon projection (perpetual-arb leagues like ppl project ~20 years out; standard leagues like eMLB use real free-agency/arbitration rules). Same calculation as before, just relabeled to distinguish it from the shorter-horizon metrics below. Positive = player worth more than they cost.">
@@ -1040,6 +1094,7 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
       
     </div>
     <div class="panel-stack">
+      {{ war_pace_panel() }}
       {{ scouting_panel() }}
       {{ stats_snapshot() }}
       {{ percentile_panel() }}
@@ -1216,6 +1271,83 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
 {% if p.dev_history and p.dev_history.snapshots|length >= 2 %}
 {# ══ Development tab (MLB) ══ #}
 <div class="tab-content" id="tab-development">
+  {% if p.dev_speed %}
+  {% set d = p.dev_speed %}
+  {% set _dc = {'rising':'#4caf50','onpace':'var(--text-dim)','watch':'#ffc107','stalled':'#f44336','regressing':'#ff9800','none':'var(--text-dim)'} %}
+  {% set _di = {'rising':'⚡','onpace':'↗','watch':'⚠','stalled':'⚠','regressing':'↘','none':''} %}
+  <div class="panel" style="margin-bottom:16px">
+    <h2>Development Pace <span class="info-tip" title="How fast this player is developing relative to same-position, same-age peers in this league — measured from rating-history movement, not stats. A pace flag to investigate, not a verdict. Orthogonal to FV (ceiling quality) and Risk (development probability prior).">ⓘ</span></h2>
+    {% if d.available %}
+    <div style="font-size:20px; font-weight:600; color:{{ _dc.get(d.css_class, 'var(--text-dim)') }}; margin-bottom:8px">
+      {{ _di.get(d.css_class, '') }} {{ d.label }}
+      <span style="font-size:13px; font-weight:400; color:var(--text-dim)">· {{ d.z }} SD vs peers · {{ d.confidence }} confidence</span>
+    </div>
+    <table class="grade-table" style="max-width:560px">
+      <tr>
+        <td style="color:var(--text-dim)">{{ 'Offensive grade (bat)' if d.signal == 'off' else 'Composite' }}</td>
+        <td>{% if d.signal == 'off' %}{{ d.off_first }} → {{ d.off_last }}{% else %}{{ d.comp_first }} → {{ d.comp_last }}{% endif %}
+            <span class="{% if d.annual_move > 0 %}pos{% elif d.annual_move < 0 %}neg{% endif %}">({{ "%+.1f"|format(d.annual_move) }}/yr)</span></td>
+      </tr>
+      <tr>
+        <td style="color:var(--text-dim)">Peer baseline<span style="font-size:11px"> — {{ d.signal == 'off' and 'bat' or 'composite' }} movement, {{ p.bucket }} age {{ p.age - (p.age % 2) }}-{{ p.age - (p.age % 2) + 1 }}, n={{ d.peer_n }}</span></td>
+        <td>{{ "%+.1f"|format(d.peer_mean) }}/yr → this player {{ "%+.1f"|format(d.annual_move) }}/yr = <strong>{{ d.z }} SD</strong></td>
+      </tr>
+      {% if d.signal == 'off' and d.def_first is not none %}
+      <tr>
+        <td style="color:var(--text-dim)">Defense <span style="font-size:10px">(excluded — experience-inflated)</span></td>
+        <td style="color:var(--text-dim)">{{ d.def_first }} → {{ d.def_last }}</td>
+      </tr>
+      {% endif %}
+      <tr>
+        <td style="color:var(--text-dim)">Ceiling trajectory</td>
+        <td>Composite {{ "%+d"|format(d.d_ovr) }} / Ceiling {{ "%+d"|format(d.d_pot) }}
+            {% if d.d_pot < -1 and d.d_ovr <= 1 %}<span class="neg">— ceiling eroding, not progress</span>
+            {% elif d.d_ovr > 1 %}<span class="pos">— developing toward the ceiling</span>{% endif %}
+            · current gap {{ d.gap }}</td>
+      </tr>
+      <tr>
+        <td style="color:var(--text-dim)">Basis</td>
+        <td style="color:var(--text-dim)">{{ d.window_years }}yr · {{ d.n_snaps }} snapshots → {{ d.confidence }} confidence</td>
+      </tr>
+    </table>
+    <p style="color:var(--text-dim); font-size:12px; margin-top:8px">
+      {%- set css = d.css_class -%}
+      {%- if css == 'rising' and d.d_pot < -1 -%}
+        Developing quickly, but scouts have trimmed the ceiling ({{ "%+d"|format(d.d_pot) }} POT) — the surge is real, the ultimate upside less than it once looked.
+      {%- elif css == 'rising' -%}
+        Developing faster than peers with ceiling room left — a candidate to reach the majors ahead of schedule.
+      {%- elif css == 'stalled' and d.d_pot <= -2 -%}
+        Not tracking a wide ceiling gap, and scouts are already cooling on the ceiling ({{ "%+d"|format(d.d_pot) }} POT) — the strongest version of a stall signal. Worth a hard look before counting on the upside.
+      {%- elif css == 'stalled' -%}
+        The tools still imply more, but development hasn't followed over this window. Check for a cause: is he mis-leveled (too comfortable / overmatched), hurt, or genuinely plateauing?
+      {%- elif css == 'watch' -%}
+        Developing a bit slower than peers relative to a wide ceiling gap — not alarming yet, but one to monitor as more history accumulates.
+      {%- elif css == 'regressing' -%}
+        Flat or declining and near his current level — likely close to what he is, with little further development expected.
+      {%- else -%}
+        Developing about as expected for his position and age.
+      {%- endif %}
+      {% if d.confidence == 'Low' %}<em>Low confidence — short history or thin playing time; treat as tentative.</em>{% endif %}
+    </p>
+    {% set _sched_css = {'ahead': 'sched-ahead', 'behind': 'sched-behind', 'at_risk': 'sched-risk'} %}
+    {% if d.schedule_status and d.schedule_status != 'on_track' %}
+    <div class="sched-panel {{ _sched_css.get(d.schedule_status, '') }}">
+      <span class="sched-badge {{ _sched_css.get(d.schedule_status, '') }}">{{ d.schedule_label }}</span>
+      <span class="sched-panel-note">{{ d.schedule_note }}</span>
+      <span class="sched-panel-meta">
+        {%- if d.stagnant_tools %} · Flat tools: {{ d.stagnant_tools }}{% endif -%}
+        {%- if d.gap_closed_pct_yr is not none %} · {{ (d.gap_closed_pct_yr * 100)|round|int }}% of gap closed/yr{% endif -%}
+        {%- if d.years_to_peak is not none %} · {{ d.years_to_peak }}yr to typical peak age{% endif -%}
+      </span>
+    </div>
+    {% elif d.schedule_status == 'on_track' %}
+    <p style="color:var(--text-dim); font-size:11px; margin-top:4px">Independent schedule check: on track — gap to ceiling closing at a reasonable pace across tools.</p>
+    {% endif %}
+    {% else %}
+    <p class="empty">Not enough rating history yet to assess development pace (needs ~6 months and a reliable, played sample). This fills in as more snapshots accumulate.</p>
+    {% endif %}
+  </div>
+  {% endif %}
   {{ dev_charts_panel() }}
   {{ dev_tracking_panel() }}
 </div>
@@ -1526,6 +1658,7 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
 <div class="tab-content" id="tab-valuation">
   <div class="columns">
     <div class="panel-stack">
+      {{ war_pace_panel() }}
       {{ surplus_panel() }}
     </div>
     {% if p.contract and p.contract.remaining %}

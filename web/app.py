@@ -18,7 +18,7 @@ for _p in (_SRC, _PROJECT_ROOT):
 from flask import Flask, render_template, redirect, request, g, session
 import werkzeug.exceptions
 import queries
-from statsplusplus.config.league_config import LeagueConfig
+from statsplusplus.config.league_config import LeagueConfig, games_per_season
 from statsplusplus.config.league_context import get_league_dir, get_active_league_slug, APP_CONFIG_PATH
 from statsplusplus.utils.logging import get_logger
 
@@ -179,10 +179,17 @@ def _inject_globals():
                 offseason_mode = bool(_json.loads(_sp.read_text()).get("offseason_mode", False))
     except Exception:
         offseason_mode = False
+    my_team_name = "My Team"
+    if getattr(g, "league_ready", False):
+        try:
+            my_team_name = cfg.team_names_map.get(cfg.my_team_id, "My Team")
+        except Exception:
+            pass
     return {
         "statsplus_base": f"https://statsplus.net/{slug}",
         "all_teams": sorted(cfg.team_names_map.items(), key=lambda x: x[1]) if getattr(g, "league_ready", False) else [],
         "league_name": cfg.settings.get("league", "League"),
+        "my_team_name": my_team_name,
         "league_list": league_list,
         "active_league_slug": g.league_slug if hasattr(g, "league_slug") else "",
         "league_ready": getattr(g, "league_ready", False),
@@ -352,10 +359,52 @@ def team_moneyball(tid):
         return "Team not found", 404
     import moneyball_queries as _mq
     data = _mq.get_moneyball(tid)
-    return render_template("moneyball.html", tid=tid, team_name=name, data=data,
+    import projected_war_queries as _pwq
+    pw_data = _pwq.get_projected_war()
+    war_projection = None
+    war_emp = {}
+    if cfg.league_dir.name.lower() == "ppl" and tid == 6:
+        from war_projection_queries import build_projection, load_overrides
+        war_projection = build_projection(tid, load_overrides(cfg.league_dir))
+        # Cross-reference each hand-planned player against the empirical,
+        # observed-performance projection above — lets Forrest sanity-check
+        # his preseason workload plan against what's actually happening
+        # in-season. Only the 25 seeded players, not the full league list,
+        # to avoid embedding pw_data's ~700-player table twice on one page.
+        seed_pids = {r["pid"] for r in war_projection.get("rows", [])}
+        war_emp = {p["pid"]: p for p in pw_data["players"] if p["pid"] in seed_pids}
+    return render_template("moneyball.html", tid=tid, team_name=name, data=data, pw_data=pw_data,
+                           war_projection=war_projection, war_emp=war_emp,
                            breadcrumbs=[{"label": cfg.settings.get("league", "League"), "url": "/league"},
                                         {"label": name, "url": f"/team/{tid}"},
                                         {"label": "Moneyball", "url": f"/team/{tid}/moneyball"}])
+
+
+@app.route("/team/<int:tid>/coaching")
+def team_coaching(tid):
+    """Org-wide coaching staff: every coach/exec grouped by role, staff
+    chemistry vs the league, optional side-by-side vs another team and a
+    league-wide ranking for one role (?vs=<team_id>&role=<job>)."""
+    cfg = _get_cfg()
+    name = cfg.team_names_map.get(tid)
+    if not name:
+        return "Team not found", 404
+    import coaching_queries as _cq
+    data = _cq.get_org_coaching(tid)
+    vs_tid = request.args.get("vs", type=int)
+    vs_data = _cq.get_org_coaching(vs_tid) if vs_tid and vs_tid != tid else None
+    role = request.args.get("role") or ""
+    role_options = [j for g in _cq.ROLE_GROUPS.values() for j in g["jobs"]]
+    role_ranking = _cq.get_role_league_ranking(role) if role in role_options else None
+    compare_teams = {t: n for t, n in _cq.get_all_team_names().items() if t != tid}
+    return render_template("coaching.html", tid=tid, team_name=name, data=data,
+                           chemistry=_cq.get_staff_chemistry(tid),
+                           league_chemistry=_cq.get_league_chemistry(),
+                           compare_teams=compare_teams, vs_tid=vs_tid, vs_data=vs_data,
+                           role=role, role_options=role_options, role_ranking=role_ranking,
+                           breadcrumbs=[{"label": cfg.settings.get("league", "League"), "url": "/league"},
+                                        {"label": name, "url": f"/team/{tid}"},
+                                        {"label": "Coaching", "url": f"/team/{tid}/coaching"}])
 
 
 @app.route("/team/<int:tid>/minors")
@@ -424,23 +473,44 @@ def league():
     my_abbr = queries.get_my_team_abbr()
     from web_league_context import league_averages as _load_la
     lg_avg = _load_la()
-    wc_per_lg = cfg.settings.get("wild_cards_per_league", 3)
-    wc_tids = set()
+    # Postseason odds badge — replaces the old "WC" (wildcard) label, which
+    # only made sense for multi-division leagues with a wildcard round. PPL
+    # is a flat single-division-per-league, pennant-winner-only format (no
+    # wildcard concept at all), so every non-leader was wrongly tagged "WC".
+    # PO% (postseason odds) from StatsPlus's own Playoff Odds page means the
+    # right thing in either format — pennant probability here, real
+    # division-or-wildcard probability in a league like eMLB — so one
+    # treatment covers both without per-format branching.
+    _scripts_dir = os.path.join(_PROJECT_ROOT, "scripts")
+    if _scripts_dir not in sys.path:
+        sys.path.insert(0, _scripts_dir)
+    from playoff_odds import get_playoff_odds_cached
+    po = get_playoff_odds_cached(cfg.league_dir)
+    _SEASON_GAMES = games_per_season(cfg.league_dir)
     for lg_group in league_groups:
-        lg_divs = lg_group["divisions"]
-        div_winners = {d["rows"][0]["tid"] for d in lg_divs if d["rows"]}
-        non_winners = sorted(
-            [r for d in lg_divs for r in d["rows"] if r["tid"] not in div_winners],
-            key=lambda r: -r["pct"])
-        if non_winners:
-            cutoff_pct = non_winners[min(wc_per_lg - 1, len(non_winners) - 1)]["pct"]
-            for r in non_winners:
-                if r["pct"] >= cutoff_pct:
-                    wc_tids.add(r["tid"])
-    for lg_group in league_groups:
-        for d in lg_group["divisions"]:
-            for r in d["rows"]:
-                r["is_wc"] = r["div_rank"] != 1 and r["tid"] in wc_tids
+        all_rows_in_lg = [r for d in lg_group["divisions"] for r in d["rows"]]
+        best_w = max((r["w"] for r in all_rows_in_lg), default=0)
+        for r in all_rows_in_lg:
+            po_row = po.get(r["tid"]) if po else None
+            if po_row:
+                r["po_pct"] = po_row["po_pct"]
+                # A team StatsPlus's own sims already round to ~0% AND whose
+                # mathematical ceiling (MaxW — best case if they won every
+                # remaining game) still can't reach the league's current
+                # best record is a safe, conservative "no shot" call — not
+                # every team below this line is truly eliminated in a
+                # wildcard format, but every team flagged here definitely is.
+                r["eliminated"] = po_row["po_pct"] < 0.05 and po_row["max_w"] < best_w
+            else:
+                # Live scrape unavailable (cookie expired, site down, no
+                # cache yet) — fall back to a local win-ceiling check so the
+                # page still distinguishes "eliminated" from "alive" even
+                # without a real percentage. Ignores head-to-head/tiebreak
+                # nuance; good enough for a binary fallback flag.
+                remaining = max(0, _SEASON_GAMES - r["g"])
+                r["po_pct"] = None
+                r["eliminated"] = (r["w"] + remaining) < best_w
+            r["is_wc"] = False  # retired field — kept so a stray template ref can't crash
 
     from web_league_context import mlb_team_ids, my_team_id
     _tam = cfg.team_abbr_map
@@ -448,7 +518,7 @@ def league():
     trade_orgs = sorted([{"tid": t, "abbr": _tam.get(t, "?"), "name": _tnm.get(t, _tam.get(t, "?"))}
                          for t in mlb_team_ids()], key=lambda x: x["name"])
     avg_gp = sum(r["w"] + r["l"] for r in standings) / max(len(standings), 1)
-    season_remaining = max(0, (162 - avg_gp) / 162)
+    season_remaining = max(0, (_SEASON_GAMES - avg_gp) / _SEASON_GAMES)
 
     draft_pool = queries.get_draft_pool()
     draft_depth = queries.get_draft_org_depth(my_team_id()) if draft_pool else {}

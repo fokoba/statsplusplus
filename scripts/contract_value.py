@@ -69,6 +69,18 @@ def _ensure_league_context(league_dir=None):
 def dollars_per_war():
     return _dollars_per_war_pkg(_league_dir)
 
+
+def _peak_age(bucket):
+    """Per-league peak age (MODEL_PARAMS override in model_weights.json,
+    falling back to the PEAK_AGE_PITCHER/PEAK_AGE_HITTER defaults).
+    Empirically derived per-league from real career-WAR trajectories
+    (2026-09-30) — see PEAK_AGE_HITTER/PEAK_AGE_PITCHER for the shared
+    unvalidated default this overrides."""
+    is_pitcher = bucket in ("SP", "RP")
+    key = "PEAK_AGE_PITCHER" if is_pitcher else "PEAK_AGE_HITTER"
+    default = PEAK_AGE_PITCHER if is_pitcher else PEAK_AGE_HITTER
+    return _weights.get_param(key, default)
+
 def league_minimum():
     return _league_minimum_pkg(_league_dir)
 
@@ -107,9 +119,13 @@ def _load_perp_arb_model():
     return _perp_arb_model_cache["model"]
 
 def _get_state():
-    if not _state_cache:
+    # Re-read if the cache is empty OR missing game_date: a prior read could
+    # have raced a non-atomic state.json write and cached a partial dict,
+    # which would otherwise never self-heal for the life of the process.
+    if not _state_cache or "game_date" not in _state_cache:
         state_path = _league_dir / "config" / "state.json"
         with open(state_path) as f:
+            _state_cache.clear()
             _state_cache.update(json.load(f))
     return _state_cache
 
@@ -162,7 +178,8 @@ def _resolve(conn, query):
     return pid, name, age, ovr, pot, bucket
 
 
-def contract_value(player_id, retention_pct=0.0, _conn=None, _hist=None, league_dir=None):
+def contract_value(player_id, retention_pct=0.0, _conn=None, _hist=None, league_dir=None,
+                    pace_war_override=None):
     """
     Programmatic interface for trade_calculator. Returns surplus dict or None.
     retention_pct: fraction of salary the sending team retains.
@@ -175,6 +192,16 @@ def contract_value(player_id, retention_pct=0.0, _conn=None, _hist=None, league_
     league_dir: explicit league to value against — pass this from any
     caller that runs inside the web server, where the module-level default
     can be stale (see _ensure_league_context).
+
+    pace_war_override (2026-09-30): substitutes this value for the normal
+    stat_peak_war() output — i.e. "if this player's current hot/cold pace
+    were his true established talent level going forward" — and lets the
+    rest of the engine (ratings/stat blend, aging curve, years-to-peak,
+    per-year breakdown) run unchanged on top of it. Used by the "on pace
+    for a historic season" surplus recalc (see war_pace.py /
+    player_queries.py) — deliberately feeds the whole remaining
+    contract/control window, not just the current season, since that's
+    what a sustained new talent level would actually be worth.
     """
     _ensure_league_context(league_dir)
     conn = _conn or get_connection(_league_dir)
@@ -222,17 +249,18 @@ def contract_value(player_id, retention_pct=0.0, _conn=None, _hist=None, league_
         two_way = _hist[2] if len(_hist) > 2 else set()
     else:
         bat_hist, pit_hist, two_way = load_stat_history(conn, game_date)
-    stat_war = stat_peak_war(pid, bucket, bat_hist, pit_hist, two_way=two_way)
+    stat_war = pace_war_override if pace_war_override is not None else \
+        stat_peak_war(pid, bucket, bat_hist, pit_hist, two_way=two_way)
     ratings_war = peak_war_from_ovr(ovr, bucket)
     no_track_record = stat_war is None
     if stat_war is None:
         pw = ratings_war * NO_TRACK_RECORD_DISCOUNT
-    elif ratings_war > stat_war and age < (PEAK_AGE_PITCHER if bucket in ("SP", "RP") else PEAK_AGE_HITTER):
-        peak_age = PEAK_AGE_PITCHER if bucket in ("SP", "RP") else PEAK_AGE_HITTER
+    elif ratings_war > stat_war and age < _peak_age(bucket):
+        peak_age = _peak_age(bucket)
         rtg_w = min(0.5, max(0, (peak_age - age) / (peak_age - 21)))
         pw = rtg_w * ratings_war + (1 - rtg_w) * stat_war
-    elif ratings_war < stat_war and age > (PEAK_AGE_PITCHER if bucket in ("SP", "RP") else PEAK_AGE_HITTER):
-        decline_start = PEAK_AGE_PITCHER if bucket in ("SP", "RP") else PEAK_AGE_HITTER
+    elif ratings_war < stat_war and age > _peak_age(bucket):
+        decline_start = _peak_age(bucket)
         age_w = min(1.0, (age - decline_start) / 5)
         gap_ratio = (stat_war - ratings_war) / stat_war if stat_war > 0 else 0
         rtg_w = min(0.75, age_w * gap_ratio)
@@ -271,7 +299,7 @@ def contract_value(player_id, retention_pct=0.0, _conn=None, _hist=None, league_
             pre_arb_left = est_pre_arb or 0
             ctrl_type = "estimated"
 
-    peak_age        = PEAK_AGE_PITCHER if bucket in ("SP", "RP") else PEAK_AGE_HITTER
+    peak_age        = _peak_age(bucket)
     use_incremental = stat_war is not None and age > peak_age
     base_mult       = aging_mult(age, bucket) if use_incremental else 1.0
 
@@ -471,7 +499,7 @@ def contract_breakdown(query):
     current_year = c["current_year"] or 0
     remaining    = years_total - current_year
 
-    peak_age        = PEAK_AGE_PITCHER if bucket in ("SP", "RP") else PEAK_AGE_HITTER
+    peak_age        = _peak_age(bucket)
     use_incremental = stat_war is not None and age > peak_age
     base_mult       = aging_mult(age, bucket) if use_incremental else 1.0
 

@@ -96,8 +96,10 @@ def league():
          for t in mlb_team_ids()],
         key=lambda x: x["name"],
     )
+    from statsplusplus.config.league_config import games_per_season
+    _season_games = games_per_season(cfg.league_dir)
     avg_gp = sum(r["w"] + r["l"] for r in standings) / max(len(standings), 1)
-    season_remaining = max(0, (162 - avg_gp) / 162)
+    season_remaining = max(0, (_season_games - avg_gp) / _season_games)
 
     # Draft
     draft_pool = queries.get_draft_pool()

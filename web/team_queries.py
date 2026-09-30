@@ -11,7 +11,7 @@ BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, "scripts"))
 from statsplusplus.utils.positions import display_pos as _display_pos
 from statsplusplus.evaluation.surplus import calc_pap
-from statsplusplus.config.league_config import dollars_per_war as _dpw_pkg, league_minimum as _lm_pkg
+from statsplusplus.config.league_config import dollars_per_war as _dpw_pkg, league_minimum as _lm_pkg, games_per_season as _gps_pkg
 from statsplusplus.utils.positions import ROLE_MAP
 from statsplusplus.evaluation.constants import DEFAULT_MINIMUM_SALARY
 from statsplusplus.data.evaluation_engine import load_tool_weights
@@ -20,7 +20,8 @@ from statsplusplus.data.db import ORG_ID_SQL
 from web_league_context import (get_db, get_cfg, team_abbr_map, team_names_map,
                                  level_map, pos_map, pos_order, pyth_exp, my_team_id,
                                  mlb_team_ids, league_averages as _load_la,
-                                 money_unit as _money_unit, money_divisor as _money_divisor)
+                                 money_unit as _money_unit, money_divisor as _money_divisor,
+                                 dev_cell as _dev_cell)
 
 # Local wrappers using request-scoped league_dir
 def _dollars_per_war():
@@ -28,6 +29,9 @@ def _dollars_per_war():
 
 def league_minimum():
     return _lm_pkg(get_cfg().league_dir)
+
+def _games_per_season():
+    return _gps_pkg(get_cfg().league_dir)
 
 
 # SQL fragment + params to filter contracts to players currently in a given org.
@@ -252,6 +256,9 @@ def get_summary(team_id=None):
     except Exception:
         have_any = False
 
+    from war_pace import get_team_combined_pace as _get_team_combined_pace
+    _pace = _get_team_combined_pace(tid, league_dir=get_cfg().league_dir, conn=conn)
+
     return {
         "game_date": state["game_date"], "year": state["year"], "phase": phase,
         "mlb_surplus": round(mlb_surplus / _money_divisor(), 1),
@@ -260,6 +267,7 @@ def get_summary(team_id=None):
         "next_year_surplus": round(next_sum / _money_divisor(), 1) if have_any else None,
         "three_year_surplus": round(three_sum / _money_divisor(), 1) if have_any else None,
         "fv50_count": fv50,
+        "combined_pace": _pace["combined_pace"], "combined_pace_n": _pace["n_qualifying"],
         "rank": _league_surplus_rankings(tid),
     }
 
@@ -304,11 +312,14 @@ def _league_surplus_rankings(team_id):
     three_by_team = {t: 0.0 for t in org_tids}
     try:
         from statsplusplus.evaluation.war import load_stat_history
+        from statsplusplus.config.league_config import games_per_season
         from contract_value import contract_surplus_horizons as _csh
         state = _get_state()
         _game_year = get_cfg().year
         _league_dir = get_cfg().league_dir
-        bat_hist, pit_hist, _tw = load_stat_history(conn, state["game_date"])
+        bat_hist, pit_hist, _tw = load_stat_history(
+            conn, state["game_date"], games_per_season=games_per_season(_league_dir)
+        )
         hist = (bat_hist, pit_hist)
         for pid, org_tid in conn.execute(
             f"SELECT c.player_id, p.team_id FROM contracts c JOIN players p ON c.player_id=p.player_id "
@@ -329,14 +340,21 @@ def _league_surplus_rankings(team_id):
 
     import statistics
 
-    def _rank_ctx(by_team):
+    def _rank_ctx(by_team, divisor=None):
         vals = list(by_team.values())
         n = len(vals)
         my = by_team.get(team_id, 0.0)
         sorted_desc = sorted(vals, reverse=True)
         rank = sorted_desc.index(my) + 1 if my in sorted_desc else n
         med = statistics.median(vals) if vals else 0.0
-        return {"rank": rank, "n": n, "vs_median": round((my - med) / _money_divisor(), 1)}
+        d = divisor if divisor is not None else _money_divisor()
+        return {"rank": rank, "n": n, "vs_median": round((my - med) / d, 1)}
+
+    from war_pace import get_all_teams_combined_pace as _get_all_teams_combined_pace
+    pace_by_team = {t: 0.0 for t in org_tids}
+    for t, d in _get_all_teams_combined_pace(league_dir=get_cfg().league_dir, conn=conn).items():
+        if t in pace_by_team:
+            pace_by_team[t] = d["combined_pace"]
 
     return {
         "mlb_surplus": _rank_ctx(mlb_by_team),
@@ -344,6 +362,7 @@ def _league_surplus_rankings(team_id):
         "current_year_surplus": _rank_ctx(cur_by_team),
         "next_year_surplus": _rank_ctx(next_by_team),
         "three_year_surplus": _rank_ctx(three_by_team),
+        "combined_pace": _rank_ctx(pace_by_team, divisor=1),
     }
 
 
@@ -451,11 +470,19 @@ def get_standings():
 
     bat = {r[0]: (r[1], r[2]) for r in conn.execute(
         "SELECT team_id, name, r FROM team_batting_stats WHERE year=? AND split_id=1", (year,)).fetchall()}
-    # Fall back to prior year if current year has no stats (preseason)
+    # Fall back when the target year has no TEAM stats (preseason, or a year gap
+    # where player stats exist but team-stat renders didn't land). Use the most
+    # recent year that actually has team stats at or before the target, rather
+    # than blindly stepping back one year (which could skip past the real last
+    # completed season to an older one).
     if not bat:
-        year = year - 1
-        bat = {r[0]: (r[1], r[2]) for r in conn.execute(
-            "SELECT team_id, name, r FROM team_batting_stats WHERE year=? AND split_id=1", (year,)).fetchall()}
+        row = conn.execute(
+            "SELECT MAX(year) FROM team_batting_stats WHERE split_id=1 AND year <= ?",
+            (year,)).fetchone()
+        if row and row[0]:
+            year = row[0]
+            bat = {r[0]: (r[1], r[2]) for r in conn.execute(
+                "SELECT team_id, name, r FROM team_batting_stats WHERE year=? AND split_id=1", (year,)).fetchall()}
     pit = {r[0]: (r[1], r[2]) for r in conn.execute(
         "SELECT team_id, r, ip FROM team_pitching_stats WHERE year=? AND split_id=1", (year,)).fetchall()}
 
@@ -727,6 +754,9 @@ def get_roster_hitters(team_id=None):
                 round(100 * (s_k or 0) / s_pa, 1) if s_pa else None,
             )
 
+    from war_pace import get_all_war_paces as _get_all_war_paces
+    _paces = _get_all_war_paces(league_dir=get_cfg().league_dir, conn=conn)
+
     result = []
     team_g, dpw, salaries = _pap_context(conn, tid, year)
     for p in players:
@@ -768,7 +798,11 @@ def get_roster_hitters(team_id=None):
             "ovr": _display_ovr, "pos": pos,
             "pos_order": pos_order().get(pos, 99),
             "surplus": round(p["surplus_yr1"] / _money_divisor(), 1) if p["surplus_yr1"] else 0,
-            "pap": calc_pap(war, salaries.get(pid, 0), team_g, dpw),
+            "pap": calc_pap(war, salaries.get(pid, 0), team_g, dpw, games_per_season=_games_per_season()),
+            "pace_war": _paces.get(pid, {}).get("pace_war"),
+            "pace_tier": _paces.get(pid, {}).get("pace_tier"),
+            "pace_tier_label": _paces.get(pid, {}).get("pace_tier_label"),
+            "pace_confidence": _paces.get(pid, {}).get("pace_confidence"),
             "is_two_way": pid in twp_pids,
             "career_babip": _r3(_c_babip), "babip_diff": _r3(_luck_gap), "luck": _babip_luck_tag,
             "career_bb_pct": _c_bb_pct, "career_k_pct": _c_k_pct,
@@ -895,6 +929,9 @@ def get_roster_pitchers(team_id=None):
             lob_denom = (s_ha + s_bb + s_hp) - 1.4 * s_hra
             career_lob[pid] = ((s_ha + s_bb + s_hp) - s_r) / lob_denom if lob_denom > 0 else None
 
+    from war_pace import get_all_war_paces as _get_all_war_paces
+    _paces = _get_all_war_paces(league_dir=get_cfg().league_dir, conn=conn)
+
     result = []
     team_g, dpw, salaries = _pap_context(conn, tid, year)
     for p in players:
@@ -953,7 +990,11 @@ def get_roster_pitchers(team_id=None):
             "ovr": _display_ovr, "role": role_str,
             "role_order": pos_order().get(role_str, 99),
             "surplus": round(p["surplus_yr1"] / _money_divisor(), 1) if p["surplus_yr1"] else 0,
-            "pap": calc_pap(war, salaries.get(pid, 0), team_g, dpw),
+            "pap": calc_pap(war, salaries.get(pid, 0), team_g, dpw, games_per_season=_games_per_season()),
+            "pace_war": _paces.get(pid, {}).get("pace_war"),
+            "pace_tier": _paces.get(pid, {}).get("pace_tier"),
+            "pace_tier_label": _paces.get(pid, {}).get("pace_tier_label"),
+            "pace_confidence": _paces.get(pid, {}).get("pace_confidence"),
             "is_two_way": pid in twp_pids,
             "career_babip": _r3(_c_babip), "babip_diff": _r3(_babip_gap), "luck": _babip_luck_tag,
             "career_hrfb": _r3(_c_hrfb), "hrfb_diff": _r3(_hrfb_gap), "hrfb_luck": _hrfb_luck_tag,
@@ -1242,20 +1283,79 @@ _PERSONALITY_TYPE_NEGATIVE = {"Selfish", "Outspoken", "Unmotivated", "Disruptive
 # year olds who haven't been scouted long enough for a Type to pop, even
 # though the underlying traits driving it are already visible. A real
 # OOTP-assigned Type always wins over inference; this only fills the gap
-# when there isn't one yet. Confirmed by real examples that popped the
-# matching Type later: Low Work Ethic + Low Leadership + Low Loyalty ->
-# Alex Rhodes, Armando Peraza, Gene Milam all went Disruptive. High
-# Financial Ambition + Low Leadership + Low Loyalty -> Thomas Egan, Nate
-# Morley both went Selfish.
-def _infer_personality_type(wrk_ethic, lead, loy, greed):
+# when there isn't one yet.
+#
+# Rules + confidence tiers below are measured, not guessed: mined against
+# every player across both PPL and eMLB with a real confirmed OOTP Type and
+# fully-scouted traits, checked 2026-09-17 (re-checked same day against
+# 7,228 players after fixing a real data-pipeline bug — see note below).
+# For each rule, "precision" = P(real Type == target | traits match this
+# rule) in that dataset, and "recall" = P(traits match this rule | real
+# Type == target). Outspoken has NO rule here because nothing beat a coin
+# flip (best combo found: <50% precision) — it appears to be close to
+# random with respect to these six traits, so guessing at it would just be
+# noise dressed up as a signal.
+#
+# CORRECTION 2026-09-17: the original mining run undercounted Disruptive
+# (only 46 confirmed players) because import_fa_asking_prices() silently
+# dropped the Type/Adaptability columns from every free-agent CSV export —
+# a released/unsigned player never appears in the roster export that DOES
+# capture Type, so his personality data was lost entirely. Caught when
+# Forrest flagged that the game was confirming Armando Peraza (a free
+# agent) as Disruptive with Low Work Ethic + Low Leadership + Low Loyalty —
+# exactly the original pre-this-session rule — while this app still showed
+# him as unscouted. Fixed in custom_upload.py's import_fa_asking_prices()
+# to persist Type/Adaptability the same way the roster importer does, and
+# backfilled both leagues from the current FA exports (PPL: 5,217 -> 5,826
+# confirmed-Type players; eMLB: 8,724 -> 10,062). Re-running the mining
+# query against the corrected data (58 confirmed Disruptive, up from 46)
+# reproduced the *exact* original rule as the actual best one:
+#   Disruptive: Work Ethic=L, Leadership=L, Loyalty=L
+#     -> 58/147 = 39% precision, but 100% RECALL — every single confirmed
+#        Disruptive player in the dataset satisfies this combo. Disruptive
+#        is rare (~0.8% base rate), so 39% precision is actually a ~49x
+#        lift over guessing; precision alone undersold it. Kept as "Low"
+#        confidence (39% still means most matches aren't Disruptive) but
+#        this is a necessary-condition flag worth surfacing early, not a
+#        weak guess — restoring the original rule that inspired this
+#        feature in the first place.
+#
+#   Unmotivated: Work Ethic=L, Baseball IQ=L, Adaptability=L
+#     -> 110/145 = 76% precision (High), 44% recall.
+#   Selfish: Leadership=L, Loyalty=L, Greed=H
+#     -> 226/314 = 72% precision (Medium), and catches 100% of every
+#        confirmed Selfish player in the dataset (full recall).
+#
+# Same mining run also covered the 5 positive Types. Two clear the bar:
+#   Sparkplug: Work Ethic=H, Greed=N, Adaptability=H
+#     -> 310/489 = 63% precision (Medium), 76% recall.
+#   Captain: Work Ethic=H, Leadership=H, Adaptability=N
+#     -> 102/211 = 48% precision (Low), 44% recall.
+# Humble, Prankster, and Fan Fav have NO rule here — best combos found for
+# each topped out well under 50% precision, so none of them show any real
+# trait signature in this data; guessing would just be noise.
+#
+# Checked in this order (most confident first, negative before positive at
+# the same tier since a personality "concern" is more actionable), except
+# Disruptive is checked ahead of Selfish's small overlap zone (Work
+# Ethic=L, Leadership=L, Loyalty=L, Greed=H matches both rules; of those,
+# 43 are actually Disruptive vs 36 Selfish) so a player matching both rules
+# gets the outcome that's actually more common in that overlap.
+def _infer_personality_type(wrk_ethic, lead, loy, greed, intel=None, adaptability=None):
+    if wrk_ethic == "L" and intel == "L" and adaptability == "L":
+        return {"label": "Likely Unmotivated (High confidence)", "class": "neg"}
     if wrk_ethic == "L" and lead == "L" and loy == "L":
-        return {"label": "Likely Disruptive", "class": "neg"}
-    if greed == "H" and lead == "L" and loy == "L":
-        return {"label": "Likely Selfish", "class": "neg"}
+        return {"label": "Likely Disruptive (Low confidence)", "class": "neg"}
+    if lead == "L" and loy == "L" and greed == "H":
+        return {"label": "Likely Selfish (Medium confidence)", "class": "neg"}
+    if wrk_ethic == "H" and greed == "N" and adaptability == "H":
+        return {"label": "Likely Sparkplug (Medium confidence)", "class": "pos"}
+    if wrk_ethic == "H" and lead == "H" and adaptability == "N":
+        return {"label": "Likely Captain (Low confidence)", "class": "pos"}
     return None
 
 
-def _personality_type_info(ptype, wrk_ethic=None, lead=None, loy=None, greed=None):
+def _personality_type_info(ptype, wrk_ethic=None, lead=None, loy=None, greed=None, intel=None, adaptability=None):
     """Classify a raw personality_type value for display + dim/highlight.
 
     Returns {"label", "class"} where class is one of:
@@ -1279,7 +1379,7 @@ def _personality_type_info(ptype, wrk_ethic=None, lead=None, loy=None, greed=Non
             return {"label": ptype, "class": "neg"}
         return {"label": ptype, "class": "neutral"}
 
-    inferred = _infer_personality_type(wrk_ethic, lead, loy, greed)
+    inferred = _infer_personality_type(wrk_ethic, lead, loy, greed, intel, adaptability)
     if inferred:
         return inferred
     if not ptype:
@@ -1295,19 +1395,103 @@ def _development_flags(wrk_ethic, intel, adaptability):
     return ("H" in values, "L" in values)
 
 
+# Mirrors the draft board's confidencePill()/_horizonFlag() (league.html) —
+# same signals (bust-risk, scouting-Accuracy, dev-horizon, makeup concerns),
+# ported server-side for the Jinja-rendered Farm System / All MiLB tables
+# rather than the client-JS tables the draft board uses.
+_CONFIDENCE_RISK_PENALTY = {"Low": 0, "Medium": 15, "High": 30, "Extreme": 50}
+_CONFIDENCE_ACC_PENALTY = {"VH": 0, "H": 7, "A": 10, "M": 10, "L": 15, "VL": 20, "EL": 20, "F": 20}
+
+# Real rostered farmhands have a real level, so — unlike the draft board's
+# amateur-only OVR-bucketing fallback in prospect_surplus() — this can use
+# the actual YEARS_TO_MLB-by-level table directly. Rookie/A-Short/lower are
+# the long-horizon levels (3.5+ years by the same table fv_calc.py uses).
+_LONG_HORIZON_LEVEL_KEYS = {"a-short", "usl", "dsl", "intl", "rookie"}
+_LEVEL_INT_TO_KEY = {0: "draft", 2: "aaa", 3: "aa", 4: "a", 5: "a-short", 6: "usl", 8: "intl", 10: "draft", 11: "draft"}
+
+
+def confidence_tier(risk, acc, has_personality_concern):
+    """Same A-F combined-confidence grade as the draft board, computed
+    server-side. Returns {"tier", "score", "reasons"}."""
+    score = 100
+    reasons = []
+    risk_pen = _CONFIDENCE_RISK_PENALTY.get(risk, 0)
+    if risk_pen:
+        score -= risk_pen
+        reasons.append(f"{risk} bust risk (-{risk_pen})")
+    acc_pen = _CONFIDENCE_ACC_PENALTY.get(acc, 10 if acc else 0)
+    if acc_pen:
+        score -= acc_pen
+        reasons.append(f"Scouting Acc {acc or '?'} (-{acc_pen})")
+    if has_personality_concern:
+        score -= 15
+        reasons.append("Makeup concern (-15)")
+    score = max(0, min(100, score))
+    tier = "A" if score >= 85 else "B" if score >= 70 else "C" if score >= 50 else "D" if score >= 30 else "F"
+    return {"tier": tier, "score": score, "reasons": reasons}
+
+
+def horizon_flag(level_int):
+    """True if this player's real level puts them at fv_calc.py's longest
+    development-horizon tier (3.5+ years to MLB by YEARS_TO_MLB) — the
+    level-based equivalent of the draft board's OVR-proxy horizon flag,
+    made possible because rostered farmhands (unlike amateur draftees)
+    have a real level to key off of."""
+    try:
+        level_key = _LEVEL_INT_TO_KEY.get(int(level_int))
+    except (TypeError, ValueError):
+        return False
+    return level_key in _LONG_HORIZON_LEVEL_KEYS
+
+
 def _personality_fields(intel, wrk_ethic, lead, loy, greed, adaptability, ptype):
     """One-call bundle of every personality-derived display/dim field an
     entry needs — buffs/concerns (Notes column text), personality_type/
     personality_type_class (Type column + dim/highlight driver), and
     dev_good/dev_bad (the separate development dim/highlight driver)."""
     buffs, concerns = _personality_notes(intel, wrk_ethic, lead, loy, greed, adaptability)
-    type_info = _personality_type_info(ptype, wrk_ethic, lead, loy, greed)
+    type_info = _personality_type_info(ptype, wrk_ethic, lead, loy, greed, intel, adaptability)
     dev_good, dev_bad = _development_flags(wrk_ethic, intel, adaptability)
     return {
         "buffs": buffs, "concerns": concerns,
         "personality_type": type_info["label"], "personality_type_class": type_info["class"],
         "dev_good": dev_good, "dev_bad": dev_bad,
     }
+
+
+# Continuous 0-100 "bang for buck" score for a draft prospect's signing
+# bonus ask vs their multi-year surplus value — used by the Draft board's
+# "Bonus Value" column so prospects can be ranked/sorted against each
+# other directly, not just bucketed. score = 100 * (1 - ask/surplus): a
+# $10 ask against $100K surplus scores ~100 (barely gives up any value to
+# sign him); a $75K ask against $100K surplus scores 25 (giving up 3/4 of
+# the value just to sign him). Clamped to [0, 100] since a) an ask above
+# the full surplus value is just "bad," not "negative infinity bad," and
+# b) "Slot" (no bonus premium demanded) is a free 100.
+_TIER_THRESHOLDS = [(80, "pos"), (50, "neutral")]  # else "neg"
+
+
+def _draft_bonus_verdict(surplus_millions, ask_dollars, special=None):
+    """Returns {"score": float|None, "label": str, "class": str} for the
+    Bonus Value column. score is None only when there's no ask on file at
+    all — every other case (including Unsignable) gets a real 0-100 number
+    so the column stays sortable. class mirrors the ptype-* CSS used
+    elsewhere (pos/neutral/neg/unscouted) for at-a-glance coloring; label
+    is a short read of the score, not an independent judgment.
+    """
+    if special == "unsignable":
+        return {"score": 0.0, "label": "Unsignable", "class": "neg"}
+    if ask_dollars is None:
+        return {"score": None, "label": "No Ask", "class": "unscouted"}
+    if surplus_millions is None or surplus_millions <= 0:
+        return {"score": 0.0, "label": "0", "class": "neg"}
+    ask_millions = ask_dollars / 1e6
+    ratio = ask_millions / surplus_millions
+    score = max(0.0, min(100.0, 100.0 * (1.0 - ratio)))
+    for cutoff, cls in _TIER_THRESHOLDS:
+        if score >= cutoff:
+            return {"score": round(score, 1), "label": str(round(score)), "class": cls}
+    return {"score": round(score, 1), "label": str(round(score)), "class": "neg"}
 
 
 def _bucket_for_display(pf_bucket, role, pos):
@@ -2103,10 +2287,14 @@ def get_farm(team_id=None, limit=None):
 
     rows = conn.execute(f"""
         SELECT p.name, p.age, p.level, pf.fv, pf.fv_str, pf.bucket, pf.prospect_surplus, p.player_id, p.pos,
-               r.composite_score, r.ceiling_score, pf.risk
+               r.composite_score, r.ceiling_score, pf.risk,
+               ds.available, ds.css_class, ds.label, ds.confidence, ds.z,
+               ds.schedule_status, ds.schedule_label, ds.schedule_note,
+               r.acc, r.int_, r.wrk_ethic, r.lead, r.loy, r.greed, r.adaptability, r.personality_type
         FROM prospect_fv pf
         JOIN players p ON pf.player_id=p.player_id
         LEFT JOIN latest_ratings r ON pf.player_id=r.player_id
+        LEFT JOIN dev_speed ds ON pf.player_id=ds.player_id AND ds.eval_date=pf.eval_date
         WHERE pf.eval_date=? AND {ORG_ID_SQL}=?
               AND p.age <= 25 AND pf.fv >= 40
     """, (ed, tid)).fetchall()
@@ -2118,7 +2306,11 @@ def get_farm(team_id=None, limit=None):
     rows = sorted(rows, key=sort_key)
     if limit:
         rows = rows[:limit]
-    return [{"rank": i + 1, "name": r[0], "age": r[1],
+    out = []
+    for i, r in enumerate(rows):
+        pers = _personality_fields(r[21], r[22], r[23], r[24], r[25], r[26], r[27])
+        conf = confidence_tier(r[11], r[20], pers["personality_type_class"] == "neg" or bool(pers["concerns"]))
+        out.append({"rank": i + 1, "name": r[0], "age": r[1],
              "level": level_map().get(str(r[2]), str(r[2])),
              "fv": r[3], "fv_str": r[4],
              "bucket": _display_pos(r[5], r[8]),
@@ -2126,8 +2318,9 @@ def get_farm(team_id=None, limit=None):
              "surplus": round(r[6] / _money_divisor(), 1) if r[6] else 0,
              "pid": r[7],
              "composite_score": r[9], "ceiling_score": r[10],
-             "risk": r[11]}
-            for i, r in enumerate(rows)]
+             "risk": r[11], "dev": _dev_cell(r, 12),
+             "acc": r[20], "confidence": conf, "long_horizon": horizon_flag(r[2])})
+    return out
 
 
 def get_intl_complex(team_id=None):
@@ -2358,10 +2551,24 @@ def get_payroll_summary(team_id):
 
     # Real per-year figures from an uploaded "Team Salary" export override the
     # formula projection above wherever they cover a given calendar year.
+    # Each cell also carries the game's own marker (see custom_upload.
+    # import_team_salary): None = guaranteed/confirmed dollar figure, T/P/O =
+    # a team/player/mutual option (the DOLLAR VALUE is still a known, fixed
+    # contract term — only whether it gets exercised is uncertain), R = a
+    # pre-arb renewal the team itself already set, and only A/A*/A# are the
+    # game's own arbitration-model ESTIMATE for a not-yet-set future year.
+    # Only that last group should ever be labeled "est" — everything else is
+    # a real number just like a guaranteed contract year.
+    _OPTION_MARKER_LABEL = {"T": "TO", "P": "PO", "O": "TO"}
     uploaded_by_pid = {}
     try:
-        for r in conn.execute("SELECT player_id, year, amount FROM salary_estimates"):
-            uploaded_by_pid.setdefault(r["player_id"], {})[r["year"]] = r["amount"]
+        for r in conn.execute("SELECT player_id, year, amount, marker FROM salary_estimates"):
+            marker = r["marker"]
+            uploaded_by_pid.setdefault(r["player_id"], {})[r["year"]] = {
+                "amount": r["amount"],
+                "is_estimate": bool(marker) and marker.startswith("A"),
+                "option": _OPTION_MARKER_LABEL.get(marker),
+            }
     except Exception:
         pass
 
@@ -2384,8 +2591,9 @@ def get_payroll_summary(team_id):
             contract_yr = cur_yr + i
             abs_year = year + i
             if pid_uploaded and abs_year in pid_uploaded:
-                sal = pid_uploaded[abs_year]
-                by_year.append({"sal": sal, "option": None, "projected": True})
+                cell = pid_uploaded[abs_year]
+                sal = cell["amount"]
+                by_year.append({"sal": sal, "option": cell["option"], "projected": cell["is_estimate"]})
                 totals[i] += sal
             elif i in proj_map:
                 by_year.append({"sal": proj_map[i], "option": None, "projected": True})
@@ -3136,9 +3344,17 @@ def get_depth_chart(team_id):
     import json, math
     from projections import (
         project_war, project_ovr, project_ops_plus, project_ops_plus_splits,
-        project_era, project_fip, project_ratings,
+        project_era, project_fip, project_ratings, set_peak_ages,
         assign_diamond_positions, allocate_playing_time, allocate_pitcher_time,
         roster_availability, LEVEL_DISCOUNT, DEFAULT_TEAM_PA, DEFAULT_TEAM_IP,
+    )
+    from statsplusplus.evaluation.constants import (
+        load_model_weights, PEAK_AGE_HITTER as _PA_H_DEFAULT, PEAK_AGE_PITCHER as _PA_P_DEFAULT,
+    )
+    _peak_weights = load_model_weights(get_cfg().league_dir)
+    set_peak_ages(
+        _peak_weights.get_param("PEAK_AGE_HITTER", _PA_H_DEFAULT),
+        _peak_weights.get_param("PEAK_AGE_PITCHER", _PA_P_DEFAULT),
     )
     from statsplusplus.evaluation.war import stat_peak_war, load_stat_history
     from contract_value import contract_value as _cv, _load_perp_arb_model
@@ -3177,7 +3393,10 @@ def get_depth_chart(team_id):
     lg_era = lg["pitching"]["era"]
     lg_fip = lg["pitching"]["fip"]
 
-    bat_hist, pit_hist, two_way = load_stat_history(conn, state["game_date"])
+    from statsplusplus.config.league_config import games_per_season as _gps
+    bat_hist, pit_hist, two_way = load_stat_history(
+        conn, state["game_date"], games_per_season=_gps(get_cfg().league_dir)
+    )
 
     # ── Query MLB roster ────────────────────────────────────────────────
     mlb_rows = conn.execute('''
@@ -4230,6 +4449,25 @@ def get_org_minor_league_roster(parent_team_id):
             lg_gb_pct = lg_gb / (lg_gb + lg_fb) if (lg_gb or 0) + (lg_fb or 0) > 0 else None
             lg_k_pct, lg_bb_pct = lg_k / lg_bf, lg_bb / lg_bf
 
+    # Real observed Zone Rating for hitters, same "prefer real stats over
+    # the scouting-tool Def proxy" convention as the pitcher block above —
+    # one row per player at whichever position they've played the most
+    # games, most recent stats year with data (state["stats_year"]).
+    _ZR_MIN_GAMES = 10
+    zr_by_pid = {}
+    if org_pids:
+        stats_year = _get_state().get("stats_year")
+        pid_qs = ",".join("?" * len(org_pids))
+        best_g = {}
+        for p_pid, g, zr in conn.execute(
+            f"SELECT player_id, g, zr FROM fielding_stats "
+            f"WHERE player_id IN ({pid_qs}) AND year=? AND zr IS NOT NULL",
+            org_pids + [stats_year],
+        ).fetchall():
+            if g and g >= _ZR_MIN_GAMES and g > best_g.get(p_pid, 0):
+                best_g[p_pid] = g
+                zr_by_pid[p_pid] = round(zr, 1)
+
     # This function hardcoded scale="1-100" (norm()'s default) regardless of
     # the league's actual ratings_scale — silently wrong for any "20-80"
     # league (PPL): a raw value that's already a 20-80 grade (e.g. 80) was
@@ -4246,6 +4484,11 @@ def get_org_minor_league_roster(parent_team_id):
     _level_order = {"2": 1, "3": 2, "4": 3, "5": 4, "6": 5, "8": 6, "0": 7}
     _VIABLE_POS_THRESHOLD = 65
     _VIABLE_POS_ORDER = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF"]
+
+    # "On pace for a historic season" (2026-09-30) — bulk-computed once for
+    # the whole org roster, not per-row, so the page load stays fast.
+    from war_pace import get_all_war_paces as _get_all_war_paces
+    _war_paces = _get_all_war_paces(league_dir=get_cfg().league_dir, conn=conn)
 
     hitters = []
     pitchers = []
@@ -4302,7 +4545,12 @@ def get_org_minor_league_roster(parent_team_id):
                        if (prospect_surplus is not None or mlb_surplus is not None) else None,
             "peak_surplus": _peak_surplus(fv_continuous, age, level_name, bucket, ovr=composite, pot=potential),
             "on_40man": bool(on_40man),
+            "war_pace": _war_paces.get(pid, {}).get("pace_war"),
+            "is_historic_pace": _war_paces.get(pid, {}).get("is_historic", False),
+            "pace_confidence": _war_paces.get(pid, {}).get("pace_confidence"),
             "acc": acc, **_pers,
+            "confidence": confidence_tier(risk, acc, _pers["personality_type_class"] == "neg" or bool(_pers["concerns"])),
+            "long_horizon": horizon_flag(level),
         }
 
         # Park fit/value against your own home park — always scored on
@@ -4368,6 +4616,7 @@ def get_org_minor_league_roster(parent_team_id):
                 "pow": n(pw), "pot_pow": n(pot_pw),
                 "eye": n(eye), "pot_eye": n(pot_eye),
                 "spd": n(speed), "def": n(pos_def) if pos_def else None,
+                "zr": zr_by_pid.get(pid),
                 # Simple pure Contact/Gap/Power/Eye weighted average — no
                 # defense/speed/transforms/recombination (separate from the
                 # vr/vl full-composite scores in vr_vl above).

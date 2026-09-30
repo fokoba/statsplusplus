@@ -23,12 +23,13 @@ BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, "scripts"))
 
 from statsplusplus.config.league_context import get_league_dir, get_active_league_slug
-from statsplusplus.config.league_config import LeagueConfig
+from statsplusplus.config.league_config import LeagueConfig, games_per_season
 from statsplusplus.data.db import get_connection
 from standings import _standings_from_db
 
 league_dir = get_league_dir(get_active_league_slug())
 _cfg = LeagueConfig(base_dir=league_dir)
+_SEASON_GAMES = games_per_season(league_dir)
 
 def _get_conn():
     return get_connection(league_dir)
@@ -257,7 +258,7 @@ def find_targets(bucket, min_ovr=50, sellers_only=False, include_controlled=Fals
         season_start = datetime(gd.year, 4, 1)
         season_end = datetime(gd.year, 10, 1)
         elapsed = (gd - season_start).days / (season_end - season_start).days
-        games_remaining = max(1, round(162 * (1 - elapsed)))
+        games_remaining = max(1, round(_SEASON_GAMES * (1 - elapsed)))
     except Exception:
         games_remaining = 53  # fallback
     conn.close()
@@ -307,7 +308,7 @@ def find_targets(bucket, min_ovr=50, sellers_only=False, include_controlled=Fals
             if not _svc(conn2, pid).is_free_agent_eligible:
                 status = "ARB"
             conn2.close()
-        prorated = sal * (games_remaining / 162)
+        prorated = sal * (games_remaining / _SEASON_GAMES)
         if max_salary_m is not None and prorated > max_salary_m:
             continue
 

@@ -154,4 +154,106 @@
 </div>
 
 {% endif %}
+
+{% if war_projection %}{% include "_war_projection.html" %}{% endif %}
+
+{# ── Projected End-of-Season WAR — league-wide ── #}
+{% set pw = pw_data %}
+<div class="panel" style="margin-top:16px;">
+  <h2>Projected End-of-Season WAR <span style="font-weight:400; color:var(--text-dim); font-size:12px">— league-wide, empirically calibrated</span></h2>
+  <div class="mb-subtitle">
+    <strong>Baseline</strong> blends this season's observed pace with real season-by-season track record (recency-weighted,
+    heavier weight on more of the season being played). <strong>Floor</strong> and <strong>Ceiling</strong> are NOT a guessed
+    spread — they come from backtesting every completed player-season in this league's own history: for each one, a baseline
+    was projected from only the seasons before it, then compared to what actually happened. The floor/ceiling shown are the
+    10th/90th percentile of that real error distribution, bucketed by hitter/pitcher and by projection tier.
+    Players are excluded (not just flagged) below a minimum current-season sample ({{ pw.n_excluded_small_sample }} players)
+    or with no qualifying prior season on record to backtest against ({{ pw.n_excluded_no_track_record }} players).
+    Two-way players are excluded for now (not modeled separately yet). This is a standalone in-season metric — it does not
+    change the Contracts/surplus figures above.
+  </div>
+
+  <div class="pw-controls">
+    <input type="text" id="pw-search" placeholder="Search player or team...">
+    <select id="pw-group-filter">
+      <option value="">All positions</option>
+      <option value="hitter">Hitters</option>
+      <option value="pitcher">Pitchers</option>
+    </select>
+    <select id="pw-confidence-filter">
+      <option value="">Any confidence</option>
+      <option value="Established">Established</option>
+      <option value="Developing">Developing</option>
+      <option value="Early">Early</option>
+    </select>
+  </div>
+
+  <div class="pw-table-wrap">
+    <table id="pw-table">
+      <thead>
+        <tr>
+          <th data-sort="str" class="left">Player</th>
+          <th data-sort="str">Team</th>
+          <th data-sort="str">Pos</th>
+          <th data-sort="num">Age</th>
+          <th data-sort="str" title="How much of the season has been played, driving how much weight current-season stats get in the baseline">Confidence</th>
+          <th data-sort="num" title="Observed WAR so far this season">Current WAR</th>
+          <th data-sort="num" title="Most recent qualifying full prior season">Prior FS WAR</th>
+          <th data-sort="num" data-sort-selected="desc" title="Blended projection for how this season ends up">Baseline WAR</th>
+          <th data-sort="num" title="Empirical bottom-10% outcome">Floor WAR</th>
+          <th data-sort="num" title="Empirical top-10% outcome">Ceiling WAR</th>
+          <th data-sort="num">Baseline $</th>
+          <th data-sort="num">Salary</th>
+          <th data-sort="num">Surplus</th>
+          <th data-sort="num" data-sort-best="low" title="Actual salary / baseline WAR — lower means better value">Observed $/WAR</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in pw.players %}
+        <tr data-group="{{ p.group }}" data-confidence="{{ p.confidence }}" data-search="{{ p.name|lower }} {{ p.team_name|lower }} {{ p.team_abbr|lower }}">
+          <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
+          <td><a class="team-link" href="/team/{{ p.team_id }}">{{ p.team_abbr }}</a></td>
+          <td>{{ p.bucket }}</td>
+          <td>{{ p.age }}</td>
+          <td><span class="pw-conf pw-conf-{{ p.confidence|lower }}" title="{{ p.season_pct }}% of season played">{{ p.confidence }}</span></td>
+          <td>{{ p.current_war }}</td>
+          <td>{{ p.prior_war }} <span style="color:var(--text-dim); font-size:11px">'{{ (p.prior_year|string)[-2:] }}</span></td>
+          <td>{{ p.baseline_war }}</td>
+          <td class="neg">{{ p.floor_war }}</td>
+          <td class="pos">{{ p.ceiling_war }}</td>
+          <td data-sort-value="{{ p.baseline_value }}">{{ fmt_money(p.baseline_value) }}</td>
+          <td data-sort-value="{{ p.salary }}">{{ fmt_money(p.salary) }}</td>
+          <td data-sort-value="{{ p.surplus }}" class="{{ 'pos' if p.surplus > 0 else 'neg' if p.surplus < 0 else '' }}">{{ fmt_money(p.surplus) }}</td>
+          <td data-sort-value="{{ p.observed_dpw if p.observed_dpw is not none else 999999999 }}">{{ fmt_dpw(p.observed_dpw) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+(function() {
+  const search = document.getElementById('pw-search');
+  const groupFilter = document.getElementById('pw-group-filter');
+  const confFilter = document.getElementById('pw-confidence-filter');
+  const rows = Array.from(document.querySelectorAll('#pw-table tbody tr'));
+
+  function applyFilters() {
+    const q = search.value.trim().toLowerCase();
+    const g = groupFilter.value;
+    const c = confFilter.value;
+    rows.forEach(function(row) {
+      const matchesSearch = !q || row.dataset.search.includes(q);
+      const matchesGroup = !g || row.dataset.group === g;
+      const matchesConf = !c || row.dataset.confidence === c;
+      row.style.display = (matchesSearch && matchesGroup && matchesConf) ? '' : 'none';
+    });
+  }
+  search.addEventListener('input', applyFilters);
+  groupFilter.addEventListener('change', applyFilters);
+  confFilter.addEventListener('change', applyFilters);
+})();
+</script>
+
 {% endblock %}

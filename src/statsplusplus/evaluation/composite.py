@@ -536,17 +536,89 @@ def compute_defensive_value(
 # Hitter composite
 # ---------------------------------------------------------------------------
 
+def _run_space_hitter_composite(tools, defense, bucket, run_space, positional_models,
+                                observed=None):
+    """Run-space composite (20-80) or None if calibration is incomplete.
+
+    Projects wOBA from tools via the calibrated tool->wOBA fit, combines facet
+    runs additively, and maps to 20-80 via the calibrated composite mapping.
+
+    ``observed`` (optional, B2 per-facet convergence): dict with observed career
+    facet runs and their playing-time samples::
+
+        {"bat_runs": wRAA, "bat_pa": PA,
+         "br_runs": UBR,   "br_pa": PA,
+         "fld_runs": ZR,   "fld_ip": IP}
+
+    When present, each facet blends its tool projection with the observed value
+    by a facet-specific stabilization confidence — replacing the old OPS+
+    ``compute_composite_mlb`` blend with a per-facet run-space blend so the
+    composite and the WAR projection share one run total.
+    """
+    if not run_space or not bucket:
+        return None
+    fit = run_space.get("tool_woba_fit")
+    mapping = run_space.get("comp_mapping")
+    if not fit or not mapping:
+        return None
+    con = tools.get("contact"); gap = tools.get("gap")
+    pw = tools.get("power"); eye = tools.get("eye")
+    if None in (con, gap, pw, eye):
+        return None
+    from statsplusplus.evaluation import facet_runs as _fr
+    proj_woba = (fit[0] + fit[1] * float(con) + fit[2] * float(gap)
+                 + fit[3] * float(pw) + fit[4] * float(eye))
+    lg_woba = run_space.get("lg_woba", 0.320)
+    woba_scale = run_space.get("woba_scale", 1.28)
+    rpw = run_space.get("anchor", {}).get("runs_per_win", 9.5)
+
+    # Tool-projected facet runs
+    bat_tool = _fr.bat_runs(proj_woba, lg_woba, woba_scale, 600.0)
+    br_tool = _fr.baserunning_runs(tools, run_space.get("br_curve"))
+    fld = _fr.fielding_runs(defense or {}, bucket, run_space.get("def_curve"), positional_models)
+    pos = _fr.positional_adj_runs(bucket, rpw)
+
+    # B2: per-facet blend with observed MLB career runs (bat/baserunning only;
+    # defense stays tool-based — MLB ZR is used directly via the tool curve and
+    # observed-ZR blending is handled at the run level when provided).
+    if observed:
+        bat_pa = observed.get("bat_pa", 0.0)
+        if observed.get("bat_runs") is not None and bat_pa > 0:
+            scb = _fr.facet_stat_confidence("bat", bat_pa)
+            bat_tool = (1 - scb) * bat_tool + scb * observed["bat_runs"]
+        br_pa = observed.get("br_pa", 0.0)
+        if observed.get("br_runs") is not None and br_pa > 0:
+            scr = _fr.facet_stat_confidence("baserunning", br_pa)
+            br_tool = (1 - scr) * br_tool + scr * observed["br_runs"]
+        fld_ip = observed.get("fld_ip", 0.0)
+        if observed.get("fld_runs") is not None and fld_ip > 0:
+            scf = _fr.facet_stat_confidence("fielding", fld_ip)
+            fld = (1 - scf) * fld + scf * observed["fld_runs"]
+
+    total = bat_tool + br_tool + fld + pos
+    return _fr.runs_to_composite(total, mapping)
+
+
 def compute_composite_hitter(
     tools: dict[str, float | int | None],
     weights: dict[str, float],
     defense: dict[str, float | int | None],
     def_weights: dict[str, float],
     transforms: dict[str, list[float]] | None = None,
+    run_space: dict | None = None,
+    bucket: str | None = None,
+    positional_models: dict | None = None,
+    observed: dict | None = None,
 ) -> int:
     """Compute hitter Composite_Score from tool ratings and weights.
 
-    Decomposes into offensive, baserunning, and defensive components,
-    then recombines using shares derived from the weight profile.
+    Two modes:
+      - **Run-space (preferred):** when ``run_space`` calibration + ``bucket`` are
+        provided, values are combined additively in RUNS (bat wRAA + baserunning
+        + fielding + positional adjustment) then mapped to 20-80. This is the
+        principled model (spec: run-space-facet-model).
+      - **Grade-space (fallback):** the legacy share-weighted grade blend, used
+        when run-space calibration is absent (backward compatible).
 
     Args:
         tools: Hitter tool ratings on 20-80 scale (contact, gap, power, eye,
@@ -560,6 +632,11 @@ def compute_composite_hitter(
     Returns:
         Integer composite score in [20, 80].
     """
+    rs_score = _run_space_hitter_composite(
+        tools, defense, bucket, run_space, positional_models, observed)
+    if rs_score is not None:
+        return rs_score
+
     off_raw = offensive_grade_raw(tools, weights, transforms)
     br_raw = baserunning_value_raw(tools, weights, transforms)
     def_raw = defensive_value_raw(defense, def_weights)

@@ -346,6 +346,7 @@ def calc_pap(
     team_games: int | None,
     dpw: int | float,
     pap_scale: float | None = None,
+    games_per_season: int = 162,
 ) -> float | None:
     """Compute Payroll-Adjusted Performance score (1-10 scale).
 
@@ -363,6 +364,9 @@ def calc_pap(
             in the tens of thousands, and a fixed $25M scale swamps every
             real surplus figure to ~0, tanh(~0) ~= 0, collapsing PAP to
             5.0 for every player regardless of actual performance.
+        games_per_season: League's full-season schedule length, e.g. from
+            statsplusplus.config.league_config.games_per_season(league_dir).
+            Defaults to 162; pass the league-specific value where available.
 
     Returns:
         PAP score rounded to 2 decimal places, or None if inputs invalid.
@@ -373,6 +377,6 @@ def calc_pap(
         return None
     if pap_scale is None:
         pap_scale = (dpw or 9_000_000) * (25_000_000 / 9_000_000)
-    annualized = war * (162 / team_games)
+    annualized = war * (games_per_season / team_games)
     surplus = annualized * dpw - salary
     return round(5 + 5 * tanh(surplus / pap_scale), 2)

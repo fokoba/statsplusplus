@@ -7,8 +7,11 @@ per-league import_export folder (or, for the Team Salary HTML report,
 ~/Downloads). This module finds the newest matching file per category and
 feeds it straight into the *existing* import_* functions that the web
 upload forms already call (import_ratings_sync, import_fa_asking_prices,
-import_team_salary, import_league_park_factors, import_rule5_eligible) —
-no new parsers, just automatic discovery instead of a manual file picker.
+import_team_salary, import_rule5_eligible) — no new parsers, just automatic
+discovery instead of a manual file picker. Park factors are deliberately
+excluded — they rarely change (irregular in PPL, effectively permanent in
+eMLB absent an expansion team) so Forrest updates those manually via a
+one-off ask instead.
 
 A small per-league state file (config/local_ingest_state.json) tracks the
 mtime last processed per category, so unchanged files are skipped cheaply
@@ -22,6 +25,7 @@ Public API:
 from __future__ import annotations
 
 import csv
+import time
 import io
 import json
 import os
@@ -57,9 +61,19 @@ LEAGUE_FOLDERS: dict[str, list[Path]] = {
 }
 
 
-def _find_latest(folders: list[Path], must_contain: list[str]) -> Path | None:
+def _find_latest(folders: list[Path], must_contain: list[str],
+                  must_not_contain: list[str] | None = None) -> Path | None:
     """Newest file across `folders` whose lowercased name contains every
-    substring in `must_contain`."""
+    substring in `must_contain` and none of `must_not_contain`.
+
+    The exclusion list matters when OOTP's export presets share a naming
+    prefix — e.g. the "All Personnel" full-org export and several narrower
+    role-filtered grids (a hitting-coach-only view, a free-agents-only view)
+    all contain "personnel_...coachsctrall" in their filename, differing
+    only by a trailing suffix. Without excluding those, a narrower export
+    saved AFTER the full one would look "newer" and get picked instead,
+    which would look like new coaches simply vanished from every other role.
+    """
     best: Path | None = None
     for folder in folders:
         if not folder.exists():
@@ -68,14 +82,19 @@ def _find_latest(folders: list[Path], must_contain: list[str]) -> Path | None:
             if not p.is_file():
                 continue
             name = p.name.lower()
-            if all(s in name for s in must_contain):
-                if best is None or p.stat().st_mtime > best.stat().st_mtime:
-                    best = p
+            if not all(s in name for s in must_contain):
+                continue
+            if must_not_contain and any(s in name for s in must_not_contain):
+                continue
+            if best is None or p.stat().st_mtime > best.stat().st_mtime:
+                best = p
     return best
 
 
 def _state_path(league_dir) -> Path:
     return Path(league_dir) / "config" / "local_ingest_state.json"
+
+
 
 
 def _load_state(league_dir) -> dict:
@@ -185,14 +204,17 @@ def ingest_once(league_slug: str, league_dir) -> dict[str, str]:
     state = _load_state(league_dir)
     summary: dict[str, str] = {}
 
-    def _maybe(category, must_contain, importer):
-        f = _find_latest(folders, must_contain)
+    def _maybe(category, must_contain, importer, must_not_contain=None):
+        f = _find_latest(folders, must_contain, must_not_contain)
         if f is None:
             summary[category] = "not found"
             return
         mtime = f.stat().st_mtime
         if state.get(category) == mtime:
             summary[category] = "unchanged"
+            return
+        if time.time() - mtime < 10:
+            summary[category] = "still being written (retry next poll)"
             return
         try:
             result = importer(f.read_bytes())
@@ -202,17 +224,38 @@ def ingest_once(league_slug: str, league_dir) -> dict[str, str]:
             summary[category] = f"error on {f.name}: {e}"
 
     from custom_upload import import_ratings_sync, import_fa_asking_prices, import_team_salary
-    from lineup_optimizer_queries import import_league_park_factors
     from scouting_queries import import_rule5_eligible
 
+    # Park factors are NOT auto-ingested here on purpose: they rarely change
+    # (PPL updates them irregularly; eMLB's are effectively permanent absent
+    # an expansion team), so Forrest updates them manually via a one-off ask
+    # instead of via this background poll.
     _maybe("ratings", ["player_list", "allcolumns"],
            lambda data: import_ratings_sync(data, league_dir=league_dir))
+    # Coaching staff (personnel) is NOT auto-ingested here on purpose
+    # (2026-09-28, Forrest's request) — coaching changes are infrequent
+    # (a handful of times a season), so this runs as a manual one-off via
+    # chat instead of every poll. custom_upload.import_personnel_sync still
+    # exists and works exactly as before; just call it directly when asked.
     _maybe("fa_asks", ["free_agents", "allcolumns"],
            lambda data: import_fa_asking_prices(data, league_dir=league_dir))
-    _maybe("park_factors", ["team_statistics"],
-           lambda data: import_league_park_factors(data, league_dir=league_dir))
-    _maybe("draft_pool", ["draft_pool", "allcolumns"],
-           lambda data: _ingest_draft_pool(data, league_dir))
+    # Draft pool / draft signing-bonus asks are NOT auto-ingested here on
+    # purpose (2026-09-28, Forrest's request) — PPL's draft is finished and
+    # eMLB has no draft underway, so there's nothing live to track right
+    # now. _ingest_draft_pool and custom_upload.import_draft_bonus_asks
+    # still exist and work exactly as before; re-enable both _maybe calls
+    # (they were here previously, same must_contain args) once a draft is
+    # actually in progress in either league again.
+    # Draft-eligible amateurs aren't in the roster "player_list" export at
+    # all, so import_ratings_sync() above never sees them — their ratings
+    # (including position-defense potentials, e.g. "1B Pot") only ever come
+    # from THIS file. Same importer, same column format (both are OOTP
+    # "All Columns" grids), just a different source/category so its own
+    # mtime is tracked independently. COALESCE-merge means this can never
+    # clobber a fuller reading the live API sync already has for a player
+    # who's since turned pro.
+    _maybe("draft_ratings", ["draft_pool", "allcolumns"],
+           lambda data: import_ratings_sync(data, league_dir=league_dir))
 
     # Rule 5 reuses the same ratings file, filtered to R5 == Yes.
     ratings_file = _find_latest(folders, ["player_list", "allcolumns"])
@@ -268,23 +311,54 @@ def ingest_once(league_slug: str, league_dir) -> dict[str, str]:
     return summary
 
 
-def get_freshness(league_dir) -> dict:
-    """Newest mtime across every locally-ingested category for this league —
-    feeds a 'local export last updated' UI indicator so Forrest knows when
-    it's worth re-exporting from OOTP, without having to track it himself.
+# Display metadata for every category the local-ingest checklist tracks —
+# drives the "Last Updated" hover panel in base.html so Forrest can see, at
+# a glance, what's being fed in and how stale each piece is, without having
+# to read this module's source.
+CATEGORY_INFO = [
+    {"key": "ratings", "label": "Ratings / roster / Rule 5"},
+    {"key": "fa_asks", "label": "FA asking prices"},
+    {"key": "team_salary", "label": "Team salary"},
+]
 
-    Returns {"newest_mtime": float | None, "categories": {name: mtime}}.
+
+def get_freshness(league_dir) -> dict:
+    """Per-category freshness for this league's locally-ingested OOTP
+    exports — feeds the 'Last Updated' hover checklist in base.html so
+    Forrest can see what's being fed in and how stale each piece is,
+    without having to track it himself.
+
+    Park factors, draft pool / draft signing-bonus asks, and coaching staff
+    are intentionally not tracked here — they're updated manually via a
+    one-off ask rather than through this background poll (see ingest_once()).
+
+    Returns {
+      "newest_mtime": float | None,
+      "categories": [
+        {"key", "label", "mtime": float|None, "found": bool}, ...
+      ],
+    }
     `newest_mtime` is None if nothing has ever been ingested for this league.
     """
     state = _load_state(league_dir)
-    mtimes: dict[str, float] = {}
-    for k in ("ratings", "fa_asks", "park_factors", "draft_pool", "rule5"):
-        if k in state:
-            mtimes[k] = state[k]
-    if "team_salary_mtime" in state:
-        mtimes["team_salary"] = state["team_salary_mtime"]
-    newest = max(mtimes.values()) if mtimes else None
-    return {"newest_mtime": newest, "categories": mtimes}
+
+    def _mtime_for(key):
+        if key == "team_salary":
+            return state.get("team_salary_mtime")
+        return state.get(key)
+
+    categories = []
+    for info in CATEGORY_INFO:
+        key = info["key"]
+        mtime = _mtime_for(key)
+        categories.append({
+            "key": key, "label": info["label"],
+            "mtime": mtime, "found": mtime is not None,
+        })
+
+    mtimes = [c["mtime"] for c in categories if c["mtime"] is not None]
+    newest = max(mtimes) if mtimes else None
+    return {"newest_mtime": newest, "categories": categories}
 
 
 def ingest_all_leagues(data_root) -> dict[str, dict[str, str]]:

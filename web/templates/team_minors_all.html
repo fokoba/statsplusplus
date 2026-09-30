@@ -102,6 +102,7 @@
         <th data-sort="num">Ceil</th>
         <th data-sort="str" data-sort-best="high">FV</th>
         <th data-sort="str" title="Scouting accuracy grade for this player's ratings">Acc</th>
+        <th data-sort="str" title="Combined confidence grade — rolls bust-risk, scouting-Accuracy, and makeup concerns into one A-F letter">Conf</th>
         <th data-sort="num">Con</th>
         <th data-sort="num">Gap</th>
         <th data-sort="num">Pow</th>
@@ -111,6 +112,7 @@
         <th data-sort="num" title="Same simple weighted average, using vs-LHP split Contact/Gap/Power/Eye">Bat vL</th>
         <th data-sort="num">Spd</th>
         <th data-sort="num">Def</th>
+        <th data-sort="num" title="Real observed Zone Rating from actual innings played (10+ G, most recent stats year) — preferred over the scouting-tool Def grade when available">ZR</th>
         <th class="left" title="Every position this player currently grades 65/80 or higher at — a quick check for who can play the field vs. who's a DH-only bat.">Viable Positions</th>
         <th data-sort="num">Surplus</th>
         <th data-sort="num" title="Best single projected year at expected grade — quality independent of remaining runway">Peak Yr</th>
@@ -123,12 +125,13 @@
     </thead>
     <tbody>
       {% for p in roster.hitters %}
-      <tr data-level="{{ p.level_num }}" data-pos="{{ p.pos }}" data-40man="{{ '1' if p.on_40man else '0' }}" data-pro="{{ '1' if p.is_pro else '0' }}" data-ptype="{{ p.personality_type_class }}" data-dev-good="{{ '1' if p.dev_good else '' }}" data-dev-bad="{{ '1' if p.dev_bad else '' }}">
-        <td data-sort-value="{{ p.level_num }}"><span class="level-badge level-{{ p.level|lower|replace('-','') }}">{{ p.level }}</span></td>
+      <tr data-level="{{ p.level_num }}" data-pos="{{ p.pos }}" data-40man="{{ '1' if p.on_40man else '0' }}" data-pro="{{ '1' if p.is_pro else '0' }}" data-ptype="{{ p.personality_type_class }}" data-dev-good="{{ '1' if p.dev_good else '' }}" data-dev-bad="{{ '1' if p.dev_bad else '' }}" data-historic-pace="{{ '1' if p.is_historic_pace else '' }}">
+        <td data-sort-value="{{ p.level_num }}"><span class="level-badge level-{{ p.level|lower|replace('-','') }}">{{ p.level }}</span>{% if p.long_horizon %} <span title="Real level puts this player at fv_calc's longest development-horizon tier (3.5+ years to MLB) — treat Surplus as more speculative than a near-ready prospect's">⏳</span>{% endif %}</td>
         <td class="left" data-sort-value="{{ p._pos_sort }}">{{ p.pos }}</td>
         <td class="left">
           <a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a>
           {% if p.on_40man %}<span class="badge-40man" title="On 40-man roster">40</span>{% endif %}
+          {% if p.is_historic_pace %}<span class="pace-badge pace-historic"{% if p.pace_confidence == 'Low' %} style="opacity:0.6"{% endif %} title="On pace for {{ p.war_pace }} WAR this season ({{ p.pace_confidence }} confidence)">🔥 {{ p.war_pace }}</span>{% endif %}
         </td>
         <td class="age-cell" data-level="{{ p.level_num }}" data-age="{{ p.age }}">{{ p.age }}</td>
         <td>{{ p.bt }}</td>
@@ -138,6 +141,7 @@
         <td>{% if p.ceiling %}<span class="ovr-color" data-g="{{ p.ceiling }}">{{ p.ceiling }}</span>{% else %}—{% endif %}</td>
         <td>{{ p.fv_str or '—' }}{% if p.risk %} <span style="font-size:10px;color:{% if p.risk == 'Low' %}#4caf50{% elif p.risk == 'Medium' %}#ffc107{% elif p.risk == 'High' %}#ff9800{% else %}#f44336{% endif %}">{{ p.risk[0] }}</span>{% endif %}</td>
         <td>{{ p.acc or '—' }}</td>
+        <td data-sort-value="{{ p.confidence.score }}"><span class="gr-pill gr-pill-{% if p.confidence.tier == 'A' %}elite{% elif p.confidence.tier == 'B' %}good{% elif p.confidence.tier == 'C' %}mid{% elif p.confidence.tier == 'D' %}poor{% else %}bad{% endif %}" title="Confidence {{ p.confidence.tier }} ({{ p.confidence.score }}/100){% if p.confidence.reasons %}: {{ p.confidence.reasons|join(', ') }}{% else %} — no flagged concerns{% endif %}">{{ p.confidence.tier }}</span></td>
         <td>{% if p.con %}<span class="ovr-color" data-g="{{ p.con }}">{{ p.con }}</span>{% if p.pot_con and p.pot_con != p.con %}/<span class="ovr-color" data-g="{{ p.pot_con }}">{{ p.pot_con }}</span>{% endif %}{% else %}—{% endif %}</td>
         <td>{% if p.gap %}<span class="ovr-color" data-g="{{ p.gap }}">{{ p.gap }}</span>{% if p.pot_gap and p.pot_gap != p.gap %}/<span class="ovr-color" data-g="{{ p.pot_gap }}">{{ p.pot_gap }}</span>{% endif %}{% else %}—{% endif %}</td>
         <td>{% if p.pow %}<span class="ovr-color" data-g="{{ p.pow }}">{{ p.pow }}</span>{% if p.pot_pow and p.pot_pow != p.pow %}/<span class="ovr-color" data-g="{{ p.pot_pow }}">{{ p.pot_pow }}</span>{% endif %}{% else %}—{% endif %}</td>
@@ -147,6 +151,7 @@
         <td>{% if p.bat_vl is not none %}<span class="ovr-color" data-g="{{ p.bat_vl }}">{{ p.bat_vl }}</span>{% else %}—{% endif %}</td>
         <td>{% if p.spd %}<span class="ovr-color" data-g="{{ p.spd }}">{{ p.spd }}</span>{% else %}—{% endif %}</td>
         <td>{% if p.def %}<span class="ovr-color" data-g="{{ p.def }}">{{ p.def }}</span>{% else %}—{% endif %}</td>
+        <td class="{{ 'pos' if p.zr and p.zr > 0 else 'neg' if p.zr and p.zr < 0 else '' }}">{{ p.zr if p.zr is not none else '—' }}</td>
         <td class="left" style="font-size:12px">{{ p.viable_positions|join(", ") if p.viable_positions else '—' }}</td>
         <td>{% if p.surplus is not none and p.surplus > 0 %}${{ p.surplus }}{{ money_unit }}{% else %}—{% endif %}</td>
         <td>{% if p.peak_surplus is not none and p.peak_surplus > 0 %}${{ p.peak_surplus }}{{ money_unit }}{% else %}—{% endif %}</td>
@@ -180,6 +185,7 @@
         <th data-sort="num">Ceil</th>
         <th data-sort="str" data-sort-best="high">FV</th>
         <th data-sort="str" title="Scouting accuracy grade for this player's ratings">Acc</th>
+        <th data-sort="str" title="Combined confidence grade — rolls bust-risk, scouting-Accuracy, and makeup concerns into one A-F letter">Conf</th>
         <th data-sort="num">Stf</th>
         <th data-sort="num">Mov</th>
         <th data-sort="num">Ctrl</th>
@@ -196,12 +202,13 @@
     </thead>
     <tbody>
       {% for p in roster.pitchers %}
-      <tr data-level="{{ p.level_num }}" data-pos="{{ p.pos }}" data-40man="{{ '1' if p.on_40man else '0' }}" data-pro="{{ '1' if p.is_pro else '0' }}" data-ptype="{{ p.personality_type_class }}" data-dev-good="{{ '1' if p.dev_good else '' }}" data-dev-bad="{{ '1' if p.dev_bad else '' }}">
-        <td data-sort-value="{{ p.level_num }}"><span class="level-badge level-{{ p.level|lower|replace('-','') }}">{{ p.level }}</span></td>
+      <tr data-level="{{ p.level_num }}" data-pos="{{ p.pos }}" data-40man="{{ '1' if p.on_40man else '0' }}" data-pro="{{ '1' if p.is_pro else '0' }}" data-ptype="{{ p.personality_type_class }}" data-dev-good="{{ '1' if p.dev_good else '' }}" data-dev-bad="{{ '1' if p.dev_bad else '' }}" data-historic-pace="{{ '1' if p.is_historic_pace else '' }}">
+        <td data-sort-value="{{ p.level_num }}"><span class="level-badge level-{{ p.level|lower|replace('-','') }}">{{ p.level }}</span>{% if p.long_horizon %} <span title="Real level puts this player at fv_calc's longest development-horizon tier (3.5+ years to MLB) — treat Surplus as more speculative than a near-ready prospect's">⏳</span>{% endif %}</td>
         <td class="left" data-sort-value="{{ p._pos_sort }}">{{ p.pos }}</td>
         <td class="left">
           <a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a>
           {% if p.on_40man %}<span class="badge-40man" title="On 40-man roster">40</span>{% endif %}
+          {% if p.is_historic_pace %}<span class="pace-badge pace-historic"{% if p.pace_confidence == 'Low' %} style="opacity:0.6"{% endif %} title="On pace for {{ p.war_pace }} WAR this season ({{ p.pace_confidence }} confidence)">🔥 {{ p.war_pace }}</span>{% endif %}
         </td>
         <td class="age-cell" data-level="{{ p.level_num }}" data-age="{{ p.age }}">{{ p.age }}</td>
         <td>{{ p.bt.split('/')[1] if '/' in p.bt else p.bt }}</td>
@@ -211,6 +218,7 @@
         <td>{% if p.ceiling %}<span class="ovr-color" data-g="{{ p.ceiling }}">{{ p.ceiling }}</span>{% else %}—{% endif %}</td>
         <td>{{ p.fv_str or '—' }}{% if p.risk %} <span style="font-size:10px;color:{% if p.risk == 'Low' %}#4caf50{% elif p.risk == 'Medium' %}#ffc107{% elif p.risk == 'High' %}#ff9800{% else %}#f44336{% endif %}">{{ p.risk[0] }}</span>{% endif %}</td>
         <td>{{ p.acc or '—' }}</td>
+        <td data-sort-value="{{ p.confidence.score }}"><span class="gr-pill gr-pill-{% if p.confidence.tier == 'A' %}elite{% elif p.confidence.tier == 'B' %}good{% elif p.confidence.tier == 'C' %}mid{% elif p.confidence.tier == 'D' %}poor{% else %}bad{% endif %}" title="Confidence {{ p.confidence.tier }} ({{ p.confidence.score }}/100){% if p.confidence.reasons %}: {{ p.confidence.reasons|join(', ') }}{% else %} — no flagged concerns{% endif %}">{{ p.confidence.tier }}</span></td>
         <td>{% if p.stf %}<span class="ovr-color" data-g="{{ p.stf }}">{{ p.stf }}</span>{% if p.pot_stf and p.pot_stf != p.stf %}/<span class="ovr-color" data-g="{{ p.pot_stf }}">{{ p.pot_stf }}</span>{% endif %}{% else %}—{% endif %}</td>
         <td>{% if p.mov %}<span class="ovr-color" data-g="{{ p.mov }}">{{ p.mov }}</span>{% if p.pot_mov and p.pot_mov != p.mov %}/<span class="ovr-color" data-g="{{ p.pot_mov }}">{{ p.pot_mov }}</span>{% endif %}{% else %}—{% endif %}</td>
         <td>{% if p.ctrl %}<span class="ovr-color" data-g="{{ p.ctrl }}">{{ p.ctrl }}</span>{% if p.pot_ctrl and p.pot_ctrl != p.ctrl %}/<span class="ovr-color" data-g="{{ p.pot_ctrl }}">{{ p.pot_ctrl }}</span>{% endif %}{% else %}—{% endif %}</td>

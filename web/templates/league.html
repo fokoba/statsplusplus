@@ -41,6 +41,7 @@
   <button class="tab" data-tab="waivers">Waivers</button>
   <button class="tab" data-tab="trade">Trade</button>
   <button class="tab" data-tab="draft">Draft</button>
+  <a class="tab" href="/team-compare">Team Compare</a>
 </div>
 
 {# ══════ Overview Tab ══════ #}
@@ -64,7 +65,17 @@
             {% set gb_num = 0 if r.div_gb == '-' else r.div_gb|float %}
             <tr{% if r.is_mine %} class="highlight"{% elif gb_num >= 10 %} class="div-faded"{% endif %}>
               <td class="left">
-                {%- if r.div_rank == 1 %}<span class="div-leader-badge">1st</span>{% elif r.is_wc %}<span class="div-wc-badge">WC</span>{% else %}<span class="div-badge-spacer"></span>{% endif -%}
+                {%- if r.div_rank == 1 -%}
+                <span class="div-leader-badge">1st</span>
+                {%- elif r.eliminated -%}
+                <span class="div-po-badge div-po-out" title="Mathematically eliminated">OUT</span>
+                {%- elif r.po_pct is not none -%}
+                {%- set po_grade = ((r.po_pct / 100 * 60 + 20) / 5)|round(0, 'common') * 5 -%}
+                {%- set po_grade = [[po_grade, 20]|max, 80]|min -%}
+                <span class="div-po-badge" data-g="{{ po_grade|int }}" title="{{ r.po_pct }}% simulated postseason odds (StatsPlus)">{{ "%.1f"|format(r.po_pct) }}%</span>
+                {%- else -%}
+                <span class="div-badge-spacer"></span>
+                {%- endif -%}
                 <a class="team-link" href="/team/{{ r.tid }}">{{ r.name }}</a>
               </td>
               <td>{{ r.w }}</td>
@@ -252,7 +263,7 @@
         </div>
         <div class="prospect-mode-group">
           <select class="prospect-mode-select" id="select-position">
-            <option value="" disabled selected>Top 10 by Position</option>
+            <option value="" disabled selected>All Prospects by Position</option>
           </select>
         </div>
         <div class="prospect-filters" id="top100-filter">
@@ -409,6 +420,51 @@
 {% if draft_pool.players %}
   {% set dp_state = draft_pool.state %}
 
+  <div class="panel draft-intel-panel" id="draft-intel-panel">
+    <div class="needs-fit-bar" id="draft-needs-fit"></div>
+    <div class="draft-intel-tabs">
+      <button class="draft-intel-tab active" data-intel="grades" onclick="setDraftIntelTab(this,'grades')">📊 Draft Grades</button>
+      <button class="draft-intel-tab" data-intel="scarcity" onclick="setDraftIntelTab(this,'scarcity')">🔎 Scarcity</button>
+      <button class="draft-intel-tab" data-intel="trends" onclick="setDraftIntelTab(this,'trends')">📈 Trends</button>
+      <button class="draft-intel-tab" data-intel="board" onclick="setDraftIntelTab(this,'board')">🗂 League Board</button>
+      <button class="draft-intel-tab" data-intel="best" onclick="setDraftIntelTab(this,'best')">🏆 Best Available</button>
+      <button class="draft-intel-tab" data-intel="personality" onclick="setDraftIntelTab(this,'personality')" title="Same ranking, with players flagged for Low Work Ethic, Low IQ, Low Loyalty, or Greedy filtered out">🧭 Best Available (Personality Filtered)</button>
+      <button class="draft-intel-tab" data-intel="lottery" onclick="setDraftIntelTab(this,'lottery')" title="Young + lower scouting Accuracy + big Ovr-to-Pot gap — PPL runs 125% Talent Change Randomness, so this is where the game's own mechanics (age-based scouting accuracy, longer development runway) create the most hidden-gem upside. Not a hard filter — a ranked score, see the Score column.">🎰 Lottery Tickets</button>
+      <button class="draft-intel-tab" data-intel="targets" onclick="setDraftIntelTab(this,'targets')" title="Estimates whether each top-available prospect will still be on the board at your next pick, using the same POT-rank ADP already driving the ExpRd column">🔮 Pick Forecast</button>
+      <button class="draft-intel-tab" data-intel="tree" onclick="setDraftIntelTab(this,'tree')" title="This league's own historical draft outcomes — career MLB WAR accrued by draft round across completed PPL drafts">🌳 Draft Tree</button>
+    </div>
+    <div class="draft-intel-body">
+      <div class="draft-intel-view" id="draft-intel-grades"></div>
+      <div class="draft-intel-view" id="draft-intel-scarcity" style="display:none"></div>
+      <div class="draft-intel-view" id="draft-intel-trends" style="display:none"></div>
+      <div class="draft-intel-view" id="draft-intel-board" style="display:none"></div>
+      <div class="draft-intel-view" id="draft-intel-best" style="display:none"></div>
+      <div class="draft-intel-view" id="draft-intel-lottery" style="display:none"></div>
+      <div class="draft-intel-view" id="draft-intel-personality" style="display:none"></div>
+      <div class="draft-intel-view" id="draft-intel-targets" style="display:none"></div>
+      <div class="draft-intel-view" id="draft-intel-tree" style="display:none"></div>
+    </div>
+  </div>
+
+  <div class="panel draft-clock-panel" id="draft-clock-panel" style="display:none">
+    <div class="draft-clock-row">
+      <div class="draft-clock-cell">
+        <div class="draft-clock-label">Last pick</div>
+        <div class="draft-clock-value" id="draft-clock-last">—</div>
+      </div>
+      <div class="draft-clock-cell draft-clock-cell-main">
+        <div class="draft-clock-label">On the clock</div>
+        <div class="draft-clock-value draft-clock-team" id="draft-clock-team">—</div>
+        <div class="draft-clock-sub" id="draft-clock-due"></div>
+        <div class="draft-clock-countdown" id="draft-clock-countdown"></div>
+      </div>
+      <div class="draft-clock-cell">
+        <div class="draft-clock-label">On deck</div>
+        <div class="draft-clock-value" id="draft-clock-deck">—</div>
+      </div>
+    </div>
+  </div>
+
   <div class="draft-layout">
     <div class="draft-main">
       <div class="draft-board-controls">
@@ -490,6 +546,11 @@
         </div>
         <p class="text-dim" id="draft-detail-placeholder">Select a prospect to view ratings.<br>Check two to compare.</p>
         <div id="draft-detail-content" style="display:none"></div>
+      </div>
+      <div class="panel draft-recent-panel" id="draft-recent-panel">
+        <div class="panel-section-title">Recently Drafted</div>
+        <div id="draft-until-mine"></div>
+        <div id="draft-recent-list"><p class="text-dim">No picks made yet</p></div>
       </div>
       <div class="panel draft-my-picks-panel" id="draft-my-picks">
         <div class="panel-section-title">My Picks</div>
@@ -714,13 +775,14 @@ POS_ORDER.forEach(p => { const o = document.createElement('option'); o.value = p
 let currentMode = 'top100';
 
 const COLS = {
-  top100:   ['#','Player','Position','Team','Level','ETA','Age','Ht','B/T','FV','Comp','Surplus'],
-  team:     ['#','Player','Position','Level','ETA','Age','Ht','B/T','FV','Comp','Surplus'],
-  position: ['#','Player','Team','Level','ETA','Age','Ht','B/T','FV','Comp','Surplus'],
+  top100:   ['#','Player','Position','Team','Level','ETA','Age','Ht','B/T','FV','Dev','Comp','Surplus'],
+  team:     ['#','Player','Position','Level','ETA','Age','Ht','B/T','FV','Dev','Comp','Surplus'],
+  position: ['#','Player','Team','Level','ETA','Age','Ht','B/T','FV','Dev','Comp','Surplus'],
 };
 const LEFT_COLS = new Set(['Player','Team','Level']);
 const COL_TIPS = {
   'FV': 'Future Value — ceiling quality vs MLB positional median. Letter = risk (L=Low, M=Medium, H=High, E=Extreme)',
+  'Dev': 'Development pace vs same-position/age peers (⚡ rising · ⚠ stalled · ↗ on pace). Dimmed = low confidence.',
   'Comp': 'Composite — tool-weighted current ability on the 20-80 scale',
   'Surplus': 'Projected on-field value minus salary over remaining team control',
   'ETA': 'Estimated year of MLB debut based on age and level',
@@ -753,6 +815,7 @@ function renderProspects(list, maxRows, singleTeam) {
     c += `<td class="${etaCls}">${p.eta}</td><td>${p.age}</td>`;
     c += `<td class="ht-cell">${p.height}</td><td>${p.bats}/${p.throws}</td>`;
     c += `<td>${fvBadge(p.fv, p.fv_str, p.risk)}</td>`;
+    c += `<td>${devCell(p.dev)}</td>`;
     c += `<td>${p.composite_score || '—'}</td>`;
     c += `<td class="surplus-cell"><span class="surplus-track"><span class="surplus-bar" style="width:${surpPct}%"></span><span class="surplus-val">$${p.surplus}${MONEY_UNIT}</span></span></td>`;
     return `<tr${hl}>${c}</tr>`;
@@ -765,6 +828,16 @@ function levelDots(level) {
   let s = '';
   for (let i = 0; i < 5; i++) s += `<span class="dot${i < filled ? ' dot-filled' : ''}"></span>`;
   return s;
+}
+
+function devCell(dev) {
+  if (!dev) return '';
+  const dim = dev.dim ? ' style="opacity:0.5"' : '';
+  let html = `<span class="dev-${dev.css_class}"${dim} title="${dev.label} (${dev.z} SD · ${dev.confidence} conf)" data-sort-value="${dev.z}">${dev.icon}</span>`;
+  if (dev.schedule_badge_text) {
+    html += ` <span class="sched-badge ${dev.schedule_badge_css}" title="${dev.schedule_label}: ${dev.schedule_note}">${dev.schedule_badge_text}</span>`;
+  }
+  return html;
 }
 
 function fvClass(fv) {
@@ -829,7 +902,7 @@ selPos.addEventListener('change', () => {
   renderHead();
   const val = selPos.value;
   const match = val === 'OF' ? p => OF_BUCKETS.has(p.bucket) : p => p.bucket === val;
-  renderProspects(ALL_PROSPECTS.filter(match), 10);
+  renderProspects(ALL_PROSPECTS.filter(match));
 });
 
 // Top 100 team filter
@@ -889,8 +962,12 @@ function gradeBar(cur, fut) {
 }
 
 function renderPanel(d) {
+  const watched = (typeof isWatched === 'function') && isWatched(d.pid);
+  const safeName = (d.name || '').replace(/'/g, "\\'");
   let html = `<div class="panel-header">
-    <div class="panel-name"><a class="player-link" href="/player/${d.pid}">${d.name}</a></div>
+    <div class="panel-name"><a class="player-link" href="/player/${d.pid}">${d.name}</a>
+      <span class="watch-star${watched ? ' watched' : ''}" data-pid="${d.pid}" onclick="toggleWatch(${d.pid}, '${safeName}')" title="Toggle draft watchlist">${watched ? '★' : '☆'}</span>
+    </div>
     <div class="panel-meta">${d.bucket} · ${d.team_name || d.team} · Age ${d.age}</div>
     <div class="panel-meta">${d.height || ''} · ${d.bats}/${d.throws} · ${d.level}</div>
   </div>`;
@@ -1270,9 +1347,40 @@ var draftSortState = null;  // {key: 'rank'|'age'|'ovr'|'pot'|'fv'|'surplus'|'ex
 var DRAFT_POOL = {{ draft_pool.players|tojson if draft_pool else '[]' }};
 var DRAFT_PICKS_INIT = {{ draft_pool.picks|tojson if draft_pool else '[]' }};
 
+// This season's round order (by team ID), pick 1 → pick 16. Rounds repeat this
+// same order (standard Rule 4 draft) unless PPL's rules say otherwise.
+// 1 KC(2) 2 BAL(15) 3 CWS(3) 4 BKN(14) 5 BOS(8) 6 STL(10) 7 WAS(1) 8 PIT(16)
+// 9 PHI(6) 10 CIN(13) 11 DET(4) 12 MIL(11) 13 LAB(7) 14 CHC(9) 15 NYY(5) 16 NYG(12)
+var DRAFT_PICK_ORDER = [2, 15, 3, 14, 8, 10, 1, 16, 6, 13, 4, 11, 7, 9, 5, 12];
+
+// Org need-by-position (surplus $ vs league avg), for the "best fit" panel —
+// same data backing the needs-bar buttons above the board.
+var DRAFT_DEPTH = {{ draft_depth|tojson if draft_depth else '{}' }};
+
+// Maps a prospect's evaluation bucket (C/1B/2B/3B/SS/CF/COF/LF/RF/SP/RP) to
+// the same display key DRAFT_DEPTH is keyed by (mirrors get_draft_org_depth
+// in team_queries.py, which collapses COF/LF/RF into one "LF/RF" need).
+function draftDepthKey(bucket) {
+  if (bucket === 'COF' || bucket === 'LF' || bucket === 'RF') return 'LF/RF';
+  return bucket;
+}
+
 // Restore picks from localStorage, then overlay server-provided picks
 var LEAGUE_SLUG = {{ active_league_slug|tojson }};
-var DRAFT_PICKS_KEY = 'draft_picks_' + LEAGUE_SLUG;
+var DRAFT_YEAR = {{ draft_pool.year|tojson if draft_pool and draft_pool.year else 'null' }};
+// Namespace pick storage per-draft (slug + game year) so a newly uploaded
+// draft pool never inherits a prior draft's picks (ported from upstream
+// tfalsone/statsplusplus f42bc12, "Draft board: fix phantom picks carried
+// across drafts", 2026-09-18). When the year is unavailable we fall back to
+// a stable namespaced key ('_x') rather than the legacy un-namespaced key,
+// so the legacy key can always be safely purged below.
+var DRAFT_PICKS_KEY = 'draft_picks_' + LEAGUE_SLUG + '_' + (DRAFT_YEAR || 'x');
+var DRAFT_PICKS_LEGACY_KEY = 'draft_picks_' + LEAGUE_SLUG;
+// One-time cleanup (rollout self-heal): always drop the legacy un-namespaced
+// key. It was the source of stale cross-draft picks (phantom "picked"
+// players). The server is authoritative for picks via DRAFT_PICKS_INIT, and
+// current picks re-sync via "Update Picks", so discarding it is safe.
+try { localStorage.removeItem(DRAFT_PICKS_LEGACY_KEY); } catch(e) {}
 try {
   var stored = JSON.parse(localStorage.getItem(DRAFT_PICKS_KEY) || '[]');
   stored.forEach(function(p) { draftPicks[p.pid] = p; });
@@ -1285,6 +1393,31 @@ function saveDraftPicks() {
   try { localStorage.setItem(DRAFT_PICKS_KEY, JSON.stringify(arr)); } catch(e) {}
 }
 saveDraftPicks();
+
+// ── Personal draft watchlist — pids the user is hoping falls to them.
+// Persisted per-league in localStorage; ★ toggle lives on the prospect
+// detail panel (renderPanel) and Recently Drafted flags a watched player
+// the moment someone else takes them.
+var DRAFT_WATCHLIST_KEY = 'draft_watchlist_' + LEAGUE_SLUG;
+var draftWatchlist = {};  // pid -> name
+try {
+  draftWatchlist = JSON.parse(localStorage.getItem(DRAFT_WATCHLIST_KEY) || '{}');
+} catch(e) {}
+function saveDraftWatchlist() {
+  try { localStorage.setItem(DRAFT_WATCHLIST_KEY, JSON.stringify(draftWatchlist)); } catch(e) {}
+}
+function isWatched(pid) { return !!draftWatchlist[pid]; }
+var lastRecentPicks = DRAFT_PICKS_INIT;
+function toggleWatch(pid, name) {
+  if (draftWatchlist[pid]) delete draftWatchlist[pid];
+  else draftWatchlist[pid] = name;
+  saveDraftWatchlist();
+  document.querySelectorAll('.watch-star[data-pid="' + pid + '"]').forEach(function(el) {
+    el.textContent = isWatched(pid) ? '★' : '☆';
+    el.classList.toggle('watched', isWatched(pid));
+  });
+  renderRecentDrafted(lastRecentPicks);
+}
 
 function fmtSurplus(val) {
   if (!val || val <= 0) return '—';
@@ -1376,7 +1509,16 @@ function uploadDraftPool(input) {
   fetch('/api/draft-pool-upload', {method: 'POST', body: fd})
     .then(function(r) { return r.json(); }).then(function(d) {
       input.value = '';
-      if (d.ok) { alert('Uploaded ' + d.total + ' players. Reloading…'); location.reload(); }
+      if (d.ok) {
+        // A freshly uploaded pool defines a new draft — clear any stored
+        // picks (namespaced and legacy) so nothing carries over from a
+        // prior draft.
+        try {
+          if (typeof DRAFT_PICKS_KEY !== 'undefined') localStorage.removeItem(DRAFT_PICKS_KEY);
+          if (typeof DRAFT_PICKS_LEGACY_KEY !== 'undefined') localStorage.removeItem(DRAFT_PICKS_LEGACY_KEY);
+        } catch(e) {}
+        alert('Uploaded ' + d.total + ' players. Reloading…'); location.reload();
+      }
       else { alert('Upload failed: ' + d.error); }
     }).catch(function() { alert('Upload failed'); });
 }
@@ -1878,6 +2020,13 @@ function togglePersonalityHighlight() {
   applyDraftFilters();
 }
 
+// True when the draft file says this player won't sign for any realistic
+// bonus ("Impos."/"Impossible" in the DEM column).
+function _isUnsignable(p) {
+  return p.bonus_verdict === 'Unsignable' ||
+    String(p.bonus_ask_raw || '').trim().toLowerCase().indexOf('impos') === 0;
+}
+
 // High Work Ethic / High IQ => positive; Low Work Ethic / Low IQ => negative.
 // Same H/VH/EH vs L/VL/EL/F scale as charClr().
 function _isHighTrait(v) {
@@ -1924,6 +2073,46 @@ function setDraftPosFilter(btn, pos) {
   renderDraftBoard(view);
 }
 
+// Below this OVR, the surplus model falls back to its longest amateur
+// development horizon (2.5 yrs to MLB — see prospect_surplus()'s
+// draft/hs/college OVR-bucketing) and can't distinguish a raw HS
+// underclassman from a fringy JC arm. $Val for these players is riding
+// on the most speculative end of what the model can express.
+function _horizonFlag(p) {
+  return (p.ovr || 0) < 42
+    ? ' <span class="draft-flag draft-flag-horizon" title="$Val uses the longest development horizon this model applies to any draft prospect (2.5 yrs to MLB) — treat the dollar figure as more speculative than a typical prospect\'s">⏳</span>'
+    : '';
+}
+
+// Combined Confidence tier — rolls the four separate uncertainty signals
+// already on this page (bust-risk letter, scouting-Accuracy grade, the
+// OVR-horizon flag above, and makeup/personality concerns) into one A-F
+// grade, so a GM doesn't have to mentally combine four columns on the fly.
+// Weights are deliberately simple/transparent (shown in the tooltip) —
+// this is a communication aid, not a new model.
+var _RISK_PENALTY = {Low: 0, Medium: 15, High: 30, Extreme: 50};
+function confidenceTier(p) {
+  var score = 100;
+  var reasons = [];
+  var riskPen = _RISK_PENALTY[p.risk];
+  if (riskPen) { score -= riskPen; reasons.push(p.risk + ' bust risk (-' + riskPen + ')'); }
+  var accUnc = (typeof _ACC_UNCERTAINTY !== 'undefined' && _ACC_UNCERTAINTY[p.acc] != null) ? _ACC_UNCERTAINTY[p.acc] : 0;
+  var accPen = Math.round(accUnc * 20);
+  if (accPen) { score -= accPen; reasons.push('Scouting Acc ' + p.acc + ' (-' + accPen + ')'); }
+  if ((p.ovr || 0) < 42) { score -= 10; reasons.push('Long dev. horizon (-10)'); }
+  if (typeof hasPersonalityConcern === 'function' && hasPersonalityConcern(p)) { score -= 15; reasons.push('Makeup concern (-15)'); }
+  score = Math.max(0, Math.min(100, score));
+  var tier = score >= 85 ? 'A' : score >= 70 ? 'B' : score >= 50 ? 'C' : score >= 30 ? 'D' : 'F';
+  return {tier: tier, score: score, reasons: reasons};
+}
+function confidencePill(p) {
+  var c = confidenceTier(p);
+  var cls = c.tier === 'A' ? 'elite' : c.tier === 'B' ? 'good' : c.tier === 'C' ? 'mid' : c.tier === 'D' ? 'poor' : 'bad';
+  var title = 'Confidence ' + c.tier + ' (' + c.score + '/100)' + (c.reasons.length ? ': ' + c.reasons.join(', ') : ' — no flagged concerns') +
+    '. Combines bust-risk, scouting-Accuracy, dev-horizon, and makeup signals into one grade.';
+  return '<span class="gr-pill gr-pill-' + cls + '" title="' + title + '">' + c.tier + '</span>';
+}
+
 function renderDraftBoard(view) {
   currentDraftView = view;
   draftSortState = null;  // reset sort when view changes
@@ -1931,9 +2120,16 @@ function renderDraftBoard(view) {
 
   var thead = document.getElementById('draft-thead');
   var base = '<th class="dd-cmp-th" title="Compare">⚖</th><th data-sort="num">Rk</th><th data-sort="str">Pos</th><th data-sort="str" class="left">Name</th>' +
-    '<th data-sort="num">Age</th><th data-sort="num" title="Expected draft round based on POT rank">ExpRd</th><th data-sort="str">Lvl</th><th data-sort="num">Ovr</th><th data-sort="num">Pot</th><th data-sort="str">FV</th><th data-sort="num" title="Risk-adjusted surplus value over 6 years of team control. Hover cells for raw (undiscounted) value.">$Val</th><th data-sort="str">Acc</th>' +
+    '<th data-sort="num">Age</th><th data-sort="num" title="Expected draft round based on POT rank">ExpRd</th>' +
+    '<th data-sort="num" title="Rank on the OSA Top 200 draft pipeline scouting list — manually entered from a pasted report; not every player on that list is draft-eligible this year">OSA Rk</th>' +
+    '<th data-sort="str">Lvl</th><th data-sort="num">Ovr</th><th data-sort="num">Pot</th><th data-sort="str">FV</th><th data-sort="num" title="Risk-adjusted surplus value over 6 years of team control. Hover cells for raw (undiscounted) value.">$Val</th>' +
+    '<th data-sort="num" title="One-time signing bonus demand from the uploaded draft pool export (DEM column). &#39;Slot&#39; = will sign for the pick&#39;s assigned slot bonus — shown as an estimated $ cost from the slot-value curve, NOT free; &#39;Impos.&#39; = will not sign for any realistic bonus.">Bonus Ask</th>' +
+    '<th data-sort="num" title="0-100 bang-for-buck score: 100 * (1 - ask/surplus), using the estimated slot cost for &#39;Slot&#39; asks. A $10 ask against $100K surplus scores ~100 (barely gives up any value); a $75K ask against $100K surplus scores 25 (gives up 3/4 the value). Unsignable = 0. Blank = no ask on file.">Bonus Value</th>' +
+    '<th data-sort="str">Acc</th>' +
     '<th data-sort="str" class="col-sep">Risk</th>' +
+    '<th data-sort="str" title="Combined confidence grade — rolls bust-risk, scouting-Accuracy, dev-horizon, and makeup concerns into one A-F letter">Conf</th>' +
     '<th data-sort="str">Loy</th><th data-sort="str">Greed</th>' +
+    '<th data-sort="str" class="left" title="Real OOTP personality Type where scouted, otherwise this app\'s own trait-combo inference (with a confidence tier) — see Personality Notes column for the raw trait breakdown">Type</th>' +
     '<th data-sort="str" class="left">Notes</th>' +
     '<th data-sort="str">Best Pos</th><th data-sort="num">Grade</th>' +
     '<th data-sort="num" title="Composite computed using vs-LHP/vs-LHB split tool ratings where available">Comp vL</th>' +
@@ -1979,7 +2175,8 @@ function renderDraftBoard(view) {
 var DRAFT_SORT_MAP = {
   'Rk': 'rank', 'Pos': 'pos', 'Name': 'name', 'Age': 'age', 'Lvl': 'type',
   'Ovr': 'ovr', 'Pot': 'pot', 'FV': 'fv', '$Val': 'surplus', 'Acc': 'acc',
-  'ExpRd': 'exp_round',
+  'ExpRd': 'exp_round', 'OSA Rk': 'osa_rank',
+  'Bonus Ask': 'bonus_ask', 'Bonus Value': 'bonus_score',
   'C%': 'contrib_pct', 'R%': 'regular_pct', 'AS%': 'allstar_pct', 'Bust%': 'bust_pct',
   'Risk': 'risk', 'Loy': 'loy', 'Greed': 'greed', 'Grade': 'best_position_grade',
   'Comp vL': 'composite_vs_l', 'Comp vR': 'composite_vs_r', 'Bal': 'specialist_score',
@@ -1996,6 +2193,9 @@ function _draftSortVal(p, key) {
     case 'fv': return p.fv;
     case 'surplus': return p.surplus || 0;
     case 'exp_round': return (p.adp && p.adp.exp_round) || 99;
+    case 'osa_rank': return p.osa_rank || 9999;
+    case 'bonus_ask': return p.bonus_ask != null ? p.bonus_ask : -1;
+    case 'bonus_score': return p.bonus_score != null ? p.bonus_score : -1;
     case 'contrib_pct': return p.outcome && p.outcome.thresholds ? (p.outcome.thresholds.Contributor || 0) : 0;
     case 'regular_pct': return p.outcome && p.outcome.thresholds ? (p.outcome.thresholds.Regular || 0) : 0;
     case 'allstar_pct': return p.outcome && p.outcome.thresholds ? (p.outcome.thresholds['All-Star'] || 0) : 0;
@@ -2118,8 +2318,14 @@ function applyDraftFilters() {
     var isMine = picked && picked.tid === MY_TEAM_ID;
     var persCls = '';
     if (showPersonality) {
-      var negTrait = _isLowTrait(p.we) || _isLowTrait(p.int);
-      var posTrait = _isHighTrait(p.we) || _isHighTrait(p.int);
+      // Also dim/highlight off the Type column's verdict (real OOTP Type or
+      // this app's own "Likely X" trait-combo inference — e.g. Selfish is
+      // driven by Leadership/Loyalty/Greed, not Work Ethic/IQ, so it was
+      // slipping through a raw-trait-only check).
+      // Unsignable players ("Impos." bonus ask) always dim — never risk
+      // drafting one by accident, and never let a positive trait highlight one.
+      var negTrait = _isUnsignable(p) || _isLowTrait(p.we) || _isLowTrait(p.int) || p.personality_type_class === 'neg';
+      var posTrait = _isHighTrait(p.we) || _isHighTrait(p.int) || p.personality_type_class === 'pos';
       if (negTrait) persCls = ' draft-pers-dim';
       else if (posTrait) persCls = ' draft-pers-highlight';
     }
@@ -2135,15 +2341,28 @@ function applyDraftFilters() {
     var flags = '';
     if (p.acc === 'L') flags += ' <span class="draft-flag draft-flag-acc" title="Low accuracy — development uncertain">⚠</span>';
     if (p.risk === 'Extreme') flags += ' <span class="draft-flag draft-flag-risk" title="Extreme bust risk">☠</span>';
+    flags += _horizonFlag(p);
     tr += '<td class="left"><a class="player-link" href="/player/' + p.pid + '">' + p.name + '</a>' + flags + '</td>';
     var _adp = p.adp || {};
-    tr += '<td>' + p.age + '</td><td data-sort-value="' + (_adp.exp_round || 99) + '">' + (_adp.exp_round ? 'Rd' + _adp.exp_round : '-') + '</td><td>' + lvlPill(p.type) + '</td>';
+    tr += '<td>' + p.age + '</td><td data-sort-value="' + (_adp.exp_round || 99) + '">' + (_adp.exp_round ? 'Rd' + _adp.exp_round : '-') + '</td>';
+    tr += '<td data-sort-value="' + (p.osa_rank || 9999) + '">' + (p.osa_rank || '<span class="text-dim">—</span>') + '</td>';
+    tr += '<td>' + lvlPill(p.type) + '</td>';
     tr += gtd(p.ovr) + gtd(p.pot) + '<td>' + fvPill(p.fv_str) + '</td>';
     tr += '<td class="text-dim" style="font-size:12px" data-sort-value="' + (p.surplus || 0) + '" title="Adj: ' + fmtSurplus(p.surplus) + ' · Ceiling: ' + fmtSurplus(p.raw_surplus) + '">' + fmtSurplus(p.surplus) + '</td>';
+    var bonusAskSort = p.bonus_ask != null ? p.bonus_ask : -1;
+    var bonusAskDisplay = p.bonus_ask_raw || '<span class="text-dim">—</span>';
+    if (p.bonus_ask_slot_estimated) {
+      bonusAskDisplay = 'Slot <span class="text-dim" title="Estimated real cost from the pick-slot value curve — a Slot ask is NOT free, it just means they\'ll sign for whatever their draft slot pays">(~' + fmtSurplus(p.bonus_ask) + ')</span>';
+    }
+    tr += '<td data-sort-value="' + bonusAskSort + '">' + bonusAskDisplay + '</td>';
+    var bonusScoreSort = p.bonus_score != null ? p.bonus_score : -1;
+    tr += '<td data-sort-value="' + bonusScoreSort + '"><span class="ptype-' + (p.bonus_verdict_class || 'unscouted') + '">' + (p.bonus_score != null ? p.bonus_score.toFixed(0) : 'No Ask') + '</span></td>';
     tr += '<td>' + charPill(p.acc) + '</td>';
     var riskClr = p.risk === 'Low' ? 'pos' : p.risk === 'Extreme' ? 'neg' : '';
     tr += '<td class="col-sep ' + riskClr + '">' + (p.risk || '-') + '</td>';
+    tr += '<td>' + confidencePill(p) + '</td>';
     tr += '<td>' + charPill(p.loy) + '</td><td>' + charPill(p.greed, true) + '</td>';
+    tr += '<td class="left"><span class="ptype-' + (p.personality_type_class || 'unscouted') + '">' + (p.personality_type || 'Unknown') + '</span></td>';
     var buffs = (p.buffs || []).join(', '), concerns = (p.concerns || []).join(', ');
     var notesHtml = '<span style="color:var(--text-dim)">—</span>';
     if (buffs || concerns) {
@@ -2540,20 +2759,647 @@ function showDraftDetail(pid) {
   });
 }
 
+// Returns how many picks remain until MY_TEAM_ID is next on the clock
+// (0 = on the clock now), based on total picks made so far and the
+// known round order. Null if the order/team isn't recognized.
+function picksUntilMine(allPicks) {
+  var n = DRAFT_PICK_ORDER.length;
+  if (!n || DRAFT_PICK_ORDER.indexOf(MY_TEAM_ID) === -1) return null;
+  var nextSlot = allPicks.length % n;
+  for (var i = 0; i < n; i++) {
+    if (DRAFT_PICK_ORDER[(nextSlot + i) % n] === MY_TEAM_ID) return i;
+  }
+  return null;
+}
+
+// Parses StatsPlus's "YYYY-MM-DD HH:MM:SS" (UTC) timestamps reliably across browsers.
+function parseUtcTs(s) {
+  if (!s) return NaN;
+  return Date.parse(s.replace(' ', 'T') + 'Z');
+}
+
+// Estimates minutes-per-pick from the most recent real timestamp gaps.
+// Ignores gaps over 4 hours (draft session paused/overnight) so a long
+// break doesn't blow up the ETA. Returns null if there isn't enough
+// reliable timing data yet.
+function estimatePickPaceMinutes(allPicks) {
+  var withTime = allPicks.filter(function(p) { return p.time_utc; })
+    .slice().sort(function(a, b) { return a.overall - b.overall; });
+  if (withTime.length < 2) return null;
+  var deltas = [];
+  for (var i = 1; i < withTime.length; i++) {
+    var t0 = parseUtcTs(withTime[i - 1].time_utc), t1 = parseUtcTs(withTime[i].time_utc);
+    if (isNaN(t0) || isNaN(t1)) continue;
+    var mins = (t1 - t0) / 60000;
+    if (mins > 0 && mins <= 240) deltas.push(mins);
+  }
+  if (!deltas.length) return null;
+  var recent = deltas.slice(-10);
+  return recent.reduce(function(a, b) { return a + b; }, 0) / recent.length;
+}
+
+// Per-team pace/predictability, derived entirely from the sanctioned
+// get_draft() pick history (Auto Pick flag + pick timestamps) — no separate
+// scrape needed. A team's "latency" is the gap between the previous overall
+// pick and theirs; teams drafting on Auto Pick or a pre-set list resolve
+// near-instantly, so this naturally captures that without needing to know
+// which mechanism they're using. Falls back to the global pace for a team
+// with no observed picks yet.
+function computeTeamPace(allPicks) {
+  var byTeam = {};
+  var withTime = allPicks.filter(function(p) { return p.time_utc; })
+    .slice().sort(function(a, b) { return a.overall - b.overall; });
+  for (var i = 1; i < withTime.length; i++) {
+    var prev = withTime[i - 1], cur = withTime[i];
+    var t0 = parseUtcTs(prev.time_utc), t1 = parseUtcTs(cur.time_utc);
+    if (isNaN(t0) || isNaN(t1)) continue;
+    var mins = (t1 - t0) / 60000;
+    if (mins < 0 || mins > 240) continue;
+    var b = byTeam[cur.tid] || (byTeam[cur.tid] = {deltas: [], autoCount: 0, n: 0});
+    b.deltas.push(mins);
+  }
+  allPicks.forEach(function(p) {
+    var b = byTeam[p.tid] || (byTeam[p.tid] = {deltas: [], autoCount: 0, n: 0});
+    b.n++;
+    if (p.auto) b.autoCount++;
+  });
+  var result = {};
+  Object.keys(byTeam).forEach(function(tid) {
+    var b = byTeam[tid];
+    var avgMins = b.deltas.length ? b.deltas.slice(-5).reduce(function(a, c) { return a + c; }, 0) / b.deltas.slice(-5).length : null;
+    result[tid] = {avgMins: avgMins, autoRate: b.n ? b.autoCount / b.n : 0, mechanical: b.n > 0 && (b.autoCount / b.n) >= 0.5};
+  });
+  return result;
+}
+
+function fmtEtaMinutes(mins) {
+  if (mins < 1) return '<1 min';
+  if (mins < 60) return Math.round(mins) + ' min';
+  var h = Math.floor(mins / 60), m = Math.round(mins % 60);
+  return h + 'h' + (m ? ' ' + m + 'm' : '');
+}
+
+function renderRecentDrafted(allPicks) {
+  var listEl = document.getElementById('draft-recent-list');
+  var untilEl = document.getElementById('draft-until-mine');
+  if (!listEl || !untilEl) return;
+  lastRecentPicks = allPicks;
+
+  var untilMine = picksUntilMine(allPicks);
+  var pace = estimatePickPaceMinutes(allPicks);
+  if (untilMine === null) {
+    untilEl.innerHTML = '';
+  } else if (untilMine === 0) {
+    untilEl.innerHTML = '<div class="draft-on-clock">🔔 You are on the clock</div>';
+  } else {
+    var etaHtml = pace ? ' <span class="draft-eta" title="Estimated from the pace of the last ' +
+      Math.min(allPicks.length - 1, 10) + ' picks — not a hard deadline">(~' +
+      fmtEtaMinutes(pace * untilMine) + ' at current pace)</span>' : '';
+    untilEl.innerHTML = '<div class="draft-countdown"><strong>' + untilMine + '</strong> pick' +
+      (untilMine === 1 ? '' : 's') + ' until you\'re on the clock' + etaHtml + '</div>';
+  }
+
+  if (!allPicks.length) { listEl.innerHTML = '<p class="text-dim">No picks made yet</p>'; return; }
+
+  var poolMap = {};
+  DRAFT_POOL.forEach(function(p) { poolMap[p.pid] = p; });
+
+  var recent = allPicks.slice().sort(function(a, b) { return b.overall - a.overall; }).slice(0, 10);
+
+  listEl.innerHTML = recent.map(function(p) {
+    var pp = poolMap[p.pid];
+    var ovrPot = pp ? (pp.ovr + ' / ' + pp.pot) : '?';
+    var fv = pp ? pp.fv_str : '?';
+    var type = pp ? pp.type : (p.college ? 'College' : 'HS');
+    var school = p.college ? ' (' + p.college + ')' : '';
+    var mine = p.tid === MY_TEAM_ID;
+    var watched = isWatched(p.pid);
+    var tags = '';
+    if (p.auto) tags += ' <span class="draft-tag draft-tag-auto" title="Autopicked — team did not select in time">🤖 Auto</span>';
+    if (p.supp) tags += ' <span class="draft-tag" title="Supplemental/compensation pick">Supp</span>';
+    if (watched) tags += ' <span class="draft-tag draft-tag-watch" title="On your watchlist">⭐ Watched</span>';
+    return '<div class="draft-recent-row' + (mine ? ' draft-recent-mine' : '') + (watched ? ' draft-recent-watched' : '') + '">' +
+      '<span class="my-pick-rd">R' + p.round + '.' + p.pick + '</span> ' +
+      '<span class="text-dim">#' + p.overall + '</span> ' +
+      '<strong>' + p.team + '</strong> selects ' +
+      '<a class="player-link" href="/player/' + p.pid + '">' + p.name + '</a>' + tags +
+      '<div class="text-dim draft-recent-sub">' + p.pos + ' · Age ' + p.age + ' · ' + type + school +
+      ' · Ovr/Pot ' + ovrPot + ' · FV ' + fv + '</div></div>';
+  }).join('');
+}
+
 function renderMyPicks(allPicks) {
   var myPicks = allPicks.filter(function(p) { return p.tid === MY_TEAM_ID; });
   var el = document.getElementById('my-picks-list');
   if (!myPicks.length) { el.innerHTML = '<p class="text-dim">No picks yet</p>'; return; }
   var poolMap = {};
   DRAFT_POOL.forEach(function(p) { poolMap[p.pid] = p; });
-  el.innerHTML = myPicks.map(function(p) {
+  var bonusTotal = 0, bonusKnown = 0;
+  var rows = myPicks.map(function(p) {
     var pp = poolMap[p.pid];
     var rank = pp ? pp.rank : '?';
     var fv = pp ? pp.fv_str : '?';
+    if (pp && typeof pp.bonus_ask === 'number') { bonusTotal += pp.bonus_ask; bonusKnown++; }
     return '<div class="my-pick-row"><span class="my-pick-rd">R' + p.round + '.' + p.pick + '</span> ' +
       '<a class="player-link" href="/player/' + p.pid + '">' + p.name + '</a> ' +
       '<span class="text-dim">' + p.pos + ' · #' + rank + ' · FV ' + fv + '</span></div>';
   }).join('');
+  // Only shown when the uploaded draft pool included signing-bonus asks
+  // (DEM column) for at least one of your picks — otherwise there's
+  // nothing real to sum, and PPL may not even use a bonus-pool cap.
+  var bonusLine = bonusKnown ? '<div class="my-pick-bonus text-dim">Class bonus total: ' + fmtSurplus(bonusTotal) +
+    (bonusKnown < myPicks.length ? ' (' + bonusKnown + '/' + myPicks.length + ' asks known)' : '') + '</div>' : '';
+  el.innerHTML = rows + bonusLine;
+}
+
+/* ── Draft Intelligence (Grades / Scarcity / Trends / League Board) ── */
+var currentDraftIntelTab = 'grades';
+
+function setDraftIntelTab(btn, tab) {
+  currentDraftIntelTab = tab;
+  document.querySelectorAll('.draft-intel-tab').forEach(function(b) { b.classList.remove('active'); });
+  btn.classList.add('active');
+  document.querySelectorAll('.draft-intel-view').forEach(function(v) { v.style.display = 'none'; });
+  document.getElementById('draft-intel-' + tab).style.display = '';
+  refreshDraftIntel();
+}
+
+// Per-team draft-so-far aggregation: total surplus captured, picks made,
+// a per-position breakdown, and the best player taken. Source of truth for
+// both the Grades tab (detail) and League Board tab (summary).
+function computeDraftGrades() {
+  var poolMap = {};
+  DRAFT_POOL.forEach(function(p) { poolMap[p.pid] = p; });
+  var byTeam = {};
+  Object.keys(draftPicks).forEach(function(pid) {
+    var pick = draftPicks[pid];
+    var pp = poolMap[pick.pid];
+    var surplus = pp ? (pp.surplus || 0) : 0;
+    var fv = pp ? (pp.fv || 0) : 0;
+    var posKey = pp ? (draftDepthKey(pp.bucket) || pick.pos || '?') : (pick.pos || '?');
+    if (!byTeam[pick.tid]) byTeam[pick.tid] = {tid: pick.tid, name: pick.team, total: 0, count: 0, fvSum: 0, byPos: {}, best: null};
+    var t = byTeam[pick.tid];
+    t.total += surplus;
+    t.count += 1;
+    t.fvSum += fv;
+    t.byPos[posKey] = (t.byPos[posKey] || 0) + surplus;
+    if (!t.best || surplus > t.best.surplus) t.best = {name: pick.name, surplus: surplus, pid: pick.pid};
+  });
+  return byTeam;
+}
+
+function renderDraftGrades() {
+  var el = document.getElementById('draft-intel-grades');
+  if (!el) return;
+  var byTeam = computeDraftGrades();
+  var teams = Object.values(byTeam).sort(function(a, b) { return b.total - a.total; });
+  if (!teams.length) { el.innerHTML = '<p class="text-dim">No picks made yet.</p>'; return; }
+  el.innerHTML = '<table class="intel-table"><thead><tr><th class="left">Team</th><th>Picks</th>' +
+    '<th title="Sum of $Val surplus across all picks so far">Total $Val</th><th class="left">Breakdown</th></tr></thead><tbody>' +
+    teams.map(function(t) {
+      var posBits = Object.keys(t.byPos).sort(function(a, b) { return t.byPos[b] - t.byPos[a]; })
+        .map(function(p) { return p + ' ' + fmtSurplus(t.byPos[p]); }).join(' · ');
+      var mine = t.tid === MY_TEAM_ID;
+      return '<tr class="' + (mine ? 'intel-mine' : '') + '"><td class="left">' + t.name + '</td>' +
+        '<td>' + t.count + '</td><td>' + fmtSurplus(t.total) + '</td>' +
+        '<td class="left text-dim" style="font-size:11px">' + posBits + '</td></tr>';
+    }).join('') + '</tbody></table>';
+}
+
+function renderDraftLeagueBoard() {
+  var el = document.getElementById('draft-intel-board');
+  if (!el) return;
+  var byTeam = computeDraftGrades();
+  var teams = Object.values(byTeam).sort(function(a, b) { return b.total - a.total; });
+  if (!teams.length) { el.innerHTML = '<p class="text-dim">No picks made yet.</p>'; return; }
+  el.innerHTML = '<table class="intel-table"><thead><tr><th class="left">Team</th><th>Picks</th>' +
+    '<th title="Average FV grade across all picks">Avg FV</th><th class="left">Best Player</th></tr></thead><tbody>' +
+    teams.map(function(t) {
+      var mine = t.tid === MY_TEAM_ID;
+      var avgFv = t.count ? (t.fvSum / t.count).toFixed(0) : '—';
+      return '<tr class="' + (mine ? 'intel-mine' : '') + '"><td class="left">' + t.name + '</td>' +
+        '<td>' + t.count + '</td><td>' + avgFv + '</td>' +
+        '<td class="left">' + (t.best ? '<a class="player-link" href="/player/' + t.best.pid + '">' + t.best.name + '</a> · ' + fmtSurplus(t.best.surplus) : '—') + '</td></tr>';
+    }).join('') + '</tbody></table>';
+}
+
+// Remaining FV by position — how thin/deep this draft class is getting at
+// each spot, recomputed after every pick from DRAFT_POOL minus draftPicks.
+function computeScarcity() {
+  var byPos = {};
+  DRAFT_POOL.forEach(function(p) {
+    if (draftPicks[p.pid]) return;  // already taken
+    var key = draftDepthKey(p.bucket) || p.pos || '?';
+    if (!byPos[key]) byPos[key] = {remaining: 0, fv50: 0, fv45: 0, top: []};
+    var b = byPos[key];
+    b.remaining++;
+    if (p.fv >= 50) b.fv50++;
+    if (p.fv >= 45) b.fv45++;
+    b.top.push(p);
+  });
+  Object.keys(byPos).forEach(function(k) {
+    byPos[k].top.sort(function(a, b) { return (b.surplus || 0) - (a.surplus || 0); });
+    byPos[k].top = byPos[k].top.slice(0, 3);
+  });
+  return byPos;
+}
+
+function renderDraftScarcity() {
+  var el = document.getElementById('draft-intel-scarcity');
+  if (!el) return;
+  var byPos = computeScarcity();
+  var posKeys = Object.keys(byPos).sort(function(a, b) { return byPos[a].fv45 - byPos[b].fv45; });
+  if (!posKeys.length) { el.innerHTML = '<p class="text-dim">No data.</p>'; return; }
+  el.innerHTML = '<table class="intel-table"><thead><tr><th class="left">Pos</th><th title="Total undrafted players left at this spot">Left</th>' +
+    '<th title="Undrafted players with FV 50+ remaining">FV 50+</th><th title="Undrafted players with FV 45+ remaining">FV 45+</th>' +
+    '<th class="left">Best Still Available</th></tr></thead><tbody>' +
+    posKeys.map(function(k) {
+      var b = byPos[k];
+      var scarce = b.fv45 <= 2 ? ' class="intel-scarce"' : '';
+      var names = b.top.map(function(p) { return '<a class="player-link" href="/player/' + p.pid + '">' + p.name + '</a> (' + p.fv_str + ')'; }).join(', ');
+      return '<tr' + scarce + '><td class="left">' + k + '</td><td>' + b.remaining + '</td>' +
+        '<td>' + b.fv50 + '</td><td>' + b.fv45 + '</td><td class="left">' + (names || '—') + '</td></tr>';
+    }).join('') + '</tbody></table>' +
+    '<p class="text-dim" style="font-size:11px;margin-top:6px">Rows in red have 2 or fewer FV-45+ players left — the position is drying up.</p>';
+}
+
+// Value/reach vs. pre-draft ADP (pot_rank, already computed for the board's
+// ADP column) + a simple positional-run detector over the last 6 picks.
+function computeValueReach() {
+  var poolMap = {};
+  DRAFT_POOL.forEach(function(p) { poolMap[p.pid] = p; });
+  var rows = [];
+  Object.values(draftPicks).forEach(function(pick) {
+    var pp = poolMap[pick.pid];
+    if (!pp || !pp.adp || !pp.adp.pot_rank) return;
+    rows.push({pick: pick, pp: pp, diff: pick.overall - pp.adp.pot_rank});
+  });
+  return rows;
+}
+
+function detectPositionalRuns() {
+  var poolMap = {};
+  DRAFT_POOL.forEach(function(p) { poolMap[p.pid] = p; });
+  var sorted = Object.values(draftPicks).sort(function(a, b) { return b.overall - a.overall; });
+  var window = sorted.slice(0, 6);
+  var counts = {};
+  window.forEach(function(pick) {
+    var pp = poolMap[pick.pid];
+    var key = pp ? (draftDepthKey(pp.bucket) || pick.pos) : pick.pos;
+    counts[key] = (counts[key] || 0) + 1;
+  });
+  var runs = [];
+  Object.keys(counts).forEach(function(k) {
+    if (counts[k] >= 3) runs.push({pos: k, count: counts[k], of: window.length});
+  });
+  return runs;
+}
+
+function renderDraftTrends() {
+  var el = document.getElementById('draft-intel-trends');
+  if (!el) return;
+  var rows = computeValueReach();
+  var runs = detectPositionalRuns();
+  var html = '';
+
+  html += '<div class="panel-section-title">Positional Runs (last 6 picks)</div>';
+  if (runs.length) {
+    html += runs.map(function(r) {
+      return '<div class="draft-run-alert">⚠ ' + r.pos + ': ' + r.count + ' of the last ' + r.of + ' picks</div>';
+    }).join('');
+  } else {
+    html += '<p class="text-dim">No notable runs right now.</p>';
+  }
+
+  if (rows.length) {
+    var fallers = rows.slice().sort(function(a, b) { return b.diff - a.diff; }).slice(0, 5);
+    var reaches = rows.slice().sort(function(a, b) { return a.diff - b.diff; }).slice(0, 5);
+    html += '<div class="panel-section-title" style="margin-top:10px">Biggest Value (fell past expected slot)</div>';
+    html += fallers.map(function(r) {
+      return '<div class="draft-trend-row">' + '<strong>' + r.pick.team + '</strong> got ' +
+        '<a class="player-link" href="/player/' + r.pick.pid + '">' + r.pick.name + '</a> at #' + r.pick.overall +
+        ' <span class="text-dim">(expected ~#' + r.pp.adp.pot_rank + ', +' + r.diff + ')</span></div>';
+    }).join('');
+    html += '<div class="panel-section-title" style="margin-top:10px">Biggest Reaches (went before expected slot)</div>';
+    html += reaches.map(function(r) {
+      return '<div class="draft-trend-row">' + '<strong>' + r.pick.team + '</strong> took ' +
+        '<a class="player-link" href="/player/' + r.pick.pid + '">' + r.pick.name + '</a> at #' + r.pick.overall +
+        ' <span class="text-dim">(expected ~#' + r.pp.adp.pot_rank + ', ' + r.diff + ')</span></div>';
+    }).join('');
+  }
+  el.innerHTML = html || '<p class="text-dim">No data yet.</p>';
+}
+
+// "Best fit" callout — cross-references your org's thinnest positions
+// (DRAFT_DEPTH, same data behind the needs-bar buttons) against players
+// still on the board, sorted by surplus.
+function renderNeedsFit() {
+  var el = document.getElementById('draft-needs-fit');
+  if (!el) return;
+  var depthEntries = Object.keys(DRAFT_DEPTH).map(function(k) { return {pos: k, ratio: DRAFT_DEPTH[k].ratio}; });
+  if (!depthEntries.length) { el.innerHTML = ''; return; }
+  var weakest = depthEntries.sort(function(a, b) { return a.ratio - b.ratio; }).slice(0, 2);
+  var byPos = computeScarcity();
+  var html = weakest.map(function(w) {
+    var b = byPos[w.pos];
+    var best = b && b.top.length ? b.top[0] : null;
+    var pct = Math.round((w.ratio || 0) * 100);
+    return '<span class="needs-fit-item"><strong>' + w.pos + '</strong> <span class="text-dim">(' + pct + '% of avg)</span>: ' +
+      (best ? '<a class="player-link" href="/player/' + best.pid + '">' + best.name + '</a> ' + best.fv_str + ' · ' + fmtSurplus(best.surplus) : 'nothing left') + '</span>';
+  }).join(' &nbsp;|&nbsp; ');
+  el.innerHTML = '🎯 <strong>Fits your needs:</strong> ' + html;
+}
+
+// Undrafted players — the pool minus everything in draftPicks.
+function getAvailablePlayers() {
+  return DRAFT_POOL.filter(function(p) { return !draftPicks[p.pid]; });
+}
+
+// A player is "flagged" if this app's own personality-notes pass caught a
+// concerning trait (Low Work Ethic, Low IQ, Low Loyalty, Greedy) — same
+// buffs/concerns arrays the main board's "Highlight Personality" toggle uses.
+// Mirrors the main board's "Highlight Personality" toggle exactly (see the
+// negTrait check in renderDraftBoard's row loop): only raw Low Work Ethic /
+// Low IQ, or a net-negative inferred personality Type (e.g. Selfish, which
+// is driven by Leadership/Loyalty/Greed combos, not a single raw trait).
+// A standalone Low Leadership/Low Loyalty/Greedy note does NOT disqualify a
+// player on its own — p.concerns is too broad for that (it flags any one
+// negative trait note), which is what was wrongly excluding players like
+// John Byers over Low Leadership alone.
+function hasPersonalityConcern(p) {
+  return _isUnsignable(p) || _isLowTrait(p.we) || _isLowTrait(p.int) || p.personality_type_class === 'neg';
+}
+
+function _renderBestAvailableTable(el, players, opts) {
+  opts = opts || {};
+  if (!players.length) { el.innerHTML = '<p class="text-dim">No players available.</p>'; return; }
+  var header = '<table class="intel-table"><thead><tr><th>#</th><th class="left">Name</th><th>Pos</th><th>Age</th>' +
+    '<th class="left">Type</th><th>Ovr/Pot</th><th>FV</th><th>$Val</th><th title="Combined confidence grade">Conf</th>' +
+    (opts.showTraits ? '<th class="left">Notes</th>' : '') + '</tr></thead><tbody>';
+  var rows = players.map(function(p, i) {
+    var traits = opts.showTraits ? '<td class="left text-dim" style="font-size:11px">' + (p.buffs || []).join(', ') + '</td>' : '';
+    return '<tr><td>' + (i + 1) + '</td><td class="left"><a class="player-link" href="/player/' + p.pid + '">' + p.name + '</a>' + _horizonFlag(p) + '</td>' +
+      '<td>' + p.pos + '</td><td>' + p.age + '</td><td class="left">' + p.type + '</td>' +
+      '<td>' + p.ovr + '/' + p.pot + '</td><td>' + p.fv_str + '</td><td>' + fmtSurplus(p.surplus) + '</td><td>' + confidencePill(p) + '</td>' + traits + '</tr>';
+  }).join('');
+  el.innerHTML = header + rows + '</tbody></table>';
+}
+
+function renderDraftBestAvailable() {
+  var el = document.getElementById('draft-intel-best');
+  if (!el) return;
+  var top = getAvailablePlayers().sort(function(a, b) { return (b.surplus || 0) - (a.surplus || 0); }).slice(0, 25);
+  _renderBestAvailableTable(el, top);
+}
+
+function renderDraftBestAvailablePersonality() {
+  var el = document.getElementById('draft-intel-personality');
+  if (!el) return;
+  var avail = getAvailablePlayers();
+  var clean = avail.filter(function(p) { return !hasPersonalityConcern(p); })
+    .sort(function(a, b) { return (b.surplus || 0) - (a.surplus || 0); }).slice(0, 25);
+  var excluded = avail.length - avail.filter(function(p) { return !hasPersonalityConcern(p); }).length;
+  el.innerHTML = '<p class="text-dim" style="font-size:11px;margin-bottom:6px">Excludes ' + excluded +
+    ' available player' + (excluded === 1 ? '' : 's') + ' flagged for Low Work Ethic, Low IQ, Low Loyalty, or Greedy.</p>';
+  var body = document.createElement('div');
+  _renderBestAvailableTable(body, clean, {showTraits: true});
+  el.innerHTML += body.innerHTML;
+}
+
+// "Lottery Ticket" score — ranks available players by how likely PPL's own
+// mechanics (confirmed via the OOTP manual + forums, not a guess) are to
+// make their listed rating wrong in a GOOD way:
+//  - Youth: scouting Accuracy is explicitly age-based in OOTP ("older =
+//    more accurate reports" per the manual) AND younger players have more
+//    remaining development years for Talent Change Randomness to swing
+//    them before their ceiling locks in. Full credit at 17, tapering to
+//    zero by 24.
+//  - Scouting Accuracy grade itself: VH = no credit, lower tiers = more
+//    credit, since that's the game's own admission the report could be off.
+//  - Ovr-to-Pot gap: how much theoretical upside is even on the table.
+// This is a ranked score, not a hard filter — PPL runs 125% TCR (community
+// "sweet spot" 125-145 for realistic boom/bust), so even the ranking order
+// itself is a heuristic, not a guarantee. See conversation notes on why:
+// no rigorous "X% become stars" stat exists publicly for this.
+var _ACC_UNCERTAINTY = {VH: 0, H: 0.35, A: 0.5, M: 0.5, L: 0.75, VL: 1, EL: 1, F: 1};
+
+function lotteryTicketScore(p) {
+  var age = p.age || 22;
+  var youthScore = Math.max(0, Math.min(1, (24 - age) / 7));
+  var accScore = _ACC_UNCERTAINTY[p.acc] != null ? _ACC_UNCERTAINTY[p.acc] : 0.35;
+  var gap = Math.max(0, (p.pot || 0) - (p.ovr || 0));
+  var gapScore = Math.min(1, gap / 40);
+  return youthScore * 0.35 + accScore * 0.25 + gapScore * 0.40;
+}
+
+function renderDraftLotteryTickets() {
+  var el = document.getElementById('draft-intel-lottery');
+  if (!el) return;
+  var avail = getAvailablePlayers();
+  var ranked = avail.map(function(p) { return {p: p, score: lotteryTicketScore(p)}; })
+    .sort(function(a, b) { return b.score - a.score; }).slice(0, 25);
+  if (!ranked.length) { el.innerHTML = '<p class="text-dim">No players available.</p>'; return; }
+  el.innerHTML = '<p class="text-dim" style="font-size:11px;margin-bottom:6px">' +
+    'Ranked by youth + scouting-Accuracy uncertainty + Ovr-to-Pot gap — where PPL\'s 125% Talent Change Randomness ' +
+    'and age-based scouting accuracy are most likely to make the listed rating wrong in your favor. Not a guarantee, just where the odds tilt.</p>' +
+    '<table class="intel-table"><thead><tr><th>#</th><th class="left">Name</th><th>Pos</th><th>Age</th><th>Acc</th>' +
+    '<th class="left">Type</th><th>Ovr/Pot</th><th>FV</th><th>$Val</th><th title="Combined confidence grade">Conf</th><th title="0-100 lottery-ticket score: higher = younger, less certain report, bigger gap to ceiling">Score</th></tr></thead><tbody>' +
+    ranked.map(function(r, i) {
+      var p = r.p;
+      return '<tr><td>' + (i + 1) + '</td><td class="left"><a class="player-link" href="/player/' + p.pid + '">' + p.name + '</a>' + _horizonFlag(p) + '</td>' +
+        '<td>' + p.pos + '</td><td>' + p.age + '</td><td>' + (p.acc || '—') + '</td>' +
+        '<td class="left">' + p.type + '</td><td>' + p.ovr + '/' + p.pot + '</td><td>' + p.fv_str + '</td>' +
+        '<td>' + fmtSurplus(p.surplus) + '</td><td>' + confidencePill(p) + '</td><td>' + Math.round(r.score * 100) + '</td></tr>';
+    }).join('') + '</tbody></table>';
+}
+
+function refreshDraftIntel() {
+  if (currentDraftIntelTab === 'grades') renderDraftGrades();
+  else if (currentDraftIntelTab === 'scarcity') renderDraftScarcity();
+  else if (currentDraftIntelTab === 'trends') renderDraftTrends();
+  else if (currentDraftIntelTab === 'board') renderDraftLeagueBoard();
+  else if (currentDraftIntelTab === 'best') renderDraftBestAvailable();
+  else if (currentDraftIntelTab === 'personality') renderDraftBestAvailablePersonality();
+  else if (currentDraftIntelTab === 'lottery') renderDraftLotteryTickets();
+  else if (currentDraftIntelTab === 'targets') renderDraftPickForecast();
+  else if (currentDraftIntelTab === 'tree') renderDraftTree();
+  renderNeedsFit();
+}
+
+// Estimates whether each top-available prospect will survive to your next
+// pick. Reuses the same POT-rank ADP (_annotate_adp in queries.py) that
+// already drives the ExpRd column — pot_rank is the estimated overall pick
+// at which the field (drafting by raw ceiling) takes that player. Compares
+// it to your own next overall slot, with a one-round tolerance band since
+// real draft order never follows ADP exactly.
+// Per-team historical draft skill vs. StatsPlus's own Expected WAR curve
+// (see queries.get_site_draft_skill / scripts/fetch_site_draft_value.py) —
+// a manually-refreshed snapshot, not live. Fetched once and cached; re-runs
+// the calling render function when it lands so the first paint isn't blocked.
+var _draftSkillCache = null;
+function getDraftSkillMap(onReady) {
+  if (_draftSkillCache) return _draftSkillCache;
+  fetch('/api/draft-skill').then(function(r) { return r.json(); }).then(function(data) {
+    var map = {};
+    (data.teams || []).forEach(function(t) { map[t.team_id] = t; });
+    _draftSkillCache = map;
+    if (onReady) onReady();
+  }).catch(function() { _draftSkillCache = {}; });
+  return null;
+}
+
+function renderDraftPickForecast() {
+  var el = document.getElementById('draft-intel-targets');
+  if (!el) return;
+  var skillMap = getDraftSkillMap(function() { if (currentDraftIntelTab === 'targets') renderDraftPickForecast(); }) || {};
+  var numTeams = DRAFT_PICK_ORDER.length || 16;
+  var untilMine = picksUntilMine(lastRecentPicks);
+  if (untilMine === null) {
+    el.innerHTML = '<p class="text-dim">Pick order not recognized for this draft — can\'t forecast survival to your next pick.</p>';
+    return;
+  }
+  var myNextOverall = lastRecentPicks.length + untilMine + 1;
+  var myRound = Math.floor((myNextOverall - 1) / numTeams) + 1;
+  var avail = getAvailablePlayers().slice().sort(function(a, b) { return (b.surplus || 0) - (a.surplus || 0); }).slice(0, 40);
+  if (!avail.length) { el.innerHTML = '<p class="text-dim">No players available.</p>'; return; }
+
+  function survival(p) {
+    var pr = p.adp && p.adp.pot_rank;
+    if (!pr) return {label: 'Unknown', cls: 'mid'};
+    var gap = pr - myNextOverall;
+    if (gap <= -numTeams) return {label: 'Likely Gone', cls: 'bad'};
+    if (gap < numTeams) return {label: 'Toss-Up', cls: 'poor'};
+    return {label: 'Likely There', cls: 'elite'};
+  }
+
+  // Per-team pace: sum each intervening team's own observed latency (Auto
+  // Pick / list-driven teams resolve near-instantly) rather than one flat
+  // average across the whole field — a mechanical team two picks ahead of
+  // you shouldn't inflate your ETA the way a slow manual GM would.
+  var teamPace = computeTeamPace(lastRecentPicks);
+  var globalPace = estimatePickPaceMinutes(lastRecentPicks);
+  var pickTeamNames = {};
+  lastRecentPicks.forEach(function(p) { if (p.tid && p.team) pickTeamNames[p.tid] = p.team; });
+  var upcoming = [];
+  var etaTotal = 0, etaKnown = true;
+  if (untilMine > 0 && DRAFT_PICK_ORDER.length) {
+    var nextSlot = lastRecentPicks.length % numTeams;
+    for (var i = 0; i < untilMine; i++) {
+      var tid = DRAFT_PICK_ORDER[(nextSlot + i) % numTeams];
+      var tp = teamPace[tid];
+      var teamName = pickTeamNames[tid] || ('Team ' + tid);
+      var mins = tp && tp.avgMins != null ? tp.avgMins : globalPace;
+      if (mins == null) etaKnown = false; else etaTotal += mins;
+      var skill = skillMap[tid];
+      upcoming.push({name: teamName, mechanical: tp && tp.mechanical, mins: mins, skill: skill});
+    }
+  }
+  function skillTag(skill) {
+    if (!skill || skill.surplus_war_plus == null) return '';
+    var wp = skill.surplus_war_plus;
+    var cls = wp >= 150 ? 'elite' : wp >= 110 ? 'good' : wp >= 90 ? 'mid' : 'poor';
+    return ' <span class="gr-pill gr-pill-' + cls + '" style="font-size:9px;padding:0 4px" title="1949-1954 draft track record: ' + wp + ' Surplus WAR+ (100 = drafted at expected value). Manually refreshed snapshot from StatsPlus\'s own Draft Value page, not live.">' + wp + '</span>';
+  }
+  var upcomingHtml = upcoming.length ? '<div class="text-dim" style="font-size:11px;margin-bottom:6px">Picks before yours: ' +
+    upcoming.map(function(u) { return u.name + (u.mechanical ? ' <span title="Auto Pick / pre-set list on 50%+ of recent picks — resolves near-instantly">⚡</span>' : '') + skillTag(u.skill); }).join(', ') + '</div>' : '';
+  var etaHtml = (untilMine > 0 && etaKnown && etaTotal > 0)
+    ? ' <span class="draft-eta" title="Sums each upcoming team\'s own observed pace (Auto Pick/list-driven teams count as near-zero) rather than one flat average">(~' + fmtEtaMinutes(etaTotal) + ' estimated)</span>' : '';
+
+  var header = (untilMine === 0
+    ? '<p><strong>🔔 You\'re on the clock</strong> — overall pick #' + myNextOverall + ' (Round ' + myRound + ').</p>'
+    : '<p>Your next pick: <strong>#' + myNextOverall + '</strong> (Round ' + myRound + ') — <strong>' + untilMine + '</strong> pick' + (untilMine === 1 ? '' : 's') + ' away' + etaHtml + '.</p>') +
+    upcomingHtml +
+    '<p class="text-dim" style="font-size:11px;margin-bottom:6px">Forecast compares each player\'s ADP-implied overall slot (POT-rank order — how the field is expected to draft) to your next pick, with a one-round tolerance band. Not a guarantee — it\'s only as good as the ADP model and assumes no trades or surprise reaches.</p>';
+
+  var rows = avail.map(function(p) {
+    var s = survival(p);
+    var expSlot = p.adp && p.adp.pot_rank ? '#' + p.adp.pot_rank : '—';
+    return '<tr><td class="left"><a class="player-link" href="/player/' + p.pid + '">' + p.name + '</a>' + _horizonFlag(p) + '</td>' +
+      '<td>' + p.pos + '</td><td>' + p.age + '</td><td>' + p.ovr + '/' + p.pot + '</td><td>' + p.fv_str + '</td>' +
+      '<td>' + fmtSurplus(p.surplus) + '</td><td>' + confidencePill(p) + '</td><td data-sort-value="' + (p.adp && p.adp.pot_rank || 9999) + '">' + expSlot + '</td>' +
+      '<td><span class="gr-pill gr-pill-' + s.cls + '">' + s.label + '</span></td></tr>';
+  }).join('');
+
+  el.innerHTML = header + '<table class="intel-table"><thead><tr><th class="left">Name</th><th>Pos</th><th>Age</th><th>Ovr/Pot</th><th>FV</th><th>$Val</th><th>Conf</th>' +
+    '<th title="Estimated overall pick the field takes them, by POT-rank ADP">Est. Slot</th><th>Survival to Your Pick</th></tr></thead><tbody>' + rows + '</tbody></table>';
+}
+
+// Draft Tree — this league's own round-by-round career-WAR hit rates.
+// Fetched once and cached; the underlying draft history doesn't change
+// mid-session.
+var _draftTreeCache = null;
+function renderDraftTree() {
+  var el = document.getElementById('draft-intel-tree');
+  if (!el) return;
+  if (_draftTreeCache) { _renderDraftTreeData(el, _draftTreeCache); return; }
+  el.innerHTML = '<p class="text-dim">Loading draft history…</p>';
+  fetch('/api/draft-tree').then(function(r) { return r.json(); }).then(function(data) {
+    _draftTreeCache = data;
+    _renderDraftTreeData(el, data);
+  }).catch(function() {
+    el.innerHTML = '<p class="text-dim">Couldn\'t load draft history.</p>';
+  });
+}
+function _renderDraftTreeData(el, data) {
+  if (data.error || !data.rounds || !data.rounds.length) {
+    el.innerHTML = '<p class="text-dim">No draft history available yet.</p>';
+    return;
+  }
+  var years = data.years || [];
+  var recentYears = years.length ? years.slice(-2) : [];
+  var maxWar = Math.max.apply(null, data.rounds.map(function(r) { return r.avg_war; }).concat([0.1]));
+  var rows = data.rounds.map(function(r) {
+    var barPct = Math.max(2, Math.round(100 * r.avg_war / maxWar));
+    var barColor = r.avg_war >= maxWar * 0.6 ? 'var(--green)' : r.avg_war >= maxWar * 0.25 ? '#e8c34a' : 'var(--red)';
+    var curveCell = r.site_curve_expected_war != null
+      ? '<td class="text-dim">' + r.site_curve_expected_war.toFixed(2) + '</td>'
+      : '<td class="text-dim">—</td>';
+    return '<tr><td class="left">' + r.round + '</td><td>' + r.picks + '</td>' +
+      '<td><div style="display:flex;align-items:center;gap:6px"><div style="background:' + barColor + ';height:10px;width:' + barPct + '%;min-width:3px;border-radius:2px"></div><span class="text-dim" style="font-size:11px">' + r.avg_war.toFixed(1) + '</span></div></td>' +
+      curveCell +
+      '<td>' + r.pct_contributor + '%</td><td>' + r.pct_regular + '%</td><td>' + r.pct_star + '%</td></tr>';
+  }).join('');
+  var curveNote = data.has_site_baseline
+    ? ' The "Curve Avg" column is StatsPlus\'s own exponential-fit Expected WAR at each overall pick, averaged over this round\'s pick range. It runs noticeably lower than Avg WAR — that\'s expected, not a bug: their curve is fit across all 799 picks (dominated by the many zero-WAR late-round picks), while Avg WAR here only reflects picks in that specific round. Use it to compare rounds\' RELATIVE shape against each other, not as an absolute apples-to-apples baseline for Avg WAR.'
+    : ' (Run scripts/fetch_site_draft_value.py to add StatsPlus\'s own curve-fit comparison column.)';
+  el.innerHTML = '<p class="text-dim" style="font-size:11px;margin-bottom:6px">Career MLB WAR accrued so far by draft round, pooled across PPL\'s completed drafts (' +
+    (years.length ? years[0] + '–' + years[years.length - 1] : '') + '). This is your own league\'s actual outcomes, not real-MLB draft lore — but ' +
+    (recentYears.length ? 'the ' + recentYears.join('/') + ' classes' : 'the most recent classes') +
+    ' have barely had time to accrue value yet, so their rows will look worse than they\'ll eventually turn out to be. Contributor/Regular/Star = % of picks in that round reaching 2/8/20 career WAR so far.' + curveNote + '</p>' +
+    '<table class="intel-table"><thead><tr><th class="left">Round</th><th title="Total picks pooled across all seen draft years in this bucket">Picks</th>' +
+    '<th title="Average career WAR accrued so far per pick in this round">Avg WAR</th>' +
+    '<th title="StatsPlus\'s own curve-fit Expected WAR, averaged over this round\'s pick range">Curve Avg</th>' +
+    '<th title="% of picks with 2.0+ career WAR so far">Contributor</th>' +
+    '<th title="% of picks with 8.0+ career WAR so far">Regular</th>' +
+    '<th title="% of picks with 20.0+ career WAR so far">Star</th></tr></thead><tbody>' + rows + '</tbody></table>';
+}
+
+// Shared by the manual "Update Picks" button and the silent background
+// poller — merges freshly-fetched picks into state and re-renders every
+// draft widget that depends on them. Returns the new-pick count.
+function _applyDraftPicksData(data) {
+  var newCount = 0;
+  // The server is authoritative: drop any locally-remembered pick it no
+  // longer reports (e.g. the commissioner reversed a pick), so that player
+  // returns to the pool. Skipped on an API error, since a failed fetch comes
+  // back as an empty list and must not wipe every pick.
+  if (!data.error && Array.isArray(data.picks)) {
+    var live = {};
+    data.picks.forEach(function(p) { live[p.pid] = true; });
+    Object.keys(draftPicks).forEach(function(pid) { if (!live[pid]) delete draftPicks[pid]; });
+  }
+  (data.picks || []).forEach(function(p) {
+    if (!draftPicks[p.pid]) newCount++;
+    draftPicks[p.pid] = p;
+  });
+  saveDraftPicks();
+  renderMyPicks(data.picks || []);
+  renderRecentDrafted(data.picks || []);
+  var statusEl = document.getElementById('draft-status');
+  if (statusEl) statusEl.textContent = (data.picks || []).length + ' picks' + (newCount ? ' · ' + newCount + ' new' : '');
+  applyDraftFilters();
+  if (typeof refreshDraftIntel === 'function') refreshDraftIntel(data.picks || []);
+  return newCount;
 }
 
 function updateDraftPicks(btn) {
@@ -2561,22 +3407,94 @@ function updateDraftPicks(btn) {
   if (!btn) return;
   btn.disabled = true; btn.textContent = 'Updating…';
   fetch('/api/draft-picks').then(function(r) { return r.json(); }).then(function(data) {
-    var newCount = 0;
-    (data.picks || []).forEach(function(p) {
-      if (!draftPicks[p.pid]) newCount++;
-      draftPicks[p.pid] = p;
-    });
-    saveDraftPicks();
-    renderMyPicks(data.picks || []);
-    document.getElementById('draft-status').textContent =
-      data.picks.length + ' picks' + (newCount ? ' · ' + newCount + ' new' : '');
+    _applyDraftPicksData(data);
     btn.disabled = false; btn.textContent = '⟳ Update Picks';
-    applyDraftFilters();
   }).catch(function() { btn.disabled = false; btn.textContent = '⟳ Update Picks'; });
 }
 
+// Silent background poll — only while the Draft tab is on screen, so an
+// idle browser tab elsewhere in the app doesn't keep hitting the API.
+{% if dp_state == 'active' %}
+setInterval(function() {
+  var tabEl = document.getElementById('tab-draft');
+  if (!tabEl || !tabEl.classList.contains('active')) return;
+  fetch('/api/draft-picks').then(function(r) { return r.json(); }).then(_applyDraftPicksData).catch(function() {});
+}, 25000);
+{% endif %}
+
 renderMyPicks(DRAFT_PICKS_INIT);
+renderRecentDrafted(DRAFT_PICKS_INIT);
+if (typeof refreshDraftIntel === 'function') refreshDraftIntel();
 renderDraftBoard('all');
+
+// Live "on the clock" widget — scraped from the StatsPlus draft room
+// (see scripts/draft_clock.py). Independent of dp_state: it reflects the
+// real live draft regardless of what this app's own pool/picks logic
+// currently thinks the state is.
+var _draftClockDueIso = null;
+var _draftClockCountdownTimer = null;
+
+function _fmtCountdown(ms) {
+  var late = ms < 0;
+  var abs = Math.abs(ms);
+  var totalSec = Math.floor(abs / 1000);
+  var h = Math.floor(totalSec / 3600);
+  var m = Math.floor((totalSec % 3600) / 60);
+  var s = totalSec % 60;
+  var pad = function(n) { return n < 10 ? '0' + n : '' + n; };
+  var text = (h > 0 ? h + ':' + pad(m) : m) + ':' + pad(s);
+  return {text: (late ? '-' : '') + text, late: late, warn: !late && abs < 15 * 60 * 1000};
+}
+
+function _tickDraftClockCountdown() {
+  var el = document.getElementById('draft-clock-countdown');
+  if (!el || !_draftClockDueIso) return;
+  var ms = new Date(_draftClockDueIso).getTime() - Date.now();
+  var f = _fmtCountdown(ms);
+  el.textContent = f.text;
+  el.classList.toggle('warn', f.warn);
+  el.classList.toggle('late', f.late);
+}
+
+function refreshDraftClock() {
+  fetch('/api/draft-clock').then(function(r) { return r.json(); }).then(function(d) {
+    var panel = document.getElementById('draft-clock-panel');
+    if (!panel || !d.ok) { if (panel) panel.style.display = 'none'; return; }
+    panel.style.display = '';
+
+    var last = document.getElementById('draft-clock-last');
+    if (d.last_pick) {
+      last.textContent = d.last_pick.pick + ' — ' + d.last_pick.team + ' — ' + d.last_pick.player;
+    } else {
+      last.textContent = '—';
+    }
+
+    var teamEl = document.getElementById('draft-clock-team');
+    var dueEl = document.getElementById('draft-clock-due');
+    if (d.on_clock) {
+      teamEl.textContent = d.on_clock.team + (d.on_clock.record ? ' ' + d.on_clock.record : '');
+      dueEl.textContent = d.on_clock.due_text || '';
+      _draftClockDueIso = d.on_clock.due_iso || null;
+      _tickDraftClockCountdown();
+      if (!_draftClockCountdownTimer) {
+        _draftClockCountdownTimer = setInterval(_tickDraftClockCountdown, 1000);
+      }
+    } else {
+      teamEl.textContent = '—'; dueEl.textContent = '';
+      _draftClockDueIso = null;
+      document.getElementById('draft-clock-countdown').textContent = '';
+    }
+
+    document.getElementById('draft-clock-deck').textContent = d.on_deck || '—';
+  }).catch(function() {});
+}
+
+refreshDraftClock();
+setInterval(function() {
+  var tabEl = document.getElementById('tab-draft');
+  if (!tabEl || !tabEl.classList.contains('active')) return;
+  refreshDraftClock();
+}, 30000);
 
 // Auto-load waiver wire when tab is opened
 let waiversLoaded = false;

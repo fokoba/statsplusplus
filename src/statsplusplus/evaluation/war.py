@@ -88,6 +88,103 @@ def peak_war_from_score(
     return _interp_table(OVR_TO_WAR_DEFAULT, int(score), col)
 
 
+# ---------------------------------------------------------------------------
+# Current-season WAR pace (2026-09-30)
+# ---------------------------------------------------------------------------
+
+HISTORIC_PACE_WAR = 8.0     # pace_war at/above this = "historic pace" tag
+MIN_PACE_SAMPLE_G = 20      # hitters: minimum games this season to trust a pace
+MIN_PACE_SAMPLE_IP = 30.0   # pitchers: minimum innings this season to trust a pace
+
+# Pace tiers (2026-09-30) — standard sabermetric bands (same cutoffs both
+# leagues, per the user's own choice — not per-league calibrated like
+# PEAK_AGE_HITTER/PITCHER). Checked in order, first match wins; below the
+# last threshold falls through to "replacement".
+PACE_TIERS: list[tuple[float, str, str]] = [
+    (HISTORIC_PACE_WAR, "historic", "Historic"),
+    (5.0, "allstar", "All-Star"),
+    (2.0, "everyday", "Everyday"),
+    (0.0, "reserve", "Reserve"),
+]
+PACE_TIER_REPLACEMENT = ("replacement", "Replacement")
+
+
+def pace_tier(pace_war: Optional[float]) -> tuple[Optional[str], Optional[str]]:
+    """(css_class, label) for a prorated pace_war, or (None, None) if
+    pace_war is None. See PACE_TIERS."""
+    if pace_war is None:
+        return None, None
+    for threshold, css, label in PACE_TIERS:
+        if pace_war >= threshold:
+            return css, label
+    return PACE_TIER_REPLACEMENT
+
+# Pace confidence (2026-09-30) — MIN_PACE_SAMPLE_G/IP is a hard cutoff, not a
+# smooth confidence signal: a hitter at exactly 20 games can produce a wildly
+# unstable prorated pace (confirmed in PPL — two "historic pace" hitters sat
+# right at the 20-21 game minimum with 12.97/14.65 WAR paces, almost
+# certainly small-sample noise, displayed with the same visual weight as a
+# much steadier 32-game, 9.4 WAR read). This doesn't move the floor — it
+# grades how far *past* it the player is, mirroring dev_speed.py's
+# confidence_tier() pattern (playing-time-in-window -> High/Medium/Low).
+# Multiples of the minimum sample, not absolute games/IP, so hitters and
+# pitchers share one scale despite different units/thresholds:
+#   High   >= 2.0x minimum — pace has roughly doubled the trust floor
+#   Medium >= 1.0x and < 2.0x minimum
+#   Low    < 1.0x minimum (shouldn't normally reach here — get_war_pace already
+#            gates below the floor — kept as a floor-case fallback, not a live band)
+PACE_CONFIDENCE_HIGH_MULT = 2.0
+
+
+def pace_confidence(sample_to_date: float, min_sample: float) -> str:
+    """"High"/"Medium"/"Low" confidence in a war_pace reading, from how far
+    past the minimum trusted sample (MIN_PACE_SAMPLE_G/IP) the player
+    actually is. See PACE_CONFIDENCE_HIGH_MULT above for the reasoning."""
+    if min_sample <= 0 or sample_to_date < min_sample:
+        return "Low"
+    ratio = sample_to_date / min_sample
+    if ratio >= PACE_CONFIDENCE_HIGH_MULT:
+        return "High"
+    return "Medium"
+
+# Full-season IP targets at a 162-game reference (SP/RP), scaled by the
+# league's actual games_per_season elsewhere — mirrors scripts/projections.py's
+# _SP_FULL_IP/_RP_FULL_IP, kept here too since this module has no import on
+# that one (projections.py is the pure/no-DB layer; this is the reverse
+# direction — DB-adjacent evaluation code importing a display constant would
+# be a layering inversion).
+FULL_SEASON_SP_IP_162 = 200.0
+FULL_SEASON_RP_IP_162 = 65.0
+
+
+def war_pace(
+    war_to_date: float,
+    sample_to_date: float,
+    bucket: str,
+    games_per_season: int = 162,
+) -> Optional[float]:
+    """Prorate a player's current-season WAR to a full-season pace.
+
+    Pure function — sample_to_date is games played (hitters) or innings
+    pitched (pitchers, use bucket in ("SP","RP") to select the right
+    full-season target). Returns None if sample_to_date <= 0.
+
+    Validated (2026-09-30) against two real PPL hitters mid-flagged by the
+    user as "on pace for 9.4/9.2 WAR": war_to_date/games_played prorated
+    over a 154-game season (not 162 — PPL is a real 1955-era 154-game
+    schedule) landed at 9.39 and 9.22, matching almost exactly — 162 would
+    have overshot to ~9.9/9.7. See games_per_season() in league_config.py.
+    """
+    if sample_to_date is None or sample_to_date <= 0:
+        return None
+    is_pitcher = bucket in ("SP", "RP")
+    if is_pitcher:
+        scale = games_per_season / 162.0
+        full_target = (FULL_SEASON_RP_IP_162 if bucket == "RP" else FULL_SEASON_SP_IP_162) * scale
+        return round((war_to_date / sample_to_date) * full_target, 2)
+    return round((war_to_date / sample_to_date) * games_per_season, 2)
+
+
 def aging_mult(age: int | float, bucket: str, weights: Optional[Any] = None) -> float:
     """Aging curve multiplier on peak WAR.
 
@@ -242,6 +339,7 @@ def load_stat_history(
     conn: Any,
     game_date: str,
     dh_rule: str = "Universal DH",
+    games_per_season: int = 162,
 ) -> tuple[dict[int, list[dict[str, Any]]], dict[int, list[dict[str, Any]]], set[int]]:
     """Load season stats into memory for WAR projection.
 
@@ -250,6 +348,9 @@ def load_stat_history(
         game_date: Current game date string (YYYY-MM-DD).
         dh_rule: League DH rule ("No DH", "Universal DH", "AL Only DH").
             Affects the AB threshold for two-way player detection.
+        games_per_season: League's full-season schedule length, e.g. from
+            statsplusplus.config.league_config.games_per_season(league_dir).
+            Defaults to 162; pass the league-specific value where available.
 
     Returns:
         Tuple of (bat_hist, pit_hist, two_way_pids):
@@ -270,7 +371,7 @@ def load_stat_history(
                 GROUP BY home_team)""",
             (f"{game_year}%",)
         ).fetchone()
-        season_pct = min((max_g[0] or 0) / 162.0, 1.0) if max_g and max_g[0] else 0.0
+        season_pct = min((max_g[0] or 0) / float(games_per_season), 1.0) if max_g and max_g[0] else 0.0
 
     cutoff_year = game_year + 1
 

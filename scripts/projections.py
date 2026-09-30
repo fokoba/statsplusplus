@@ -8,6 +8,26 @@ Used by web/team_queries.py::get_depth_chart().
 from statsplusplus.evaluation.war import peak_war_from_score as peak_war_from_ovr, aging_mult
 from statsplusplus.evaluation.constants import PEAK_AGE_PITCHER, PEAK_AGE_HITTER
 
+# Per-league peak age (2026-09-30) — this module is otherwise pure/stateless
+# (see module docstring), but the caller (get_depth_chart) needs to configure
+# the calibrated, per-league peak age before projecting. set_peak_ages() is
+# the one deliberate piece of request-scoped state here, mirroring the
+# active-league-context pattern used elsewhere in this app (e.g.
+# contract_value.py's _ensure_league_context). Falls back to the shared
+# PEAK_AGE_PITCHER/PEAK_AGE_HITTER defaults until a caller overrides them.
+_peak_age_hitter = PEAK_AGE_HITTER
+_peak_age_pitcher = PEAK_AGE_PITCHER
+
+
+def set_peak_ages(peak_age_hitter=None, peak_age_pitcher=None):
+    """Override this module's peak-age values for the active league.
+    Call once per request (get_depth_chart does this) before projecting."""
+    global _peak_age_hitter, _peak_age_pitcher
+    if peak_age_hitter is not None:
+        _peak_age_hitter = peak_age_hitter
+    if peak_age_pitcher is not None:
+        _peak_age_pitcher = peak_age_pitcher
+
 # ---------------------------------------------------------------------------
 # OPS+ model — calibrated from 2,573 qualified hitter-seasons (PA >= 200)
 # R² = 0.45, RMSE = 11.5 OPS+ points
@@ -30,7 +50,7 @@ _RP_FULL_IP = 65
 
 def project_ovr(ovr, pot, age, bucket, year_offset):
     """Project Ovr for a future year using development ramp."""
-    peak_age = PEAK_AGE_PITCHER if bucket in ("SP", "RP") else PEAK_AGE_HITTER
+    peak_age = _peak_age_pitcher if bucket in ("SP", "RP") else _peak_age_hitter
     future_age = age + year_offset
     ovr = ovr or 0
     pot = pot or ovr
@@ -133,7 +153,7 @@ def project_ratings(ratings, year_offset, age, bucket):
     Returns a new dict with projected values for cntct, gap, pow, eye,
     stf, mov, ctrl (averaged from ctrl_r/ctrl_l).
     """
-    peak_age = PEAK_AGE_PITCHER if bucket in ("SP", "RP") else PEAK_AGE_HITTER
+    peak_age = _peak_age_pitcher if bucket in ("SP", "RP") else _peak_age_hitter
     if year_offset == 0 or age >= peak_age:
         progress = 0.0
     else:

@@ -48,6 +48,7 @@ from statsplusplus.data.evaluation_engine import (
     DEFAULT_TOOL_WEIGHTS, validate_tool_weights,
 )
 from statsplusplus.evaluation.composite import derive_tool_transform
+from statsplusplus.evaluation.woba import woba_weights_from_run_env, player_woba
 from statsplusplus.evaluation.constants import (
     TOOL_TRANSFORM_ANCHORS, TOOL_TRANSFORM_PRIOR, TOOL_TRANSFORM_DEFAULT_PRIOR,
 )
@@ -89,6 +90,23 @@ def _linreg(xs, ys):
 
 def _war_at(slope, intercept, ovr):
     return max(0.0, round(slope * ovr + intercept, 2))
+
+
+def _primary_lid(conn):
+    """Primary MLB league id from league_meta (written by refresh), or None.
+
+    Used to scope calibration to *our* MLB and exclude a co-resident top-level
+    league (e.g. NPB in PPL). Most calibration reads join the mlb_* views (which
+    are already primary-scoped); this covers the few that read players/ratings
+    directly. Returns None on any DB where league_meta isn't populated (single-
+    top-league leagues, older DBs) → callers treat None as no scoping.
+    """
+    try:
+        row = conn.execute(
+            "SELECT primary_league_id FROM league_meta WHERE id = 1").fetchone()
+        return row[0] if row else None
+    except Exception:
+        return None
 
 
 def _bucket_player(row, role_map):
@@ -164,6 +182,35 @@ def _calibrate_tool_weights(conn, game_year, role_map):
           f"hitters={n_hitters}, pitchers={n_pitchers}, ages {age_lo}-{age_hi}")
 
     # -------------------------------------------------------------------
+    # Derive per-league/year wOBA linear weights from the run environment.
+    # The offensive tools are regressed against per-player wOBA (offense only),
+    # not total WAR — WAR bundles defense/baserunning/positional value, which
+    # inflates gap (gap-hitters cluster at premium defensive spots) and
+    # suppresses power (power-hitters cluster at low-value spots). Anchor the
+    # canonical wOBA shape to OOTP's stored league wOBA for the most recent
+    # complete season; fall back to canonical when the season is too thin.
+    woba_totals = conn.execute("""
+        SELECT SUM(ab) ab, SUM(h) h, SUM(d) d, SUM(t) t, SUM(hr) hr,
+               SUM(bb) bb, SUM(ibb) ibb, SUM(hbp) hbp, SUM(sf) sf
+        FROM mlb_batting_stats WHERE split_id=1 AND year=?
+    """, (year_hi,)).fetchone()
+    woba_anchor = conn.execute("""
+        SELECT SUM(woba*pa)/NULLIF(SUM(pa),0) AS lg_woba,
+               COUNT(*) AS n_teams, SUM(pa) AS total_pa
+        FROM team_batting_stats
+        WHERE split_id=1 AND year=? AND woba IS NOT NULL AND woba>0
+    """, (year_hi,)).fetchone()
+    woba_wts, woba_src = woba_weights_from_run_env(
+        dict(woba_totals) if woba_totals else {},
+        woba_anchor["lg_woba"] if woba_anchor else None,
+        woba_anchor["n_teams"] if woba_anchor else 0,
+        woba_anchor["total_pa"] if woba_anchor else 0,
+    )
+    print(f"  wOBA target weights ({woba_src}): "
+          f"uBB={woba_wts['ubb']} 1B={woba_wts['b1']} 2B={woba_wts['b2']} "
+          f"3B={woba_wts['b3']} HR={woba_wts['hr']}")
+
+    # -------------------------------------------------------------------
     # Hitter offensive tool weights (pooled across positions, age 27-32)
     # -------------------------------------------------------------------
     hitter_rows = conn.execute("""
@@ -171,7 +218,8 @@ def _calibrate_tool_weights(conn, game_year, role_map):
                r.babip, r.ks,
                r.ifr, r.ife, r.ifa, r.tdp, r.ofr, r.ofe, r.ofa,
                r.c_frm, r.c_blk, r.c_arm,
-               p.pos, p.role, p.age, b.war
+               p.pos, p.role, p.age, b.war,
+               b.ab, b.h, b.d, b.t, b.hr, b.bb, b.ibb, b.hbp, b.sf
         FROM latest_ratings r
         JOIN players p ON r.player_id = p.player_id
         JOIN mlb_batting_stats b ON b.player_id = p.player_id AND b.split_id = 1
@@ -194,8 +242,14 @@ def _calibrate_tool_weights(conn, game_year, role_map):
         eye = norm(r["eye"])
         if any(v is None for v in (contact, gap, power, eye)):
             continue
+        # Offensive target is per-player wOBA (offense only), NOT total WAR.
+        # WAR contaminates offensive tool weights with defensive/positional
+        # value (see woba module). Skip rows with no valid wOBA denominator.
+        woba = player_woba(dict(r), woba_wts)
+        if woba is None:
+            continue
         off_tool_ratings.append({"contact": contact, "gap": gap, "power": power, "eye": eye})
-        off_targets.append(float(r["war"]))
+        off_targets.append(float(woba))
 
     # Baserunning
     br_tool_ratings = []
@@ -366,6 +420,15 @@ def _calibrate_tool_weights(conn, game_year, role_map):
             "baserunning": round(br_share, 2),
         }
 
+    # -------------------------------------------------------------------
+    # Run-space facet model calibration (spec: run-space-facet-model)
+    # Derives baserunning->UBR and defense->ZR curves, the wOBA scale, the
+    # OOTP-WAR anchor, and the runs->composite mapping. Consumed by the run-space
+    # composite; degrades gracefully (composite falls back) if absent.
+    # -------------------------------------------------------------------
+    run_space = _calibrate_run_space(conn, game_year, role_map, woba_wts,
+                                     off_norm, result_hitter)
+
     # Build output
     tool_weights = {
         "version": 1,
@@ -379,6 +442,7 @@ def _calibrate_tool_weights(conn, game_year, role_map):
         "hitter": result_hitter,
         "pitcher": result_pitcher,
         "recombination": recombination,
+        "run_space": run_space,
     }
 
     # Validate
@@ -390,9 +454,191 @@ def _calibrate_tool_weights(conn, game_year, role_map):
 
 
 # ---------------------------------------------------------------------------
-# Per-tool transform curves (residualized marginal-WAR band fit)
+# Run-space facet model calibration
 # ---------------------------------------------------------------------------
 
+def _calibrate_run_space(conn, game_year, role_map, woba_wts, off_norm, result_hitter):
+    """Derive run-space facet params for a league (spec: run-space-facet-model).
+
+    Returns a dict with: woba_scale, lg_woba, tool_woba_fit (coef for prospect/
+    tool projection), br_curve, def_curve (per bucket), anchor, comp_mapping.
+    Returns {} on insufficient data (composite falls back to grade-space).
+    """
+    import statistics as _st
+    from statsplusplus.evaluation import facet_runs as _fr
+    from statsplusplus.evaluation.woba import player_woba as _pw
+    from statsplusplus.evaluation.constants import CANONICAL_WOBA_WEIGHTS as _CANON
+    from statsplusplus.utils.positions import load_positional_models
+
+    year_hi = game_year - 1
+    year_lo = year_hi - 1
+
+    # wOBA scale = canonical (1.277) * run-env factor applied to weights
+    scale_factor = woba_wts["b1"] / _CANON["b1"] if _CANON["b1"] else 1.0
+    woba_scale = 1.277 * scale_factor
+    anc = conn.execute("""SELECT SUM(woba*pa)/NULLIF(SUM(pa),0) w FROM team_batting_stats
+        WHERE split_id=1 AND year=? AND woba>0""", (year_hi,)).fetchone()
+    lg_woba = anc["w"] if anc and anc["w"] else 0.320
+
+    def _b(pos, role):
+        return {2:"C",3:"1B",4:"2B",5:"3B",6:"SS",7:"COF",8:"CF",9:"COF",10:"1B"}.get(pos, "COF")
+
+    # --- baserunning speed->UBR curve ---
+    brrows = conn.execute("""SELECT r.speed, b.ubr FROM latest_ratings r
+        JOIN players p ON r.player_id=p.player_id
+        JOIN mlb_batting_stats b ON b.player_id=p.player_id AND b.split_id=1
+        WHERE b.pa>=300 AND p.role NOT IN (11,12,13) AND b.ubr IS NOT NULL
+          AND b.year BETWEEN ? AND ?""", (year_lo, year_hi)).fetchall()
+    bx = [norm(r["speed"]) for r in brrows if r["speed"] is not None]
+    by = [r["ubr"] for r in brrows if r["speed"] is not None]
+    br_curve = _fr.calibrate_grade_runs_curve(bx, by, _fr.BASERUNNING_PRIOR_SLOPE, shrink=0.8) or {}
+
+    # --- fielding per-position range->ZR curves ---
+    def_curve = {}
+    pos_cfg = {"SS": (6, "ifr"), "2B": (4, "ifr"), "3B": (5, "ifr"),
+               "CF": (8, "ofr"), "COF": ("(7,9)", "ofr"), "C": (2, "c_arm")}
+    for bk, (code, tool) in pos_cfg.items():
+        codes = code if isinstance(code, str) else f"({code})"
+        rows = conn.execute(f"""SELECT r.{tool} t, f.zr FROM latest_ratings r
+            JOIN fielding_stats f ON r.player_id=f.player_id
+            WHERE f.position IN {codes} AND f.zr IS NOT NULL AND f.ip>=250
+              AND f.year BETWEEN ? AND ?""", (year_lo, year_hi)).fetchall()
+        fx = [norm(x["t"]) for x in rows if x["t"] is not None]
+        fy = [x["zr"] for x in rows if x["t"] is not None]
+        # Population-mean grade at this position (all players who man it,
+        # not just the high-IP calibration starters) — the curve must be
+        # centered so a POPULATION-average fielder gets ~0 runs, else the whole
+        # population shifts negative when the qualified sample is more selective.
+        prows = conn.execute(f"""SELECT r.{tool} t FROM latest_ratings r
+            JOIN players p ON r.player_id=p.player_id
+            WHERE p.pos IN {codes} AND p.role NOT IN (11,12,13) AND r.{tool} IS NOT NULL""").fetchall()
+        pg = [norm(x["t"]) for x in prows if x["t"] is not None]
+        pop_mean = (sum(pg) / len(pg)) if pg else None
+        # Fielding is the noisiest facet AND the tool->ZR relationship plateaus at
+        # high grades (a plus fielder tops out ~+5-7 ZR, not the +10+ a steep
+        # linear slope extrapolates). Strong shrinkage + the robust-percentile
+        # clamp keep plus-grade fielders at realistic run values.
+        cur = _fr.calibrate_grade_runs_curve(fx, fy, _fr.FIELDING_PRIOR_SLOPE,
+                                             shrink=0.55, center_grade=pop_mean)
+        if cur:
+            def_curve[bk] = cur
+
+    # --- tool->wOBA fit (for prospect/tool projection) ---
+    fitrows = conn.execute("""SELECT r.cntct,r.gap,r.pow,r.eye,b.ab,b.h,b.d,b.t,b.hr,b.bb,b.ibb,b.hbp,b.sf
+        FROM latest_ratings r JOIN players p ON r.player_id=p.player_id
+        JOIN mlb_batting_stats b ON b.player_id=p.player_id AND b.split_id=1
+        WHERE b.pa>=300 AND p.role NOT IN (11,12,13) AND b.year=?""", (year_hi,)).fetchall()
+    X = []; Y = []
+    for r in fitrows:
+        con, gap, pw, eye = norm(r["cntct"]), norm(r["gap"]), norm(r["pow"]), norm(r["eye"])
+        w = _pw(dict(r), woba_wts)
+        if None not in (con, gap, pw, eye) and w is not None:
+            X.append([con, gap, pw, eye]); Y.append(w)
+    tool_woba_fit = _solve_lstsq(X, Y) if len(X) >= 20 else None
+
+    # --- anchor + composite mapping over qualified MLB hitters ---
+    pmodels = load_positional_models(get_league_dir())
+    qrows = conn.execute("""SELECT r.*,p.pos,p.role,p.player_id,b.war,b.ab,b.h,b.d,b.t,b.hr,b.bb,b.ibb,b.hbp,b.sf
+        FROM latest_ratings r JOIN players p ON r.player_id=p.player_id
+        JOIN mlb_batting_stats b ON b.player_id=p.player_id AND b.split_id=1
+        WHERE b.pa>=300 AND p.role NOT IN (11,12,13) AND b.year=?""", (year_hi,)).fetchall()
+    totals = []; wars = []; comps = []
+    for r in qrows:
+        bk = _b(r["pos"], r["role"])
+        w = _pw(dict(r), woba_wts)
+        if w is None:
+            continue
+        ifr = norm(r["ifr"]); ofr = norm(r["ofr"])
+        dt = {bk: (ifr if bk in ("SS","2B","3B") else ofr), "ifr": ifr, "ofr": ofr}
+        parts = _fr.total_runs(w, lg_woba, woba_scale,
+                               {"speed": norm(r["speed"]), "steal": norm(r["steal"])},
+                               dt, bk, br_curve=br_curve, def_curve=def_curve,
+                               positional_models=pmodels, pa=600, runs_per_win=9.5)
+        totals.append(parts["total_runs"])
+        if r["war"] is not None:
+            wars.append(r["war"])
+        pe = conn.execute("SELECT composite FROM player_evaluation WHERE player_id=? LIMIT 1", (r["player_id"],)).fetchone()
+        if pe and pe["composite"]:
+            comps.append(pe["composite"])
+    anchor = _fr.solve_war_anchor(totals, wars) if wars else {}
+
+    # Population center for the composite mapping: the run->composite map is
+    # applied to the whole player universe (prospects included), so it must be
+    # centered on the POPULATION average, not the selective 300+ PA qualified
+    # sample (whose mean composite is inflated — good enough to start every day).
+    # Centering on qualified starters pushes every player up ~a full grade
+    # (glove-first regulars graded FV 55 instead of 50). Mirror the fielding-
+    # curve population-centering fix. Run-totals use tool-PROJECTED wOBA (from
+    # tool_woba_fit) so low-PA population members aren't stat-noise-driven.
+    pop_runs = []; pop_comps = []
+    if tool_woba_fit:
+        prows = conn.execute("""SELECT r.*,p.pos,p.role,p.player_id
+            FROM latest_ratings r JOIN players p ON r.player_id=p.player_id
+            JOIN mlb_batting_stats b ON b.player_id=p.player_id AND b.split_id=1
+            WHERE p.role NOT IN (11,12,13) AND b.year=? GROUP BY r.player_id""", (year_hi,)).fetchall()
+        for r in prows:
+            con, gap, pw, eye = norm(r["cntct"]), norm(r["pow"]), None, None
+            gp, ey = norm(r["gap"]), norm(r["eye"])
+            if None in (con, gp, norm(r["pow"]), ey):
+                continue
+            w = (tool_woba_fit[0] + tool_woba_fit[1]*con + tool_woba_fit[2]*gp
+                 + tool_woba_fit[3]*norm(r["pow"]) + tool_woba_fit[4]*ey)
+            bk = _b(r["pos"], r["role"])
+            ifr = norm(r["ifr"]); ofr = norm(r["ofr"])
+            dt = {bk: (ifr if bk in ("SS","2B","3B") else ofr), "ifr": ifr, "ofr": ofr}
+            parts = _fr.total_runs(w, lg_woba, woba_scale,
+                                   {"speed": norm(r["speed"]), "steal": norm(r["steal"])},
+                                   dt, bk, br_curve=br_curve, def_curve=def_curve,
+                                   positional_models=pmodels, pa=600, runs_per_win=9.5)
+            pe = conn.execute("SELECT composite FROM player_evaluation WHERE player_id=? LIMIT 1", (r["player_id"],)).fetchone()
+            if pe and pe["composite"]:
+                pop_runs.append(parts["total_runs"]); pop_comps.append(pe["composite"])
+    import statistics as _st
+    pop_runs_mean = _st.mean(pop_runs) if len(pop_runs) >= 10 else None
+    pop_comp_mean = _st.mean(pop_comps) if len(pop_comps) >= 10 else None
+    comp_mapping = (
+        _fr.calibrate_composite_mapping(totals, comps, pop_runs_mean, pop_comp_mean)
+        if comps else {}
+    )
+
+    return {
+        "woba_scale": round(woba_scale, 4),
+        "lg_woba": round(lg_woba, 4),
+        "woba_weights": {k: round(v, 4) for k, v in woba_wts.items()},
+        "tool_woba_fit": tool_woba_fit,
+        "br_curve": br_curve,
+        "def_curve": def_curve,
+        "anchor": anchor,
+        "comp_mapping": comp_mapping,
+    }
+
+
+def _solve_lstsq(X, y):
+    """Normal-equations OLS with intercept (stdlib). X: list of feature lists."""
+    p = len(X[0]) + 1
+    rows = [[1.0] + list(x) for x in X]
+    XtX = [[0.0] * p for _ in range(p)]; Xty = [0.0] * p
+    for xi, yi in zip(rows, y):
+        for a in range(p):
+            Xty[a] += xi[a] * yi
+            for b in range(p):
+                XtX[a][b] += xi[a] * xi[b]
+    M = [XtX[i][:] + [Xty[i]] for i in range(p)]
+    for col in range(p):
+        piv = max(range(col, p), key=lambda rr: abs(M[rr][col]))
+        M[col], M[piv] = M[piv], M[col]
+        d = M[col][col] or 1e-9
+        M[col] = [v / d for v in M[col]]
+        for rr in range(p):
+            if rr != col:
+                f = M[rr][col]
+                M[rr] = [a - f * b for a, b in zip(M[rr], M[col])]
+    return [round(M[i][p], 6) for i in range(p)]
+
+
+# ---------------------------------------------------------------------------
+# Per-tool transform curves (residualized marginal-WAR band fit)
+# ---------------------------------------------------------------------------
 # The rating bands aligned to TOOL_TRANSFORM_ANCHORS (28/40/50/60/72).
 _TRANSFORM_BANDS = [(20, 35), (35, 45), (45, 55), (55, 65), (65, 85)]
 
@@ -709,8 +955,11 @@ def _calibrate_years_to_mlb(conn):
 
     Returns dict mapping level label → years, or None if insufficient data.
     """
+    from statsplusplus.data.db import primary_league_predicate
+    _cl, _pr = primary_league_predicate(_primary_lid(conn))
     young_mlb = conn.execute(
-        "SELECT AVG(age) FROM players WHERE level = 1 AND age <= 26"
+        f"SELECT AVG(age) FROM players p WHERE p.level = 1 AND p.age <= 26 AND {_cl}",
+        _pr,
     ).fetchone()[0]
     if not young_mlb:
         return None
@@ -924,14 +1173,16 @@ def _calibrate_arb_pct(conn, game_year, dpw):
     year_lo = game_year - CALIBRATION_YEARS
     year_hi = game_year - 1
 
-    rows = conn.execute("""
+    from statsplusplus.data.db import primary_league_predicate
+    _cl, _pr = primary_league_predicate(_primary_lid(conn))
+    rows = conn.execute(f"""
         SELECT c.player_id, p.age, c.salary_0, r.ovr
         FROM contracts c
         JOIN players p ON c.player_id = p.player_id
         JOIN latest_ratings r ON r.player_id = p.player_id
         WHERE c.years = 1 AND c.salary_0 > ? AND c.salary_0 < 20000000
-          AND p.age < 30 AND p.level = 1
-    """, (_cfg.minimum_salary,)).fetchall()
+          AND p.age < 30 AND p.level = 1 AND {_cl}
+    """, (_cfg.minimum_salary, *_pr)).fetchall()
 
     arb_data = defaultdict(list)
     for r in rows:
@@ -1006,12 +1257,14 @@ def _calibrate_arb_salary_model(conn, game_year, dpw):
     min_sal = _cfg.minimum_salary
 
     # Gather 1-year contract players with career WAR data
-    rows = conn.execute("""
+    from statsplusplus.data.db import primary_league_predicate
+    _cl, _pr = primary_league_predicate(_primary_lid(conn))
+    rows = conn.execute(f"""
         SELECT p.player_id, p.age, c.salary_0
         FROM players p
         JOIN contracts c ON p.player_id = c.player_id
-        WHERE p.level = '1' AND c.years = 1
-    """).fetchall()
+        WHERE p.level = '1' AND c.years = 1 AND {_cl}
+    """, _pr).fetchall()
 
     data = []
     for r in rows:
@@ -1145,15 +1398,17 @@ def _calibrate_scarcity(conn, game_date):
         print("  Scarcity: skipped (offseason — FA pool is flooded)")
         return None
 
-    rows = conn.execute("""
+    from statsplusplus.data.db import primary_league_predicate
+    _cl, _pr = primary_league_predicate(_primary_lid(conn))
+    rows = conn.execute(f"""
         SELECT r.pot,
                SUM(CASE WHEN p.level != 1 THEN 1 ELSE 0 END) as non_mlb,
                COUNT(*) as total
         FROM latest_ratings r
         JOIN players p ON r.player_id = p.player_id
-        WHERE r.pot >= 38 AND p.team_id > 0 AND p.age BETWEEN 18 AND 32
+        WHERE r.pot >= 38 AND p.team_id > 0 AND p.age BETWEEN 18 AND 32 AND {_cl}
         GROUP BY r.pot ORDER BY r.pot
-    """).fetchall()
+    """, _pr).fetchall()
 
     if not rows:
         return None
@@ -1436,12 +1691,17 @@ def _calibrate_positional_models(conn):
     Returns dict: {position: {"features": [...], "coefficients": [...], "r2": float, "n": int}}
     """
     models = {}
+    from statsplusplus.data.db import primary_league_predicate
+    _cl, _pr = primary_league_predicate(_primary_lid(conn))
     for pos_col, features in _POS_MODEL_FEATURES.items():
-        feat_sql = ", ".join(features)
-        # Only train on players who have a rating at this position AND have defensive tools
+        feat_sql = ", ".join(f"r.{f}" for f in features)
+        # Only train on players who have a rating at this position AND have
+        # defensive tools. Scope to the primary league (exclude co-resident NPB).
         rows = conn.execute(
-            f"SELECT {pos_col}, {feat_sql} FROM latest_ratings "
-            f"WHERE {pos_col} > 0 AND {features[0]} > 0"
+            f"SELECT r.{pos_col}, {feat_sql} FROM latest_ratings r "
+            f"JOIN players p ON p.player_id = r.player_id "
+            f"WHERE r.{pos_col} > 0 AND r.{features[0]} > 0 AND {_cl}",
+            _pr,
         ).fetchall()
         if len(rows) < 30:
             continue

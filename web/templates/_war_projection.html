@@ -1,0 +1,173 @@
+<div id="war-projection-section" style="margin-top:16px;">
+  <div class="panel war-proj-intro">
+    <div class="war-proj-heading">
+      <div>
+        <h2>1955 WAR projections · Philadelphia</h2>
+        <p>Full-season plan for the agreed 25. AB, IP, and each hitter's vR share are editable; vL is the balance. Adjustments recalculate immediately. Save when the workload looks right.</p>
+      </div>
+      <div class="war-proj-actions">
+        <button type="button" id="war-proj-defaults">Restore suggested workload</button>
+        <button type="button" id="war-proj-save">Save plan</button>
+      </div>
+    </div>
+    <div id="war-proj-status" role="status" aria-live="polite"></div>
+    <div class="war-proj-summary" id="war-proj-summary"></div>
+    <div class="war-proj-checks" id="war-proj-checks"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Projected 25</h2>
+    <p class="war-proj-note">All values are projected wins above replacement. Hitting is batting only; fielding is fielding only. Baserunning, positional adjustment, and replacement credit have their own columns. For pitchers, pitching is run prevention above average and replacement credit is separate. Component totals add to Total.</p>
+    <div class="war-proj-scroll">
+      <table class="war-proj-table">
+        <thead><tr>
+          <th class="left">Player</th><th class="left">Primary role</th>
+          <th title="Projected hitter at-bats; pitchers' batting is handled in the team workload check">AB</th>
+          <th title="Share of a hitter's projected at-bats versus right-handed pitching">vR%</th>
+          <th title="Share of a hitter's projected at-bats versus left-handed pitching">vL%</th>
+          <th title="Projected innings pitched">IP</th>
+          <th title="Batting runs above league average, divided by runs per win">Hit</th>
+          <th title="Pitching run prevention above average, divided by runs per win">Pitch</th>
+          <th title="Fielding runs above positional average, divided by runs per win">Field</th>
+          <th title="Baserunning runs above average, divided by runs per win">Run</th>
+          <th title="Positional adjustment">Pos</th>
+          <th title="Replacement-level playing-time credit">Repl</th>
+          <th>Total</th><th title="Heuristic planning range; not a calibrated probability interval">Planning range</th>
+          <th title="Cross-check against the empirically-calibrated in-season projection (Moneyball's Projected End-of-Season WAR table above) — baseline, with the backtested floor-ceiling range. Blank if this player doesn't yet have enough current-season sample to appear there.">Empirical (obs.)</th>
+        </tr></thead>
+        <tbody id="war-proj-body"></tbody>
+        <tfoot id="war-proj-footer"></tfoot>
+      </table>
+    </div>
+    <p class="war-proj-note">Method: current split ratings and 1952–54 MLB batting results are blended by split sample size; baserunning and fielding use the league's calibrated tool curves with historical UBR/ZR where available. Pitcher rates blend recent MLB WAR with ratings and discount old starter results when projecting a relief role. Workload follows the roles agreed with Forrest. The ranges are planning bands, not confidence intervals or OOTP forecasts.</p>
+  </div>
+
+  <div class="panel">
+    <h2>Outside the projected 25</h2>
+    <p class="war-proj-note">Current Philadelphia 40-man players outside this workload plan. Their projected 1955 AB/IP is zero in the team total; this list is for promotion and replacement decisions.</p>
+    <div class="war-proj-scroll">
+      <table class="war-proj-table war-proj-outside">
+        <thead><tr><th class="left">Player</th><th>Level</th><th>Active</th><th>Comp</th><th>Ovr</th><th>Pot</th></tr></thead>
+        <tbody id="war-proj-outside"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const teamId = {{ tid|tojson }};
+  let projection = {{ war_projection|tojson }};
+  const EMPIRICAL = {{ war_emp|tojson }};
+  let seq = 0;
+  const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const signed = n => (n > 0 ? '+' : '') + Number(n || 0).toFixed(2);
+  const cell = n => `<span class="${n > .005 ? 'pos' : n < -.005 ? 'neg' : ''}">${signed(n)}</span>`;
+  // Cross-check column: the empirically-calibrated, observed-performance
+  // projection for the same player (Moneyball's Projected End-of-Season WAR
+  // table), so a hand-built playing-time plan can be sanity-checked against
+  // what's actually happening in-season. Not every seeded player has one —
+  // some don't yet have enough current-season sample to appear there.
+  const empiricalCell = pid => {
+    const e = EMPIRICAL[pid];
+    if (!e) return '<span style="color:var(--text-dim)">—</span>';
+    const confClass = e.confidence === 'Established' ? '' : ' style="opacity:0.7"';
+    return `<span title="${e.confidence} confidence — ${e.season_pct}% of season played"${confClass}>${e.baseline_war.toFixed(1)} <small style="color:var(--text-dim)">(${e.floor_war.toFixed(1)} to ${e.ceiling_war.toFixed(1)})</small></span>`;
+  };
+  const status = (msg, error=false) => {
+    const el = document.getElementById('war-proj-status');
+    el.textContent = msg;
+    el.classList.toggle('neg', error);
+  };
+  function render(data) {
+    projection = data;
+    const summary = document.getElementById('war-proj-summary');
+    const t = data.totals, w = data.workload;
+    summary.innerHTML = `
+      <div><small>Total WAR</small><strong>${signed(t.total)}</strong></div>
+      <div><small>Hitting</small><strong>${signed(t.hitting)}</strong></div>
+      <div><small>Pitching</small><strong>${signed(t.pitching)}</strong></div>
+      <div><small>Fielding</small><strong>${signed(t.fielding)}</strong></div>
+      <div><small>Other</small><strong>${signed(t.baserunning+t.positional+t.replacement)}</strong></div>`;
+    const gap = (actual, target, unit) => {
+      const delta = Math.round(actual-target);
+      return `${Number(actual).toLocaleString()} / ${Number(target).toLocaleString()} ${unit} (${delta > 0 ? '+' : ''}${delta})`;
+    };
+    const abBad = Math.abs(w.hitter_ab-w.hitter_ab_target) > 50;
+    const ipBad = Math.abs(w.pitcher_ip-w.pitcher_ip_target) > 20;
+    const splitBad = Math.abs(w.vr_ab-w.vr_ab_target) > 100;
+    document.getElementById('war-proj-checks').innerHTML = `
+      <div class="${abBad ? 'war-check-alert' : ''}">Hitter AB: <b>${gap(w.hitter_ab,w.hitter_ab_target,'AB')}</b></div>
+      <div class="${ipBad ? 'war-check-alert' : ''}">Pitcher IP: <b>${gap(w.pitcher_ip,w.pitcher_ip_target,'IP')}</b></div>
+      <div class="${splitBad ? 'war-check-alert' : ''}">vR AB mix: <b>${gap(w.vr_ab,w.vr_ab_target,'AB')}</b></div>
+      <div>Team AB incl. ${w.pitcher_batting_ab_assumption} pitcher AB: <b>${gap(w.team_ab_est,w.team_ab_target,'AB')}</b></div>
+      ${data.missing.length ? `<div class="war-check-alert">${data.missing.length} planned player(s) no longer in this organization</div>` : ''}`;
+
+    const parts = [data.rows.filter(r => r.ab !== null), data.rows.filter(r => r.ip !== null)];
+    let html = '';
+    for (const [index, group] of parts.entries()) {
+      html += `<tr class="war-proj-group"><td colspan="15">${index ? 'Pitchers' : 'Position players'}</td></tr>`;
+      group.sort((a,b) => b.total-a.total);
+      for (const r of group) {
+        const c = r.components;
+        const input = (field, value, min, max, step) => `<input type="number" data-pid="${r.pid}" data-field="${field}" min="${min}" max="${max}" step="${step}" value="${value}" aria-label="${esc(r.name)} ${field}">`;
+        html += `<tr>
+          <td class="left" title="1952–54 MLB sample: ${r.sample} ${r.ab === null ? 'IP' : 'PA'}; smaller samples lean more on ratings"><a class="player-link" href="/player/${r.pid}">${esc(r.name)}</a></td>
+          <td class="left">${esc(r.role)}</td>
+          <td>${r.ab === null ? '—' : input('ab',r.ab,0,750,1)}</td>
+          <td>${r.ab === null ? '—' : input('vr_share',r.vr_share,0,100,.1)}</td>
+          <td>${r.ab === null ? '—' : r.vl_share.toFixed(1)+'%'}</td>
+          <td>${r.ip === null ? '—' : input('ip',r.ip,0,350,.1)}</td>
+          <td>${cell(c.hitting)}</td><td>${cell(c.pitching)}</td>
+          <td>${cell(c.fielding)}</td><td>${cell(c.baserunning)}</td>
+          <td>${cell(c.positional)}</td><td>${cell(c.replacement)}</td>
+          <td class="war-proj-total">${cell(r.total)}</td>
+          <td>${signed(r.range[0])} to ${signed(r.range[1])}</td>
+          <td>${empiricalCell(r.pid)}</td>
+        </tr>`;
+      }
+    }
+    document.getElementById('war-proj-body').innerHTML = html;
+    document.getElementById('war-proj-footer').innerHTML = `<tr><th class="left" colspan="2">Team total</th>
+      <th>${w.hitter_ab}</th><th></th><th></th><th>${w.pitcher_ip}</th>
+      <th>${cell(t.hitting)}</th><th>${cell(t.pitching)}</th><th>${cell(t.fielding)}</th>
+      <th>${cell(t.baserunning)}</th><th>${cell(t.positional)}</th><th>${cell(t.replacement)}</th>
+      <th>${cell(t.total)}</th><th></th><th></th></tr>`;
+    document.getElementById('war-proj-outside').innerHTML = data.outside.map(r => `<tr>
+      <td class="left"><a class="player-link" href="/player/${r.pid}">${esc(r.name)}</a></td>
+      <td>${esc(r.level)}</td><td>${r.active ? 'Yes' : 'No'}</td>
+      <td>${r.composite ?? '—'}</td><td>${r.ovr ?? '—'}</td><td>${r.pot ?? '—'}</td></tr>`).join('') || '<tr><td colspan="6">No other 40-man players found.</td></tr>';
+  }
+  function values() {
+    const result = {};
+    document.querySelectorAll('#war-proj-body input').forEach(input => {
+      if (!result[input.dataset.pid]) result[input.dataset.pid] = {};
+      result[input.dataset.pid][input.dataset.field] = Number(input.value);
+    });
+    return result;
+  }
+  async function send(action, overrides) {
+    const thisSeq = ++seq;
+    status(action === 'save' ? 'Saving…' : 'Recalculating…');
+    try {
+      const resp = await fetch(`/api/team/${teamId}/war-projections`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({action, overrides})
+      });
+      const body = await resp.json();
+      if (!resp.ok || !body.ok) throw Error(body.error || 'Projection failed');
+      if (thisSeq !== seq) return;
+      render(body.projection);
+      status(action === 'save' ? 'Plan saved.' : 'Preview updated. Save to keep these changes.');
+    } catch (err) {
+      if (thisSeq === seq) status(err.message || 'Could not update projections', true);
+    }
+  }
+  document.getElementById('war-proj-body').addEventListener('change', e => {
+    if (e.target.matches('input')) send('preview', values());
+  });
+  document.getElementById('war-proj-save').addEventListener('click', () => send('save', values()));
+  document.getElementById('war-proj-defaults').addEventListener('click', () => send('preview', {}));
+  render(projection);
+})();
+</script>

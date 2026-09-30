@@ -14,6 +14,15 @@ import os
 from pathlib import Path
 
 
+
+def atomic_write_text(path: Path, text: str) -> None:
+    """Write via temp file + rename so concurrent readers never see a partial file."""
+    path = Path(path)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(text)
+    os.replace(tmp, path)
+
+
 def _project_root() -> Path:
     """Resolve the project root directory.
 
@@ -143,7 +152,7 @@ def set_statsplus_cookie(cookie: str, league_dir: Path | None = None) -> None:
         except (json.JSONDecodeError, OSError):
             pass
     state["statsplus_cookie"] = cookie
-    state_path.write_text(json.dumps(state, indent=2) + "\n")
+    atomic_write_text(state_path, json.dumps(state, indent=2) + "\n")
 
 
 def get_statsplus_token(league_dir: Path | None = None) -> str:
@@ -203,4 +212,4 @@ def set_statsplus_token(token: str, league_dir: Path | None = None) -> None:
         except (json.JSONDecodeError, OSError):
             pass
     state["statsplus_token"] = token
-    state_path.write_text(json.dumps(state, indent=2) + "\n")
+    atomic_write_text(state_path, json.dumps(state, indent=2) + "\n")

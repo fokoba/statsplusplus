@@ -42,12 +42,13 @@ def get_moneyball(team_id=None):
     import queries as _q
     from contract_value import contract_value as _cv
     from statsplusplus.evaluation.war import load_stat_history
+    from statsplusplus.config.league_config import games_per_season
 
     conn = get_db()
     tid = team_id or my_team_id()
     league_dir = get_cfg().league_dir
     state = _q.get_state()
-    hist = load_stat_history(conn, state["game_date"])
+    hist = load_stat_history(conn, state["game_date"], games_per_season=games_per_season(league_dir))
     mtd = _money_divisor()
 
     tids = mlb_team_ids()
@@ -57,7 +58,9 @@ def get_moneyball(team_id=None):
 
     qs = ",".join("?" * len(tids))
     rows = conn.execute(
-        f"SELECT player_id, name, team_id FROM players WHERE level='1' AND team_id IN ({qs})",
+        f"""SELECT p.player_id, p.name, p.team_id FROM players p
+            JOIN contracts c ON c.player_id = p.player_id
+            WHERE p.level='1' AND p.team_id IN ({qs}) AND c.is_major=1""",
         list(tids),
     ).fetchall()
 
@@ -67,6 +70,32 @@ def get_moneyball(team_id=None):
 
     names = team_names_map()
     abbrs = team_abbr_map()
+
+    # Real payroll (matches the top-bar Payroll tile and Contracts tab exactly):
+    # org-wide is_major contracts' current-year salary, with any uploaded
+    # "Team Salary" export override applied — NOT contract_value()'s
+    # salary_full, which is a per-player *model* figure re-derived from
+    # ratings/stats and can drift from the actual synced contract, and NOT
+    # limited to the active MLB roster (a rehabbing/optioned player on a
+    # real major-league deal still counts against payroll).
+    game_year = get_cfg().year
+    uploaded_by_pid = {}
+    try:
+        for r in conn.execute("SELECT player_id, year, amount FROM salary_estimates"):
+            uploaded_by_pid.setdefault(r["player_id"], {})[r["year"]] = r["amount"]
+    except Exception:
+        pass
+    real_payroll = defaultdict(float)
+    _org_rows = conn.execute("""
+        SELECT c.player_id, c.salary_0, COALESCE(NULLIF(p.organization_id,0), NULLIF(p.parent_team_id,0), p.team_id) AS org_id
+        FROM contracts c JOIN players p ON c.player_id = p.player_id
+        WHERE c.is_major=1
+    """).fetchall()
+    for r in _org_rows:
+        if r["org_id"] not in tids:
+            continue
+        sal = uploaded_by_pid.get(r["player_id"], {}).get(game_year, r["salary_0"] or 0)
+        real_payroll[r["org_id"]] += sal or 0
 
     team_stats = {}
     my_contracts = []
@@ -102,16 +131,17 @@ def get_moneyball(team_id=None):
                 })
 
         n = pos_count + neg_count
+        team_payroll = real_payroll.get(t, payroll)
         team_stats[t] = {
             "team_id": t, "name": names.get(t, f"Team {t}"), "abbr": abbrs.get(t, "?"),
-            "payroll": payroll, "war": war,
-            "dollars_per_war": (payroll / war) if war > 0 else None,
+            "payroll": team_payroll, "war": war,
+            "dollars_per_war": (team_payroll / war) if war > 0 else None,
             "surplus_yr1": surplus_yr1,
             "pos_count": pos_count, "neg_count": neg_count, "n": n,
             "pos_pct": round(pos_count / n * 100, 1) if n else 0.0,
             "pos_dollars": pos_dollars, "neg_dollars": neg_dollars,
         }
-        total_payroll_lg += payroll
+        total_payroll_lg += team_payroll
         total_war_lg += war
 
     ranked = sorted(

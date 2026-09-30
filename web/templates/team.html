@@ -11,6 +11,13 @@
 </span>
 {% endif %}
 {% endmacro %}
+{% macro rank_sub_war(r) %}
+{% if r %}
+<span class="summary-rank" title="League rank out of {{ r.n }} teams, and this value vs. the league median (average of the middle two if {{ r.n }} is even)">
+  {{ r.rank }}/{{ r.n }} &middot; {{ '+' if r.vs_median > 0 else '' }}{{ r.vs_median }} WAR vs med
+</span>
+{% endif %}
+{% endmacro %}
 <div class="summary-bar">
   <div class="summary-item">
     <span class="label">Game Date</span>
@@ -40,6 +47,13 @@
     <span class="label">3-Yr Surplus</span>
     <span class="value {{ 'pos' if summary.three_year_surplus > 0 else 'neg' if summary.three_year_surplus < 0 else '' }}">${{ summary.three_year_surplus }}{{ money_unit }}</span>
     {{ rank_sub(summary.rank.three_year_surplus) }}
+  </div>
+  {% endif %}
+  {% if summary.combined_pace_n %}
+  <div class="summary-item" title="Sum of current-season WAR pace across your active (MLB-level) roster's qualifying players ({{ summary.combined_pace_n }} with enough sample this season) — how hot your team is running right now, not a projection of true talent.">
+    <span class="label">Combined Pace</span>
+    <span class="value {{ 'pos' if summary.combined_pace > 0 else 'neg' if summary.combined_pace < 0 else '' }}">{{ summary.combined_pace }} WAR</span>
+    {{ rank_sub_war(summary.rank.combined_pace) }}
   </div>
   {% endif %}
   <div class="summary-item kpi-accent">
@@ -105,7 +119,13 @@
 <div class="tab-bar">
   <button class="tab active" data-tab="main">Main</button>
   <button class="tab" data-tab="depth">Depth Chart</button>
-  <button class="tab" data-tab="roles">Depth Chart Roles</button>
+  {# WAR Projections moved to the Moneyball page (2026-09-26) — lives
+     alongside the rest of the team's WAR/value analysis instead of its own
+     tab here. Still team-6/PPL-only; see moneyball.html. #}
+  <button class="tab" data-tab="roles" style="display:none">Depth Chart Roles</button>
+  {# Hidden 2026-09-17 at Forrest's request — not using this feature. Content
+     and backend left intact; just remove the display:none above to bring
+     it back. #}
   <button class="tab" data-tab="org">Organization</button>
   <button class="tab" data-tab="hitters">Hitters</button>
   <button class="tab" data-tab="pitchers">Pitchers</button>
@@ -118,6 +138,7 @@
   <a class="tab" href="/best-available">Best Available</a>
   <a class="tab" href="/scouting">Scouting Targets</a>
   <a class="tab" href="/team/{{ tid }}/moneyball">Moneyball</a>
+  <a class="tab" href="/team/{{ tid }}/coaching">Coaching</a>
 </div>
 
 {# ══════ Main ══════ #}
@@ -822,6 +843,7 @@
           <th data-sort="num">Age</th>
           <th data-sort="num" title="Composite score (20-80 scale)">Comp</th>
           <th data-sort="num" title="Wins Above Replacement" class="col-sep">WAR</th>
+          <th data-sort="num" title="Current-season WAR prorated to a full season. See the tier color for what that pace is worth: Historic (8.0+) / All-Star (5.0+) / Everyday (2.0+) / Reserve (0+) / Replacement (below 0).">Pace</th>
           <th data-sort="num" title="Games played" class="col-sep">G</th>
           <th data-sort="num" title="Plate appearances">PA</th>
           <th data-sort="num" title="Batting average">AVG</th>
@@ -884,6 +906,7 @@
           <th data-sort="num">Age</th>
           <th data-sort="num" title="Composite score (20-80 scale)">Comp</th>
           <th data-sort="num" title="Wins Above Replacement" class="col-sep">WAR</th>
+          <th data-sort="num" title="Current-season WAR prorated to a full season. See the tier color for what that pace is worth: Historic (8.0+) / All-Star (5.0+) / Everyday (2.0+) / Reserve (0+) / Replacement (below 0).">Pace</th>
           <th data-sort="num" title="Innings pitched" class="col-sep">IP</th>
           <th data-sort="num" data-sort-best="low" title="Earned run average">ERA</th>
           <th data-sort="num" data-sort-best="low" title="Walks + hits per inning pitched">WHIP</th>
@@ -1496,7 +1519,7 @@ function intlFilterPers() {
           </tr>
         </tfoot>
       </table>
-      <p class="note">Guaranteed contracts shown in full. Pre-arb and arbitration-eligible salaries are estimated based on projected performance and OOTP arb model. <sup>TO</sup> = Team Option, <sup>PO</sup> = Player Option, <sup>est</sup> = Estimated (arb/pre-arb projection).</p>
+      <p class="note">Guaranteed contract years shown in full — including years confirmed via an uploaded Team Salary export, not just this app's own formula. Only years without a set number yet (future arbitration, before the game or an export has priced them) are estimated. <sup>TO</sup> = Team Option, <sup>PO</sup> = Player Option, <sup>est</sup> = Estimated (arb/pre-arb projection).</p>
     </div>
   </div>
 </div>
@@ -1516,7 +1539,9 @@ function intlFilterPers() {
         <thead>
           <tr>
             <th data-sort="num">#</th><th data-sort="pos">Pos</th><th data-sort="str" class="left">Name</th><th data-sort="num" data-sort-best="low">Age</th>
-            <th data-sort="str" data-sort-best="high" class="left">FV</th><th data-sort="str" class="left">Level</th><th data-sort="num">Surplus</th>
+            <th data-sort="str" data-sort-best="high" class="left">FV</th><th data-sort="num" title="Development pace vs same-position/age peers (⚡ rising · ⚠ stalled · ↗ on pace), dimmed = low confidence, PLUS an independent Ahead/Behind/At Risk badge: is he actually closing his own gap to ceiling across tools before his runway to peak age runs out (a player can be both 'Rising' and 'Behind Schedule' at once — narrow, one-tool progress).">Dev</th>
+            <th data-sort="str" title="Combined confidence grade — rolls bust-risk, scouting-Accuracy, dev-horizon, and makeup concerns into one A-F letter">Conf</th>
+            <th data-sort="str" class="left">Level</th><th data-sort="num">Surplus</th>
           </tr>
         </thead>
         <tbody>
@@ -1527,7 +1552,9 @@ function intlFilterPers() {
             <td><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
             <td>{{ p.age }}</td>
             <td class="left">{{ p.fv_str }}{% if p.risk %} <span style="font-size:10px;color:{% if p.risk == 'Low' %}#4caf50{% elif p.risk == 'Medium' %}#ffc107{% elif p.risk == 'High' %}#ff9800{% else %}#f44336{% endif %}">{{ p.risk[0] }}</span>{% endif %}</td>
-            <td class="left">{{ p.level }}</td>
+            <td{% if p.dev %} data-sort-value="{{ p.dev.z }}"{% endif %}>{% if p.dev %}<span class="dev-{{ p.dev.css_class }}"{% if p.dev.dim %} style="opacity:0.5"{% endif %} title="{{ p.dev.label }} ({{ p.dev.z }} SD · {{ p.dev.confidence }} conf)">{{ p.dev.icon }}</span>{% if p.dev.schedule_badge_text %} <span class="sched-badge {{ p.dev.schedule_badge_css }}" title="{{ p.dev.schedule_label }}: {{ p.dev.schedule_note }}">{{ p.dev.schedule_badge_text }}</span>{% endif %}{% endif %}</td>
+            <td data-sort-value="{{ p.confidence.score }}"><span class="gr-pill gr-pill-{% if p.confidence.tier == 'A' %}elite{% elif p.confidence.tier == 'B' %}good{% elif p.confidence.tier == 'C' %}mid{% elif p.confidence.tier == 'D' %}poor{% else %}bad{% endif %}" title="Confidence {{ p.confidence.tier }} ({{ p.confidence.score }}/100){% if p.confidence.reasons %}: {{ p.confidence.reasons|join(', ') }}{% else %} — no flagged concerns{% endif %}">{{ p.confidence.tier }}</span></td>
+            <td class="left">{{ p.level }}{% if p.long_horizon %} <span title="Real level puts this player at fv_calc's longest development-horizon tier (3.5+ years to MLB) — treat Surplus as more speculative than a near-ready prospect's">⏳</span>{% endif %}</td>
             <td>${{ p.surplus }}{{ money_unit }}</td>
           </tr>
           {% endfor %}
@@ -2245,17 +2272,19 @@ function addsFilterPers() {
           '<td data-sort-value="' + p.pos_order + '">' + p.pos + '</td>' +
           '<td class="left"><a class="player-link" href="/player/' + p.pid + '">' + p.name + '</a>' + twBadge + statusBadge + '</td>' +
           '<td>' + p.age + '</td><td>' + p.ovr + '</td>' +
-          '<td class="col-sep">-</td><td class="col-sep">-</td><td>-</td><td>-</td><td>-</td><td>-</td>' +
+          '<td class="col-sep">-</td><td>-</td><td class="col-sep">-</td><td>-</td><td>-</td><td>-</td>' +
           '<td>-</td><td class="col-sep">-</td><td>-</td><td>-</td><td>-</td><td>-</td><td class="col-sep">-</td><td>-</td>' +
           '<td class="col-sep ' + papCls(p.pap) + '">' + fmtPap(p.pap) + '</td>';
       } else {
         var L = lgAvg;
+        var paceCell = p.pace_war != null ? '<td class="pace-cell-' + p.pace_tier + '"' + (p.pace_confidence === 'Low' ? ' style="opacity:0.55"' : '') + ' title="' + p.pace_tier_label + ' pace (' + (p.pace_confidence || 'Medium') + ' confidence)">' + p.pace_war + '</td>' : '<td>-</td>';
         tr.innerHTML =
           '<td data-sort-value="' + p.pos_order + '">' + p.pos + '</td>' +
           '<td class="left"><a class="player-link" href="/player/' + p.pid + '">' + p.name + '</a>' + twBadge + statusBadge + '</td>' +
           '<td>' + p.age + '</td>' +
           '<td>' + p.ovr + '</td>' +
           td(s.war, isOvr ? s.war : '-', undefined, false, true) +
+          paceCell +
           '<td class="col-sep">' + s.g + '</td>' +
           '<td>' + s.pa + '</td>' +
           td(s.avg, fmtAvg(s.avg), L.avg) +
@@ -2321,18 +2350,20 @@ function addsFilterPers() {
           '<td data-sort-value="' + p.role_order + '">' + p.role + '</td>' +
           '<td class="left"><a class="player-link" href="/player/' + p.pid + '">' + p.name + '</a>' + twBadge + statusBadge + '</td>' +
           '<td>' + p.age + '</td><td>' + p.ovr + '</td>' +
-          '<td class="col-sep">-</td><td class="col-sep">-</td><td>-</td><td>-</td><td class="col-sep">-</td><td>-</td><td>-</td><td>-</td><td>-</td>' +
+          '<td class="col-sep">-</td><td>-</td><td class="col-sep">-</td><td>-</td><td>-</td><td class="col-sep">-</td><td>-</td><td>-</td><td>-</td><td>-</td>' +
           '<td class="col-sep">-</td><td>-</td><td class="col-sep">-</td><td>-</td><td>-</td><td>-</td><td>-</td>' +
           '<td class="col-sep ' + papCls(p.pap) + '">' + fmtPap(p.pap) + '</td>';
       } else {
         var svh = s.sv + s.hld;
         var L = lgAvg;
+        var paceCell = p.pace_war != null ? '<td class="pace-cell-' + p.pace_tier + '"' + (p.pace_confidence === 'Low' ? ' style="opacity:0.55"' : '') + ' title="' + p.pace_tier_label + ' pace (' + (p.pace_confidence || 'Medium') + ' confidence)">' + p.pace_war + '</td>' : '<td>-</td>';
         tr.innerHTML =
           '<td data-sort-value="' + p.role_order + '">' + p.role + '</td>' +
           '<td class="left"><a class="player-link" href="/player/' + p.pid + '">' + p.name + '</a>' + twBadge + statusBadge + '</td>' +
           '<td>' + p.age + '</td>' +
           '<td>' + p.ovr + '</td>' +
           td(s.war, isOvr ? s.war : '-', undefined, false, true) +
+          paceCell +
           '<td class="col-sep">' + fmtIp(s.ip) + '</td>' +
           td(s.era, fmtEra(s.era), L.era, true) +
           '<td>' + fmtEra(s.whip) + '</td>' +

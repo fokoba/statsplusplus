@@ -93,18 +93,31 @@ def _trait_notes(wrk_ethic, intel, lead, loy, greed, adaptability):
 
 
 # Mirrors team_queries.py's _infer_personality_type() — see that copy for
-# the real-example rationale (Alex Rhodes/Armando Peraza/Gene Milam ->
-# Disruptive; Thomas Egan/Nate Morley -> Selfish). Duplicated, not imported,
-# since this module is deliberately DB-free.
-def _infer_personality_type(wrk_ethic, lead, loy, greed):
+# the full rationale and the precision numbers behind each rule (mined
+# against 7,228 real confirmed-Type players across both leagues,
+# 2026-09-17, after fixing a bug where this module's own
+# import_fa_asking_prices() was silently dropping Type/Adaptability from
+# every free-agent export — see that function's docstring). Duplicated,
+# not imported, since this module is deliberately DB-free. No Outspoken/
+# Humble/Prankster/Fan Fav rule exists — nothing beat a coin flip for any
+# of them. Disruptive is checked ahead of Selfish because of their overlap
+# zone (Work Ethic=L, Leadership=L, Loyalty=L, Greed=H matches both; 43 of
+# those are actually Disruptive vs 36 Selfish).
+def _infer_personality_type(wrk_ethic, lead, loy, greed, intel=None, adaptability=None):
+    if wrk_ethic == "L" and intel == "L" and adaptability == "L":
+        return {"label": "Likely Unmotivated (High confidence)", "class": "neg"}
     if wrk_ethic == "L" and lead == "L" and loy == "L":
-        return {"label": "Likely Disruptive", "class": "neg"}
-    if greed == "H" and lead == "L" and loy == "L":
-        return {"label": "Likely Selfish", "class": "neg"}
+        return {"label": "Likely Disruptive (Low confidence)", "class": "neg"}
+    if lead == "L" and loy == "L" and greed == "H":
+        return {"label": "Likely Selfish (Medium confidence)", "class": "neg"}
+    if wrk_ethic == "H" and greed == "N" and adaptability == "H":
+        return {"label": "Likely Sparkplug (Medium confidence)", "class": "pos"}
+    if wrk_ethic == "H" and lead == "H" and adaptability == "N":
+        return {"label": "Likely Captain (Low confidence)", "class": "pos"}
     return None
 
 
-def _personality_type_class(ptype, wrk_ethic=None, lead=None, loy=None, greed=None):
+def _personality_type_class(ptype, wrk_ethic=None, lead=None, loy=None, greed=None, intel=None, adaptability=None):
     if ptype and ptype != "Unknown":
         if ptype == "Normal":
             return "neutral"
@@ -113,7 +126,7 @@ def _personality_type_class(ptype, wrk_ethic=None, lead=None, loy=None, greed=No
         if ptype in _PERSONALITY_TYPE_NEGATIVE:
             return "neg"
         return "neutral"
-    inferred = _infer_personality_type(wrk_ethic, lead, loy, greed)
+    inferred = _infer_personality_type(wrk_ethic, lead, loy, greed, intel, adaptability)
     if inferred:
         return inferred["class"]
     return "unscouted" if not ptype else "unknown"
@@ -515,9 +528,9 @@ def evaluate_row(d: dict, league_dir=None) -> dict | None:
     greed = (d.get("FIN") or "N").strip()
     adaptability = (d.get("AD") or "N").strip()
     personality_type = (d.get("Type") or "").strip()
-    personality_class = _personality_type_class(personality_type, wrk_ethic, lead, loy, greed)
+    personality_class = _personality_type_class(personality_type, wrk_ethic, lead, loy, greed, intel, adaptability)
     if personality_class == "neg" and (not personality_type or personality_type == "Unknown"):
-        _inferred = _infer_personality_type(wrk_ethic, lead, loy, greed)
+        _inferred = _infer_personality_type(wrk_ethic, lead, loy, greed, intel, adaptability)
         personality_type = _inferred["label"] if _inferred else personality_type
     buffs, concerns = _trait_notes(wrk_ethic, intel, lead, loy, greed, adaptability)
     dev_good = "H" in (wrk_ethic, intel, adaptability)
@@ -993,6 +1006,19 @@ def import_fa_asking_prices(file_bytes: bytes, league_dir=None) -> dict:
 
     Returns {"count": rows with a real (non "-") demand, "changed": how many
     of those had a new/different ask this time}.
+
+    ALSO persists personality_type/adaptability (Type/AD columns) to
+    personality_overrides for every row that has a player ID, regardless of
+    whether it has a real asking price. This export carries a player's real
+    OOTP "Type" the same as the roster allcolumns export does — a free
+    agent gets it here even though import_ratings_sync() (the roster-only
+    upload) never sees him, since a released/unsigned player isn't in that
+    file. Before this, a confirmed Type for any free agent was silently
+    dropped by this importer even though it was right there in the file —
+    confirmed 2026-09-17 via a real export: Armando Peraza's row carries
+    Type=Disruptive, AD=H, matching the classic "Low Work Ethic + Low
+    Leadership + Low Loyalty" combo, but his personality_overrides row was
+    NULL until this fix because he'd dropped off every roster export.
     """
     import datetime
     rows = parse_rows(file_bytes)
@@ -1004,6 +1030,27 @@ def import_fa_asking_prices(file_bytes: bytes, league_dir=None) -> dict:
         pid = (d.get("ID") or "").strip()
         if not pid:
             continue
+        pid = int(pid)
+
+        po_values = {}
+        ptype = (d.get("Type") or "").strip()
+        adapt = (d.get("AD") or "").strip()
+        if ptype:
+            po_values["personality_type"] = ptype
+        if adapt:
+            po_values["adaptability"] = adapt
+        if po_values:
+            po_values["uploaded_at"] = now
+            cols = list(po_values.keys())
+            set_clause = ", ".join(f"{c}=excluded.{c}" for c in cols)
+            col_list = ", ".join(["player_id"] + cols)
+            placeholders = ", ".join(["?"] * (1 + len(cols)))
+            conn.execute(
+                f"INSERT INTO personality_overrides ({col_list}) VALUES ({placeholders}) "
+                f"ON CONFLICT(player_id) DO UPDATE SET {set_clause}",
+                [pid] + [po_values[c] for c in cols],
+            )
+
         dem = (d.get("DEM") or "").strip()
         if not dem or dem == "-":
             continue
@@ -1012,24 +1059,99 @@ def import_fa_asking_prices(file_bytes: bytes, league_dir=None) -> dict:
             "UPDATE fa_asking_prices SET ask_raw=?, uploaded_at=?, "
             "changed_at=CASE WHEN ask_raw IS NOT ? THEN ? ELSE changed_at END "
             "WHERE player_id=?",
-            (dem, now, dem, now, int(pid)),
+            (dem, now, dem, now, pid),
         )
         if cur.rowcount == 0:
             conn.execute(
                 "INSERT INTO fa_asking_prices (player_id, ask_raw, uploaded_at, changed_at) "
                 "VALUES (?, ?, ?, ?)",
-                (int(pid), dem, now, now),
+                (pid, dem, now, now),
             )
             changed += 1
         else:
             row = conn.execute(
-                "SELECT changed_at FROM fa_asking_prices WHERE player_id=?", (int(pid),)
+                "SELECT changed_at FROM fa_asking_prices WHERE player_id=?", (pid,)
             ).fetchone()
             if row and row[0] == now:
                 changed += 1
     conn.commit()
     conn.close()
     return {"count": count, "changed": changed}
+
+
+# OOTP's draft pool DEM column holds either a dollar amount ("$10k", "$900",
+# "$25"), or one of two special strings: "Slot" (will sign for whatever the
+# pick's assigned slot bonus turns out to be — no premium demanded, so
+# treated as a $0 ask for comparison purposes) and "Impos." (will not sign
+# for any realistic bonus — flagged separately, not given a dollar value).
+def _parse_bonus_ask(raw: str):
+    """Return (dollars: float|None, special: str|None) for a raw DEM cell.
+
+    dollars is None when there's no usable number (blank, "-", "Impos.").
+    special is "slot" or "unsignable" when the text is one of OOTP's two
+    non-numeric asks; None for anything else.
+    """
+    raw = (raw or "").strip()
+    if not raw or raw == "-":
+        return None, None
+    low = raw.lower()
+    if low.startswith("impos"):
+        return None, "unsignable"
+    if low == "slot":
+        return 0.0, "slot"
+    text = raw.replace("$", "").replace(",", "").strip()
+    mult = 1
+    if text.lower().endswith("k"):
+        mult = 1_000
+        text = text[:-1]
+    elif text.lower().endswith("m"):
+        mult = 1_000_000
+        text = text[:-1]
+    try:
+        return float(text) * mult, None
+    except ValueError:
+        return None, None
+
+
+def import_draft_bonus_asks(file_bytes: bytes, league_dir=None) -> dict:
+    """Import signing-bonus demands from an uploaded OOTP draft pool "All
+    Columns" export's DEM column into draft_bonus_asks, keyed by player_id.
+
+    Distinct from import_fa_asking_prices(): that's a current free agent's
+    ongoing salary ask, this is a one-time bonus to sign an amateur — used
+    to compare against a prospect's multi-year surplus on the Draft board
+    (see team_queries.py's _draft_bonus_verdict()).
+
+    Returns {"count": rows with a usable ask (numeric, "Slot", or
+    "Impos."), "unsignable": how many were "Impos."}.
+    """
+    import datetime
+    rows = parse_rows(file_bytes)
+    conn = get_conn(league_dir)
+    now = datetime.datetime.now().isoformat()
+    count = 0
+    unsignable = 0
+    for d in rows:
+        pid = (d.get("ID") or "").strip()
+        if not pid:
+            continue
+        raw = (d.get("DEM") or "").strip()
+        dollars, special = _parse_bonus_ask(raw)
+        if dollars is None and special is None:
+            continue
+        count += 1
+        if special == "unsignable":
+            unsignable += 1
+        conn.execute(
+            "INSERT INTO draft_bonus_asks (player_id, ask_raw, ask_dollars, uploaded_at) "
+            "VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(player_id) DO UPDATE SET ask_raw=excluded.ask_raw, "
+            "ask_dollars=excluded.ask_dollars, uploaded_at=excluded.uploaded_at",
+            (int(pid), raw, dollars, now),
+        )
+    conn.commit()
+    conn.close()
+    return {"count": count, "unsignable": unsignable}
 
 
 def get_last_fa_ask_upload(league_dir=None) -> dict:
@@ -1102,6 +1224,126 @@ def import_team_salary(file_bytes: bytes, league_dir=None) -> int:
                 (pid, yr, amt, marker, now),
             )
             count += 1
+    conn.commit()
+    conn.close()
+    return count
+
+
+# Header index -> personnel column, for the "All Personnel" grid export
+# ("Coach/Scout/Trainer/All" preset, All Columns). The export has no numeric
+# coach ID, so name+DOB is used as a stable key (coach_key) — matches how
+# the table was originally populated. Each pair is (full-text column, then
+# its OOTP-abbreviated duplicate via _dup) wherever both exist; a handful of
+# grid columns (Rel/Dem/Ret/CY/ExtSal/ExtYrs/the four scout-weight sliders)
+# have no matching schema column and are intentionally dropped.
+_PERSONNEL_TEXT_FIELDS = {
+    "normal_pos": "Pos", "job": "Job", "job_abbr": ("Job", 1),
+    "city": "City", "nat": "NAT",
+    "reputation": "Rep",
+    "scout_major": "S MAJ", "scout_minor": "S MIN",
+    "scout_intl": "S INT", "scout_amateur": "S AMA",
+    "amateur_pref": "AMA PR",
+    "personality_type": "Type", "personality_pos": "POS", "personality_neg": "NEG",
+    "manager_style": "Style", "hit_focus": "Hit", "pit_focus": "Pit",
+    "teach_hitting": ("Hit", 1), "teach_pitching": ("Pit", 1),
+    "teach_catching": "C", "teach_infield": "IF", "teach_outfield": "OF",
+    "teach_running": "T-RUN", "handle_running": "H-RUN",
+    "development": "DEV", "mechanics": "MECH", "veteran_handling": "VET",
+    "recover_legs": "R L", "recover_arms": "R A", "recover_back": "R B", "recover_other": "R O",
+    "prevent_legs": "P L", "prevent_arms": "P A", "prevent_back": "P B", "prevent_other": "P O",
+    "fatigue_recovery": "REC",
+    "vet_prospect": "Vet-Prosp.", "pitching_hitting": "Pit-Hit",
+    "speed_power": "Speed-Power", "defense_offense": "Def-Off", "avg_obp": "AVG-OBP",
+    "trade_freq": "Trade Freq.", "trade_agg": "Trade Agg.",
+    "player_loyalty": "Pl Loyalty", "trade_pref": "Trade Pref",
+    "draft_pref": "Draft", "intl_fa_pref": "Intl FA",
+    "dev_pref": "Dev Pref", "scout_pref": "Scout Pref",
+    "owner_patience": "Patience", "owner_spending": "Spending",
+    "owner_involvement": "Involvement", "owner_priority": "Priority",
+}
+
+
+def _txt(v):
+    """'-' and '' mean "not applicable" for these grade/preference columns."""
+    if v is None:
+        return None
+    v = v.strip()
+    return v if v not in ("", "-") else None
+
+
+def _parse_personnel_salary(v):
+    """'$8 000' -> 8000 (OOTP uses a space as the thousands separator in
+    this export, not a comma — _parse_money_short's regex expects the
+    HTML Team Salary export's '$93k'/'$1.2m' shorthand and would silently
+    truncate this at the first space)."""
+    if not v:
+        return None
+    digits = re.sub(r"[^\d]", "", v)
+    return int(digits) if digits else None
+
+
+def _parse_exp_years(v):
+    """'24 Yrs.' -> 24."""
+    if not v:
+        return None
+    m = re.search(r"\d+", v)
+    return int(m.group(0)) if m else None
+
+
+def import_personnel_sync(file_bytes: bytes, league_dir=None) -> int:
+    """Import coach/manager/executive records from an OOTP "All Personnel"
+    grid export (Coach/Scout/Trainer/All, All Columns preset) into the
+    `personnel` table — powers the Coaching tab on every team page.
+
+    Team is resolved by exact-matching the export's full team-name column
+    against teams.name, not team_abbr_map() — that map only covers the 16-30
+    MLB teams (from league_settings.json), so it can't resolve a minor-league
+    affiliate like a AA team (e.g. "Dallas"), which is exactly the kind of
+    coach this import needs to keep current. A coach with no resolvable team
+    (free agent, or a team name that doesn't match) is stored with
+    team_id=NULL rather than dropped.
+
+    Returns the number of coach rows imported (upserted by coach_key).
+    """
+    import datetime
+
+    conn = get_conn(league_dir)
+    team_by_name = {r[1]: r[0] for r in conn.execute("SELECT team_id, name FROM teams")}
+
+    rows = parse_rows(file_bytes)
+    now = datetime.datetime.now().isoformat()
+    count = 0
+    for d in rows:
+        name = d.get("Name")
+        dob = d.get("DOB")
+        if not name or not dob:
+            continue
+        coach_key = f"{name}|{dob}"
+        team_name = d.get("TM")
+        team_id = team_by_name.get(team_name) if team_name else None
+        level = _dup(d, "Lev")
+
+        fields = {"coach_key": coach_key, "name": name, "dob": dob,
+                  "age": _num(d.get("Age")), "team_id": team_id, "level": level,
+                  "exp_years": _parse_exp_years(d.get("EXP")),
+                  "salary": _parse_personnel_salary(d.get("SAL")),
+                  "contract_years": _num(d.get("YRS")),
+                  "uploaded_at": now}
+        for col, src in _PERSONNEL_TEXT_FIELDS.items():
+            if isinstance(src, tuple):
+                fields[col] = _txt(_dup(d, src[0]))
+            else:
+                fields[col] = _txt(d.get(src))
+
+        cols = list(fields.keys())
+        placeholders = ",".join("?" for _ in cols)
+        updates = ",".join(f"{c}=excluded.{c}" for c in cols if c != "coach_key")
+        conn.execute(
+            f"INSERT INTO personnel ({','.join(cols)}) VALUES ({placeholders}) "
+            f"ON CONFLICT(coach_key) DO UPDATE SET {updates}",
+            [fields[c] for c in cols],
+        )
+        count += 1
     conn.commit()
     conn.close()
     return count

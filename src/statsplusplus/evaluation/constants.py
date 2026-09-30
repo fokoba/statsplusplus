@@ -27,6 +27,44 @@ PEAK_AGE_PITCHER: int = 27
 PEAK_AGE_HITTER: int = 28
 
 # ---------------------------------------------------------------------------
+# wOBA (offensive tool-weight target)
+# ---------------------------------------------------------------------------
+# The offensive hitter tools (contact/gap/power/eye) are regressed against
+# per-player wOBA rather than total WAR. WAR bundles defense/baserunning/
+# positional value, which contaminates the offensive tool weights (gap ends
+# up dominant because gap-hitters sit at premium defensive positions). wOBA is
+# a plate-production-only measure (baserunning excluded by construction), so it
+# isolates offensive value.
+#
+# OOTP exposes wOBA only at the TEAM level, not per player, so we compute
+# per-player wOBA from raw counting stats using linear weights derived per
+# league/year from the run environment (see woba_weights_from_run_env). The
+# canonical FanGraphs 2013 shape below is the fixed weight *structure*; the
+# derivation scales it so that our league wOBA matches OOTP's stored league
+# wOBA for that season. When the anchor season is too small (early in a
+# league's life / an in-progress season), we fall back to this canonical set.
+
+# Canonical wOBA linear weights (FanGraphs 2013). Used as the fixed shape that
+# gets run-environment-scaled, and as the small-sample fallback.
+CANONICAL_WOBA_WEIGHTS: dict[str, float] = {
+    "ubb": 0.690,   # unintentional walk
+    "hbp": 0.722,   # hit by pitch
+    "b1":  0.888,   # single
+    "b2":  1.271,   # double
+    "b3":  1.616,   # triple
+    "hr":  2.101,   # home run
+}
+
+# Sample-size guards for deriving per-league/year wOBA weights from the run
+# environment. Below these thresholds the OOTP league-wOBA anchor is unreliable
+# (thin or in-progress season) and we fall back to CANONICAL_WOBA_WEIGHTS.
+# Configurable — raise MIN_PA_PER_TEAM toward a full season (~6000) to only
+# ever derive from a near-complete season, at the cost of falling back to
+# canonical more often early in a league's life.
+WOBA_MIN_TEAM_SEASONS: int = 8
+WOBA_MIN_PA_PER_TEAM: int = 3000  # ~half a season
+
+# ---------------------------------------------------------------------------
 # Aging curves
 # ---------------------------------------------------------------------------
 
@@ -125,6 +163,11 @@ ARB_DEEP_SALARY_THRESHOLD: int = 5_500_000
 SERVICE_DAYS_PER_YEAR: int = 172
 FREE_AGENCY_SERVICE_YEARS: int = 6
 
+# Fixed denominator for the games-based service-time fallback (used only when
+# mlb_service_days is missing from the API). Left at 162 regardless of league
+# schedule length — this heuristic already only approximates real service
+# time, and service time itself is a real-world MLB rule (172 days/year),
+# not a function of this league's schedule. Not the games_per_season() bug.
 SERVICE_GAMES_HITTER: int = 162
 SERVICE_STARTS_SP: int = 32
 SERVICE_GAMES_RP: int = 65

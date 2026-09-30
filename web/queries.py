@@ -9,14 +9,14 @@ of sqlite3.Row. This is intentional — these functions use positional indexing 
 r[1], etc.) for performance. Do not change without updating all index references.
 """
 
-import os, sys, json
+import os, sys, json, math
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, "scripts"))
 from statsplusplus.utils.positions import display_pos as _display_pos
 from statsplusplus.config.ratings import norm as _norm_raw, norm_floor as _norm_floor_raw
 from web_league_context import (get_db, get_cfg, team_abbr_map, team_names_map, pos_order, year, mlb_team_ids, level_map,
-                                 money_divisor as _money_divisor)
+                                 money_divisor as _money_divisor, dev_cell as _dev_cell)
 from statsplusplus.utils.positions import ROLE_MAP
 
 # Wrap norm functions to use the request-scoped scale
@@ -65,9 +65,8 @@ def set_my_team(team_id):
     cfg = get_cfg()
     state = get_state()
     state["my_team_id"] = team_id
-    with open(cfg.state_path, "w") as f:
-        json.dump(state, f, indent=2)
-        f.write("\n")
+    from statsplusplus.config.league_context import atomic_write_text
+    atomic_write_text(cfg.state_path, json.dumps(state, indent=2) + "\n")
     cfg.reload()
 
 
@@ -108,10 +107,13 @@ def get_top_prospects(n=100):
                pf.fv, pf.fv_str, pf.bucket,
                pf.level, pf.prospect_surplus, p.pos, p.player_id,
                r.height, r.bats, r.throws, r.ovr, r.pot,
-               r.composite_score, r.ceiling_score, pf.risk
+               r.composite_score, r.ceiling_score, pf.risk,
+               ds.available, ds.css_class, ds.label, ds.confidence, ds.z,
+               ds.schedule_status, ds.schedule_label, ds.schedule_note
         FROM prospect_fv pf
         JOIN players p ON pf.player_id=p.player_id
         LEFT JOIN latest_ratings r ON pf.player_id=r.player_id
+        LEFT JOIN dev_speed ds ON pf.player_id=ds.player_id AND ds.eval_date=pf.eval_date
         WHERE pf.eval_date=? AND p.age <= 25
     """, (ed,)).fetchall()
 
@@ -140,7 +142,8 @@ def get_top_prospects(n=100):
              "eta": _calc_eta(r[6], r[13], r[14]),
              "height": fmt_ht(r[10]),
              "bats": r[11] or "", "throws": r[12] or "",
-             "composite_score": r[15], "ceiling_score": r[16], "risk": r[17]}
+             "composite_score": r[15], "ceiling_score": r[16], "risk": r[17],
+             "dev": _dev_cell(r, 18)}
             for i, r in enumerate(rows)]
 
 
@@ -300,10 +303,13 @@ def get_all_prospects():
                pf.fv, pf.fv_str, pf.bucket,
                pf.level, pf.prospect_surplus, p.pos, p.player_id,
                r.height, r.bats, r.throws, r.ovr, r.pot,
-               r.composite_score, r.ceiling_score, pf.risk
+               r.composite_score, r.ceiling_score, pf.risk,
+               ds.available, ds.css_class, ds.label, ds.confidence, ds.z,
+               ds.schedule_status, ds.schedule_label, ds.schedule_note
         FROM prospect_fv pf
         JOIN players p ON pf.player_id=p.player_id
         LEFT JOIN latest_ratings r ON pf.player_id=r.player_id
+        LEFT JOIN dev_speed ds ON pf.player_id=ds.player_id AND ds.eval_date=pf.eval_date
         WHERE pf.eval_date=? AND pf.fv >= 40 AND p.age <= 25
     """, (ed,)).fetchall()
 
@@ -332,7 +338,8 @@ def get_all_prospects():
              "eta": _calc_eta(r[6], r[13], r[14]),
              "height": fmt_ht(r[10]),
              "bats": r[11] or "", "throws": r[12] or "",
-             "composite_score": r[15], "ceiling_score": r[16], "risk": r[17]}
+             "composite_score": r[15], "ceiling_score": r[16], "risk": r[17],
+             "dev": _dev_cell(r, 18)}
             for r in rows]
 
 
@@ -856,7 +863,8 @@ from team_queries import (get_summary, get_standings, get_division_standings,
                           get_org_minor_league_roster,
                           get_head_to_head_matrix, get_cut_candidates,
                           get_waiver_candidates, get_free_agent_candidates,
-                          get_defense_page, get_farm_system_rankings, _gr_tier)
+                          get_defense_page, get_farm_system_rankings, _gr_tier,
+                          _personality_type_info, _draft_bonus_verdict)
 from player_queries import get_player
 from percentiles import get_hitter_percentiles, get_pitcher_percentiles
 
@@ -926,6 +934,211 @@ def _annotate_adp(results):
         }
 
 
+# Signing-bonus slot values ($) by overall pick number — real anchor points
+# pulled from PPL's own draft-order screen (full round 1 + round 2, plus
+# Philadelphia's pick-9 slot value at rounds 5/10/15/20/25). A "Slot" bonus
+# ask means the player signs for whatever their actual pick's assigned
+# bonus is — NOT $0 — so this estimates that real cost for the Bonus Value
+# column instead of treating Slot as a free pass. See _apply_slot_value_estimates.
+_SLOT_VALUE_ANCHORS = [
+    # Round 1, overall picks 1-16
+    (1, 450000), (2, 380860), (3, 352770), (4, 329010), (5, 309560),
+    (6, 294440), (7, 283640), (8, 277160), (9, 275000), (10, 250000),
+    (11, 225000), (12, 200000), (13, 175000), (14, 150000), (15, 125000), (16, 100000),
+    # Round 2, overall picks 17-32
+    (17, 75000), (18, 67590), (19, 64580), (20, 62030), (21, 59950),
+    (22, 58330), (23, 57170), (24, 56480), (25, 56250), (26, 53570),
+    (27, 50890), (28, 48210), (29, 45530), (30, 42850), (31, 40170), (32, 37500),
+    # Philadelphia's own pick (slot 9) at later-round milestones
+    (73, 16875),   # round 5, pick 9
+    (153, 7915),   # round 10, pick 9
+    (233, 5175),   # round 15, pick 9
+    (313, 3845),   # round 20, pick 9
+    (393, 3060),   # round 25, pick 9
+]
+
+
+def _estimate_slot_value(overall_pick):
+    """Log-log interpolates a signing-bonus slot value for an overall pick
+    number between the known anchors above. Clamped at both ends of the
+    known range rather than extrapolated, since we have no data past
+    round 25 or before pick 1."""
+    if not overall_pick or overall_pick < 1:
+        return None
+    anchors = _SLOT_VALUE_ANCHORS
+    if overall_pick <= anchors[0][0]:
+        return float(anchors[0][1])
+    if overall_pick >= anchors[-1][0]:
+        return float(anchors[-1][1])
+    for (p_lo, v_lo), (p_hi, v_hi) in zip(anchors, anchors[1:]):
+        if p_lo <= overall_pick <= p_hi:
+            if p_hi == p_lo:
+                return float(v_lo)
+            t = (math.log(overall_pick) - math.log(p_lo)) / (math.log(p_hi) - math.log(p_lo))
+            return math.exp(math.log(v_lo) + t * (math.log(v_hi) - math.log(v_lo)))
+    return float(anchors[-1][1])
+
+
+def _apply_slot_value_estimates(results, pid_to_overall=None):
+    """Replaces the fake $0 "Slot" bonus ask with an estimated real dollar
+    cost, recomputing the Bonus Value verdict against it. Uses the player's
+    actual overall pick if they've already been drafted (pid_to_overall),
+    otherwise their pre-draft ADP (adp.pot_rank, set by _annotate_adp —
+    must run before this) as an expected-slot proxy. Leaves non-"Slot"
+    asks (numeric demands, "Impos.", no ask on file) untouched.
+    """
+    pid_to_overall = pid_to_overall or {}
+    for entry in results:
+        if (entry.get("bonus_ask_raw") or "").strip().lower() != "slot":
+            continue
+        overall = pid_to_overall.get(entry["pid"])
+        if overall is None:
+            overall = (entry.get("adp") or {}).get("pot_rank")
+        est_dollars = _estimate_slot_value(overall)
+        if est_dollars is None:
+            continue
+        entry["bonus_ask"] = round(est_dollars / 1e6, 4)
+        entry["bonus_ask_slot_estimated"] = True
+        verdict = _draft_bonus_verdict(entry.get("surplus"), est_dollars, None)
+        entry["bonus_score"] = verdict["score"]
+        entry["bonus_verdict"] = verdict["label"]
+        entry["bonus_verdict_class"] = verdict["class"]
+
+
+_DRAFT_TREE_ROUND_BUCKETS = [
+    (1, 1, "Rd 1"), (2, 2, "Rd 2"), (3, 3, "Rd 3"), (4, 4, "Rd 4"), (5, 5, "Rd 5"),
+    (6, 10, "Rd 6-10"), (11, 15, "Rd 11-15"), (16, 20, "Rd 16-20"),
+    (21, 30, "Rd 21-30"), (31, 999, "Rd 31+"),
+]
+
+_SITE_DRAFT_DATA_CACHE: dict = {}
+
+
+def _load_site_draft_json(name):
+    """Loads a manually-refreshed snapshot from StatsPlus's own website
+    (see scripts/fetch_site_draft_value.py) — not something this app can
+    fetch live, since it needs the site's session cookie and isn't exposed
+    by the sanctioned CSV/API client. Returns [] if never fetched."""
+    if name in _SITE_DRAFT_DATA_CACHE:
+        return _SITE_DRAFT_DATA_CACHE[name]
+    try:
+        path = get_cfg().league_dir / "config" / name
+        data = json.loads(path.read_text()) if path.exists() else []
+    except Exception:
+        data = []
+    _SITE_DRAFT_DATA_CACHE[name] = data
+    return data
+
+
+def get_site_draft_skill():
+    """Per-team historical draft performance vs. StatsPlus's own Expected
+    WAR curve (site_draft_skill.json — see fetch_site_draft_value.py).
+    Empty list if the snapshot has never been pulled."""
+    return _load_site_draft_json("site_draft_skill.json")
+
+
+def _site_expected_war_for_round_bucket(lo_round, hi_round, num_teams=16):
+    """Averages the site's own per-pick Expected WAR (its exponential-curve
+    fit across all 799 picks in the same 1949-1954 window this app's own
+    Draft Tree uses) over the overall picks that fall in a round range,
+    assuming num_teams picks/round. NOT a more "mature" baseline — it's the
+    same immature sample, just curve-smoothed at pick-level granularity
+    instead of this app's raw per-round average, so small per-bucket sample
+    noise (a few lucky/unlucky picks skewing a whole round) washes out.
+    Treat a big gap between avg_war and this as "this bucket's raw average
+    is noisy," not "this bucket is underperforming its true talent level."
+    """
+    site_rows = _load_site_draft_json("site_draft_value.json")
+    if not site_rows:
+        return None
+    lo_pick = (lo_round - 1) * num_teams + 1
+    hi_pick = hi_round * num_teams if hi_round < 999 else 10**6
+    picks_in_range = [r for r in site_rows if lo_pick <= r["pick"] <= hi_pick and r.get("expected_war") is not None]
+    if not picks_in_range:
+        return None
+    return sum(r["expected_war"] for r in picks_in_range) / len(picks_in_range)
+
+
+def get_draft_tree(min_year=None, max_year=None):
+    """This league's own historical draft outcomes: career MLB WAR accrued
+    so far by draft round, pooled across completed PPL drafts.
+
+    Real front offices call this a "draft tree" (e.g. the public Fangraphs/
+    Baseball-Reference round-by-round WAR charts) — here it's built from this
+    league's actual draft_year/draft_round + realized batting_stats/
+    pitching_stats.war, not an external league's history, so it directly
+    answers "what actually happens to a pick in this league" rather than
+    leaning on real-MLB draft lore that may not transfer to PPL's own talent
+    pool / 125% Talent Change Randomness settings.
+
+    Excludes draft_year 0 (undated/legacy imports) and lets the caller bound
+    the year range — very recent classes haven't had time to accrue career
+    value yet and will understate their eventual hit rate.
+    """
+    conn = get_db()
+    where = "p.draft_year IS NOT NULL AND p.draft_year > 0 AND p.draft_round IS NOT NULL"
+    params = []
+    if min_year is not None:
+        where += " AND p.draft_year >= ?"
+        params.append(min_year)
+    if max_year is not None:
+        where += " AND p.draft_year <= ?"
+        params.append(max_year)
+
+    rows = conn.execute(f"""
+        SELECT p.draft_year, p.draft_round, p.player_id,
+               COALESCE(b.war, 0) + COALESCE(pi.war, 0) AS career_war
+        FROM players p
+        LEFT JOIN (SELECT player_id, SUM(war) AS war FROM batting_stats
+                   WHERE split_id = 1 GROUP BY player_id) b ON b.player_id = p.player_id
+        LEFT JOIN (SELECT player_id, SUM(war) AS war FROM pitching_stats
+                   WHERE split_id = 1 GROUP BY player_id) pi ON pi.player_id = p.player_id
+        WHERE {where}
+    """, params).fetchall()
+
+    def bucket_for(rd):
+        for lo, hi, label in _DRAFT_TREE_ROUND_BUCKETS:
+            if lo <= rd <= hi:
+                return label
+        return None
+
+    buckets = {}
+    years_seen = set()
+    for r in rows:
+        yr, rd, war = r["draft_year"], r["draft_round"], r["career_war"] or 0.0
+        years_seen.add(yr)
+        label = bucket_for(rd)
+        if label is None:
+            continue
+        b = buckets.setdefault(label, {"n": 0, "total_war": 0.0, "contributor": 0, "regular": 0, "star": 0})
+        b["n"] += 1
+        b["total_war"] += war
+        if war >= 2.0:
+            b["contributor"] += 1
+        if war >= 8.0:
+            b["regular"] += 1
+        if war >= 20.0:
+            b["star"] += 1
+
+    result = []
+    for lo, hi, label in _DRAFT_TREE_ROUND_BUCKETS:
+        b = buckets.get(label)
+        if not b or not b["n"]:
+            continue
+        curve_expected = _site_expected_war_for_round_bucket(lo, hi)
+        result.append({
+            "round": label,
+            "picks": b["n"],
+            "avg_war": round(b["total_war"] / b["n"], 2),
+            "pct_contributor": round(100 * b["contributor"] / b["n"]),
+            "pct_regular": round(100 * b["regular"] / b["n"]),
+            "pct_star": round(100 * b["star"] / b["n"]),
+            "site_curve_expected_war": round(curve_expected, 2) if curve_expected is not None else None,
+        })
+    return {"rounds": result, "years": sorted(years_seen),
+            "has_site_baseline": bool(_load_site_draft_json("site_draft_value.json"))}
+
+
 def get_draft_pool():
     """Return draft board: either from API picks (if draft is active/complete)
     or top 800 amateurs by Pot (pre-draft scouting approximation).
@@ -934,6 +1147,20 @@ def get_draft_pool():
     """
     conn = get_db()
     amateur_levels = _detect_amateur_levels(conn)
+
+    # Draft year — used by the web UI to namespace per-draft localStorage
+    # pick storage so a newly uploaded pool never inherits a prior draft's
+    # picks (ported from upstream tfalsone/statsplusplus f42bc12, "Draft
+    # board: fix phantom picks carried across drafts", 2026-09-18).
+    draft_year = None
+    try:
+        import json as _json_dy
+        _state_path = os.path.join(str(get_cfg().league_dir), "config", "state.json")
+        if os.path.exists(_state_path):
+            with open(_state_path) as _f_dy:
+                draft_year = _json_dy.load(_f_dy).get("year")
+    except Exception:
+        draft_year = None
 
     from statsplusplus.data.fv_calc import RATINGS_SQL
     from statsplusplus.utils.positions import assign_bucket, LEVEL_NORM_AGE; from statsplusplus.evaluation.fv import calc_fv_from_dict as calc_fv; from statsplusplus.config.ratings import norm
@@ -1014,6 +1241,47 @@ def get_draft_pool():
             kind, label = note
             (buffs if kind == "buff" else concerns).append(label)
         return buffs, concerns
+
+    # Personality Type column: real OOTP Type + Adaptability aren't in
+    # RATINGS_SQL (they only exist via a manual Custom Upload, stored in
+    # personality_overrides — see db.py) so fetch the whole table once here
+    # rather than per player. Reuses team_queries._personality_type_info(),
+    # the same trait-combo-inference logic (with real precision numbers)
+    # already driving this everywhere else in the app.
+    _personality_overrides_map = {}
+    try:
+        for _r in conn.execute("SELECT player_id, personality_type, adaptability FROM personality_overrides"):
+            _personality_overrides_map[_r["player_id"]] = (_r["personality_type"], _r["adaptability"])
+    except Exception:
+        pass
+
+    # Bonus Ask / Bonus Value columns: signing-bonus demand for each
+    # draft-eligible amateur, from the draft pool export's DEM column (see
+    # custom_upload.import_draft_bonus_asks). Fetched once here, same
+    # pattern as personality_overrides above.
+    _bonus_ask_map = {}
+    try:
+        for _r in conn.execute("SELECT player_id, ask_raw, ask_dollars FROM draft_bonus_asks"):
+            _bonus_ask_map[_r["player_id"]] = (_r["ask_raw"], _r["ask_dollars"])
+    except Exception:
+        pass
+
+    # OSA Draft Pipeline Rank: a manually-entered top-200 scouting list (no
+    # CSV export of this exists — see osa_top200.json's own comment),
+    # matched to this year's draft pool by exact player name. Not every
+    # name on that list is draft-eligible this year, so this only ever
+    # ADDS a rank to players already in the pool — it never pulls in
+    # players who aren't otherwise part of it.
+    _osa_rank_by_name = {}
+    try:
+        import json as _json_osa
+        _osa_path = os.path.join(str(_league_dir), "config", "osa_top200.json") if _league_dir else None
+        if _osa_path and os.path.exists(_osa_path):
+            with open(_osa_path) as _f_osa:
+                _osa_names = _json_osa.load(_f_osa).get("ranks", [])
+            _osa_rank_by_name = {name: i + 1 for i, name in enumerate(_osa_names)}
+    except Exception:
+        pass
 
     # Mirrors custom_upload.py's _BEST_POSITION_PRIORITY / _best_position(),
     # applied to the draft entry's already-normalized (20-80) potential
@@ -1129,6 +1397,11 @@ def get_draft_pool():
         _buffs, _concerns = _trait_notes(p.get("WrkEthic"), p.get("Int"), p.get("Lead"),
                                           p.get("Loy"), p.get("Greed"))
         entry["buffs"], entry["concerns"] = _buffs, _concerns
+        _po_type, _po_adapt = _personality_overrides_map.get(p["ID"], (None, None))
+        _type_info = _personality_type_info(_po_type, p.get("WrkEthic"), p.get("Lead"),
+                                             p.get("Loy"), p.get("Greed"), p.get("Int"), _po_adapt)
+        entry["personality_type"] = _type_info["label"]
+        entry["personality_type_class"] = _type_info["class"]
         if p["_is_pitcher"]:
             # Count viable pitches (pot >= 45)
             from statsplusplus.utils.positions import PITCH_FIELDS
@@ -1374,6 +1647,17 @@ def get_draft_pool():
         entry.setdefault("buffs", [])
         entry.setdefault("concerns", [])
 
+        _ask_raw, _ask_dollars = _bonus_ask_map.get(p["ID"], (None, None))
+        _ask_special = "unsignable" if (_ask_raw or "").strip().lower().startswith("impos") else None
+        entry["bonus_ask_raw"] = _ask_raw
+        entry["bonus_ask"] = round(_ask_dollars / 1e6, 4) if _ask_dollars else (0 if _ask_dollars == 0 else None)
+        _verdict = _draft_bonus_verdict(entry.get("surplus"), _ask_dollars, _ask_special)
+        entry["bonus_score"] = _verdict["score"]
+        entry["bonus_verdict"] = _verdict["label"]
+        entry["bonus_verdict_class"] = _verdict["class"]
+
+        entry["osa_rank"] = _osa_rank_by_name.get(p["Name"])
+
         return entry
 
     # Try to load uploaded draft pool first
@@ -1402,7 +1686,9 @@ def get_draft_pool():
         picks = [{"pid": d["ID"], "name": d["Player Name"], "team": d["Team"],
                   "tid": d["Team ID"], "pos": d["Position"], "age": d["Age"],
                   "round": d["Round"], "pick": d["Pick In Round"],
-                  "overall": d["Overall"], "college": d["College"]}
+                  "overall": d["Overall"], "college": d["College"],
+                  "supp": bool(d.get("Supp")), "auto": bool(d.get("Auto Pick")),
+                  "time_utc": d.get("Time (UTC)")}
                  for d in raw if d.get("ID")]
     except Exception:
         pass
@@ -1439,13 +1725,14 @@ def get_draft_pool():
         _annotate_adp(results)
         for i, r in enumerate(results):
             r['rank'] = i + 1
-        return {"state": state, "players": results, "picks": []}
+        _apply_slot_value_estimates(results)
+        return {"state": state, "players": results, "picks": [], "year": draft_year}
 
     elif state == "active":
         # Use draft API player IDs as the definitive pool
         pick_pids = [p["pid"] for p in picks]
         if not pick_pids:
-            return {"state": state, "players": [], "picks": picks}
+            return {"state": state, "players": [], "picks": picks, "year": draft_year}
         placeholders = ",".join("?" * len(pick_pids))
         sql = _DRAFT_SQL + f" AND r.player_id IN ({placeholders})"
         rows = conn.execute(sql, pick_pids).fetchall()
@@ -1457,7 +1744,8 @@ def get_draft_pool():
         _annotate_adp(results)
         for i, r in enumerate(results):
             r['rank'] = i + 1
-        return {"state": state, "players": results, "picks": picks}
+        _apply_slot_value_estimates(results, {p["pid"]: p["overall"] for p in picks})
+        return {"state": state, "players": results, "picks": picks, "year": draft_year}
 
     elif state == "pre_draft" and amateur_levels:
         # Scouting approximation: top 800 amateurs by Pot. Discard API picks — stale from prior draft.
@@ -1473,9 +1761,10 @@ def get_draft_pool():
         _annotate_adp(results)
         for i, r in enumerate(results):
             r['rank'] = i + 1
-        return {"state": state, "players": results, "picks": []}
+        _apply_slot_value_estimates(results)
+        return {"state": state, "players": results, "picks": [], "year": draft_year}
 
-    return {"state": "no_data", "players": [], "picks": []}
+    return {"state": "no_data", "players": [], "picks": [], "year": draft_year}
 
 
 

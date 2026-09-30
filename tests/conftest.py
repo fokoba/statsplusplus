@@ -5,6 +5,7 @@ Provides an in-memory SQLite DB seeded with minimal data and a mock LeagueConfig
 patched into web_league_context so query functions run without a real league on disk.
 """
 
+import json
 import sqlite3
 import sys
 from pathlib import Path
@@ -73,6 +74,7 @@ CREATE TABLE IF NOT EXISTS ratings (
     hra_l INTEGER, hra_r INTEGER, pbabip_l INTEGER, pbabip_r INTEGER,
     int_ TEXT, wrk_ethic TEXT, greed TEXT, loy TEXT, lead TEXT,
     prone TEXT, acc TEXT, league_id INTEGER,
+    personality_type TEXT, adaptability TEXT,
     height INTEGER, bats TEXT, throws TEXT,
     stl_rt INTEGER, run INTEGER, sac_bunt INTEGER, bunt_hit INTEGER, hold INTEGER,
     composite_score INTEGER, ceiling_score INTEGER, tool_only_score INTEGER, secondary_composite INTEGER,
@@ -185,6 +187,26 @@ CREATE TABLE IF NOT EXISTS player_surplus (
     surplus INTEGER, surplus_yr1 INTEGER, level TEXT,
     team_id INTEGER, parent_team_id INTEGER,
     PRIMARY KEY (player_id, eval_date)
+);
+CREATE TABLE IF NOT EXISTS dev_speed (
+    player_id INTEGER, eval_date TEXT, available INTEGER, z REAL,
+    signal TEXT, label TEXT, css_class TEXT, note TEXT, gap INTEGER,
+    d_ovr INTEGER, d_pot INTEGER, confidence TEXT, annual_move REAL,
+    peer_mean REAL, peer_sd REAL, peer_n INTEGER,
+    comp_first INTEGER, comp_last INTEGER, off_first INTEGER, off_last INTEGER,
+    def_first INTEGER, def_last INTEGER, window_years REAL, n_snaps INTEGER,
+    schedule_status TEXT, schedule_label TEXT, schedule_note TEXT,
+    stagnant_tools TEXT, gap_closed_pct_yr REAL, years_to_peak REAL,
+    gap_smoothed REAL, gap_trend REAL,
+    PRIMARY KEY (player_id, eval_date)
+);
+CREATE TABLE IF NOT EXISTS depth_chart_roles (
+    team_id     INTEGER NOT NULL,
+    position    TEXT NOT NULL,
+    player_id   INTEGER NOT NULL,
+    role        TEXT NOT NULL,
+    updated_at  TEXT,
+    PRIMARY KEY (team_id, position, player_id)
 );
 """
 
@@ -372,6 +394,15 @@ def _make_cfg():
     cfg.settings = {"statsplus_slug": ""}
     cfg.state_path = "/tmp/state.json"
     cfg.league_dir = Path("/tmp")
+    # scripts/contract_value.py reads <league_dir>/config/state.json directly
+    # (not through LeagueConfig) for game_date — write it so callers that
+    # touch contract valuation (e.g. get_depth_chart) don't hit a real
+    # filesystem gap under /tmp.
+    state_dir = Path("/tmp/config")
+    state_dir.mkdir(parents=True, exist_ok=True)
+    (state_dir / "state.json").write_text(json.dumps({
+        "game_date": cfg.game_date, "year": cfg.year, "my_team_id": cfg.my_team_id,
+    }))
     return cfg
 
 

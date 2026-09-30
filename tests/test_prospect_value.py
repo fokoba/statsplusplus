@@ -31,6 +31,14 @@ def _stub(perpetual_arb=False):
         dollars_per_war=lambda: _DPW,
         league_minimum=lambda: _LG_MIN,
         _cfg=_FakeCfg(perpetual_arb),
+        # prospect_surplus() calls _ensure_league_context(None) unconditionally
+        # to refresh stale module-level league state (see its docstring) — a
+        # real hazard for the long-running web server, but here it can
+        # clobber the _cfg stub above if an earlier test in the same process
+        # left prospect_value._league_dir pointed at a different league than
+        # the active one (e.g. via STATSPP_LEAGUE env manipulation). These
+        # tests are pure math against the stubbed _cfg, so neutralize it.
+        _ensure_league_context=lambda *a, **k: None,
     )
 
 

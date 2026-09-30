@@ -436,7 +436,8 @@ def onboard_step3():
     state_path = league_dir / "config" / "state.json"
     st = json.loads(state_path.read_text())
     st["my_team_id"] = team_id
-    state_path.write_text(json.dumps(st, indent=2) + "\n")
+    from statsplusplus.config.league_context import atomic_write_text
+    atomic_write_text(state_path, json.dumps(st, indent=2) + "\n")
     try:
         script = Path(__file__).parent.parent / "src" / "statsplusplus" / "data" / "fv_calc.py"
         subprocess.run([sys.executable, str(script)],

@@ -81,6 +81,35 @@ def test_get_standings_shape():
         assert key in row, f"Missing key: {key}"
 
 
+def test_get_standings_falls_back_to_latest_year_with_team_stats(monkeypatch):
+    """When the stats_year has no TEAM stats (a year gap — e.g. player stats
+    landed for 1954 but the 1954 team-stat render didn't), standings resolves to
+    the most recent year that DOES have team stats, not blindly year-1.
+
+    Regression: a PPL preseason refresh left team stats at 1953 while stats_year
+    was 1954, and the old `year - 1` fallback would have shown 1952. It should
+    show 1953 (the latest year with actual team stats).
+    """
+    import sqlite3
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE team_batting_stats (team_id INT, year INT, split_id INT, name TEXT, r INT)")
+    conn.execute("CREATE TABLE team_pitching_stats (team_id INT, year INT, split_id INT, r INT, ip REAL)")
+    conn.execute("CREATE TABLE games (home_team INT, away_team INT, runs0 INT, runs1 INT, date TEXT, played INT, game_type INT)")
+    # Team stats exist ONLY for 1953 (1954 is a gap).
+    conn.execute("INSERT INTO team_batting_stats VALUES (?,1953,1,'Team A',700)", (TEAM_ID,))
+    conn.execute("INSERT INTO team_pitching_stats VALUES (?,1953,1,650,1458.0)", (TEAM_ID,))
+
+    monkeypatch.setattr(team_queries, "get_db", lambda: conn)
+    monkeypatch.setattr(team_queries, "_get_state",
+                        lambda: {"year": 1955, "stats_year": 1954, "game_date": "1955-03-31"})
+
+    result = team_queries.get_standings()
+    row = next((r for r in result if r["tid"] == TEAM_ID), None)
+    assert row is not None, "standings should resolve to 1953 (latest with team stats)"
+    assert row["rs"] == 700 and row["ra"] == 650
+
+
 # ── get_roster ───────────────────────────────────────────────────────────────
 
 def test_get_roster_returns_two_lists():

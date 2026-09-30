@@ -51,23 +51,24 @@ _BOARD_SQL = """
 """
 
 
-def _connect():
-    db = get_league_dir() / "league.db"
+def _connect(league_dir=None):
+    db = (league_dir or get_league_dir()) / "league.db"
     conn = sqlite3.connect(str(db))
     conn.row_factory = sqlite3.Row
     return conn
 
 
-def _get_num_teams():
+def _get_num_teams(league_dir=None):
     try:
         from statsplusplus.config.league_config import LeagueConfig
-        return len(LeagueConfig().mlb_team_ids)
+        cfg = LeagueConfig(base_dir=league_dir) if league_dir else LeagueConfig()
+        return len(cfg.mlb_team_ids)
     except Exception:
         return 30
 
 
-def _load_pool_ids():
-    pool_path = get_league_dir() / "config" / "draft_pool.json"
+def _load_pool_ids(league_dir=None):
+    pool_path = (league_dir or get_league_dir()) / "config" / "draft_pool.json"
     if not pool_path.exists():
         raise FileNotFoundError("No draft pool uploaded. Upload via the web UI first.")
     return json.loads(pool_path.read_text())["player_ids"]
@@ -98,14 +99,21 @@ def _get_taken_pids():
         return set()
 
 
-def load_board():
-    """Load full draft board with ADP and needs. Returns (rows, adp, needs, num_teams, conn)."""
-    conn = _connect()
-    pids = _load_pool_ids()
+def load_board(league_dir=None):
+    """Load full draft board with ADP and needs. Returns (rows, adp, needs, num_teams, conn).
+
+    league_dir: resolve all data (DB, pool, config) from this league directory.
+    The web layer MUST pass its request-scoped league dir — the process-global
+    active league (app_config.json) can differ from the browser's session league,
+    which would build the board from the wrong league (cross-league name/ID leak).
+    Ported from upstream tfalsone/statsplusplus 0411fb0.
+    """
+    conn = _connect(league_dir)
+    pids = _load_pool_ids(league_dir)
     rows = _query_board(conn, pids)
-    num_teams = _get_num_teams()
+    num_teams = _get_num_teams(league_dir)
     adp = compute_adp(rows, num_teams)
-    needs = compute_org_needs(conn)
+    needs = compute_org_needs(conn, league_dir)
     return rows, adp, needs, num_teams, conn
 
 
@@ -322,7 +330,7 @@ def compute_adp(rows, num_teams=None):
     return result
 
 
-def compute_org_needs(conn):
+def compute_org_needs(conn, league_dir=None):
     """Positional need scores based on roster weakness + farm depth.
 
     For standard FA leagues: departure-based (players leaving with thin farm depth).
@@ -333,20 +341,25 @@ def compute_org_needs(conn):
     """
     try:
         from statsplusplus.config.league_config import LeagueConfig
-        cfg = LeagueConfig()
+        cfg = LeagueConfig(base_dir=league_dir) if league_dir else LeagueConfig()
         my_team = cfg.my_team_id
         is_perpetual = cfg.settings.get("perpetual_arb", False)
+        primary_lid = cfg.primary_league_id
     except Exception:
         return {}
 
     if is_perpetual:
-        return _compute_org_needs_weakness(conn, my_team)
+        return _compute_org_needs_weakness(conn, my_team, primary_lid)
     else:
-        return _compute_org_needs_departures(conn, my_team)
+        return _compute_org_needs_departures(conn, my_team, primary_lid)
 
 
-def _compute_org_needs_departures(conn, my_team):
-    """FA leagues: positions losing contributors with thin farm depth."""
+def _compute_org_needs_departures(conn, my_team, primary_lid=None):
+    """FA leagues: positions losing contributors with thin farm depth.
+
+    Queries are team/org-scoped (my_team), so no cross-league contamination is
+    possible here — primary_lid is accepted for dispatch symmetry.
+    """
     pos_map = {2: "C", 3: "1B", 4: "2B", 5: "3B", 6: "SS", 7: "COF", 8: "CF", 9: "COF"}
 
     rows = conn.execute("""
@@ -384,7 +397,7 @@ def _compute_org_needs_departures(conn, my_team):
     return needs
 
 
-def _compute_org_needs_weakness(conn, my_team):
+def _compute_org_needs_weakness(conn, my_team, primary_lid=None):
     """Perpetual arb leagues: positions where MLB starter is below league median
     AND farm has no FV 50+ prospect in that bucket.
 
@@ -400,12 +413,16 @@ def _compute_org_needs_weakness(conn, my_team):
     SP_SLOT = 3  # Compare 3rd-best SP (rotation depth indicator)
 
     # ── Gather all MLB player composites by team and bucket ──
-    all_rows = conn.execute("""
+    # Scope to the PRIMARY league — a co-resident top-level league (e.g. NPB in
+    # PPL) is also level='1' and would contaminate the league median.
+    from statsplusplus.data.db import primary_league_predicate
+    _pl_clause, _pl_params = primary_league_predicate(primary_lid)
+    all_rows = conn.execute(f"""
         SELECT p.pos, p.role, p.team_id, r.composite_score
         FROM players p
         JOIN latest_ratings r ON p.player_id = r.player_id
-        WHERE p.level = '1' AND r.composite_score IS NOT NULL
-    """).fetchall()
+        WHERE p.level = '1' AND r.composite_score IS NOT NULL AND {_pl_clause}
+    """, _pl_params).fetchall()
 
     from collections import defaultdict
     # team_id -> bucket -> list of scores (descending sort later)

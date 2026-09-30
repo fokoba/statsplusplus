@@ -13,8 +13,8 @@ from pathlib import Path
 from flask import Blueprint, g, jsonify, request, session
 
 from statsplusplus.config.league_context import (
+    atomic_write_text,
     APP_CONFIG_PATH,
-    get_league_dir,
     get_statsplus_cookie,
     set_statsplus_cookie,
     get_statsplus_token,
@@ -27,6 +27,25 @@ log = get_logger("web.api")
 
 _refresh_lock = threading.Lock()
 _refresh_status = {"running": False, "result": None, "message": ""}
+
+
+@api_bp.route("/api/team/<int:tid>/war-projections", methods=["POST"])
+def team_war_projections(tid):
+    """Preview or save the league-scoped 1955 Philadelphia workload plan."""
+    from war_projection_queries import build_projection, save_overrides, validate_overrides
+    cfg = _get_cfg()
+    if cfg.league_dir.name.lower() != "ppl" or tid != 6:
+        return jsonify({"ok": False, "error": "Projection plan unavailable for this team"}), 404
+    body = request.get_json(silent=True) or {}
+    if body.get("action") not in ("preview", "save"):
+        return jsonify({"ok": False, "error": "Invalid action"}), 400
+    try:
+        cleaned = validate_overrides(body.get("overrides", {}))
+        if body["action"] == "save":
+            cleaned = save_overrides(cfg.league_dir, cleaned)
+        return jsonify({"ok": True, "projection": build_projection(tid, cleaned)})
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
 
 
 def _get_cfg():
@@ -54,7 +73,7 @@ def toggle_offseason():
         state = json.loads(state_path.read_text()) if state_path.exists() else {}
         new_val = not bool(state.get("offseason_mode", False))
         state["offseason_mode"] = new_val
-        state_path.write_text(json.dumps(state, indent=2) + "\n")
+        atomic_write_text(state_path, json.dumps(state, indent=2) + "\n")
         return jsonify({"ok": True, "offseason_mode": new_val})
     except Exception as e:
         log.error("toggle-offseason failed: %s", e)
@@ -83,7 +102,7 @@ def set_offseason_phase():
     try:
         state = json.loads(state_path.read_text()) if state_path.exists() else {}
         state["offseason_phase"] = phase  # "" clears the focus
-        state_path.write_text(json.dumps(state, indent=2) + "\n")
+        atomic_write_text(state_path, json.dumps(state, indent=2) + "\n")
         return jsonify({"ok": True, "phase": phase})
     except Exception as e:
         log.error("set-offseason-phase failed: %s", e)
@@ -96,7 +115,7 @@ def finance_payload(team_id):
     cart commitments — 0 until the FA cart exists).
     """
     from statsplusplus.config import finance_settings as fin
-    settings = fin.load_settings(get_league_dir())
+    settings = fin.load_settings(_get_cfg().league_dir)
     return {
         "settings": settings,
         "available": fin.available_for_fa(settings),
@@ -126,7 +145,7 @@ def api_finance_settings_post():
     try:
         import queries
         from statsplusplus.config import finance_settings as fin
-        fin.save_settings(get_league_dir(), settings)
+        fin.save_settings(_get_cfg().league_dir, settings)
         return jsonify({"ok": True, **finance_payload(queries.get_my_team_id())})
     except ValueError as e:
         return jsonify({"ok": False, "error": str(e)}), 400
@@ -503,11 +522,56 @@ def api_draft_picks():
         picks = [{"pid": d["ID"], "name": d["Player Name"], "team": d["Team"],
                   "tid": d["Team ID"], "pos": d["Position"], "age": d["Age"],
                   "round": d["Round"], "pick": d["Pick In Round"],
-                  "overall": d["Overall"], "college": d["College"]}
+                  "overall": d["Overall"], "college": d["College"],
+                  "supp": bool(d.get("Supp")), "auto": bool(d.get("Auto Pick")),
+                  "time_utc": d.get("Time (UTC)")}
                  for d in raw if d.get("ID")]
         return jsonify({"picks": picks})
     except Exception as e:
         return jsonify({"picks": [], "error": str(e)})
+
+
+@api_bp.route("/api/draft-clock")
+def api_draft_clock():
+    """Live 'on the clock' status scraped from the StatsPlus draft room
+    (last pick / who's up / due time / on deck) — see scripts/draft_clock.py
+    for why this needs to scrape the website rather than use the CSV API
+    (the in-progress draft state isn't exposed there at all)."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
+    from draft_clock import get_draft_clock
+
+    cfg = _get_cfg()
+    data = get_draft_clock(cfg.league_dir)
+    if data is None:
+        return jsonify({"ok": False})
+    return jsonify({"ok": True, **data})
+
+
+@api_bp.route("/api/draft-tree")
+def api_draft_tree():
+    """This league's own historical hit-rate-by-round chart (career WAR
+    accrued so far, pooled across completed drafts). See queries.get_draft_tree
+    for why this uses PPL's own draft history rather than real-MLB lore."""
+    import queries
+    min_year = request.args.get("min_year", type=int)
+    max_year = request.args.get("max_year", type=int)
+    try:
+        return jsonify(queries.get_draft_tree(min_year=min_year, max_year=max_year))
+    except Exception as e:
+        return jsonify({"rounds": [], "years": [], "error": str(e)})
+
+
+@api_bp.route("/api/draft-skill")
+def api_draft_skill():
+    """Per-team historical draft performance vs. StatsPlus's own Expected
+    WAR curve — see queries.get_site_draft_skill and
+    scripts/fetch_site_draft_value.py. Empty list if that snapshot has
+    never been manually pulled."""
+    import queries
+    try:
+        return jsonify({"teams": queries.get_site_draft_skill()})
+    except Exception as e:
+        return jsonify({"teams": [], "error": str(e)})
 
 
 # ── Draft pool and simulation ──
@@ -541,7 +605,7 @@ def api_draft_pool_upload():
                 pids.append(int(val))
         if not pids:
             return jsonify({"ok": False, "error": "No valid player IDs found in file"}), 400
-        pool_path = get_league_dir() / "config" / "draft_pool.json"
+        pool_path = _get_cfg().league_dir / "config" / "draft_pool.json"
         pool_path.write_text(json.dumps({"player_ids": pids}, indent=2))
         return jsonify({"ok": True, "total": len(pids)})
     except Exception as e:
@@ -556,8 +620,9 @@ def api_draft_sim():
         from draft_board import load_board, simulate_draft
         from draft_settings import load_settings
 
-        league_dir = get_league_dir()
-        rows, adp, needs, num_teams, conn = load_board()
+        # Session-aware league, not the process-global active league (upstream 0411fb0).
+        league_dir = _get_cfg().league_dir
+        rows, adp, needs, num_teams, conn = load_board(league_dir)
         pick_pos = data.get("pick", 30)
         num_rounds = data.get("rounds", 7)
         seed = data.get("seed")
@@ -595,8 +660,9 @@ def api_draft_upload_list():
         from draft_board import load_board, build_pick_list
         from draft_settings import load_settings
 
-        league_dir = get_league_dir()
-        rows, adp, needs, num_teams, conn = load_board()
+        # Session-aware league, not the process-global active league (upstream 0411fb0).
+        league_dir = _get_cfg().league_dir
+        rows, adp, needs, num_teams, conn = load_board(league_dir)
 
         if exclude_pids:
             rows = [r for r in rows if r["player_id"] not in exclude_pids]
@@ -626,7 +692,7 @@ def api_draft_settings_get():
     """Return current draft board settings for the active league."""
     try:
         from draft_settings import load_settings, PRESETS
-        settings = load_settings(get_league_dir())
+        settings = load_settings(_get_cfg().league_dir)
         return jsonify({"ok": True, "settings": settings, "presets": PRESETS})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -641,7 +707,7 @@ def api_draft_settings_post():
         return jsonify({"ok": False, "error": "Missing 'settings' in request body"}), 400
     try:
         from draft_settings import save_settings
-        save_settings(get_league_dir(), settings)
+        save_settings(_get_cfg().league_dir, settings)
         return jsonify({"ok": True})
     except ValueError as e:
         return jsonify({"ok": False, "error": str(e)}), 400
@@ -664,7 +730,7 @@ def api_draft_settings_copy():
         if not source_dir.exists():
             return jsonify({"ok": False, "error": f"League '{from_league}' not found"}), 404
 
-        copied = copy_settings(source_dir, get_league_dir())
+        copied = copy_settings(source_dir, _get_cfg().league_dir)
         return jsonify({"ok": True, "settings": copied})
     except FileNotFoundError as e:
         return jsonify({"ok": False, "error": str(e)}), 404
@@ -810,14 +876,20 @@ def api_local_export_status():
 
     info = get_freshness(_get_cfg().league_dir)
     newest = info["newest_mtime"]
+    now = time.time()
+    categories = []
+    for c in info["categories"]:
+        age_hours = (now - c["mtime"]) / 3600 if c["mtime"] is not None else None
+        categories.append({**c, "age_hours": round(age_hours, 1) if age_hours is not None else None})
     if newest is None:
-        return jsonify({"newest": None, "age_hours": None, "stale": None})
-    age_hours = (time.time() - newest) / 3600
+        return jsonify({"newest": None, "age_hours": None, "stale": None,
+                         "categories": categories})
+    age_hours = (now - newest) / 3600
     return jsonify({
         "newest": newest,
         "age_hours": round(age_hours, 1),
         "stale": age_hours > 24,
-        "categories": info["categories"],
+        "categories": categories,
     })
 
 

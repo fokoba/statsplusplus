@@ -156,6 +156,22 @@ _USER_AGENT = "statsplusplus/1.0 (+https://github.com/statsplusplus)"
 _WAIT_RE = re.compile(r"wait (\d+) seconds", re.IGNORECASE)
 _RATE_LIMIT_MAX_RETRIES = 4
 
+# Proactive pacing for render-limited endpoints. StatsPlus renders team-stats /
+# game-history at most once per minute per caller; requesting a render too soon
+# returns 429 (team stats) and costs a wasted round-trip + retry wait. Rather
+# than fire blindly and eat the penalty on every historical-year pull (which
+# turned a deep retro-league first refresh into a ~40-min, 429-storm run), we
+# pace ourselves: track the last render request and sleep just enough to clear
+# the per-minute window before the next one. Collecting an already-rendered copy
+# is free and never counts, so pacing only the render request is optimal.
+_RENDER_MIN_INTERVAL = 62.0  # seconds (1/min limit + small margin)
+_RENDER_PATHS = ("/teambatstats", "/teampitchstats", "/gamehistory")
+_last_render_ts: float = 0.0
+
+
+def _render_path(url: str) -> bool:
+    return any(p in url for p in _RENDER_PATHS)
+
 # HTTP-200 plain-text human messages the API documents (see client_reference).
 _MSG_TOKEN_EXPIRED = "api token has expired"
 _MSG_TOKEN_INVALID = "invalid or unknown api token"
@@ -180,6 +196,7 @@ def _classify_message(body: str) -> str:
 
 
 def _fetch(url: str, _retries: int = _RATE_LIMIT_MAX_RETRIES) -> str:
+    global _last_render_ts
     _, cookie, token = _resolve_creds()
     headers = {"Accept": "application/json", "User-Agent": _USER_AGENT}
     if token and "token=" not in url:
@@ -191,6 +208,14 @@ def _fetch(url: str, _retries: int = _RATE_LIMIT_MAX_RETRIES) -> str:
     elif not token:
         headers["Cookie"] = cookie
     body: str = ""
+    is_render = _render_path(url)
+    if is_render:
+        gap = time.monotonic() - _last_render_ts
+        if _last_render_ts and gap < _RENDER_MIN_INTERVAL:
+            wait = _RENDER_MIN_INTERVAL - gap
+            log.info("Pacing render request — waiting %.0fs (1/min limit)", wait)
+            time.sleep(wait)
+        _last_render_ts = time.monotonic()
     for attempt in range(_retries + 1):
         req = urllib.request.Request(url, headers=headers)
         ctype = ""
@@ -201,9 +226,18 @@ def _fetch(url: str, _retries: int = _RATE_LIMIT_MAX_RETRIES) -> str:
         except urllib.error.HTTPError as e:
             if e.code == 429 and attempt < _retries:
                 retry_after = e.headers.get("Retry-After") if e.headers else None
-                wait = int(retry_after) if retry_after and retry_after.isdigit() else 35
+                if retry_after and retry_after.isdigit():
+                    wait = int(retry_after)
+                elif is_render:
+                    # No useful Retry-After; the render limit is ~1/min, so a
+                    # short wait just 429s again. Wait a full window.
+                    wait = int(_RENDER_MIN_INTERVAL)
+                else:
+                    wait = 35
                 log.info("Rate limited (429) — waiting %ds (attempt %d)", wait, attempt + 1)
                 time.sleep(wait + 2)
+                if is_render:
+                    _last_render_ts = time.monotonic()
                 continue
             raise
         is_data_ctype = ("text/csv" in ctype) or ("json" in ctype)
@@ -436,8 +470,26 @@ def get_ratings(
         log.info("ratings: waiting 30s for export...")
         time.sleep(30)
 
+    # A poll URL's request ID can expire server-side if the rest of the refresh
+    # ran long (deep retro leagues with many rate-limited historical pulls can
+    # take 30-40 min, well past the export's validity window). When that happens
+    # the endpoint returns "The request ID is no longer valid..." rather than
+    # CSV — detect it and re-request a fresh export once, instead of silently
+    # returning 0 rows (which wipes downstream evaluation).
+    reexported = False
     for attempt in range(20):
         text = _fetch(poll_url)
+        if "no longer valid" in text or "request again" in text:
+            if reexported:
+                raise RuntimeError(
+                    "Ratings export request ID expired twice — the refresh is "
+                    "running too long for the export to stay valid.")
+            log.warning("ratings: export request ID expired — re-requesting a "
+                        "fresh export")
+            poll_url = start_ratings_export()
+            reexported = True
+            time.sleep(30)
+            continue
         if "still in progress" not in text and not text.startswith("Request received"):
             text = _fix_ratings_header(text)
             rows = _parse_csv(text)

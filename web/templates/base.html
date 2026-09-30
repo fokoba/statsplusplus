@@ -27,11 +27,13 @@
         {% else %}
         <span class="nav-league-label">{{ league_name }}</span>
         {% endif %}
-        <a href="/dashboard">My Team</a>
+        <a href="/dashboard">{{ my_team_name }}</a>
         <a href="/league">League</a>
         <a href="/custom-upload">Custom Upload</a>
-        <a href="/lineup-optimizer">Lineup Optimizer</a>
-        <a href="/team-compare">Team Compare</a>
+        {# Lineup Optimizer hidden from nav — not part of Forrest's workflow.
+           Route still works at /lineup-optimizer; restore by uncommenting. #}
+        {# <a href="/lineup-optimizer">Lineup Optimizer</a> #}
+        {# Team Compare moved to the League page's tab-bar — see league.html #}
         <div class="nav-dropdown">
           <button class="nav-btn nav-dropdown-btn">Teams ▾</button>
           <div class="nav-dropdown-menu">
@@ -46,7 +48,12 @@
           <div id="search-results" class="search-dropdown"></div>
         </div>
         <button id="refresh-btn" class="nav-btn" title="Pull latest game data">⟳ Refresh</button>
-        <span id="local-export-badge" class="nav-local-export"></span>
+        <span id="local-export-badge" class="nav-local-export">
+          <div id="local-export-panel" class="local-export-panel">
+            <div class="local-export-panel-title">Local OOTP export checklist</div>
+            <div id="local-export-rows"></div>
+          </div>
+        </span>
         <button id="session-btn" class="nav-btn" title="StatsPlus connection">🔑</button>
         <div id="session-panel" class="session-panel hidden">
           <div class="session-panel-header">
@@ -130,25 +137,53 @@
       }).catch(() => {});
     }
 
+    function fmtAge(h) {
+      return h < 1 ? Math.round(h * 60) + 'm ago'
+           : h < 48 ? Math.round(h) + 'h ago'
+           : Math.round(h / 24) + 'd ago';
+    }
+
     function updateLocalExportBadge() {
       var el = document.getElementById('local-export-badge');
-      if (!el) return;
+      var panel = document.getElementById('local-export-panel');
+      var rows = document.getElementById('local-export-rows');
+      if (!el || !panel || !rows) return;
       fetch('/api/local-export-status').then(function(r) { return r.json(); }).then(function(d) {
+        // Rebuild the checklist panel first (it lives inside el, so do this
+        // before touching el's own label text/badge below).
+        rows.innerHTML = (d.categories || []).map(function(c) {
+          var ageCls = '';
+          var ageText;
+          if (c.mtime == null) {
+            ageText = 'not found';
+            ageCls = 'missing';
+          } else {
+            ageText = fmtAge(c.age_hours) + (c.age_hours > 24 ? '' : '');
+            if (c.age_hours > 24) ageCls = 'stale';
+          }
+          return '<div class="local-export-row"><span class="local-export-row-label">' + c.label +
+                 '</span><span class="local-export-row-age ' + ageCls + '">' + ageText + '</span></div>';
+        }).join('');
+
+        var badgeText = document.createElement('span');
         if (d.age_hours == null) {
-          el.innerHTML = '';
-          return;
+          badgeText.innerHTML = '';
+        } else {
+          var h = d.age_hours;
+          var label = fmtAge(h);
+          var cls = d.stale ? 'sync-stale' : 'sync-ok';
+          var title = d.stale
+            ? 'Local OOTP export data is ' + label + ' old — recommend re-exporting from OOTP for fresh ratings/contracts/park factors.'
+            : 'Local OOTP export data last updated ' + label + '.';
+          badgeText.innerHTML = '<span class="sync-badge ' + cls + '" title="' + title + '">Local export: ' + label + '</span>';
         }
-        var h = d.age_hours;
-        var label = h < 1 ? Math.round(h * 60) + 'm ago'
-                  : h < 48 ? Math.round(h) + 'h ago'
-                  : Math.round(h / 24) + 'd ago';
-        var cls = d.stale ? 'sync-stale' : 'sync-ok';
-        var text = 'Local export: ' + label;
-        var title = d.stale
-          ? 'Local OOTP export data is ' + label + ' old — recommend re-exporting from OOTP for fresh ratings/contracts/park factors.'
-          : 'Local OOTP export data last updated ' + label + '.';
-        el.innerHTML = '<span class="sync-badge ' + cls + '" title="' + title + '">' + text + '</span>';
-      }).catch(function() { el.innerHTML = ''; });
+        // Replace only the badge text node(s) that precede the panel, leaving
+        // the panel element itself intact.
+        Array.prototype.slice.call(el.childNodes).forEach(function(n) {
+          if (n !== panel) el.removeChild(n);
+        });
+        while (badgeText.firstChild) el.insertBefore(badgeText.firstChild, panel);
+      }).catch(function() {});
     }
     updateLocalExportBadge();
 

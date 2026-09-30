@@ -52,10 +52,22 @@ def get_connection(league_dir: Optional[Path] = None) -> sqlite3.Connection:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path), timeout=30)
     conn.execute("PRAGMA journal_mode=WAL")
+    # Per-player latest snapshot, NOT a single global MAX(snapshot_date) —
+    # confirmed bug (2026-09-28): a single stray row written at a newer date
+    # than the rest of the table (e.g. one player picked up individually by
+    # an incremental sync after the last full-batch import) made the old
+    # global-MAX version of this view return just that one row, silently
+    # emptying every page built on latest_ratings (Free Agent Adds showed
+    # 0 candidates across every category despite a real 1,045-player
+    # signable pool). Drop+recreate on every connection since the view
+    # needs updating even where CREATE VIEW IF NOT EXISTS already fired
+    # with the old (buggy) definition on a previous connection.
+    conn.execute("DROP VIEW IF EXISTS latest_ratings")
     conn.execute(
-        "CREATE VIEW IF NOT EXISTS latest_ratings AS "
-        "SELECT * FROM ratings "
-        "WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM ratings)"
+        "CREATE VIEW latest_ratings AS "
+        "SELECT r.* FROM ratings r "
+        "WHERE r.snapshot_date = (SELECT MAX(r2.snapshot_date) FROM ratings r2 "
+        "WHERE r2.player_id = r.player_id)"
     )
     conn.row_factory = sqlite3.Row
     return conn
@@ -313,6 +325,47 @@ CREATE TABLE IF NOT EXISTS prospect_fv (
     PRIMARY KEY (player_id, eval_date)
 );
 
+-- Development-speed metric (ported from upstream tfalsone/statsplusplus 886ee50).
+-- A separate axis from FV/surplus by design — displayed adjacent, not blended.
+-- Rebuilt each fv_calc run. `available=0` = below the history/reporting gate.
+CREATE TABLE IF NOT EXISTS dev_speed (
+    player_id   INTEGER,
+    eval_date   TEXT,
+    available   INTEGER,
+    z           REAL,
+    signal      TEXT,      -- 'off' (bat, hitters) | 'comp' (pitchers)
+    label       TEXT,
+    css_class   TEXT,      -- rising|onpace|watch|stalled|regressing|none
+    note        TEXT,
+    gap         INTEGER,
+    d_ovr       INTEGER,
+    d_pot       INTEGER,
+    confidence  TEXT,      -- High|Medium|Low
+    annual_move REAL,
+    peer_mean   REAL,
+    peer_sd     REAL,
+    peer_n      INTEGER,
+    comp_first  INTEGER, comp_last INTEGER,
+    off_first   INTEGER, off_last INTEGER,
+    def_first   INTEGER, def_last INTEGER,
+    window_years REAL,
+    n_snaps     INTEGER,
+    -- Schedule/risk tag (2026-09-29) — a SECOND, independent signal
+    -- alongside the z-score label above, not a replacement: label/css_class
+    -- answer "is he outpacing peers right now"; schedule_status answers "is
+    -- he actually closing his own gap to ceiling before his runway to peak
+    -- age runs out, across multiple tools, not just one." See dev_speed.py.
+    schedule_status TEXT,   -- ahead|behind|at_risk|on_track|NULL(not reportable)
+    schedule_label  TEXT,
+    schedule_note   TEXT,
+    stagnant_tools  TEXT,   -- comma-joined tool keys with ~0 movement in-window
+    gap_closed_pct_yr REAL, -- fraction of the window-start gap closed per year
+    years_to_peak   REAL,
+    gap_smoothed    REAL,   -- trailing-average gap (vs point-in-time `gap`)
+    gap_trend       REAL,   -- annualized change in smoothed gap; negative = closing
+    PRIMARY KEY (player_id, eval_date)
+);
+
 CREATE TABLE IF NOT EXISTS player_surplus (
     player_id      INTEGER,
     eval_date      TEXT,
@@ -345,6 +398,19 @@ CREATE TABLE IF NOT EXISTS fa_asking_prices (
     ask_raw     TEXT,
     uploaded_at TEXT,
     changed_at  TEXT
+);
+
+-- Signing bonus demands for draft-eligible amateurs, imported from an
+-- uploaded OOTP draft pool "All Columns" export's DEM column (e.g. "$10k",
+-- "Slot", "Impos."). Distinct from fa_asking_prices, which is a current
+-- free agent's ongoing salary ask — this is a one-time up-front bonus cost
+-- to sign an amateur, used to compare against a prospect's multi-year
+-- surplus value on the Draft board.
+CREATE TABLE IF NOT EXISTS draft_bonus_asks (
+    player_id    INTEGER PRIMARY KEY,
+    ask_raw      TEXT,
+    ask_dollars  REAL,
+    uploaded_at  TEXT
 );
 
 -- Real per-year salary/arbitration figures, imported from a manually
@@ -418,14 +484,47 @@ CREATE TABLE IF NOT EXISTS league_park_factors (
     uploaded_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS league_meta (
+    id                INTEGER PRIMARY KEY CHECK (id = 1),
+    primary_league_id INTEGER
+);
+
+-- MLB views: primary league only (excludes co-resident leagues such as NPB).
 CREATE VIEW IF NOT EXISTS mlb_batting_stats AS
-    SELECT * FROM batting_stats WHERE league_id IS NULL;
+    SELECT b.* FROM batting_stats b
+    WHERE b.league_id IS NULL
+      AND (
+        NOT EXISTS (SELECT 1 FROM league_meta WHERE primary_league_id IS NOT NULL)
+        OR b.player_id IN (
+            SELECT p.player_id FROM players p
+            WHERE p.player_league_id IS NULL
+               OR p.player_league_id = (SELECT primary_league_id FROM league_meta WHERE id = 1)
+        )
+      );
 
 CREATE VIEW IF NOT EXISTS mlb_pitching_stats AS
-    SELECT * FROM pitching_stats WHERE league_id IS NULL;
+    SELECT ps.* FROM pitching_stats ps
+    WHERE ps.league_id IS NULL
+      AND (
+        NOT EXISTS (SELECT 1 FROM league_meta WHERE primary_league_id IS NOT NULL)
+        OR ps.player_id IN (
+            SELECT p.player_id FROM players p
+            WHERE p.player_league_id IS NULL
+               OR p.player_league_id = (SELECT primary_league_id FROM league_meta WHERE id = 1)
+        )
+      );
 
 CREATE VIEW IF NOT EXISTS mlb_fielding_stats AS
-    SELECT * FROM fielding_stats WHERE league_id IS NULL;
+    SELECT fs.* FROM fielding_stats fs
+    WHERE fs.league_id IS NULL
+      AND (
+        NOT EXISTS (SELECT 1 FROM league_meta WHERE primary_league_id IS NOT NULL)
+        OR fs.player_id IN (
+            SELECT p.player_id FROM players p
+            WHERE p.player_league_id IS NULL
+               OR p.player_league_id = (SELECT primary_league_id FROM league_meta WHERE id = 1)
+        )
+      );
 """
 
 
@@ -441,6 +540,27 @@ CREATE VIEW IF NOT EXISTS mlb_fielding_stats AS
 #
 # `p` is the required table alias for the `players` row in the query.
 ORG_ID_SQL = "COALESCE(NULLIF(p.organization_id,0), NULLIF(p.parent_team_id,0), p.team_id)"
+
+
+def primary_league_predicate(primary_league_id, alias: str = "p"):
+    """SQL predicate restricting a `players` row (aliased ``alias``) to the
+    primary MLB league — excludes co-resident top-level leagues like NPB.
+
+    Returns ``(clause, params)`` for splicing into a WHERE (parameterized, no
+    string interpolation of the id).
+
+    - ``primary_league_id is None`` (single-top-league universe / older DB) →
+      ``("1=1", [])`` — an always-true no-op, so non-multi-league leagues
+      (eMLB/vMLB) are completely unaffected.
+    - Otherwise → keep players whose league id IS the primary OR IS NULL. The
+      NULL allowance preserves backward compat (older data / single-league DBs
+      where the field isn't populated). See task_list: revisit the NULL
+      allowance (a handful of level-1 players with NULL league id slip through).
+    """
+    if primary_league_id is None:
+        return "1=1", []
+    return (f"({alias}.player_league_id = ? OR {alias}.player_league_id IS NULL)",
+            [primary_league_id])
 
 
 # ---------------------------------------------------------------------------
@@ -591,6 +711,8 @@ def init_schema(league_dir: Optional[Path] = None) -> None:
         league_dir: League data directory. If None, uses active league.
     """
     conn = get_connection(league_dir)
+    for _v in ("mlb_batting_stats", "mlb_pitching_stats", "mlb_fielding_stats"):
+        conn.execute(f"DROP VIEW IF EXISTS {_v}")
     conn.executescript(SCHEMA)
     _migrate_ratings(conn)
     _migrate_ratings_history(conn)
@@ -654,3 +776,29 @@ def _migrate_ratings_components(conn: sqlite3.Connection) -> None:
         for col in new_cols:
             if col not in existing:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} INTEGER")
+    # true_ceiling was already computed every evaluation cycle and written to
+    # `ratings`, but never to `ratings_history` — dev_speed.py had no
+    # historical ceiling series to work from other than the more
+    # conservative ceiling_score, an inconsistency with the rest of the app
+    # (contract_value._resolve prefers true_ceiling). Rows written before
+    # this migration stay NULL here; history accumulates from now on.
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(ratings_history)").fetchall()}
+    if "true_ceiling" not in existing:
+        conn.execute("ALTER TABLE ratings_history ADD COLUMN true_ceiling INTEGER")
+
+    # dev_speed's schedule/risk tag columns (2026-09-29) — table is fully
+    # derived/recomputed on every fv_calc run, so a plain ALTER (not a
+    # rebuild) is safe; old rows just carry NULL until the next recompute.
+    # Guard on the table actually existing — some callers (tests) run this
+    # migration function against a minimal schema without dev_speed at all.
+    has_table = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='dev_speed'"
+    ).fetchone()
+    if has_table:
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(dev_speed)").fetchall()}
+        for col, typ in [("schedule_status", "TEXT"), ("schedule_label", "TEXT"),
+                          ("schedule_note", "TEXT"), ("stagnant_tools", "TEXT"),
+                          ("gap_closed_pct_yr", "REAL"), ("years_to_peak", "REAL"),
+                          ("gap_smoothed", "REAL"), ("gap_trend", "REAL")]:
+            if col not in existing:
+                conn.execute(f"ALTER TABLE dev_speed ADD COLUMN {col} {typ}")

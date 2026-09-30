@@ -660,6 +660,109 @@ def compute_durability_score(stamina: int | None, role: str) -> int | None:
     return max(20, min(80, stamina))
 
 
+def _observed_career_facets(conn, player_id, run_space):
+    """Recency-weighted observed career facet runs for the run-space MLB blend.
+
+    Returns {"bat_runs","bat_pa","br_runs","br_pa","fld_runs","fld_ip"} or None.
+    bat_runs is level-relative wRAA/600 (vs the MLB league wOBA); br_runs is
+    career UBR/season; fld_runs is career ZR/season. All recency-weighted.
+    """
+    from statsplusplus.evaluation.woba import player_woba as _pw
+    wwts = run_space.get("woba_weights")
+    lg = run_space.get("lg_woba", 0.320)
+    sc = run_space.get("woba_scale", 1.28)
+    if not wwts:
+        return None
+    seasons = conn.execute(
+        "SELECT year, pa, ubr, ab, h, d, t, hr, bb, ibb, hbp, sf "
+        "FROM mlb_batting_stats WHERE player_id=? AND split_id=1 AND pa>=100 "
+        "ORDER BY year DESC LIMIT 4", (player_id,)).fetchall()
+    if not seasons:
+        return None
+    wts = [3.0, 3.0, 2.0, 1.0]
+    num_bat = num_ubr = tot_pa = tw = 0.0
+    for i, s in enumerate(seasons):
+        w = wts[i] if i < len(wts) else 1.0
+        wo = _pw(dict(s), wwts)
+        if wo is None:
+            continue
+        wraa = ((wo - lg) / sc) * 600.0
+        num_bat += w * wraa
+        num_ubr += w * (s["ubr"] or 0.0)
+        tot_pa += s["pa"]
+        tw += w
+    if tw == 0:
+        return None
+    zrs = conn.execute(
+        "SELECT zr, ip FROM fielding_stats WHERE player_id=? AND zr IS NOT NULL "
+        "AND ip>=100 ORDER BY year DESC LIMIT 3", (player_id,)).fetchall()
+    fld_runs = (sum(z["zr"] for z in zrs) / len(zrs)) if zrs else None
+    fld_ip = sum(z["ip"] for z in zrs) if zrs else 0.0
+    return {
+        "bat_runs": num_bat / tw, "bat_pa": tot_pa,
+        "br_runs": num_ubr / tw, "br_pa": tot_pa,
+        "fld_runs": fld_runs, "fld_ip": fld_ip,
+    }
+
+
+# MiLB level discount: how much a level's production translates toward MLB (and
+# how fast the bat stabilizes there). AAA close; low-A heavily discounted.
+_MILB_LEVEL_DISCOUNT = {1: 1.0, 2: 0.55, 3: 0.40, 4: 0.28, 5: 0.20, 6: 0.12, 7: 0.08, 8: 0.05}
+
+
+def _observed_milb_facets(conn, player_id, run_space, milb_league_map):
+    """Level-relative, level-discounted observed MiLB facet runs (prospects).
+
+    Bat: level-relative wRAA/600 vs the player's own MiLB league average wOBA,
+    level-discounted. Baserunning: level-discounted MiLB UBR. Defense: none
+    (MiLB fielding unavailable). Returns dict or None.
+    """
+    from statsplusplus.evaluation.woba import player_woba as _pw
+    wwts = run_space.get("woba_weights")
+    sc = run_space.get("woba_scale", 1.28)
+    if not wwts:
+        return None
+    seasons = conn.execute(
+        "SELECT year, league_id, pa, ubr, ab, h, d, t, hr, bb, ibb, hbp, sf "
+        "FROM batting_stats WHERE player_id=? AND league_id IS NOT NULL AND split_id=1 "
+        "AND pa>=50 ORDER BY year DESC LIMIT 3", (player_id,)).fetchall()
+    if not seasons:
+        return None
+    _lgwoba_cache = {}
+
+    def _milb_lg_woba(lid, year):
+        key = (lid, year)
+        if key not in _lgwoba_cache:
+            row = conn.execute(
+                "SELECT SUM(ab) ab,SUM(h) h,SUM(d) d,SUM(t) t,SUM(hr) hr,SUM(bb) bb,"
+                "SUM(ibb) ibb,SUM(hbp) hbp,SUM(sf) sf FROM batting_stats "
+                "WHERE league_id=? AND split_id=1 AND year=?", (lid, year)).fetchone()
+            _lgwoba_cache[key] = _pw(dict(row), wwts) if row and row["ab"] else None
+        return _lgwoba_cache[key]
+
+    num_bat = num_ubr = eff_pa = 0.0
+    recency = [1.0, 0.6, 0.3]
+    for i, s in enumerate(seasons):
+        wo = _pw(dict(s), wwts)
+        lgw = _milb_lg_woba(s["league_id"], s["year"])
+        if wo is None or lgw is None:
+            continue
+        lvl = (milb_league_map or {}).get(str(s["league_id"]), {}).get("level", 5)
+        disc = _MILB_LEVEL_DISCOUNT.get(lvl, 0.15)
+        rec = recency[i] if i < len(recency) else 0.2
+        wraa_600 = ((wo - lgw) / sc) * 600.0
+        num_bat += wraa_600 * disc * rec * s["pa"]
+        num_ubr += (s["ubr"] or 0.0) * disc * rec * s["pa"]
+        eff_pa += disc * rec * s["pa"]
+    if eff_pa <= 0:
+        return None
+    return {
+        "bat_runs": num_bat / eff_pa, "bat_pa": eff_pa,
+        "br_runs": num_ubr / eff_pa, "br_pa": eff_pa,
+        "fld_runs": None, "fld_ip": 0.0,  # MiLB fielding unavailable
+    }
+
+
 def derive_composite_from_components(
     offensive_grade: int | float,
     baserunning_value: int | float | None,
@@ -832,11 +935,15 @@ def compute_two_way_scores(
     arsenal: dict | None = None,
     stamina: int = 50,
     role: str = "SP",
+    run_space: dict | None = None,
+    hitter_bucket: str | None = None,
+    positional_models: dict | None = None,
 ) -> dict:
     """Compute separate hitter and pitcher Composite_Scores for a two-way player."""
     hitter_composite = compute_composite_hitter(
         hitting_tools, hitter_weights,
         defense or {}, def_weights or {},
+        run_space=run_space, bucket=hitter_bucket, positional_models=positional_models,
     )
     pitcher_composite = compute_composite_pitcher(
         pitching_tools, pitcher_weights,
@@ -1984,7 +2091,9 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
     from statsplusplus.utils.positions import assign_bucket as _assign_bucket
     from statsplusplus.evaluation.constants import DEFENSIVE_WEIGHTS
     from statsplusplus.config.league_config import LeagueConfig as _LC
-    _scale = _LC(base_dir=league_dir).ratings_scale
+    _lc = _LC(base_dir=league_dir)
+    _scale = _lc.ratings_scale
+    _primary_lid = _lc.primary_league_id  # None → single-top-league DB (no scoping)
     def _norm(val): return _norm_pkg(val, _scale)
     def _norm_display(val): return _norm_display_pkg(val, _scale)
 
@@ -2009,6 +2118,20 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
     hitter_transforms = _tool_transforms.get("hitter")
     sp_transforms = _tool_transforms.get("SP")
     rp_transforms = _tool_transforms.get("RP")
+
+    # -- Run-space facet model params (spec: run-space-facet-model). Absent →
+    #    the hitter composite falls back to the grade-space blend (legacy). --
+    _run_space = weights.get("run_space") or None
+    from statsplusplus.utils.positions import load_positional_models as _lpm
+    _positional_models = _lpm(league_dir)
+    # MiLB league->level map for prospect per-facet MiLB blend
+    _milb_league_map = {}
+    try:
+        import json as _json
+        _ls = _json.loads((league_dir / "config" / "league_settings.json").read_text())
+        _milb_league_map = _ls.get("milb_league_map", {}) or {}
+    except Exception:
+        _milb_league_map = {}
 
     # -- Load carrying tool config --
     ct_config = load_carrying_tool_config(league_dir)
@@ -2052,16 +2175,14 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
 
     # -- Query all players with their latest ratings --
     rows = conn.execute("""
-        SELECT r.*, p.age, p.pos, p.role, p.level, p.player_id as pid
+        SELECT r.*, p.age, p.pos, p.role, p.level, p.player_league_id, p.player_id as pid
         FROM ratings r
         JOIN players p ON r.player_id = p.player_id
-        WHERE r.snapshot_date = (SELECT MAX(snapshot_date) FROM ratings)
+        WHERE r.snapshot_date = (SELECT MAX(r2.snapshot_date) FROM ratings r2 WHERE r2.player_id = r.player_id)
     """).fetchall()
 
     if not rows:
         return
-
-    snapshot_date = rows[0]["snapshot_date"]
 
     # -- Ensure positional context columns exist (idempotent migration) --
     _existing_cols = {r[1] for r in conn.execute("PRAGMA table_info(ratings)").fetchall()}
@@ -2202,6 +2323,8 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
                 arsenal=arsenal,
                 stamina=stamina,
                 role=pitcher_role,
+                run_space=_run_space, hitter_bucket=hitter_bucket,
+                positional_models=_positional_models,
             )
 
             composite_score = two_way_result["primary_composite"]
@@ -2220,6 +2343,7 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
                 age=player_age,
                 ratings_scale=_scale,
                 transforms=hitter_transforms,
+                run_space=_run_space, bucket=hitter_bucket, positional_models=_positional_models,
             )
             p_ceiling = compute_ceiling(
                 potential_pitcher_tools, p_weights, two_way_result["pitcher_composite"],
@@ -2243,6 +2367,7 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
                 work_ethic=row_dict.get("wrk_ethic") or "N",
                 defense=defense_tools, def_weights=def_weights,
                 transforms=hitter_transforms,
+                run_space=_run_space, bucket=hitter_bucket, positional_models=_positional_models,
             )
             p_true_ceil = compute_true_ceiling(
                 potential_pitcher_tools, p_weights, two_way_result["pitcher_composite"],
@@ -2363,6 +2488,7 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
 
             tool_only_score = compute_composite_hitter(
                 hitter_tools, h_weights, defense_tools, def_weights, hitter_transforms,
+                run_space=_run_space, bucket=bucket, positional_models=_positional_models,
             )
             composite_score = tool_only_score
 
@@ -2378,6 +2504,7 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
                 age=player_age,
                 ratings_scale=_scale,
                 transforms=hitter_transforms,
+                run_space=_run_space, bucket=bucket, positional_models=_positional_models,
             )
             true_ceiling = compute_true_ceiling(
                 potential_hitter_tools, h_weights, composite_score,
@@ -2385,6 +2512,7 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
                 work_ethic=row_dict.get("wrk_ethic") or "N",
                 defense=defense_tools, def_weights=def_weights,
                 transforms=hitter_transforms,
+                run_space=_run_space, bucket=bucket, positional_models=_positional_models,
             )
 
             # Component scores for hitters
@@ -2431,9 +2559,22 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
         level = row_dict.get("level")
         is_mlb = (level == "1" or level == 1)
 
-        # Step 1: MLB stat blending (preserves existing behavior exactly)
+        # Step 1: MLB stat blending
         mlb_stat_2080_values = []
-        if is_mlb:
+        _run_space_hitter = (_run_space and not is_pitcher and not two_way
+                             and bucket in ("C","SS","2B","3B","CF","COF","1B"))
+        if is_mlb and _run_space_hitter:
+            # Run-space per-facet convergence: blend observed CAREER facet runs
+            # (wRAA / UBR / ZR) into the run-space composite, replacing the OPS+
+            # compute_composite_mlb blend so composite & WAR share one run total.
+            observed = _observed_career_facets(conn, player_id, _run_space)
+            if observed:
+                composite_score = compute_composite_hitter(
+                    hitter_tools, h_weights, defense_tools, def_weights, hitter_transforms,
+                    run_space=_run_space, bucket=bucket,
+                    positional_models=_positional_models, observed=observed,
+                )
+        elif is_mlb:
             stat_seasons = _load_qualifying_stat_seasons(conn, player_id, is_pitcher)
             if stat_seasons:
                 mlb_stat_2080_values = _compute_stat_signal(
@@ -2449,11 +2590,25 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
                         is_pitcher=is_pitcher,
                         bucket=bucket,
                     )
+        elif _run_space_hitter:
+            # Prospect (non-MLB) run-space per-facet MiLB blend: level-relative
+            # MiLB wRAA into the bat facet + MiLB UBR into baserunning (defense
+            # stays tool-only — MiLB fielding unavailable). Replaces the ceiling-
+            # only PAC signal with a run-level, stabilization-weighted blend.
+            _milb_obs = _observed_milb_facets(conn, player_id, _run_space, _milb_league_map)
+            if _milb_obs:
+                composite_score = compute_composite_hitter(
+                    hitter_tools, h_weights, defense_tools, def_weights, hitter_transforms,
+                    run_space=_run_space, bucket=bucket,
+                    positional_models=_positional_models, observed=_milb_obs,
+                )
 
         # Step 2: MiLB stat blending (additive for all players with MiLB data)
         # Only applies when MLB stat blending hasn't already provided a strong signal.
         # The MiLB contribution is scaled DOWN as MLB sample grows.
-        if milb_averages:
+        # Skip for run-space hitters — their MiLB signal is already folded in per
+        # facet (Step 1) at the run level; the OPS+ blend here would double-count.
+        if milb_averages and not _run_space_hitter:
             milb_seasons = _load_milb_stat_seasons(conn, player_id, is_pitcher, milb_averages)
             if milb_seasons:
                 disc_key = "pitcher" if is_pitcher else "hitter"
@@ -2505,8 +2660,13 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
                             composite_score * (1.0 - milb_blend) + milb_signal * milb_blend
                         )))
 
-        # Ensure ceiling >= composite after stat blending
+        # Ensure ceiling >= composite after stat blending. Both ceiling_score
+        # (display) and true_ceiling (drives FV/surplus via fv_calc's Pot) must
+        # be floored at the FINAL composite — the observed stat blend (Step 1/2)
+        # can lift the composite above the pre-blend ceiling floor.
         ceiling_score = max(ceiling_score, composite_score)
+        if true_ceiling is not None:
+            true_ceiling = max(true_ceiling, composite_score)
 
         # -- Divergence detection with component context (Pass 1 — no positional context yet) --
         ovr = row_dict.get("ovr")
@@ -2517,9 +2677,15 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
         }
         divergence = detect_divergence(tool_only_score, ovr, components=components_dict)
 
-        # Collect MLB hitter offensive grades for positional median computation
+        # Collect MLB hitter offensive grades for positional median computation.
+        # Scope to the PRIMARY league — a co-resident top-level league (e.g. NPB
+        # in PPL) is also level='1' and would skew the positional medians that
+        # every prospect's FV is graded against. Inclusive of NULL league id
+        # (backward compat; see db.primary_league_predicate).
+        _plid = row_dict.get("player_league_id")
+        is_primary = (_primary_lid is None or _plid is None or _plid == _primary_lid)
         is_hitter = not is_pitcher
-        if is_mlb and is_hitter and offensive_grade is not None:
+        if is_mlb and is_primary and is_hitter and offensive_grade is not None:
             mlb_offensive_grades.setdefault(bucket, []).append(offensive_grade)
 
         # Collect update tuples (positional_percentile and positional_median
@@ -2527,18 +2693,19 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
         positional_percentile: float | None = None
         positional_median: int | None = None
 
+        player_snapshot_date = row_dict["snapshot_date"]
         ratings_updates.append((
             composite_score, ceiling_score, tool_only_score, secondary_composite,
             offensive_grade, baserunning_value, defensive_value,
             durability_score, offensive_ceiling, true_ceiling,
             positional_percentile, positional_median,
-            player_id, snapshot_date,
+            player_id, player_snapshot_date,
         ))
         history_updates.append((
             composite_score, ceiling_score,
             offensive_grade, baserunning_value, defensive_value,
-            durability_score, offensive_ceiling,
-            player_id, snapshot_date,
+            durability_score, offensive_ceiling, true_ceiling,
+            player_id, player_snapshot_date,
         ))
 
         # Store info for Pass 2 divergence enrichment (hitters only)
@@ -2617,11 +2784,19 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
     try:
         hist_cols = {r[1] for r in conn.execute("PRAGMA table_info(ratings_history)").fetchall()}
         if "composite_score" in hist_cols:
-            conn.executemany("""
+            set_cols = ["composite_score", "ceiling_score", "offensive_grade",
+                        "baserunning_value", "defensive_value", "durability_score",
+                        "offensive_ceiling"]
+            if "true_ceiling" in hist_cols:
+                set_cols.append("true_ceiling")
+            else:
+                # Older DB not yet migrated — drop that value from each tuple
+                # rather than fail the whole batch write.
+                history_updates = [(*t[:7], *t[8:]) for t in history_updates]
+            set_clause = ", ".join(f"{c} = ?" for c in set_cols)
+            conn.executemany(f"""
                 UPDATE ratings_history
-                SET composite_score = ?, ceiling_score = ?,
-                    offensive_grade = ?, baserunning_value = ?, defensive_value = ?,
-                    durability_score = ?, offensive_ceiling = ?
+                SET {set_clause}
                 WHERE player_id = ? AND snapshot_date = ?
             """, history_updates)
     except Exception:

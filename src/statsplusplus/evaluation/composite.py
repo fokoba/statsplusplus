@@ -593,7 +593,16 @@ def _run_space_hitter_composite(tools, defense, bucket, run_space, positional_mo
         fld_ip = observed.get("fld_ip", 0.0)
         if observed.get("fld_runs") is not None and fld_ip > 0:
             scf = _fr.facet_stat_confidence("fielding", fld_ip)
-            fld = (1 - scf) * fld + scf * observed["fld_runs"]
+            obs_fld = observed["fld_runs"]
+            # Positional ZR difficulty bonus (data-driven, calibrated per
+            # league): real demonstrated +ZR at a position where few players
+            # clear 0 (e.g. CF/SS) counts for more than the same +ZR at an
+            # easy position. Only rewards a POSITIVE observed reading — it
+            # doesn't add extra punishment for below-average defense.
+            if obs_fld > 0:
+                diff_mult = (run_space.get("fld_difficulty") or {}).get(bucket, 1.0)
+                obs_fld = obs_fld * diff_mult
+            fld = (1 - scf) * fld + scf * obs_fld
 
     total = bat_tool + br_tool + fld + pos
     return _fr.runs_to_composite(total, mapping)

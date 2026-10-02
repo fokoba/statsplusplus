@@ -461,11 +461,17 @@ CREATE TABLE IF NOT EXISTS rule5_eligible (
 -- (future years keep using the automatic WAR-ranked allocation, since roles
 -- may change as players age/depart). A position with no rows here falls
 -- back entirely to the automatic algorithm in allocate_playing_time().
+-- share: optional explicit playing-time fraction (0-1) for pitcher roles
+-- (position 'SP'/'RP'), used verbatim instead of the automatic split when
+-- set. NULL for batting-position rows, and NULL for pitcher rows where the
+-- user only specified a role tier (e.g. "long_relief") and wants the
+-- automatic within-tier weighting.
 CREATE TABLE IF NOT EXISTS depth_chart_roles (
     team_id     INTEGER NOT NULL,
     position    TEXT NOT NULL,
     player_id   INTEGER NOT NULL,
     role        TEXT NOT NULL,
+    share       REAL,
     updated_at  TEXT,
     PRIMARY KEY (team_id, position, player_id)
 );
@@ -695,6 +701,12 @@ def _migrate_misc(conn: sqlite3.Connection) -> None:
     p_cols = {r[1] for r in conn.execute("PRAGMA table_info(players)").fetchall()}
     if "retired" not in p_cols:
         conn.execute("ALTER TABLE players ADD COLUMN retired INTEGER")
+
+    # depth_chart_roles.share — added for manual pitcher role overrides
+    # (explicit IP-share pins for SP/RP), see the table's own comment.
+    dcr_cols = {r[1] for r in conn.execute("PRAGMA table_info(depth_chart_roles)").fetchall()}
+    if "share" not in dcr_cols:
+        conn.execute("ALTER TABLE depth_chart_roles ADD COLUMN share REAL")
 
 
 # ---------------------------------------------------------------------------

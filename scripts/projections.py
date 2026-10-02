@@ -634,53 +634,157 @@ def allocate_playing_time(players_by_pos, team_pa=None, team_ip=None, manual_rol
     return result
 
 
-def allocate_pitcher_time(sp_list, rp_list, team_ip=None):
+# Manual pitcher role designations (see web/team_queries.py::get_pitcher_depth_chart_roles).
+# When any pitcher in the SP or RP pool has a manual role, it fully replaces
+# the automatic WAR-ranked allocation for that bucket — same philosophy as
+# the batting-side manual roles (a designation is a full override, not a
+# bias on top of the auto-ranking).
+SP_ROLE_STARTER = "starter"
+SP_ROLE_SPOT = "spot_starter"
+
+RP_ROLE_CLOSER = "closer"
+RP_ROLE_SETUP = "setup"
+RP_ROLE_MIDDLE = "middle_relief"
+RP_ROLE_LONG = "long_relief"
+_RP_ROLE_LABEL = {
+    RP_ROLE_CLOSER: "CL", RP_ROLE_SETUP: "SU",
+    RP_ROLE_MIDDLE: "MR", RP_ROLE_LONG: "LR",
+}
+# A spot starter's default weight relative to a full-time starter (1.0) when
+# splitting whatever share the full-time starters didn't explicitly claim —
+# e.g. "starts twice for every 10 Valdes starts" is a small fraction of a
+# full starter's workload, not an equal share.
+_SP_SPOT_WEIGHT = 0.3
+
+
+def _manual_sp_entries(sp_list, roles):
+    """Build (player, share) entries for the SP bucket from manual overrides.
+
+    roles: dict of player_id -> (role, share_or_None). Players not in this
+    dict are dropped — a manual designation is a full override, not a bias.
+    Shares sum to 1.0 across the returned entries (explicit shares are
+    honored as-is when they already sum to <= 1.0; anything unclaimed is
+    split among role-only entries, weighted by role; the whole set is then
+    renormalized in case explicit shares alone exceed 1.0).
+    """
+    by_pid = {p["player_id"]: p for p in sp_list}
+    tagged = [(pid, role, share) for pid, (role, share) in roles.items() if pid in by_pid]
+    if not tagged:
+        return None
+
+    explicit = [(pid, role, share) for pid, role, share in tagged if share]
+    implicit = [(pid, role, share) for pid, role, share in tagged if not share]
+
+    explicit_total = sum(share for _, _, share in explicit)
+    remaining = max(1.0 - explicit_total, 0.0)
+    weights = [(_SP_SPOT_WEIGHT if role == SP_ROLE_SPOT else 1.0) for _, role, _ in implicit]
+    wt_total = sum(weights) or 1.0
+
+    entries = [(by_pid[pid], share) for pid, _, share in explicit]
+    entries += [(by_pid[pid], remaining * w / wt_total)
+                for (pid, _, _), w in zip(implicit, weights)]
+
+    total = sum(s for _, s in entries) or 1.0
+    return [(p, s / total) for p, s in entries]
+
+
+def allocate_pitcher_time(sp_list, rp_list, team_ip=None,
+                           manual_sp_roles=None, manual_rp_roles=None):
     """Allocate innings to SP and RP lists.
 
     Each pitcher dict needs: 'player_id', 'name', 'war_proj', 'level_discount'
+    manual_sp_roles / manual_rp_roles: optional dict of player_id -> (role, share)
+        from get_pitcher_depth_chart_roles.
+
+        SP semantics: presence of ANY manual SP entry fully overrides the
+        automatic rotation ranking — a 5-man-rotation-sized bucket means
+        every slot is a real decision, so an untagged pitcher genuinely
+        shouldn't be projected into it (see _manual_sp_entries).
+
+        RP semantics are different on purpose: a bullpen has 6-8 real
+        arms, so tagging 1-2 of them (e.g. "these two are long relief")
+        must not wipe the rest of the pen from the projection. A manual
+        RP entry only pins that pitcher's role *label* (and, if an
+        explicit share was given, their exact IP share); every other
+        pitcher — tagged or not — still gets a share from the normal
+        WAR-ranked decay curve. Explicit shares are carved out first and
+        the decay curve is applied to whatever pool-fraction is left.
     Returns (sp_result, rp_result) with 'pt_pct' and 'ip' added.
     """
     team_ip = team_ip or DEFAULT_TEAM_IP
     sp_ip_total = team_ip * 0.62  # ~62% of innings to starters
     rp_ip_total = team_ip - sp_ip_total
 
-    # SP: rank by WAR, assign shares — redistribute if fewer than 6 SP
-    sp_list.sort(key=lambda x: x["war_proj"] * x.get("level_discount", 1.0), reverse=True)
-    sp_count = min(len(sp_list), 6)
-    sp_shares = SP_IP_SHARES[:sp_count]
-    if sp_shares:
-        # Normalize so shares sum to 1.0
-        share_total = sum(sp_shares)
-        sp_shares = [s / share_total for s in sp_shares]
+    # ── SP ──────────────────────────────────────────────────────────────
+    manual_sp = _manual_sp_entries(sp_list, manual_sp_roles) if manual_sp_roles else None
     sp_result = []
-    for i, p in enumerate(sp_list[:sp_count]):
-        share = sp_shares[i]
-        ip = round(sp_ip_total * share, 1)
-        p_out = {k: v for k, v in p.items()}
-        p_out["pt_pct"] = round(share * 100, 1)
-        p_out["ip"] = ip
-        sp_result.append(p_out)
-
-    # RP: rank by WAR, distribute remaining IP proportionally
-    rp_list.sort(key=lambda x: x["war_proj"] * x.get("level_discount", 1.0), reverse=True)
-    n_rp = min(len(rp_list), 8)
-    rp_result = []
-    if n_rp > 0:
-        # Weighted distribution: top RP gets more IP, declining
-        rp_weights = [max(1.0 - i * 0.12, 0.3) for i in range(n_rp)]
-        wt_total = sum(rp_weights)
-        for i, p in enumerate(rp_list[:n_rp]):
-            ip = round(rp_ip_total * rp_weights[i] / wt_total, 1)
+    if manual_sp is not None:
+        for p, share in manual_sp:
+            ip = round(sp_ip_total * share, 1)
             p_out = {k: v for k, v in p.items()}
-            p_out["pt_pct"] = round((ip / team_ip) * 100, 1)
+            p_out["pt_pct"] = round(share * 100, 1)
             p_out["ip"] = ip
-            if i == 0:
-                p_out["rp_role"] = "CL"
-            elif i <= 2:
-                p_out["rp_role"] = "SU"
-            else:
-                p_out["rp_role"] = "MR"
-            rp_result.append(p_out)
+            sp_result.append(p_out)
+    else:
+        # Automatic: rank by WAR, assign shares — redistribute if fewer than 6 SP
+        sp_list.sort(key=lambda x: x["war_proj"] * x.get("level_discount", 1.0), reverse=True)
+        sp_count = min(len(sp_list), 6)
+        sp_shares = SP_IP_SHARES[:sp_count]
+        if sp_shares:
+            share_total = sum(sp_shares)
+            sp_shares = [s / share_total for s in sp_shares]
+        for i, p in enumerate(sp_list[:sp_count]):
+            share = sp_shares[i]
+            ip = round(sp_ip_total * share, 1)
+            p_out = {k: v for k, v in p.items()}
+            p_out["pt_pct"] = round(share * 100, 1)
+            p_out["ip"] = ip
+            sp_result.append(p_out)
+
+    # ── RP ──────────────────────────────────────────────────────────────
+    manual_rp_roles = manual_rp_roles or {}
+    rp_list = sorted(rp_list, key=lambda x: x["war_proj"] * x.get("level_discount", 1.0),
+                      reverse=True)
+    n_rp = min(len(rp_list), 8)
+    pool = rp_list[:n_rp]
+
+    pinned = {pid: share for pid, (_role, share) in manual_rp_roles.items() if share}
+    pinned_total = min(sum(pinned.values()), 1.0)
+    auto_pool = [p for p in pool if p["player_id"] not in pinned]
+    remaining_frac = max(1.0 - pinned_total, 0.0)
+
+    rp_result = []
+    auto_weights = [max(1.0 - i * 0.12, 0.3) for i in range(len(auto_pool))]
+    wt_total = sum(auto_weights) or 1.0
+    for i, (p, w) in enumerate(zip(auto_pool, auto_weights)):
+        share = remaining_frac * w / wt_total
+        ip = round(rp_ip_total * share, 1)
+        p_out = {k: v for k, v in p.items()}
+        p_out["pt_pct"] = round((ip / team_ip) * 100, 1)
+        p_out["ip"] = ip
+        manual_role = manual_rp_roles.get(p["player_id"], (None, None))[0]
+        if manual_role:
+            p_out["rp_role"] = _RP_ROLE_LABEL.get(manual_role, "MR")
+        elif i == 0:
+            p_out["rp_role"] = "CL"
+        elif i <= 2:
+            p_out["rp_role"] = "SU"
+        else:
+            p_out["rp_role"] = "MR"
+        rp_result.append(p_out)
+
+    for pid, share in pinned.items():
+        p = next((x for x in pool if x["player_id"] == pid), None)
+        if p is None:
+            continue
+        ip = round(rp_ip_total * share, 1)
+        p_out = {k: v for k, v in p.items()}
+        p_out["pt_pct"] = round((ip / team_ip) * 100, 1)
+        p_out["ip"] = ip
+        p_out["rp_role"] = _RP_ROLE_LABEL.get(manual_rp_roles[pid][0], "MR")
+        rp_result.append(p_out)
+
+    rp_result.sort(key=lambda x: x["ip"], reverse=True)
 
     return sp_result, rp_result
 

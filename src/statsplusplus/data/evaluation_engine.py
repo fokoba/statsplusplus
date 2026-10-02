@@ -673,12 +673,71 @@ def compute_durability_score(stamina: int | None, role: str) -> int | None:
     return max(20, min(80, stamina))
 
 
-def _observed_career_facets(conn, player_id, run_space):
+# Positional bucket -> the raw fielding_stats.position code(s) that count as
+# "playing this bucket". Used to filter observed ZR to the player's CURRENT
+# position — a season spent misplayed out of position (e.g. a true 2B stuck
+# in a corner OF) shouldn't drag down the defensive value of the position he
+# actually plays now.
+_BUCKET_POS_CODES: dict[str, tuple[int, ...]] = {
+    "C": (2,), "1B": (3,), "2B": (4,), "3B": (5,), "SS": (6,),
+    "COF": (7, 9), "CF": (8,),
+}
+
+# Team-change decay: how much a season logged at a different team than the
+# player's current one gets discounted, shrinking further as current-team PA
+# accrues. Floor keeps old-team data from ever hitting zero weight.
+_TEAM_DECAY_FLOOR = 0.3
+_TEAM_DECAY_PA_NORM = 900.0
+
+# Automatic platoon-split detection off the CURRENT season's L/R PA split.
+_PLATOON_MIN_PA = 30
+_PLATOON_DOMINANCE_THRESHOLD = 0.75
+
+# A player's bucket is chosen by best career GRADE, which can disagree with
+# where he's actually being deployed THIS season (e.g. a 75-grade LF/60-grade
+# CF bucketed COF, but moved to CF this year and thriving there). When that
+# happens, his current-season position wouldn't be queried for ZR at all under
+# a strict bucket-only filter. Any position with at least this much CURRENT
+# SEASON innings gets folded into the ZR position pool alongside the bucket's
+# own position(s) — the normal per-season ip>=100 qualifying gate on the ZR
+# query itself still applies before that position's data actually counts.
+_CURRENT_SEASON_MIN_IP = 50
+
+
+def _observed_career_facets(conn, player_id, run_space, bucket=None):
     """Recency-weighted observed career facet runs for the run-space MLB blend.
 
     Returns {"bat_runs","bat_pa","br_runs","br_pa","fld_runs","fld_ip"} or None.
     bat_runs is level-relative wRAA/600 (vs the MLB league wOBA); br_runs is
     career UBR/season; fld_runs is career ZR/season. All recency-weighted.
+
+    ``fld_runs`` is restricted to seasons played at ``bucket``'s own position
+    (via ``_BUCKET_POS_CODES``), plus any position with meaningful CURRENT
+    SEASON innings (``_CURRENT_SEASON_MIN_IP``) even if it falls outside the
+    bucket — a player's bucket is chosen by best career grade, which can
+    disagree with where he's actually deployed this year (e.g. a better-LF-
+    than-CF player moved to CF this season and thriving there); his current
+    role shouldn't be invisible just because a career grade points elsewhere.
+    A season spent misplayed out of position in the PAST still doesn't drag
+    down the bucket's defensive value. Falls back to all positions if
+    ``bucket`` is unmapped (e.g. no data for the exact position yet).
+
+    The BATTING facet is further adjusted by two automatic, data-driven
+    mechanisms (both PA-based, both self-limiting — neither kicks in without
+    enough sample):
+
+    - **Team-change decay**: seasons logged with a team other than the
+      player's current one are progressively discounted as his current-team
+      PA accrues (``_TEAM_DECAY_PA_NORM`` sample fully "resets" trust in the
+      new situation), floored at ``_TEAM_DECAY_FLOOR`` so old-team data never
+      vanishes outright — skill carries over, it just weighs less the more a
+      player proves himself somewhere new.
+    - **Automatic platoon-split detection**: when the CURRENT season's PA is
+      lopsided to one side of the L/R split (``_PLATOON_DOMINANCE_THRESHOLD``+
+      of PA on one side, with a minimum sample), the batting facet is judged
+      on that split's own history only — a player newly deployed in a
+      platoon role should be judged on how he performs in that role, not
+      diluted by a side of the plate he barely sees.
     """
     from statsplusplus.evaluation.woba import player_woba as _pw
     wwts = run_space.get("woba_weights")
@@ -686,34 +745,91 @@ def _observed_career_facets(conn, player_id, run_space):
     sc = run_space.get("woba_scale", 1.28)
     if not wwts:
         return None
-    seasons = conn.execute(
-        "SELECT year, pa, ubr, ab, h, d, t, hr, bb, ibb, hbp, sf "
-        "FROM mlb_batting_stats WHERE player_id=? AND split_id=1 AND pa>=100 "
-        "ORDER BY year DESC LIMIT 4", (player_id,)).fetchall()
-    if not seasons:
+
+    latest = conn.execute(
+        "SELECT year, team_id FROM mlb_batting_stats WHERE player_id=? AND split_id=1 "
+        "AND pa>0 ORDER BY year DESC LIMIT 1", (player_id,)).fetchone()
+    if not latest:
         return None
+    current_team = latest["team_id"]
+    current_year = latest["year"]
+
+    # Automatic platoon-split detection off the CURRENT season's L/R PA split.
+    split_rows = conn.execute(
+        "SELECT split_id, pa FROM mlb_batting_stats WHERE player_id=? AND year=? "
+        "AND split_id IN (2, 3)", (player_id, current_year)).fetchall()
+    pa_l = next((r["pa"] for r in split_rows if r["split_id"] == 2), 0) or 0
+    pa_r = next((r["pa"] for r in split_rows if r["split_id"] == 3), 0) or 0
+    bat_split_id = 1
+    if pa_l + pa_r >= _PLATOON_MIN_PA:
+        dom_pa = max(pa_l, pa_r)
+        if dom_pa / (pa_l + pa_r) >= _PLATOON_DOMINANCE_THRESHOLD:
+            bat_split_id = 2 if pa_l > pa_r else 3
+
+    pa_min = 100 if bat_split_id == 1 else 40
+    bat_seasons = conn.execute(
+        "SELECT year, team_id, pa, ab, h, d, t, hr, bb, ibb, hbp, sf "
+        "FROM mlb_batting_stats WHERE player_id=? AND split_id=? AND pa>=? "
+        "ORDER BY year DESC LIMIT 4", (player_id, bat_split_id, pa_min)).fetchall()
+    if not bat_seasons:
+        return None
+
+    current_team_pa = sum(s["pa"] for s in bat_seasons if s["team_id"] == current_team)
+    team_decay = max(_TEAM_DECAY_FLOOR, 1.0 - current_team_pa / _TEAM_DECAY_PA_NORM)
+
     wts = [3.0, 3.0, 2.0, 1.0]
-    num_bat = num_ubr = tot_pa = tw = 0.0
-    for i, s in enumerate(seasons):
+    num_bat = tot_bat_pa = tw_bat = 0.0
+    for i, s in enumerate(bat_seasons):
         w = wts[i] if i < len(wts) else 1.0
+        if s["team_id"] != current_team:
+            w *= team_decay
         wo = _pw(dict(s), wwts)
         if wo is None:
             continue
         wraa = ((wo - lg) / sc) * 600.0
         num_bat += w * wraa
-        num_ubr += w * (s["ubr"] or 0.0)
-        tot_pa += s["pa"]
-        tw += w
-    if tw == 0:
+        tot_bat_pa += s["pa"]
+        tw_bat += w
+    if tw_bat == 0:
         return None
-    zrs = conn.execute(
-        "SELECT zr, ip FROM fielding_stats WHERE player_id=? AND zr IS NOT NULL "
-        "AND ip>=100 ORDER BY year DESC LIMIT 3", (player_id,)).fetchall()
+    bat_runs = num_bat / tw_bat
+
+    # Baserunning always uses the overall (split 1) line — platoon usage
+    # doesn't change a player's baserunning ability the way it changes his
+    # batting production against a given throwing hand.
+    br_seasons = conn.execute(
+        "SELECT year, pa, ubr FROM mlb_batting_stats WHERE player_id=? AND split_id=1 "
+        "AND pa>=100 ORDER BY year DESC LIMIT 4", (player_id,)).fetchall()
+    num_ubr = tot_br_pa = tw_br = 0.0
+    for i, s in enumerate(br_seasons):
+        w = wts[i] if i < len(wts) else 1.0
+        num_ubr += w * (s["ubr"] or 0.0)
+        tot_br_pa += s["pa"]
+        tw_br += w
+    br_runs = (num_ubr / tw_br) if tw_br else None
+
+    pos_codes = set(_BUCKET_POS_CODES.get(bucket) or ())
+    current_fld = conn.execute(
+        "SELECT position, SUM(ip) ip FROM fielding_stats WHERE player_id=? "
+        "AND year=? GROUP BY position", (player_id, current_year)).fetchall()
+    for r in current_fld:
+        if r["ip"] and r["ip"] >= _CURRENT_SEASON_MIN_IP:
+            pos_codes.add(r["position"])
+    if pos_codes:
+        placeholders = ",".join("?" * len(pos_codes))
+        zrs = conn.execute(
+            f"SELECT zr, ip FROM fielding_stats WHERE player_id=? AND zr IS NOT NULL "
+            f"AND ip>=100 AND position IN ({placeholders}) ORDER BY year DESC LIMIT 3",
+            (player_id, *pos_codes)).fetchall()
+    else:
+        zrs = conn.execute(
+            "SELECT zr, ip FROM fielding_stats WHERE player_id=? AND zr IS NOT NULL "
+            "AND ip>=100 ORDER BY year DESC LIMIT 3", (player_id,)).fetchall()
     fld_runs = (sum(z["zr"] for z in zrs) / len(zrs)) if zrs else None
     fld_ip = sum(z["ip"] for z in zrs) if zrs else 0.0
     return {
-        "bat_runs": num_bat / tw, "bat_pa": tot_pa,
-        "br_runs": num_ubr / tw, "br_pa": tot_pa,
+        "bat_runs": bat_runs, "bat_pa": tot_bat_pa,
+        "br_runs": br_runs if br_runs is not None else 0.0, "br_pa": tot_br_pa,
         "fld_runs": fld_runs, "fld_ip": fld_ip,
     }
 
@@ -2580,7 +2696,7 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
             # Run-space per-facet convergence: blend observed CAREER facet runs
             # (wRAA / UBR / ZR) into the run-space composite, replacing the OPS+
             # compute_composite_mlb blend so composite & WAR share one run total.
-            observed = _observed_career_facets(conn, player_id, _run_space)
+            observed = _observed_career_facets(conn, player_id, _run_space, bucket=bucket)
             if observed:
                 composite_score = compute_composite_hitter(
                     hitter_tools, h_weights, defense_tools, def_weights, hitter_transforms,

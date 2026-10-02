@@ -15,6 +15,19 @@ for _p in (_SRC, _PROJECT_ROOT):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+# Reloader disabled (2026-10-01) — background Claude Code tasks regularly
+# edit source files in this same working tree while the dev server is
+# running, and Werkzeug's debug-mode auto-reloader restarts the whole
+# worker process on every watched-file change. Forrest reported the app
+# "crashing" multiple times in a day; traced it to exactly this — a restart
+# mid-request looks identical to a crash from the browser's side. Explicit
+# relaunch (the existing "relaunch localhost" workflow) now required to
+# pick up code changes. See the matching USE_RELOADER check below, which
+# keeps the auto-ingest background thread starting correctly either way —
+# WERKZEUG_RUN_MAIN is only set when the reloader spawns its watcher/worker
+# split, so without the reloader that guard alone would never fire.
+USE_RELOADER = False
+
 from flask import Flask, render_template, redirect, request, g, session
 import werkzeug.exceptions
 import queries
@@ -71,7 +84,7 @@ except Exception:
 # (which also executes this module's top-level code once, before spawning
 # the real worker subprocess) doesn't also start a duplicate thread — only
 # the actual worker process (marked WERKZEUG_RUN_MAIN=true) should.
-if os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not USE_RELOADER:
     def _local_ingest_loop():
         import time
         sys.path.insert(0, str(Path(_PROJECT_ROOT, "scripts")))
@@ -783,4 +796,4 @@ def upload_salary(tid):
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5001, threaded=True)
+    app.run(debug=True, port=5001, threaded=True, use_reloader=USE_RELOADER)

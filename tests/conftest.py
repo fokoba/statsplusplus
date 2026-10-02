@@ -206,6 +206,7 @@ CREATE TABLE IF NOT EXISTS depth_chart_roles (
     position    TEXT NOT NULL,
     player_id   INTEGER NOT NULL,
     role        TEXT NOT NULL,
+    share       REAL,
     updated_at  TEXT,
     PRIMARY KEY (team_id, position, player_id)
 );

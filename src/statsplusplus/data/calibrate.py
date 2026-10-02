@@ -523,6 +523,38 @@ def _calibrate_run_space(conn, game_year, role_map, woba_wts, off_norm, result_h
         if cur:
             def_curve[bk] = cur
 
+    # --- positional ZR difficulty (data-driven bonus for real +ZR at hard
+    # positions) ---
+    # Raw population-wide %positive-ZR is roughly a coin flip at EVERY
+    # position (ZR is constructed to be ~mean-zero league-wide), so that
+    # doesn't distinguish "hard" from "easy" positions. The real signal
+    # Forrest described — a 65-grade barely avoiding negative ZR — shows up
+    # when you condition on grade: among players who ALREADY carry a plus
+    # (60+) defensive tool grade at the position, how often does that
+    # actually convert to real positive ZR? At COF/2B/3B a plus grade
+    # converts to +ZR ~75-95% of the time; at SS/CF/C it's closer to a coin
+    # flip (~55-58%) — up-the-middle/premium spots are genuinely harder to
+    # turn rated skill into measured value. A real demonstrated +ZR there is
+    # more meaningful than the same +ZR at an easy position, so give the
+    # OBSERVED (not tool-projected) fielding blend a bonus there. Fully
+    # data-driven and self-calibrating per league.
+    fld_difficulty = {}
+    for bk, (code, tool) in pos_cfg.items():
+        codes = code if isinstance(code, str) else f"({code})"
+        zrows = conn.execute(f"""SELECT f.zr FROM fielding_stats f
+            JOIN latest_ratings r ON r.player_id=f.player_id
+            WHERE f.position IN {codes} AND f.zr IS NOT NULL AND f.ip>=100
+              AND r.{tool}>=60 AND f.year BETWEEN ? AND ?""",
+            (year_lo, year_hi)).fetchall()
+        zrs = [x["zr"] for x in zrows]
+        if len(zrs) >= 15:
+            pct_pos = sum(1 for z in zrs if z > 0) / len(zrs)
+            # 75%+ conversion is easy -> no bonus (mult=1.0). Below that,
+            # scale up to a 1.5x cap so a thin conversion rate (~50-60% at
+            # SS/CF/C) earns real, but bounded, extra credit.
+            mult = min(1.5, max(1.0, 0.75 / pct_pos)) if pct_pos > 0 else 1.5
+            fld_difficulty[bk] = round(mult, 3)
+
     # --- tool->wOBA fit (for prospect/tool projection) ---
     fitrows = conn.execute("""SELECT r.cntct,r.gap,r.pow,r.eye,b.ab,b.h,b.d,b.t,b.hr,b.bb,b.ibb,b.hbp,b.sf
         FROM latest_ratings r JOIN players p ON r.player_id=p.player_id
@@ -557,9 +589,22 @@ def _calibrate_run_space(conn, game_year, role_map, woba_wts, off_norm, result_h
         totals.append(parts["total_runs"])
         if r["war"] is not None:
             wars.append(r["war"])
-        pe = conn.execute("SELECT composite FROM player_evaluation WHERE player_id=? LIMIT 1", (r["player_id"],)).fetchone()
-        if pe and pe["composite"]:
-            comps.append(pe["composite"])
+        # `player_evaluation` is a dead table in this fork (always empty — see
+        # web/player_queries.py's comment on the same table) — composite scores
+        # live on `latest_ratings`, already joined as `r` here. Using the
+        # CURRENT composite_score as the fit target for a NEW run->composite
+        # mapping is a bootstrap-calibration, same pattern as `tool_woba_fit`
+        # (fit against real wOBA) and `anchor` (fit against real WAR) above:
+        # it isn't circular, because the run-space totals come from an
+        # independently-derived facet model (wOBA scale, br_curve, def_curve),
+        # not from composite_score itself — this mapping only re-expresses
+        # those independently-computed run totals on the legacy grade-space
+        # scale so the new model doesn't cause a level shift, not to reproduce
+        # composite_score's existing biases. Ties the new run-space composite's
+        # scale/dispersion to the model it displaces rather than inventing an
+        # arbitrary new one.
+        if r["composite_score"] is not None:
+            comps.append(r["composite_score"])
     anchor = _fr.solve_war_anchor(totals, wars) if wars else {}
 
     # Population center for the composite mapping: the run->composite map is
@@ -590,9 +635,8 @@ def _calibrate_run_space(conn, game_year, role_map, woba_wts, off_norm, result_h
                                    {"speed": norm(r["speed"]), "steal": norm(r["steal"])},
                                    dt, bk, br_curve=br_curve, def_curve=def_curve,
                                    positional_models=pmodels, pa=600, runs_per_win=9.5)
-            pe = conn.execute("SELECT composite FROM player_evaluation WHERE player_id=? LIMIT 1", (r["player_id"],)).fetchone()
-            if pe and pe["composite"]:
-                pop_runs.append(parts["total_runs"]); pop_comps.append(pe["composite"])
+            if r["composite_score"] is not None:
+                pop_runs.append(parts["total_runs"]); pop_comps.append(r["composite_score"])
     import statistics as _st
     pop_runs_mean = _st.mean(pop_runs) if len(pop_runs) >= 10 else None
     pop_comp_mean = _st.mean(pop_comps) if len(pop_comps) >= 10 else None
@@ -608,6 +652,7 @@ def _calibrate_run_space(conn, game_year, role_map, woba_wts, off_norm, result_h
         "tool_woba_fit": tool_woba_fit,
         "br_curve": br_curve,
         "def_curve": def_curve,
+        "fld_difficulty": fld_difficulty,
         "anchor": anchor,
         "comp_mapping": comp_mapping,
     }

@@ -200,8 +200,16 @@ def api_waiver_wire():
 def api_depth_chart_role():
     """Set (or clear) a manual depth-chart role for a player at a position.
 
-    Body: {team_id, position, player_id, role}. role="auto" (or omitted)
-    clears the override and falls back to the automatic algorithm.
+    Body: {team_id, position, player_id, role, share?}. role="auto" (or
+    omitted) clears the override and falls back to the automatic algorithm.
+
+    For pitcher positions ("SP"/"RP"), role is one of "starter"/"spot_starter"
+    (SP) or "closer"/"setup"/"middle_relief"/"long_relief" (RP), and `share`
+    is an optional explicit playing-time fraction in (0, 1] — e.g. 0.33 for
+    "gets a third of the rotation's innings". Omit `share` to let the
+    within-tier weighting fill in the rest automatically (see
+    projections.allocate_pitcher_time). `share` is ignored for batting
+    positions.
     """
     import queries
     data = request.get_json(silent=True) or {}
@@ -212,8 +220,9 @@ def api_depth_chart_role():
     except (KeyError, TypeError, ValueError):
         return jsonify({"ok": False, "error": "Missing/invalid team_id, position, or player_id"}), 400
     role = data.get("role") or "auto"
+    share = data.get("share")
     try:
-        queries.set_depth_chart_role(team_id, position, player_id, role)
+        queries.set_depth_chart_role(team_id, position, player_id, role, share=share)
         return jsonify({"ok": True})
     except ValueError as e:
         return jsonify({"ok": False, "error": str(e)}), 400

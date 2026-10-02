@@ -3345,12 +3345,25 @@ def get_draft_org_depth(team_id):
 
 DEPTH_CHART_ROLES = ("starter", "platoon_vr", "platoon_vl", "bench")
 
+# Pitcher-side manual roles, set on the pseudo-positions "SP" and "RP".
+# "starter"/"spot_starter" apply to SP; the rest are bullpen usage tiers
+# for RP. Unlike batting roles, these may carry an explicit `share` (see
+# projections.allocate_pitcher_time / _manual_sp_entries for how it's used).
+PITCHER_DEPTH_CHART_ROLES = (
+    "starter", "spot_starter",
+    "closer", "setup", "middle_relief", "long_relief",
+)
+
 
 def get_depth_chart_roles(team_id):
-    """Manual depth-chart role overrides for a team: {position: {player_id: role}}."""
+    """Manual depth-chart role overrides for a team: {position: {player_id: role}}.
+
+    Batting positions only — see get_pitcher_depth_chart_roles for SP/RP.
+    """
     conn = get_db()
     rows = conn.execute(
-        'SELECT position, player_id, role FROM depth_chart_roles WHERE team_id=?',
+        "SELECT position, player_id, role FROM depth_chart_roles "
+        "WHERE team_id=? AND position NOT IN ('SP', 'RP')",
         (team_id,)
     ).fetchall()
     out = {}
@@ -3359,8 +3372,32 @@ def get_depth_chart_roles(team_id):
     return out
 
 
-def set_depth_chart_role(team_id, position, player_id, role):
-    """Set (or clear, if role is falsy/'auto') a manual depth-chart role."""
+def get_pitcher_depth_chart_roles(team_id):
+    """Manual pitcher role overrides: {'SP': {pid: (role, share)}, 'RP': {pid: (role, share)}}.
+
+    `share` is the explicit playing-time fraction (0-1) if the user pinned
+    one, else None — see _manual_sp_entries in projections.py for how a
+    missing share is filled in automatically.
+    """
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT position, player_id, role, share FROM depth_chart_roles "
+        "WHERE team_id=? AND position IN ('SP', 'RP')",
+        (team_id,)
+    ).fetchall()
+    out = {"SP": {}, "RP": {}}
+    for r in rows:
+        out[r["position"]][r["player_id"]] = (r["role"], r["share"])
+    return out
+
+
+def set_depth_chart_role(team_id, position, player_id, role, share=None):
+    """Set (or clear, if role is falsy/'auto') a manual depth-chart role.
+
+    share: optional explicit playing-time fraction (0-1), only meaningful
+    for pitcher positions ('SP'/'RP') — ignored (stored as NULL) for
+    batting positions.
+    """
     import datetime
     conn = get_db()
     if not role or role == "auto":
@@ -3369,14 +3406,21 @@ def set_depth_chart_role(team_id, position, player_id, role):
             (team_id, position, player_id)
         )
     else:
-        if role not in DEPTH_CHART_ROLES:
-            raise ValueError(f"Unknown depth chart role: {role!r}")
+        valid_roles = PITCHER_DEPTH_CHART_ROLES if position in ("SP", "RP") else DEPTH_CHART_ROLES
+        if role not in valid_roles:
+            raise ValueError(f"Unknown depth chart role for position {position!r}: {role!r}")
+        if position not in ("SP", "RP"):
+            share = None
+        elif share is not None:
+            share = float(share)
+            if not (0.0 < share <= 1.0):
+                raise ValueError(f"share must be in (0, 1], got {share!r}")
         conn.execute('''
-            INSERT INTO depth_chart_roles (team_id, position, player_id, role, updated_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO depth_chart_roles (team_id, position, player_id, role, share, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(team_id, position, player_id)
-            DO UPDATE SET role=excluded.role, updated_at=excluded.updated_at
-        ''', (team_id, position, player_id, role, datetime.datetime.now().isoformat()))
+            DO UPDATE SET role=excluded.role, share=excluded.share, updated_at=excluded.updated_at
+        ''', (team_id, position, player_id, role, share, datetime.datetime.now().isoformat()))
     conn.commit()
 
 
@@ -3796,26 +3840,47 @@ def get_depth_chart(team_id):
             pos_result["DH"] = dh_players
 
         # Allocate pitcher time
+        # Manual pitcher role overrides only apply to the current year
+        # (off == 0), same reasoning as the batting manual_roles above.
+        manual_pitcher_roles = get_pitcher_depth_chart_roles(team_id) if off == 0 else None
+        manual_rp_pids = set(manual_pitcher_roles["RP"]) if manual_pitcher_roles else set()
+
         # SP prospects who can't crack the rotation move to the bullpen.
         # Sort SP by effective WAR, keep top 5 MLB-caliber starters,
-        # overflow SP prospects become RP candidates.
-        sp_pool.sort(key=lambda x: x["war_proj"] * x.get("level_discount", 1.0),
-                     reverse=True)
+        # overflow SP prospects become RP candidates. An SP-bucket pitcher
+        # the user has manually assigned an RP role (e.g. a starter moved
+        # to long relief) is pulled out first and always goes to the
+        # bullpen, regardless of level or WAR rank — a manual RP
+        # designation always wins over the automatic SP/RP split.
+        def _reproject_as_rp(p):
+            rp_war = project_war(p["ovr"], p["pot"], p["age"], "RP", off)
+            rp_era = project_era(p["ovr"], p["pot"], p["age"], "RP", off, lg_era)
+            rp_fip = project_fip(p["ovr"], p["pot"], p["age"], "RP", off, lg_fip)
+            return dict(p, war_proj=rp_war, _era=rp_era, _fip=rp_fip, bucket="RP", role=12)
+
+        sp_candidates = []
+        for p in sp_pool:
+            if p["player_id"] in manual_rp_pids:
+                rp_pool.append(_reproject_as_rp(p))
+            else:
+                sp_candidates.append(p)
+
+        sp_candidates.sort(key=lambda x: x["war_proj"] * x.get("level_discount", 1.0),
+                            reverse=True)
         rotation_size = 5
-        sp_keep, sp_overflow = sp_pool[:rotation_size], sp_pool[rotation_size:]
+        sp_keep, sp_overflow = sp_candidates[:rotation_size], sp_candidates[rotation_size:]
         for p in sp_overflow:
             if p.get("level", "MLB") != "MLB":
                 # Prospect — re-project as RP
-                rp_war = project_war(p["ovr"], p["pot"], p["age"], "RP", off)
-                rp_era = project_era(p["ovr"], p["pot"], p["age"], "RP", off, lg_era)
-                rp_fip = project_fip(p["ovr"], p["pot"], p["age"], "RP", off, lg_fip)
-                rp_entry = dict(p, war_proj=rp_war, _era=rp_era, _fip=rp_fip,
-                                bucket="RP", role=12)
-                rp_pool.append(rp_entry)
+                rp_pool.append(_reproject_as_rp(p))
             else:
                 # MLB SP who didn't make top 5 stays as 6th starter / swingman
                 sp_keep.append(p)
-        sp_result, rp_result = allocate_pitcher_time(sp_keep, rp_pool)
+        sp_result, rp_result = allocate_pitcher_time(
+            sp_keep, rp_pool,
+            manual_sp_roles=manual_pitcher_roles["SP"] if manual_pitcher_roles else None,
+            manual_rp_roles=manual_pitcher_roles["RP"] if manual_pitcher_roles else None,
+        )
 
         # ── Format output ───────────────────────────────────────────────
         def _fmt_hitter(p):

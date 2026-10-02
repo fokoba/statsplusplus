@@ -278,30 +278,38 @@ def assign_bucket(
         viable = sum(1 for f in PITCH_FIELDS if (p.get("Pot" + f) or 0) >= 45)
         return "RP" if (viable < 3 or stm < 30) else "SP"
 
-    # Position players — check positional grades
+    # Position players — check positional grades.
     if pgrade("C") >= 45:
         return "C"
+
+    # Infield: pick the player's BEST eligible infield position by grade,
+    # rather than locking into SS the moment it merely clears its own
+    # threshold. The old logic only reconsidered 3B/2B when the SS grade sat
+    # in a narrow 45-55 "marginal" band — once SS cleared 55 it returned SS
+    # unconditionally, even when 3B was clearly the better (and actually
+    # played) position (e.g. SS=65 vs 3B=70 used to lock in SS). Ties favor
+    # the scarcer, more premium position (SS > 2B > 3B).
+    _if_priority = {"SS": 2, "2B": 1, "3B": 0}
+    infield = []
     if pgrade("SS") >= 50:
-        ss_grade = pgrade("SS")
-        if ss_grade <= 55:
-            if pgrade("3B") >= ss_grade + 10:
-                return "3B"
-            if pgrade("2B") >= ss_grade + 10:
-                return "2B"
-        return "SS"
-    if pgrade("2B") >= 50 or pgrade("SS") >= 50:
-        return "2B"
+        infield.append(("SS", pgrade("SS")))
+    if pgrade("2B") >= 50:
+        infield.append(("2B", pgrade("2B")))
+    if pgrade("3B") >= 45:
+        infield.append(("3B", pgrade("3B")))
+    if infield:
+        infield.sort(key=lambda x: (x[1], _if_priority[x[0]]))
+        return infield[-1][0]
+
+    # Outfield: same principle for CF vs. corner outfield — a materially
+    # better corner grade should win outright, not just when it clears the
+    # old +10 margin.
     if pgrade("CF") >= 55:
-        cf_grade = pgrade("CF")
-        if cf_grade <= 55:
-            best_cof = max(pgrade("LF"), pgrade("RF"))
-            if best_cof >= cf_grade + 10:
-                return "COF"
+        if max(pgrade("LF"), pgrade("RF")) > pgrade("CF"):
+            return "COF"
         return "CF"
     if pgrade("LF") >= 45 or pgrade("RF") >= 45:
         return "COF"
-    if pgrade("3B") >= 45:
-        return "3B"
     if pgrade("1B") >= 45:
         return "1B"
 

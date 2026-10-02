@@ -596,6 +596,15 @@ def calc_fv_from_dict(
         except Exception:
             _weights = None
 
+    # Per-league switch (MODEL_PARAMS "FV_CEILING_ANCHORED", default on). Off →
+    # legacy composite-anchored FV for hitters. PPL is off pending recalibration:
+    # its compressed composite->runs mapping (comp_sd ~3.4) turns a 55 ceiling
+    # into ~4.6 WAR, which graded ~250 hitter prospects FV 60+ (eMLB, sd ~5.4,
+    # produces a normal pyramid under the same model).
+    if _weights is not None and not int(_weights.get_param("FV_CEILING_ANCHORED", 1)):
+        run_anchor = None
+        comp_mapping = None
+
     ovr = p.get("Ovr") or 0
     pot = p.get("Pot") or 0
     age = p["Age"]

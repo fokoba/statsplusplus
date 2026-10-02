@@ -536,6 +536,38 @@ def compute_defensive_value(
 # Hitter composite
 # ---------------------------------------------------------------------------
 
+# Prospect range bump (non-MLB, age <= 24 — see neutral_position). Range is a
+# base skill that carries over as a player develops real LF/CF/RF (or IF) skills,
+# so strong range earns credit even though position/fielding runs are neutralized.
+# Expressed in RUNS so it flows through the run->composite mapping (~0.2 composite
+# pts per run in the current calibration: mild ~ +1, big ~ +2.4). Tune here.
+RANGE_BUMP_MILD_RUNS = 6.0
+RANGE_BUMP_BIG_RUNS = 12.0
+# (mild_floor, big_floor) range grades on the 20-80 scale, by bucket family.
+_RANGE_BUMP_THRESHOLDS = {"OF": (60, 70), "IF": (65, 70)}
+_OF_BUCKETS = ("CF", "COF", "LF", "RF")
+_IF_BUCKETS = ("SS", "2B", "3B")
+
+
+def _prospect_range_bump_runs(defense, bucket):
+    """Runs credit for a prospect's range grade (OF: OFR, IF: IFR); 0 otherwise."""
+    if bucket in _OF_BUCKETS:
+        fam, keys = "OF", ("OFR", "ofr")
+    elif bucket in _IF_BUCKETS:
+        fam, keys = "IF", ("IFR", "ifr")
+    else:
+        return 0.0
+    grade = next((defense[k] for k in keys if (defense or {}).get(k) is not None), None)
+    if grade is None:
+        return 0.0
+    mild_floor, big_floor = _RANGE_BUMP_THRESHOLDS[fam]
+    if grade >= big_floor:
+        return RANGE_BUMP_BIG_RUNS
+    if grade >= mild_floor:
+        return RANGE_BUMP_MILD_RUNS
+    return 0.0
+
+
 def _run_space_hitter_composite(tools, defense, bucket, run_space, positional_models,
                                 observed=None, neutral_position=False):
     """Run-space composite (20-80) or None if calibration is incomplete.
@@ -582,7 +614,7 @@ def _run_space_hitter_composite(tools, defense, bucket, run_space, positional_mo
     # a premium-position buff nor a weak-glove penalty is a reliable signal yet.
     # Value is then bat + baserunning only (a neutral-position, neutral-glove player).
     if neutral_position:
-        fld = 0.0
+        fld = _prospect_range_bump_runs(defense, bucket)
         pos = 0.0
 
     # B2: per-facet blend with observed MLB career runs (bat/baserunning only;

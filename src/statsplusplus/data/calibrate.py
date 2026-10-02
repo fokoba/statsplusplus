@@ -2078,6 +2078,19 @@ def calibrate(dry_run=False):
     if pos_models:
         weights["POSITIONAL_MODELS"] = pos_models
 
+    # Carry over hand-set per-league MODEL_PARAMS (PEAK_AGE_HITTER/PITCHER,
+    # FV_CEILING_ANCHORED, ...). This function rebuilds `weights` from scratch,
+    # so without this every calibration run silently wiped them (the per-league
+    # peak ages reverted to the 27/28 defaults after the next calibration).
+    _existing_path = league_dir / "config" / "model_weights.json"
+    if _existing_path.exists():
+        try:
+            _prev = json.loads(_existing_path.read_text()).get("MODEL_PARAMS")
+            if isinstance(_prev, dict) and _prev:
+                weights.setdefault("MODEL_PARAMS", {}).update(_prev)
+        except (json.JSONDecodeError, OSError):
+            pass
+
     if dry_run:
         print("\n=== DRY RUN — would write: ===")
         print(json.dumps(weights, indent=2))

@@ -262,6 +262,11 @@ app.jinja_env.filters["money"] = _fmt_money
 
 @app.route("/")
 def index():
+    # HEAD / is the preview tool's readiness probe. It never counts a redirect
+    # as "ready", so every server was flagged neverBecameReady and stopped by
+    # the tool after 30 minutes — the recurring "crash". Answer it directly.
+    if request.method == "HEAD":
+        return "", 200
     return redirect(f"/team/{queries.get_my_team_id()}")
 
 

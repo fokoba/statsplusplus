@@ -1556,6 +1556,11 @@ def main():
         log.info("=== Full pipeline: year=%s, game_date=%s ===", year, game_date)
         refresh_league(year, game_date=game_date, full=full)
         update_state(game_date, year)
+        try:
+            from statsplusplus.data.exclusions import purge_excluded
+            purge_excluded(get_league_dir())
+        except Exception as e:
+            log.warning("excluded-player purge failed: %s", e)
         if not skip_fv:
             _run_evaluation_engine()
             _run_calibrate()

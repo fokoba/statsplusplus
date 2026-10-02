@@ -324,6 +324,16 @@ def ingest_once(league_slug: str, league_dir) -> dict[str, str]:
             except Exception as e:
                 summary["team_salary"] = f"error: {e}"
 
+    # Keep excluded players (career-ending injuries etc.) out — the export still
+    # contains them, so every import would otherwise re-insert them.
+    try:
+        from statsplusplus.data.exclusions import purge_excluded
+        purged = purge_excluded(league_dir)
+        if purged:
+            summary["excluded_purged"] = f"{purged} rows"
+    except Exception as e:
+        summary["excluded_purged"] = f"error: {e}"
+
     _save_state(league_dir, state)
     return summary
 

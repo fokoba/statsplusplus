@@ -12,7 +12,13 @@ These decisions define the model's scope and are not subject to incremental tuni
 
 1. **Composite = pure tool value.** The composite score is a tool-weighted assessment on the 20-80 scale, identical in methodology for prospects and MLB players. It does not incorporate "proven-ness," track record, or stat performance. This provides a unified basis for comparing players across the prospect/MLB threshold.
 
-2. **FV = ceiling quality, not expected value.** FV answers "what does this player become if he develops?" Risk label answers "how likely is that?" These are separate dimensions, not blended into a single number.
+2. **FV = projected value from the ceiling, risk-discounted.** FV answers "what
+   does this player become if he develops?" — computed (hitters, Session 94) as a
+   WAR projection off potential ratings, discounted by the probability of
+   realizing it. Risk is BOTH that realization discount *inside* the grade AND a
+   separate variance **label** ("how confident"). The discount must be in the
+   grade (or every toolsy teenager is an FV 60); the residual uncertainty is the
+   label.
 
 3. **Risk labels replace "+" grades.** Clean 5-point FV tiers (40/45/50/55/60/65/70) with a separate risk dimension (Low/Medium/High/Extreme).
 
@@ -49,27 +55,42 @@ free agent contracts in the league. Currently $8.62M. This converts WAR into dol
 ### FV Grade (Future Value)
 
 FV is a scouting-style grade on the standard 20-80 scale that estimates a prospect's
-MLB ceiling quality. It answers: *how good could this player become if he develops?*
+MLB value. It answers: *how good could this player become if he develops?*
 
-The formula compares the player's true ceiling to the MLB positional median, scaled
-by how much of that ceiling they've already realized:
+**As of Session 94 (hitters), FV is derived from a WAR projection built off the
+player's POTENTIAL ratings (ceiling), discounted by the probability of realizing
+it.** This replaced the older composite-anchored formula (which graded off current
+composite and let bench/role players ride a modest ceiling to FV 55). FV and the
+player's projected WAR now tell one story.
 
-    ceiling_credit = 0.20 + 0.55 × (composite / ceiling)
-    FV = 45 + (true_ceiling - positional_MLB_median) × ceiling_credit
+    ceiling_WAR  = saturate_war( runs_to_war( runs_from(ceiling_score) ) )
+    p(develops)  = closure_rate(age) × FV_CEILING_STRENGTH   (near-maxed gap≤2 → 1.0)
+    expected_WAR = p × ceiling_WAR + (1 − p) × (−0.3 replacement bust fallback)
+    FV grade     = invert( per-position FV→WAR ladder + sub-40 role ladder )[expected_WAR]
 
-Players closer to their ceiling get more credit (higher `ceiling_credit`). A prospect
-who is 90% of the way to their ceiling gets nearly full credit; a raw 19-year-old at
-40% realization gets minimal credit.
+- **Ceiling WAR** comes from the run-space spine (potential tools → projected
+  runs → WAR), **tail-saturated** so an elite ceiling caps at a realistic peak
+  (~7-9 WAR per league) rather than linear-extrapolating to 13-18. The saturation
+  caps (`sat_top`=p98, `sat_bot`=p02, `sat_mid`=median) are each league's real
+  full-time hitter WAR distribution, stored in the run-space `anchor`.
+- **p(develops)** is the realization discount — a young/raw player's high ceiling
+  is credited only as far as the empirical gap-closure rate for his age justifies.
+  `FV_CEILING_STRENGTH` (1.1) tunes upside-friendliness. Near-maxed players
+  (ceiling ≈ composite) get full credit — what you see is what you get.
+- **Bust fallback (−0.3):** a prospect who doesn't develop lands ~replacement
+  (sent down / washes out), NOT a negative full-season regular.
+- **Role ladder below 40** (`FV_SUB40_WAR_LADDER`: 35 up/down AAAA, 30 org,
+  25/20 fringe) lets below-replacement talent grade sub-40 per the industry role
+  scale instead of flooring at 40. These are TALENT grades; **surplus keeps its
+  $0 floor** separately (you never pay negative dollars).
 
-**Maxed-out players** (gap < 3 between composite and ceiling) use a simpler formula:
-`FV = 45 + (ceiling - median)`. What you see is what you get.
+**Pitchers** remain on the legacy composite-gap FV path (the run spine is
+hitters-only); the ceiling-anchored path is also the graceful fallback whenever
+run-space calibration is unavailable.
 
-**Ceiling quality gate**: A prospect's ceiling must be at least 6 points above the
-positional MLB median to qualify for FV 45+. This prevents marginal prospects with
-ceilings barely above average from inflating the FV 45 tier.
-
-**Risk label** captures development probability separately from FV:
-- Low: development confidence ≥ 0.40 (or gap < 3)
+**Risk is now BOTH axes:** it is the realization discount *inside* the grade
+(p(develops)) AND a separate variance **label** (how wide the error bar is):
+- Low: development confidence ≥ 0.40 (or near-maxed)
 - Medium: ≥ 0.25
 - High: ≥ 0.15
 - Extreme: < 0.15

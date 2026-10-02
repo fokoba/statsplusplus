@@ -112,6 +112,7 @@ def run(league_dir: Path | None = None) -> None:
     _db.init_schema(league_dir)
 
     cfg = LeagueConfig(base_dir=league_dir)
+    _scale = cfg.ratings_scale
 
     state_path = league_dir / "config" / "state.json"
     with open(state_path) as f:
@@ -253,11 +254,11 @@ def run(league_dir: Path | None = None) -> None:
                 p["_norm_age"] = LEVEL_NORM_AGE["aaa"]
                 p["_level"] = "aaa"
                 _apply_milb_context(p, conn, pid, _milb_averages, _milb_discounts, _milb_norm_ages, load_milb_stat_seasons)
-                fv_base, fv_risk = calc_fv(p)
+                fv_base, fv_risk = calc_fv(p, scale=_scale, league_dir=league_dir)
                 fv_str = str(fv_base)
                 if bucket == "RP":
                     p["_bucket"] = "SP"
-                    raw_fv, _ = calc_fv(p)
+                    raw_fv, _ = calc_fv(p, scale=_scale, league_dir=league_dir)
                     p["_bucket"] = bucket
                 else:
                     raw_fv = fv_base
@@ -308,7 +309,7 @@ def run(league_dir: Path | None = None) -> None:
             p["_norm_age"] = LEVEL_NORM_AGE[level_key]
             p["_level"] = level_key
             _apply_milb_context(p, conn, pid, _milb_averages, _milb_discounts, _milb_norm_ages, load_milb_stat_seasons)
-            fv_base, fv_risk = calc_fv(p)
+            fv_base, fv_risk = calc_fv(p, scale=_scale, league_dir=league_dir)
             fv_str = str(fv_base)
             # level=0 free agents are already-proven, immediately signable
             # professionals — not amateur draft prospects, even though they
@@ -328,7 +329,7 @@ def run(league_dir: Path | None = None) -> None:
                 level_label = LEVEL_INT_LABEL.get(int(level), str(level))
             if bucket == "RP":
                 p["_bucket"] = "SP"
-                raw_fv, _ = calc_fv(p)
+                raw_fv, _ = calc_fv(p, scale=_scale, league_dir=league_dir)
                 p["_bucket"] = bucket
             else:
                 raw_fv = fv_base

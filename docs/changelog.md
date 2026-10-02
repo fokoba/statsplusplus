@@ -4,11 +4,583 @@ Completed and deferred work items, organized by session. Moved from `task_list.m
 
 ---
 
-## Session 87 (2026-09-15)
+## Session 94 (2026-10-02)
 
-### Offseason page — Rule 5 panel
+### Ceiling-anchored WAR FV model (hitters) — v1.14.0
 
-Built on the two `/players` Rule 5 fields (stored earlier this session). After a
+Reframed how FV is computed for hitters. Previously the FV grade ran *parallel*
+to the composite (graded off current composite, with risk a cosmetic label), and
+`peak_war` was a separate downstream number — so bench/role players rode a modest
+ceiling to FV 55 (eMLB had 42% of hitters in the 45/50/55 band). FV now **derives
+from a WAR projection built off potential ratings**, so grade and value tell one
+story. Full investigation + prototype trail: `docs/fv_war_pipeline_diagnosis.md`.
+
+**New FV formula (hitters):**
+```
+ceiling_WAR  = saturate_war( runs_to_war( runs_from(ceiling_score), anchor ) )
+p(develops)  = closure_rate(age) * FV_CEILING_STRENGTH   (near-maxed gap≤2 → 1.0)
+expected_WAR = p·ceiling_WAR + (1−p)·(−0.3 replacement bust fallback)
+FV grade     = invert( per-position FV→WAR ladder + sub-40 role ladder )[expected_WAR]
+```
+
+- **Saturating runs→WAR** (`facet_runs.saturate_war`): the linear runs→WAR map is
+  only valid in the fitted ~45-65 composite band; a tanh now compresses the tails
+  toward each league's REAL hitter-WAR distribution (`calibrate` stores
+  `anchor.sat_top`=p98, `sat_bot`=p02, `sat_mid`=median). Stops ceilings
+  extrapolating to 13-18 WAR (now cap ~7-9) and the bottom to −14 (now ~−2).
+- **Risk is now BOTH** the realization discount inside the grade (p(develops)
+  weighting ceiling-WAR vs the bust fallback) AND the separate variance label —
+  resolving the old "risk is cosmetic to the grade" problem.
+- **Projects from POTENTIAL** (ceiling), not current ability — young/raw players
+  grade on upside discounted by development probability; finished low-ceiling
+  players (bad bat, no projection) grade down for the right reason.
+- **FV→WAR ladder extended below 40** (`FV_SUB40_WAR_LADDER`: 35=AAAA, 30=org,
+  25/20=fringe) so below-replacement talent grades 35/30/25/20 per the industry
+  role scale instead of flooring at 40. These are TALENT grades; **surplus keeps
+  its $0 floor** (you never pay negative dollars — `player_value`/`surplus`
+  untouched).
+- **Pitchers unchanged** — the run spine is hitters-only; pitchers keep the
+  legacy composite-gap FV path (graceful fallback when run-space is absent).
+
+**Impact (all 3 leagues recalibrated + fv_calc re-run):** hitter FV distribution
+is now a prospect pyramid — eMLB 45/50/55 band 42%→20%, vMLB/PPL ~11%; bulk in
+the 35-and-below depth/org tiers. Named cases: Mike French (glove-first SS,
+near-maxed) 55→50; Luis Carrasco (25-bat glove-only SS) 55→45 via low ceiling;
+raw high-ceiling teens (Del Vecchio FV 65, Roman Anthony 60) keep their upside.
+
+**Files:** `evaluation/fv.py` (`calc_fv` ceiling-anchored branch + `FV_CEILING_STRENGTH`,
+new `run_anchor`/`comp_mapping`/`weights`/`fv_strength` params; `calc_fv_from_dict`
+loads run_space + model weights), `evaluation/facet_runs.py` (`saturate_war`,
+`runs_to_war_saturated`), `evaluation/surplus.py` (`fv_from_peak_war` ladder
+inversion), `evaluation/constants.py` (`FV_SUB40_WAR_LADDER`), `data/calibrate.py`
+(saturation caps in run-space anchor), `data/fv_calc.py` (passes scale + league_dir
+through). Full suite 979 passed; mypy net-zero new errors.
+
+**Deferred (backlog):** PPL runs slightly top-rich (4% at 60+ vs eMLB 1%) — a PPL
+ceiling-score calibration difference (low scouting accuracy + young-prospect
+fall-off), not FV logic. Prospect-list age filter (27-yo AAA vets shouldn't rank
+as prospects). Possibly-inflated composite ratings (separate from FV now).
+Pitcher run-space FV. `calc_fv_from_dict` loads weights per-call (hoist later).
+
+---
+
+## Session 93 (2026-09-24)
+
+### Prospect FV realism: rounding-cliff fix + composite-mapping population-centering
+
+Investigation started from a user spot-check (eMLB: glove-first SS "Mike French"
+graded #4 prospect FV 55, tying a clearly higher-upside COF "Chad Marshall" at
+FV 50). The dig produced two validated fixes and — as importantly — rejected
+three plausible-but-wrong changes the data disproved.
+
+**Fix 1 — FV rounding cliff (`evaluation/fv.py`).** FV snapped to the nearest 5
+with a gap-dependent rule: near-ceiling players were ROUNDED while high-gap
+(upside) players were FLOORED (`int()`). Since `fv_continuous` already discounts
+the unrealized ceiling (via the `peak = ovr + gap*closure*bust` blend +
+`ceil_weight`), the floor was a redundant SECOND penalty on upside — producing a
+full-grade cliff between two players 0.04 apart in continuous FV (French 54.0 →
+55 vs Marshall 53.96 → 50). Now rounds consistently. Marshall correctly lifts to
+55; high-upside young hitters across all leagues no longer under-graded (eMLB
+FV 60 count 24→47, similar lifts vMLB/PPL). This was the actual fix for the
+reported ordering.
+
+**Fix 2 — composite-mapping population-centering (`data/calibrate.py`,
+`evaluation/facet_runs.py`).** The runs→composite affine map (`comp_mapping`)
+was centered on the selective 300+ PA qualified-starter sample (eMLB mean
+composite 55.9) instead of the population — so every player, prospects included,
+mapped ~1 grade too high (below-average-total players landing above composite
+50). Mirrors the earlier fielding-curve population-centering fix. Now anchors the
+map center on all MLB hitters (run-totals from tool-projected wOBA to avoid
+low-PA stat noise): eMLB comp_mean 55.9→54.8, vMLB→51.5, PPL→50.7.
+
+**Empirical validations run (kept as findings, not code):**
+- Projected bat (`tool_woba_fit`) genuinely predicts MLB outcomes: worst-bat
+  tercile 1.98 WAR/600 vs best-bat 4.78. The bat model works.
+- Composite tracks actual WAR at r=0.62 (eMLB) — slightly BETTER than raw
+  total_runs (0.56); the run→composite path loses no information. But only
+  **0.47 on vMLB/PPL** — flagged as the real headline gap (see task_list).
+- Residual-bat signal after composite is real but small (partial r 0.167,
+  ~0.031 WAR/run); a calibrated residual-bat FV term improved WAR alignment only
+  +0.004 corr while flipping ~2,500 grades via rounding noise — **rejected** as
+  over-engineering.
+
+**Defensive ratings → evaluation (task resolved with evidence).** Tested whether
+fielding runs should use the full defensive profile (arm/hands/DP) vs the range
+tool alone. Result: range (IFR/OFR) is the correct and SUFFICIENT input —
+range→ZR r=0.559, full-glove→ZR only +0.014 better, and arm/hands/DP are
+*negatively* associated with WAR after controlling for range (a positional-
+selection confound: weak-range players kept at premium spots have compensating
+secondary tools). The `ss` composite grade is a WORSE ZR predictor (0.338) than
+range. Conclusion: the range-only fielding curve is empirically right; do NOT
+incorporate secondary defensive tools. French's range-based fielding value is
+correctly scored; he lands at a defensible FV 55 (rangy SS, slightly-light bat,
+premium position).
+
+All three leagues recalibrated + re-evaluated; full suite 979 passed.
+
+### Composite→WAR alignment gap — investigated, closed as a data ceiling
+
+Followed up the flagged eMLB-vs-vMLB/PPL composite→WAR correlation gap (0.62 vs
+0.47). Finding: **not a model defect.** (1) The composite is at or above the
+optimal achievable linear tool-fit in every league (vMLB composite 0.474 beats a
+from-scratch tool regression's 0.357 — our blend adds stats/position the tools
+alone miss). (2) The lower vMLB/PPL correlation traces to compressed source
+ratings (normalized tool SDs 5.4–6.4 vs eMLB's 9.0) — OOTP rates those leagues
+into tighter bands, carrying less outcome information; an intrinsic ceiling no
+reweighting can beat. (3) The composite still ranks players monotonically by
+actual WAR in all three leagues. (4) Against next-year WAR (the target that
+matters), composite (0.71 vMLB) far outperforms prior-year stats (0.42) — leaning
+harder on stats would hurt projections. Conclusion: the ranking engine is sound
+cross-league; the same-year corr gap is noise + data ceiling. The real gap is
+interpretability, not accuracy — redirecting to position-relative player-page
+context. No code change.
+
+
+
+### Per-facet aging + development projection + dev_speed tie-in (v1.13.0)
+
+`compute_player_value`'s year-by-year WAR projection is now **per-facet** — each
+of bat / baserunning / fielding develops and declines on its own timeline,
+instead of one whole-player aging curve and a flat development ramp.
+
+- **Per-facet aging (P1):** a blended aging multiplier weights bat/baserunning/
+  fielding aging curves by each facet's positive run-share. Baserunning declines
+  earliest/steepest (physical), the bat holds longest, defense is moderate — so a
+  bat-first player ages more gracefully than a glove/speed-first player (age 34:
+  a pure-bat 1B retains ~54% of peak while a glove+speed SS retains ~46%). The
+  whole-player curve treated them identically.
+- **Per-facet development (P2):** prospect growth follows the age-based **bat**
+  development curve (bat develops latest/most into the mid-20s; baserunning is
+  near-fixed early; defense moderate) rather than a flat linear ramp.
+- **dev_speed tie-in (P3):** a player's development-pace metric (dev_speed) now
+  influences valuation through **timing only** — its z-score maps to a clamped
+  [0.6, 1.4]× growth-rate modifier (confidence-faded) applied to the development
+  ramp, so a fast developer reaches peak production sooner (more surplus while
+  cheaply controlled) and a stalled one later. **FV and ceiling are unchanged** —
+  dev_speed stays an independent axis (timing, not level); validated 0/10 FV
+  moves on the highest-|z| prospects with sensible surplus shifts (fast up,
+  stalled down, bounded ~3-5%). dev_speed is read from the prior run to avoid
+  circularity.
+
+**Curve provenance (honest note):** the aging/development curve SHAPES are
+hardcoded literature-based priors, identical across leagues; only the facet run
+MAGNITUDES they multiply are per-league-calibrated. Per-league fitting is
+deliberately deferred — the cross-section is survivorship-biased (observed
+baserunning "improves" at 33+ because only good baserunners still play) and the
+longitudinal sample is too thin; survivorship-corrected per-league curves are a
+data-gated future enhancement.
+
+Scope: hitters only (pitchers unchanged). All leagues re-evaluated; full suite
+973 passed (11 new tests). Spec: `.kiro/specs/per-facet-aging-projection/`.
+
+### Fielding runs right-sized at high grades (v1.12.2)
+
+Surfaced by spot-checking vMLB prospect Jimmy Gregory (a no-power, contact/
+defense corner OF grading too high). The fielding grade→ZR curve's linear slope
+over-extrapolated at the top end: observed corner-OF ZR plateaus around +5-7 at
+OFR 55-65, but the steep slope reached +10.8 at OFR 65, over-crediting
+good-but-not-elite corner defenders. Two fixes: (1) stronger fielding slope
+shrinkage (0.75→0.55) — defense is the noisiest facet and the tool→ZR
+relationship plateaus; (2) clamp the grade→runs curves to robust 5th/95th
+percentiles of observed runs instead of min/max×1.1, so a single noisy season no
+longer sets the ceiling. All leagues recalibrated; genuine elite defenders still
+credited (Barry Allen CF 69/69). Gregory now grades FV 50 (fine regular) instead
+of FV 55. Cross-divergence review (players where our model differs most from
+OOTP) confirmed the remaining large gaps are intended second-opinion behavior:
+positional adjustments verified FanGraphs-standard, so proper position value that
+OOTP's position-blind OVR omits (elite 1B docked, up-the-middle credited) is
+correct, not a bug. Full suite 968 passed.
+
+### Run-space model follow-up fixes (v1.12.1)
+
+Four bugs in the v1.12.0 run-space hitter model, all surfaced by spot-checking
+real, recognizable players (the abstract metrics — R², distributions — looked
+fine while these existed):
+
+- **Fielding curves centered on qualified starters, not the position population.**
+  The grade→ZR curve was centered on the mean grade of high-IP starters (≥250 IP)
+  but applied to the whole positional population, shifting everyone negative — an
+  average corner OF got ~−5 fielding runs, elite-name defenders showed −17 to −24.
+  Now centered on the population-mean grade so a league-average fielder ≈ 0 runs.
+- **Fielding used the positional-model ESTIMATE instead of the actual range rating.**
+  `_primary_def_grade` preferred an OLS estimate of a player's rating at a bucket
+  over his real range tool; since the curves are calibrated on the real tool, this
+  mismatched and underrated true defenders (an elite CF with OFR 70 was estimated
+  at 58 → −3 fielding runs instead of +12). Now uses the position-appropriate range
+  rating (OFR/IFR/CArm) first.
+- **Ceiling computed in grade-space while composite moved to run-space.** A fully
+  developed player (potential == current) showed a ceiling well above his composite
+  (phantom upside) because the two used different scales, plus a grade-space
+  peak-tool bonus. `compute_ceiling`/`compute_true_ceiling` now run potential tools
+  through the run-space spine (no peak-tool bonus), so a maxed player's ceiling ≈
+  composite and prospects retain real ceiling > composite. Also wired run-space
+  through the two-way branch (good-hitting position players were mis-flagged
+  two-way and bypassed the run-space path).
+- **Ceiling could fall below composite (780 eMLB players).** The run-space ceiling
+  uses potential tools without the observed-stat blend, while the composite includes
+  it, so an over-performer's blended composite could exceed his ceiling; PAC could
+  also drop a prospect's ceiling below composite. Now floored at the final composite
+  in both the engine and fv_calc (post-PAC). Regression tests in
+  `test_ceiling_runspace.py`.
+
+All three leagues (eMLB/vMLB/PPL) re-evaluated; downstream consumers verified
+(surplus/WAR, depth chart, stat projections all sensible; cross-league invariants
+clean). Full suite 968 passed. Known bounded follow-up: `dev_speed` windows that
+straddle the grade-space→run-space migration measure the model change as
+development (~1.7% of rows; self-heals as post-migration snapshots accumulate).
+
+### Run-space facet evaluation model (hitters) — core evaluation redesign
+
+Replaced the hitter composite's grade-space, share-weighted blend with a
+**run-additive facet model**. Hitter value is now built in **runs** —
+`bat (wRAA) + baserunning (UBR-runs) + fielding (ZR-runs) + positional adjustment`
+— then converted to WAR (OOTP-anchored) and mapped to a 20-80 composite. This
+fixes a structural flaw: a "70" grade meant different run values in different
+facets, and the old shares that combined them (hardcoded defense shares, 0.06
+baserunning) were reverse-engineered against total WAR and became orphaned once
+each facet was calibrated on its own proper target.
+
+- **New pure module `evaluation/facet_runs.py`** — facet run functions, OOTP-WAR
+  anchor, runs→20-80 mapping, per-facet aging curves + stabilization confidence.
+- **Per-league calibration** (`calibrate.py` `_calibrate_run_space`, persisted to
+  `tool_weights.json` under `run_space`): wOBA scale (canonical × run-env factor),
+  baserunning speed→UBR curve, per-position fielding range→ZR curves (centered +
+  clamped to observed ZR range), OOTP-WAR anchor (runs-per-win + replacement
+  solved to match OOTP's WAR distribution), runs→composite affine map, tool→wOBA
+  fit, and wOBA weights.
+- **Offense target → wOBA** (Phase 0): offensive tools (contact/gap/power/eye)
+  now regress against per-player **wOBA** instead of total WAR, fixing the
+  backwards gap-dominant ordering (power now correctly dominant). Per-league/year
+  run-environment-derived wOBA weights with canonical FanGraphs fallback and
+  sample guards. New `evaluation/woba.py` + 8 tests.
+- **Per-facet stat blend (composite↔projection convergence):** MLB hitters blend
+  observed **career** wRAA/UBR/ZR into each facet by a facet-specific stabilization
+  confidence (bat slow ~600 PA, baserunning fast ~250 PA, fielding slowest
+  ~900 IP), replacing the OPS+ `compute_composite_mlb` blend so the composite and
+  the WAR projection derive from one shared run total. Prospects blend
+  level-relative, level-discounted **MiLB** wRAA + UBR into bat/baserunning
+  (defense stays tool-only — MiLB fielding is unavailable from the API); the
+  Step-2 MiLB OPS+ blend is guarded off for run-space hitters to avoid double-count.
+- **Threaded through** `compute_composite_hitter` (with a graceful grade-space
+  fallback when `run_space` calibration is absent — single-league/older DBs and
+  pre-recalibration are unaffected), the batch evaluation engine, and `fv_calc`
+  → FV/surplus/rankings.
+- **WAR fidelity:** new tool-WAR ~ OOTP WAR R² **0.70-0.84** across PPL/eMLB/vMLB
+  (vs ~0.10 for the old composite→WAR path). Validated: full suite 965 passed,
+  1 skipped; prospect FV distribution healthy; rosters re-rank sensibly —
+  up-the-middle defenders and catchers rise, defensively-limited corner bats fall.
+- **Scope:** hitters only. Pitchers stay on the composite→WAR path (out of scope
+  v1). Migration is graceful — a league picks up the run-space model on its next
+  calibrate + fv_calc (or refresh); code degrades to the grade-space blend until then.
+
+**Deferred follow-ups** (logged in `task_list.md` / spec): per-facet aging wired
+into the WAR projection (curves defined, not yet in `compute_player_value` —
+highest blast radius, needs a surplus-validation gate); reliability penalties
+re-expressed as run penalties; dev_speed recalibration against the new composite;
+scratch-harness cleanup; pitcher run-space model.
+
+Design: `.kiro/specs/run-space-facet-model/` (design + requirements + tasks).
+
+---
+
+### Bug fix — cross-league (NPB) contamination in the evaluation engine
+
+A user's PPL universe contains **two co-resident top-level (`level=1`) leagues**:
+PPL MLB (`player_league_id=200`, the `primary=True` league per `/lgdata`) and
+**NPB** (`player_league_id=228`, a separate `primary=False` league). The codebase
+defined "MLB" as `players.level='1'` / `mlb_*` views (`stats.league_id IS NULL`),
+which conflated them — NPB players are also `level=1` and their top-level stats
+also carry `league_id NULL`. Result: **calibration, positional medians, league
+medians, org-needs, and arb/scarcity models were trained/computed on PPL+NPB
+mixed data** (NPB was ~6% of the WAR sample, lower-mean/wider — it dragged
+medians down, e.g. made a balanced roster look "above median everywhere").
+Discovered while investigating why draft org-needs returned empty. `/teams`
+provides no Level/League field; `/lgdata` is authoritative (`primary=True`).
+
+- **Single source of truth for "our MLB" = the primary league.** New
+  `LeagueConfig.primary_league_id` (from `/lgdata` via settings) and
+  `db.primary_league_predicate(primary_id, alias)` → `(clause, params)`, a no-op
+  when no primary is set (single-top-league DBs / older data). Mirrors the
+  `ORG_ID_SQL` pattern.
+- **`mlb_*` views scoped to the primary league** via a one-row `league_meta`
+  table (SQL views can't take a param). `init_schema` drops/recreates the views
+  each run so existing DBs pick up the scoped definition. **Backward compatible:**
+  when `league_meta` has no primary id, the views' `NOT EXISTS` branch is a no-op
+  — single-league leagues (eMLB/vMLB) are byte-for-byte unchanged. The NULL
+  `player_league_id` allowance is kept for older data (see task_list follow-up).
+- **Refresh** writes `primary_league_id` into `league_meta`; the fix activates on
+  a multi-league user's next refresh (which recalibrates on corrected data).
+- **Direct-read sites scoped** (those not going through the views): evaluation-
+  engine positional-median collection, draft `compute_org_needs`, and calibrate's
+  dev-curve age / arb-% / arb-salary / scarcity / positional-model reads. Most
+  WAR-regression reads join the `mlb_*` views and were fixed automatically.
+- **Migration safety:** only `DROP VIEW IF EXISTS` (a view is a saved query — no
+  data moved); no table is dropped. `league_meta` via `CREATE TABLE IF NOT
+  EXISTS`. `init_schema` runs on app boot (all leagues) + refresh, idempotently.
+- **Validated:** PPL hard refresh recalibrated on clean data (tool-weight sample
+  168→160 hitters / 104→95 pitchers — NPB removed); `mlb_batting_stats` NPB rows
+  417→0; model shifted modestly (refinement, not upheaval); eMLB/vMLB unchanged.
+  Tests: `tests/test_cross_league_scoping.py` (5). Full suite 957 pass.
+
+### Bug fix — draft board `$Val` blank (swallowed NameError zeroed all surplus)
+
+Every draft-board prospect showed `—` for `$Val` (surplus). Root cause: the
+raw-surplus (ceiling-scenario) block in `queries._build_prospect` called
+`dollars_per_war(_ld_raw)` but never imported that name in scope — it threw
+`NameError` on **every** prospect, and the block's bare `except Exception:`
+reset `entry["surplus"] = 0`, clobbering the correct value set moments earlier.
+It also left `raw_surplus` ("Ceiling value" in the prospect detail panel)
+unset. League-agnostic bug (fired everywhere); most visible on PPL where the
+live draft board was in use. **Fix:** import `dollars_per_war as _dpw_raw` in
+that block. Verified surplus now populates on PPL (FV 60 prospects ~$0.4–0.5M,
+correct for a 1955 retro league's ~$22K/WAR economy) and emlb (raw_surplus now
+differentiated from surplus rather than clobbered to equal it).
+
+### Bug fix — cross-league draft pool (session vs process-global league)
+
+The draft board showed only the ~34 already-drafted players instead of the
+977-player uploaded pool. `queries.get_draft_pool` read the pool file, the
+draft year, and the StatsPlus credentials from the **process-global** active
+league (`app_config.json`, bare `get_league_dir()`), while the rest of the page
+uses the **session** league set by the nav switch-league dropdown. When they
+differed (global=emlb, browsing ppl), the pool loaded from the wrong league
+(emlb had no pool file) → fell through to the live-API picks. Same
+session-vs-global class as the Session 90 draft-endpoint fix, but on the
+page-render path. **Fix:** `get_draft_pool` now resolves the pool file, draft
+year, and cookie/token via the request-scoped `get_cfg().league_dir`.
+
+### Enforce single-source-of-truth for the active league (request-context guard)
+
+To prevent the whole class of session-vs-global bug above, `get_league_dir()`
+now **raises** when called with no slug *inside a Flask request* and with no
+explicit `STATSPP_LEAGUE` override. In a request, the per-request league
+(`g.league_dir`, set once in `before_request` from `session → app_config →
+default`) is the single source of truth — web code must read it via
+`get_cfg()`/`get_db()`, not re-resolve the global. An explicit
+`STATSPP_LEAGUE` env override is honored even in a request (single-league
+deploys, blueprint-only tests); CLI/background paths are unaffected. The
+credential helpers (`get/set_statsplus_cookie/token`) keep their documented
+"resolve from active league" fallback via a new unguarded `_global_league_dir()`
+(they legitimately run during onboarding before a league session exists).
+
+The guard immediately surfaced **three more latent instances** of the same bug,
+all fixed to use the session config: team-page ratings scale
+(`projections._to_model_scale` → new `_ratings_scale()` reading `g.league_config`
+in-request), and the player-popup / role-map lookups (`player_queries`,
+`api_routes` → session `get_cfg()`).
+
+Tests: `tests/test_league_dir_guard.py` (5 — guard in/out of request, explicit
+slug, env override). Full suite 952 pass.
+
+### Investigated — cross-environment evaluation divergence (no change)
+
+A player graded differently across two dev environments on the same code/league
+(David Monahan PPL: 38/74 FV 65 rank-1 on a heavily-refreshed env vs 39/69 FV 60
+rank-7 here). Root cause: **per-league calibration**, not a code difference —
+`tool_weights`/`tool_transforms`/`model_weights` are re-derived from each DB's
+accumulated data every refresh, and this env's small sample (hitter regression
+N=172, only 4 `ratings_history` snapshots) yields noisier weights → different
+composite/ceiling/FV. Not a bug; the more-refreshed env is the more reliable
+one, and this env converges as refresh history accumulates. Committing per-league
+calibrated JSON was rejected (breaks the league-agnostic design); `league.db`
+sync is the way to align environments. Logged as a known limitation in the task
+list.
+
+---
+
+### Bug fix — standings show an outdated season (preseason / retro leagues)
+
+A fresh PPL install (game year 1955, spring training — no 1955 games yet)
+displayed **1953** standings. Two compounding causes:
+
+- **Refresh never pulled the prior year's TEAM stats.** The historical loop
+  covers years *before* prior_year, and the current-year team-stats pull returns
+  nothing in preseason — so the last completed season (1954) was a gap in
+  `team_batting_stats` even though player stats for 1954 were present. Refresh now
+  fetches prior-year team stats when missing (skips the render if already stored,
+  respecting the 1/min render limit).
+- **Standings fell back only one year.** `get_standings` used `stats_year`
+  (derived from *player* stats = 1954) then, finding no 1954 *team* stats, stepped
+  back exactly one year to 1953. It now falls back to the most recent year that
+  actually has team stats (`MAX(year) <= target`), so a gap degrades to the true
+  last completed season rather than skipping past it.
+
+Tests: `test_team_queries.py` (year-gap fallback). Full suite 947 pass.
+
+### Bug fix — draft board: stale pool from a prior draft
+
+The auto-draft list (and the page board) could show a *previous* draft's
+players. `draft_pool.json` persists on disk, and the `uploaded` state
+unconditionally won whenever that file existed — but once a draft completes, its
+pool players get drafted and move off the amateur levels (0/10/11) into org
+systems. A leftover pool from a past draft was still treated as current.
+
+- **Staleness guard** — a `draft_pool.json` is now validated against the DB: if
+  fewer than half its players are still on amateur (draft-eligible) levels, it's
+  a prior draft's pool. `get_draft_pool` discards it and falls through to the
+  live-API (`active`) or DB-approximation (`pre_draft`) pool (per draft-page spec
+  State 3). `draft_board.load_board` raises `StalePoolError`; the auto-draft-list
+  and sim endpoints surface it as a clear "upload the current pool" message (409)
+  instead of generating a bad list.
+- Tests: `tests/test_draft_league_context.py` (+ stale/fresh/foreign/empty pool
+  cases).
+
+### Bug fix — draft board: auto-draft list built from the wrong league
+
+A user's auto-draft list showed names that didn't match the players their links
+resolved to (e.g. list said "Aurélien Jolivet" but the player page showed "Jimmy
+Pappas"). Root cause: the web draft endpoints (`/api/draft-upload-list`,
+`/api/draft-sim`, pool upload, draft/finance settings) resolved their league via
+the **process-global** active league (`app_config.json`) through bare
+`get_league_dir()` / `LeagueConfig()` in `draft_board`, while the page itself
+(and its `/player/<pid>` links) uses the **session** league set by the nav's
+switch-league dropdown. When those differed, the board was built from one
+league's DB and the links resolved against another — cross-league name/ID leak.
+
+- **`draft_board` data helpers now accept an explicit `league_dir`** (`_connect`,
+  `_load_pool_ids`, `_get_num_teams`, `load_board`, `compute_org_needs`),
+  falling back to the global active league only when none is passed (CLI path,
+  unchanged).
+- **All draft/finance API endpoints pass the request-scoped league**
+  (`_get_cfg().league_dir`, session-aware) into `draft_board` and the settings
+  loaders/savers — fixing the same latent cross-league bug for pool upload,
+  draft settings, and finance settings too.
+- Tests: `tests/test_draft_league_context.py` (helpers honor the passed
+  `league_dir` over the global active league; CLI fallback preserved).
+
+### Bug fix — draft board: phantom picks carried across drafts
+
+Draft picks were persisted in `localStorage` under a league-slug-only key
+(`draft_picks_<slug>`), so a *new* draft in the same league inherited the prior
+draft's picks — players showed as already "picked" in a fresh draft.
+
+- **Namespace pick storage per-draft** (`slug + game year`,
+  `draft_picks_<slug>_<year>`) so successive drafts start clean. `get_draft_pool`
+  now returns the game `year` (from `state.json`) alongside state/players/picks;
+  the league template emits it as `DRAFT_YEAR` and keys pick storage on it.
+- **Self-heal:** the legacy un-namespaced key is purged on every load (safe —
+  the server is authoritative for picks via `DRAFT_PICKS_INIT`, re-syncable via
+  "Update Picks"; local storage is only a convenience overlay). When the year is
+  unavailable the key falls back to a stable `_x` suffix, never the legacy key,
+  so the legacy key can always be discarded.
+- **Fresh upload clears picks** — uploading a new draft pool now clears both the
+  namespaced and legacy pick keys, since a new pool defines a new draft.
+
+Cleanup: removed the throwaway `scripts/engine_diff.py` (OOTP 26→27 ratings-drift
+analysis tool) and its baseline tables. Full suite 939 pass.
+
+## Session 89 (2026-09-17)
+
+### Bug fix — refresh: ratings-export resilience + proactive rate-limit pacing
+
+A user's PPL (deep 1955 retro league) refresh completed with **zero ratings**,
+leaving everything except standings blank (draft/prospects/rosters all read from
+the empty `player_evaluation`/`prospect_fv` tables; standings comes straight from
+`/lgdata`). Root cause from the log: the 15-year historical team-stats backfill
+hit HTTP 429 on nearly every call (team-stats render limit is **1/min/caller**)
+and the flat 35s retry (< the 60s window) 429'd again — turning the refresh into
+a ~40-min 429-storm. By the time ratings were collected, the export request ID
+had expired server-side (`"The request ID is no longer valid"`), and the client
+treated that as valid-but-empty CSV → 0 ratings → 0 prospects evaluated.
+
+- **Proactive render pacing** (`client/statsplus.py`) — the client now paces the
+  render-limited endpoints (`/teambatstats`, `/teampitchstats`, `/gamehistory`)
+  to the known ~1/min cadence: it sleeps out the remainder of the window *before*
+  firing, instead of firing early and eating a 429 + wasted retry. Render 429s
+  with no useful `Retry-After` now wait a full window (not 35s) and reset the
+  pacing clock. Cuts the first-pull time and stops burning failed requests.
+- **Ratings-export re-request on expiry** — `get_ratings` detects the expired-
+  request-ID response and re-requests a fresh export once (raising loudly on a
+  second expiry) rather than silently returning 0 rows and wiping downstream
+  evaluation.
+- Confirmed the historical backfill already **skips already-fetched years**, so
+  the 40-min cost is a one-time first-pull penalty (subsequent refreshes re-render
+  only current + prior year). Logged a follow-up task to explore deferring/
+  backgrounding the deep historical backfill for an even faster first refresh.
+- Tests: `tests/test_ratings_reexport.py` (expiry re-request + render pacing).
+
+**User remediation for the reported incident:** re-run with `--force`
+(`spp-refresh --force`) — the `/date` gate otherwise skips it since the game date
+is unchanged. The re-run now completes with ratings intact.
+
+### Offseason page — Season in Review tab
+
+Replaced the placeholder "Playoffs" offseason phase with a "wrapped"-style
+**Season in Review** — a data-driven recap that opens the offseason and hands
+off into the rest of the panels. All from existing data (season team/player
+stats, standings, farm FV + dev-speed); no new models; degrades to
+`has_season=False` before a season is played.
+
+- **`get_season_review(team_id)`** (`web/offseason_queries.py`) assembles: hero
+  record + pyth-vs-actual verdict + division/league finish; **What went well /
+  What to improve** (team stat categories ranked vs the league — only genuinely
+  top/bottom-third categories surface, up to 5 each, never forced); **Players of
+  the Season** (top actual-WAR performers); **Farm — Top Prospects** (FV 45+,
+  with each prospect's season *by level and affiliate*, WAR per stint);
+  **Knocking on the Door** (near-MLB contributors with a role-scaled expected
+  WAR); and a terse **Where to focus** handoff.
+- **Role-scaled contributor projections** — `peak_war` is a full-season *rate*;
+  showing it raw overstates a part-time player's actual contribution. The panel
+  now derives a projected **role** and scales expected WAR by that role's
+  realistic playing time. Pitchers route through stamina (`_pitcher_role`:
+  bullpen/swing/back-end/mid-rotation — stamina, not WAR magnitude, drives the
+  starter/reliever call, consistent with the ~stm-40 SP/RP boundary). Hitters
+  with a clear multi-tool L/R split (`_platoon_lean`, reading real split
+  ratings) are capped at a platoon role (reduced reps) — catches the
+  better-vs-RHP profile the FV model's contact-only platoon check misses.
+- **Cross-level performance line** — each top prospect's season is broken into
+  one stint per affiliate, labeled by game level + **affiliate team name** (with
+  league abbr when available), disambiguating multiple same-level stints (OOTP
+  classifies all full-season A leagues as one level). Refresh now stores each
+  minor league's `abbr` in `milb_league_map` (API-provided; takes effect next
+  refresh).
+- **Color scaling** — WAR values / player cards, FV badges, and expected-WAR
+  figures use a 5-tier red→green scale so quality reads at a glance (an FV 55
+  looks different from a 50).
+- **Removed the standalone Offseason Budget panel** from the page; the FA-budget
+  editor moved inline into the Free Agency targets cart (where the draw-down
+  actually happens). Pruned the dead `.fin-*` CSS.
+- Phase key `playoffs` → `season_review` (`app.py`, `api_routes.py`,
+  `offseason_queries.PHASE_KEYS`); route guards against a stale/renamed saved
+  phase. Tests: `tests/test_offseason.py` (+4 role/scaling unit tests, +2
+  season-review shape/empty). Full suite 935 pass.
+
+---
+
+## Session 88 (2026-09-16)
+
+### Development-speed metric — v1 (display)
+
+New per-player metric: how fast a prospect is developing vs same-group, same-age
+peers in this league, from longitudinal `ratings_history`. Spec + validation:
+`.kiro/specs/development-speed-metric/design.md`.
+
+- **Pure module** `evaluation/dev_speed.py` — component-split (offensive-grade
+  movement for hitters, composite for pitchers; defense excluded as
+  experience-inflated), per-(dev-group, age-band, league) longitudinal z, POT-gap
+  qualifier + ΔOVR/ΔPOT decomposition, confidence tier (High/Medium/Low), and a
+  history/reporting gate. Signals use **our composite/ceiling, never the game's
+  OVR/POT** (the latter are NULL in OVR-less leagues like PPL and inconsistent
+  with the rest of the app).
+- **dev-group grouping:** hitters are NOT sliced by fielding position — offensive
+  development rate is position-independent (validated across vMLB/eMLB). Groups
+  are SP / RP / C (catcher bats develop slower) / HIT. Canonical `assign_bucket`
+  for SP/RP classification; `(group, "ALL")` fallback for tiny leagues.
+- **Storage:** new `dev_speed` table, rebuilt each `fv_calc` run (a separate axis
+  — deliberately NOT blended into FV/surplus to avoid double-counting; displayed
+  adjacent). Auto-creates via `init_schema`; degrades gracefully when empty.
+- **Display (v1):** player-page summary badge next to FV/Risk; a "Development
+  Pace" detail panel on the Development tab (component readout, peer baseline,
+  ceiling trajectory, confidence, player-specific interpretation); sortable "Dev"
+  column on the league prospect lists (Top-100 + by-position + team) and the team
+  farm Top-15. Shared `dev_cell` helper in `web_league_context.py`.
+- **No model interaction** — FV/risk/surplus/outcomes compute unchanged. Risk
+  proxy-swap and outcomes integration are deferred, gated on accumulated
+  multi-season `ratings_history` for benchmarking (PPL is the target league).
+- POC (`scripts/dev_speed_poc.py`) retained as reference until superseded. Tests:
+  `tests/evaluation/test_dev_speed.py` (9). Full suite green.
+
+
 vMLB refresh populated real values, confirmed the semantics empirically:
 `years_protected_from_rule_5` is the **years remaining before a player must be
 added to the 40-man or is exposed to the Rule 5 draft** — `0` = eligible this

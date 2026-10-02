@@ -18,6 +18,7 @@ from statsplusplus.evaluation.arb import arb_salary, arb_salary_perpetual
 from statsplusplus.evaluation.constants import (
     FV_TO_PEAK_WAR_DEFAULT,
     FV_TO_PEAK_WAR_RP_DEFAULT,
+    FV_SUB40_WAR_LADDER,
     PROSPECT_DISCOUNT_RATE,
     PROSPECT_WAR_RAMP,
     SCARCITY_MULT_DEFAULT,
@@ -82,6 +83,56 @@ def peak_war_from_fv(
     if bucket == "RP":
         return _interp_dict(FV_TO_PEAK_WAR_RP_DEFAULT, fv)
     return _interp_dict(FV_TO_PEAK_WAR_DEFAULT, fv)
+
+
+def fv_from_peak_war(
+    peak_war: float,
+    bucket: str,
+    weights: Optional[ModelWeights] = None,
+    war_floor: Optional[float] = None,
+) -> float:
+    """Invert the FV→peak-WAR ladder: map a projected peak WAR to a continuous FV.
+
+    The inverse of peak_war_from_fv, used by the ceiling-anchored FV grade (which
+    projects a WAR from potential ratings and reads off the grade). Builds the
+    per-position FV→WAR ladder (40..70/80) and extends it below 40 with the
+    industry role ladder (FV_SUB40_WAR_LADDER: 35 AAAA, 30 org, 25/20 fringe) so
+    below-replacement talent grades 35/30/25/20 instead of flooring at 40.
+
+    Args:
+        peak_war: Projected (already risk-discounted + saturated) peak WAR.
+        bucket: Positional bucket.
+        weights: Calibrated model weights (per-position FV→WAR tables).
+        war_floor: Optional WAR corresponding to the FV-20 floor (per-league
+            run-space saturation bottom cap). Overrides the default 20-anchor.
+
+    Returns:
+        Continuous FV grade (interpolated), clamped to [20, 80].
+    """
+    # Upper ladder (40+) from the calibrated per-position table.
+    pts: list[tuple[float, float]] = []
+    for fv in (40, 45, 50, 55, 60, 65, 70, 80):
+        pts.append((float(fv), peak_war_from_fv(float(fv), bucket, weights)))
+    # Sub-40 role ladder (industry role scale), with an optional per-league floor.
+    for fv, war in FV_SUB40_WAR_LADDER.items():
+        w = war
+        if fv == 20 and war_floor is not None:
+            w = war_floor
+        pts.append((float(fv), float(w)))
+    # Sort ascending by WAR and interpolate FV from the WAR axis.
+    pts.sort(key=lambda t: t[1])
+    war = max(pts[0][1], min(pts[-1][1], peak_war))
+    if war <= pts[0][1]:
+        return pts[0][0]
+    if war >= pts[-1][1]:
+        return pts[-1][0]
+    for i in range(len(pts) - 1):
+        f0, w0 = pts[i]
+        f1, w1 = pts[i + 1]
+        if w0 <= war <= w1:
+            t = (war - w0) / (w1 - w0) if w1 > w0 else 0.0
+            return max(20.0, min(80.0, f0 + t * (f1 - f0)))
+    return pts[0][0]
 
 
 # ---------------------------------------------------------------------------

@@ -25,11 +25,14 @@ Public API:
     positional_adj_runs(bucket) -> float
     total_runs(...) -> dict            # facet breakdown + total
     runs_to_war(runs, anchor) -> float
+    runs_to_war_saturated(runs, anchor) -> float   # tail-capped for ceiling FV
+    saturate_war(war, anchor) -> float
     runs_to_composite(runs, mapping) -> int
 """
 
 from __future__ import annotations
 
+import math
 from typing import Any, Optional
 
 from statsplusplus.utils.positions import (
@@ -381,6 +384,36 @@ def runs_to_war(runs_above_avg: float, anchor: Optional[dict[str, float]] = None
     if rpw <= 0:
         rpw = DEFAULT_RUNS_PER_WIN
     return (runs_above_avg + repl_runs) / rpw
+
+
+def saturate_war(war: float, anchor: Optional[dict[str, float]] = None) -> float:
+    """Saturate a (possibly extrapolated) WAR toward data-grounded tail caps.
+
+    The linear runs→WAR map is only valid in the fitted ~45-65 composite band;
+    projecting a prospect's CEILING score linearly runs off to absurd WAR
+    (13-18 at score 80) / absurd negatives at the bottom. This compresses the
+    tails toward each league's REAL full-time-hitter WAR distribution using a
+    tanh that is ~linear near the median (`sat_mid`) and asymptotes to the
+    top/bottom caps (`sat_top`=p98, `sat_bot`=p02). Center/slope preserved;
+    only the tails bend. No caps in `anchor` → returned unchanged (back-compat).
+    """
+    if not anchor:
+        return war
+    top = anchor.get("sat_top")
+    bot = anchor.get("sat_bot")
+    mid = anchor.get("sat_mid")
+    if top is None or bot is None or mid is None:
+        return war
+    if war >= mid:
+        span = max(0.1, top - mid)
+        return mid + span * math.tanh((war - mid) / span)
+    span = max(0.1, mid - bot)
+    return mid + span * math.tanh((war - mid) / span)
+
+
+def runs_to_war_saturated(runs_above_avg: float, anchor: Optional[dict[str, float]] = None) -> float:
+    """runs→WAR then tail-saturated (for ceiling-anchored FV projection)."""
+    return saturate_war(runs_to_war(runs_above_avg, anchor), anchor)
 
 
 def runs_to_composite(runs_above_avg: float, mapping: Optional[dict[str, float]] = None) -> int:

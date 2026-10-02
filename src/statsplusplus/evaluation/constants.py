@@ -109,6 +109,17 @@ FV_TO_PEAK_WAR_RP_DEFAULT: dict[int, float] = {
     80: 3.2, 70: 2.6, 65: 2.3, 60: 2.0, 55: 1.6, 50: 1.2, 45: 0.8, 40: 0.5,
 }
 
+# Sub-40 role ladder (industry 20-80 role scale): 40 = bench/depth, 35 = up/down
+# AAAA, 30 = organizational, 25/20 = fringe/won't-reach-MLB. Used by the ceiling-
+# anchored FV to grade below-replacement talent (a bad bat or miscast glove whose
+# projected peak WAR is sub-replacement) instead of flooring everyone at FV 40.
+# The 20-floor WAR is overridden per-league by the run-space saturation bottom cap
+# (anchor.sat_bot) when available. These are TALENT grades; surplus keeps its $0
+# floor separately (you never pay negative dollars).
+FV_SUB40_WAR_LADDER: dict[int, float] = {
+    35: 0.0, 30: -0.6, 25: -1.2, 20: -2.0,
+}
+
 # ---------------------------------------------------------------------------
 # Prospect surplus model defaults
 # ---------------------------------------------------------------------------

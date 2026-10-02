@@ -607,6 +607,21 @@ def _calibrate_run_space(conn, game_year, role_map, woba_wts, off_norm, result_h
             comps.append(r["composite_score"])
     anchor = _fr.solve_war_anchor(totals, wars) if wars else {}
 
+    # Saturation caps for the runs→WAR map (ceiling-anchored FV). The runs→WAR
+    # conversion is linear and only valid in the fitted ~45-65 composite band;
+    # extrapolating a prospect's CEILING score (66-72) linearly yields absurd WAR
+    # (13-18). Cap the tails at this league's REAL full-time hitter WAR
+    # distribution so ceiling-WAR saturates at a realistic sustainable peak
+    # (top=p98) / floor (bot=p02) with the center (median) left linear. Consumed
+    # by facet_runs.runs_to_war when present; absent → linear (back-compat).
+    if wars and len(wars) >= 20:
+        import statistics as _stx
+        _sw = sorted(wars)
+        _n = len(_sw)
+        anchor["sat_top"] = round(_sw[min(_n - 1, int(0.98 * _n))], 2)
+        anchor["sat_bot"] = round(_sw[int(0.02 * _n)], 2)
+        anchor["sat_mid"] = round(_stx.median(_sw), 2)
+
     # Population center for the composite mapping: the run->composite map is
     # applied to the whole player universe (prospects included), so it must be
     # centered on the POPULATION average, not the selective 300+ PA qualified

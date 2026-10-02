@@ -180,7 +180,7 @@ recomputed from summed counting stats — `_bat_row`/`_pit_row` store raw counts
 `_hra`, `_bf`, etc.) alongside computed rates for this purpose. Percentile queries use `GROUP BY
 player_id` with `SUM` to aggregate stints before computing rankings.
 
-**FV calculation** — `calc_fv()` / `calc_fv_v2()` in `fv_model.py` (re-exported via `player_utils.py`). Expected-peak model with ceiling blend and risk labels.
+**FV calculation** — `calc_fv()` / `calc_fv_from_dict()` in `evaluation/fv.py`. Hitters (Session 94): **ceiling-anchored WAR model** — projects peak WAR from potential ratings (`saturate_war(runs_to_war(runs_from(ceiling)))`, tail-capped to real-WAR p98/p02 via the run-space `anchor`), discounts by `p(develops)` (empirical gap-closure × `FV_CEILING_STRENGTH`), and inverts the per-position FV→WAR ladder (extended below 40 with `FV_SUB40_WAR_LADDER` role tiers) via `surplus.fv_from_peak_war`. Risk is both the discount and a separate variance label. Pitchers keep the legacy composite-gap path (also the no-run-space fallback). Surplus keeps its $0 floor (talent may be negative; trade value cannot).
 
 Three-score model inputs from evaluation engine:
 - **Composite** (composite_score): current tool value, continuous 20-80 scale

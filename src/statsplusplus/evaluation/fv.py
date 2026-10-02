@@ -16,6 +16,14 @@ from typing import Any, Optional
 from statsplusplus.evaluation.constants import RP_POT_DISCOUNT
 
 
+# Realization-credit strength for the ceiling-anchored FV (hitters). Scales
+# p(develops) = closure_rate(age) * strength. 1.0 = raw empirical closure;
+# >1.0 is upside-friendly (credits more of the ceiling for toolsy prospects).
+# Chosen 1.1 per the prototype sweep (user preference: grade raw high-upside
+# players generously, while the WAR anchor still caps no-bat role players).
+FV_CEILING_STRENGTH: float = 1.1
+
+
 # ---------------------------------------------------------------------------
 # Development curve defaults (overridable via model_weights)
 # ---------------------------------------------------------------------------
@@ -174,6 +182,10 @@ def calc_fv(
     intelligence: str = "N",
     gap_closure_table: Optional[dict[int, float]] = None,
     expected_gap_table: Optional[dict[int, float]] = None,
+    run_anchor: Optional[dict[str, float]] = None,
+    comp_mapping: Optional[dict[str, float]] = None,
+    weights: Any = None,
+    fv_strength: float = 1.0,
 ) -> tuple[int, str, float]:
     """Compute FV grade and risk label for a prospect.
 
@@ -210,23 +222,71 @@ def calc_fv(
 
     gap = max(0, effective_pot - ovr)
 
-    # Compute expected peak composite
-    if gap <= 3:
-        fv = float(ovr)
+    # --- Ceiling-anchored WAR path (hitters) ---------------------------------
+    # When run-space calibration is available and this is a hitter, derive the FV
+    # grade by PROJECTING FUTURE WAR FROM THE CEILING (potential ratings) and
+    # discounting it by the probability of realizing that ceiling, then reading
+    # the grade off the FV→WAR ladder. This replaces the composite-anchored
+    # formula below (which graded off current composite and let bench/role
+    # players ride a modest ceiling to FV 55). Design: docs/fv_war_pipeline_diagnosis.md.
+    ceiling_anchored = (
+        not is_pitcher
+        and bucket not in ("SP", "RP")
+        and run_anchor is not None
+        and comp_mapping is not None
+        and comp_mapping.get("comp_sd", 0) > 0
+    )
+    if ceiling_anchored:
+        from statsplusplus.evaluation.facet_runs import runs_to_war, saturate_war
+        from statsplusplus.evaluation.surplus import fv_from_peak_war
+
+        # The ceiling_anchored guard already proves these are populated.
+        assert comp_mapping is not None and run_anchor is not None
+        _cm: dict[str, float] = comp_mapping
+        _anchor: dict[str, float] = run_anchor
+
+        def _score_to_runs(score: float) -> float:
+            z = (score - _cm["comp_mean"]) / _cm["comp_sd"]
+            return _cm["runs_mean"] + z * _cm["runs_sd"]
+
+        # Future WAR from POTENTIAL (ceiling), tail-saturated to realistic caps.
+        ceiling_war = saturate_war(runs_to_war(_score_to_runs(pot), _anchor), _anchor)
+
+        # p(develops): probability of realizing the ceiling. Near-maxed (small
+        # gap) → ~1.0 (what you see is what you get). Else empirical gap-closure
+        # rate for age, scaled by fv_strength (upside-friendliness).
+        if gap <= 2:
+            p_dev = 1.0
+        else:
+            closure_tbl = gap_closure_table or GAP_CLOSURE_HITTER_DEFAULT
+            p_dev = max(0.0, min(1.0, _interp_table(closure_tbl, age) * fv_strength))
+
+        # Bust fallback: a prospect who doesn't develop lands ~replacement
+        # (sent down / washes out), NOT a negative full-season regular.
+        fallback_war = -0.3
+        expected_war = p_dev * ceiling_war + (1.0 - p_dev) * fallback_war
+
+        war_floor = _anchor.get("sat_bot")
+        fv = fv_from_peak_war(expected_war, bucket, weights, war_floor=war_floor)
     else:
-        closure_tbl = gap_closure_table or (
-            GAP_CLOSURE_PITCHER_DEFAULT if is_pitcher else GAP_CLOSURE_HITTER_DEFAULT
-        )
-        closure = _interp_table(closure_tbl, age)
+        # --- Legacy composite-anchored path (pitchers + no-run-space fallback) ---
+        # Compute expected peak composite
+        if gap <= 3:
+            fv = float(ovr)
+        else:
+            closure_tbl = gap_closure_table or (
+                GAP_CLOSURE_PITCHER_DEFAULT if is_pitcher else GAP_CLOSURE_HITTER_DEFAULT
+            )
+            closure = _interp_table(closure_tbl, age)
 
-        # Bust discount: derived from target product / closure
-        age_key = max(17, min(25, int(age)))
-        target = _TARGET_PRODUCT.get(age_key, 0.47)
-        bust = min(0.85, target / closure) if closure > 0 else 0.55
+            # Bust discount: derived from target product / closure
+            age_key = max(17, min(25, int(age)))
+            target = _TARGET_PRODUCT.get(age_key, 0.47)
+            bust = min(0.85, target / closure) if closure > 0 else 0.55
 
-        peak = ovr + gap * closure * bust
-        ceil_weight = max(0.0, min(0.5, (effective_pot - 50) / 30.0))
-        fv = peak * (1.0 - ceil_weight) + effective_pot * ceil_weight
+            peak = ovr + gap * closure * bust
+            ceil_weight = max(0.0, min(0.5, (effective_pot - 50) / 30.0))
+            fv = peak * (1.0 - ceil_weight) + effective_pot * ceil_weight
 
     # Accuracy penalty
     if accuracy == "L":
@@ -250,12 +310,13 @@ def calc_fv(
     if bucket == "RP":
         fv = min(fv, 55)
 
-    # Ceiling cap: FV cannot exceed true_ceiling - 3
-    fv = min(fv, effective_pot - 3)
-
-    # Offensive ceiling cap for bat-limited hitters
-    if offensive_ceiling is not None and offensive_ceiling < 45 and bucket not in ("SP", "RP"):
-        fv = min(fv, 50)
+    if not ceiling_anchored:
+        # Composite-scale caps — only meaningful for the legacy composite path.
+        # Ceiling cap: FV cannot exceed true_ceiling - 3
+        fv = min(fv, effective_pot - 3)
+        # Offensive ceiling cap for bat-limited hitters
+        if offensive_ceiling is not None and offensive_ceiling < 45 and bucket not in ("SP", "RP"):
+            fv = min(fv, 50)
 
     fv = max(20.0, fv)
 
@@ -514,6 +575,27 @@ def calc_fv_from_dict(
             except (json.JSONDecodeError, OSError):
                 pass
 
+    # Load run-space anchor + comp_mapping (for the ceiling-anchored hitter path)
+    # and the calibrated FV→WAR tables (ModelWeights) for ladder inversion.
+    run_anchor = None
+    comp_mapping = None
+    _weights = None
+    if league_dir is not None:
+        import json
+        tw_path = Path(league_dir) / "config" / "tool_weights.json"
+        if tw_path.exists():
+            try:
+                _rs = json.loads(tw_path.read_text()).get("run_space", {})
+                run_anchor = _rs.get("anchor")
+                comp_mapping = _rs.get("comp_mapping")
+            except (json.JSONDecodeError, OSError):
+                pass
+        try:
+            from statsplusplus.evaluation.constants import load_model_weights
+            _weights = load_model_weights(Path(league_dir))
+        except Exception:
+            _weights = None
+
     ovr = p.get("Ovr") or 0
     pot = p.get("Pot") or 0
     age = p["Age"]
@@ -544,6 +626,10 @@ def calc_fv_from_dict(
         work_ethic=work_ethic, intelligence=intelligence,
         gap_closure_table=gap_closure,
         expected_gap_table=expected_gap,
+        run_anchor=run_anchor,
+        comp_mapping=comp_mapping,
+        weights=_weights,
+        fv_strength=FV_CEILING_STRENGTH,
     )
 
     # Mutate player dict (legacy behavior)

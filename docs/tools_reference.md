@@ -404,12 +404,17 @@ get_ratings_scale()   # → '1-100' or '20-80'
 Prospect FV grade calculation. Empirical gap closure model with MLB-anchored grading.
 
 ```python
-from fv_model import calc_fv, calc_fv_v2, defensive_score
-# player_dict needs: Ovr (composite), Pot (true_ceiling), Age, _bucket,
-#   _norm_age, _is_pitcher, _mlb_median, WrkEthic, Int, Acc
-fv_base, fv_plus = calc_fv(player_dict)
-# FV = 45 + (expected_peak - positional_MLB_median)
-# expected_peak = composite + gap × closure × bust_discount × gap_scale
+from statsplusplus.evaluation.fv import calc_fv_from_dict
+# player_dict needs: Ovr (composite), Pot (true_ceiling/ceiling), Age, _bucket,
+#   _norm_age, _is_pitcher, Acc, WrkEthic, Int (+ split tools for platoon penalty)
+fv_grade, risk = calc_fv_from_dict(player_dict, scale="1-100", league_dir=league_dir)
+# Hitters (Session 94): ceiling-anchored WAR grade —
+#   ceiling_WAR  = saturate_war(runs_to_war(runs_from(ceiling)))   # tail-capped
+#   expected_WAR = p(develops)·ceiling_WAR + (1−p)·(−0.3 bust)
+#   FV           = invert(FV→WAR ladder + sub-40 role ladder)[expected_WAR]
+# Pitchers: legacy composite-gap path. Risk is both the p(develops) discount
+# and the returned variance label. Needs run-space anchor + comp_mapping from
+# tool_weights.json (loaded via league_dir); falls back to composite path without.
 ```
 
 ### `war_model`

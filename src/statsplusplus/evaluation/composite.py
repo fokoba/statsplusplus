@@ -537,7 +537,7 @@ def compute_defensive_value(
 # ---------------------------------------------------------------------------
 
 def _run_space_hitter_composite(tools, defense, bucket, run_space, positional_models,
-                                observed=None):
+                                observed=None, neutral_position=False):
     """Run-space composite (20-80) or None if calibration is incomplete.
 
     Projects wOBA from tools via the calibrated tool->wOBA fit, combines facet
@@ -577,6 +577,13 @@ def _run_space_hitter_composite(tools, defense, bucket, run_space, positional_mo
     br_tool = _fr.baserunning_runs(tools, run_space.get("br_curve"))
     fld = _fr.fielding_runs(defense or {}, bucket, run_space.get("def_curve"), positional_models)
     pos = _fr.positional_adj_runs(bucket, rpw)
+    # Prospects (non-MLB, age <= 24): ignore both the positional adjustment and
+    # fielding credit — their position skills are still developing, so neither
+    # a premium-position buff nor a weak-glove penalty is a reliable signal yet.
+    # Value is then bat + baserunning only (a neutral-position, neutral-glove player).
+    if neutral_position:
+        fld = 0.0
+        pos = 0.0
 
     # B2: per-facet blend with observed MLB career runs (bat/baserunning only;
     # defense stays tool-based — MLB ZR is used directly via the tool curve and
@@ -591,7 +598,7 @@ def _run_space_hitter_composite(tools, defense, bucket, run_space, positional_mo
             scr = _fr.facet_stat_confidence("baserunning", br_pa)
             br_tool = (1 - scr) * br_tool + scr * observed["br_runs"]
         fld_ip = observed.get("fld_ip", 0.0)
-        if observed.get("fld_runs") is not None and fld_ip > 0:
+        if not neutral_position and observed.get("fld_runs") is not None and fld_ip > 0:
             scf = _fr.facet_stat_confidence("fielding", fld_ip)
             obs_fld = observed["fld_runs"]
             # Positional ZR difficulty bonus (data-driven, calibrated per
@@ -618,6 +625,7 @@ def compute_composite_hitter(
     bucket: str | None = None,
     positional_models: dict | None = None,
     observed: dict | None = None,
+    neutral_position: bool = False,
 ) -> int:
     """Compute hitter Composite_Score from tool ratings and weights.
 
@@ -642,7 +650,8 @@ def compute_composite_hitter(
         Integer composite score in [20, 80].
     """
     rs_score = _run_space_hitter_composite(
-        tools, defense, bucket, run_space, positional_models, observed)
+        tools, defense, bucket, run_space, positional_models, observed,
+        neutral_position=neutral_position)
     if rs_score is not None:
         return rs_score
 

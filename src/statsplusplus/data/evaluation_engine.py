@@ -162,6 +162,10 @@ DEFAULT_TOOL_WEIGHTS: dict[str, Any] = {
 # Default carrying tool config — fallback when no calibrated config exists
 # ---------------------------------------------------------------------------
 
+# Prospects at or below this age (and not at MLB level) are valued without
+# positional-adjustment/fielding credit. See _run_space_hitter_composite.
+PROSPECT_NEUTRAL_POS_MAX_AGE = 24
+
 DEFAULT_CARRYING_TOOL_CONFIG: dict[str, Any] = {
     "version": 1,
     "source": "calibrated",
@@ -2615,9 +2619,16 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
             h_weights = hitter_weights.get(bucket, hitter_weights.get("COF", {}))
             def_weights = _get_def_weights_for_bucket(bucket)
 
+            # Prospects (non-MLB, age <= 24) get no positional-adjustment or
+            # fielding credit in the run-space composite/ceiling — their
+            # position skills are still developing. See _run_space_hitter_composite.
+            _lvl = row_dict.get("level")
+            _neutral_pos = (str(_lvl) != "1") and ((row_dict.get("age") or 99) <= PROSPECT_NEUTRAL_POS_MAX_AGE)
+
             tool_only_score = compute_composite_hitter(
                 hitter_tools, h_weights, defense_tools, def_weights, hitter_transforms,
                 run_space=_run_space, bucket=bucket, positional_models=_positional_models,
+                neutral_position=_neutral_pos,
             )
             composite_score = tool_only_score
 
@@ -2634,6 +2645,7 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
                 ratings_scale=_scale,
                 transforms=hitter_transforms,
                 run_space=_run_space, bucket=bucket, positional_models=_positional_models,
+                neutral_position=_neutral_pos,
             )
             true_ceiling = compute_true_ceiling(
                 potential_hitter_tools, h_weights, composite_score,
@@ -2642,6 +2654,7 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
                 defense=defense_tools, def_weights=def_weights,
                 transforms=hitter_transforms,
                 run_space=_run_space, bucket=bucket, positional_models=_positional_models,
+                neutral_position=_neutral_pos,
             )
 
             # Component scores for hitters
@@ -2730,6 +2743,7 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
                     hitter_tools, h_weights, defense_tools, def_weights, hitter_transforms,
                     run_space=_run_space, bucket=bucket,
                     positional_models=_positional_models, observed=_milb_obs,
+                    neutral_position=_neutral_pos,
                 )
 
         # Step 2: MiLB stat blending (additive for all players with MiLB data)

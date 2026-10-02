@@ -59,6 +59,7 @@ def compute_ceiling(
     run_space: dict | None = None,
     bucket: str | None = None,
     positional_models: dict | None = None,
+    neutral_position: bool = False,
 ) -> int:
     """Compute Ceiling_Score from potential tool ratings.
 
@@ -100,6 +101,7 @@ def compute_ceiling(
         raw_ceiling = compute_composite_hitter(
             potential_tools, weights, defense or {}, def_weights or {}, transforms,
             run_space=run_space, bucket=bucket, positional_models=positional_models,
+            neutral_position=neutral_position,
         )
         pot_weight = _potential_weight(age)
         raw_ceiling = round(raw_ceiling * pot_weight + composite_score * (1.0 - pot_weight))
@@ -155,6 +157,7 @@ def compute_true_ceiling(
     run_space: dict | None = None,
     bucket: str | None = None,
     positional_models: dict | None = None,
+    neutral_position: bool = False,
 ) -> int:
     """Compute the true ceiling from potential tools with no age blend.
 
@@ -175,6 +178,7 @@ def compute_true_ceiling(
         raw = compute_composite_hitter(
             potential_tools, weights, defense or {}, def_weights or {}, transforms,
             run_space=run_space, bucket=bucket, positional_models=positional_models,
+            neutral_position=neutral_position,
         )
     else:
         raw = compute_composite_hitter(

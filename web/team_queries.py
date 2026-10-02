@@ -2347,9 +2347,12 @@ def get_farm(team_id=None, limit=None):
               AND p.age <= 25 AND pf.fv >= 40
     """, (ed, tid)).fetchall()
 
+    # Ranked by surplus (the app's value measure), FV only as the tiebreak —
+    # FV-first ordering put older FV-50 depth ahead of younger, higher-surplus
+    # FV-45 prospects.
     def sort_key(r):
         fv_val = r[3] + (0.1 if r[4].endswith("+") else 0)
-        return (-fv_val, -(r[6] or 0))
+        return (-(r[6] or 0), -fv_val)
 
     rows = sorted(rows, key=sort_key)
     if limit:

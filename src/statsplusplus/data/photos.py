@@ -28,6 +28,7 @@ log = logging.getLogger(__name__)
 PHOTO_URL = "https://statsplus.net/{slug}/reports/news/html/images/person_pictures/player_{pid}.png"
 USER_AGENT = "statsplusplus/1.0 (+https://github.com/statsplusplus)"
 STALE_SECS = 7 * 24 * 3600
+MISSING_RETRY_SECS = 24 * 3600  # StatsPlus only renders a portrait once a player is in its reports; re-check 404s daily
 DEFAULT_WORKERS = 8       # parallel downloads; backs off automatically on 429
 INDEX_NAME = "index.json"
 
@@ -127,8 +128,12 @@ def sync_photos(league_dir: Path, slug: str, *, workers: int = DEFAULT_WORKERS,
     idx = _load_index(d)
     now = time.time()
     counts = {"downloaded": 0, "unchanged": 0, "missing": 0, "errors": 0, "rate_limited": 0}
-    todo = [pid for pid in _candidate_ids(league_dir)
-            if now - idx.get(str(pid), {}).get("t", 0) > stale_secs]
+    def _is_stale(pid):
+        e = idx.get(str(pid), {})
+        limit = MISSING_RETRY_SECS if e.get("s") == 404 else stale_secs
+        return now - e.get("t", 0) > limit
+
+    todo = [pid for pid in _candidate_ids(league_dir) if _is_stale(pid)]
     if max_requests is not None:
         todo = todo[:max_requests]
     pause = threading.Event()

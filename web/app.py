@@ -115,6 +115,7 @@ if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not USE_RELOADER:
         import json as _json
         import time
         from statsplusplus.data.photos import sync_photos
+        from statsplusplus.data.logos import sync_logos
         time.sleep(60)  # let startup settle
         while True:
             try:
@@ -126,6 +127,7 @@ if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not USE_RELOADER:
                     except (OSError, ValueError):
                         slug = None
                     if slug:
+                        sync_logos(ld, slug)
                         res = sync_photos(ld, slug)
                         if res["downloaded"] or res["missing"]:
                             log.info("photo_sync %s: %s", ld.name, res)

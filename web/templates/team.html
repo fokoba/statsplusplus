@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 
-<h1 class="page-title">{{ team_name }} <a href="{{ statsplus_base }}/team/{{ tid }}" target="_blank" class="ext-link" title="View on StatsPlus">↗</a></h1>
+<h1 class="page-title"><img class="team-logo-hd" src="/team-logo/{{ tid }}" alt="" onerror="this.remove()">{{ team_name }} <a href="{{ statsplus_base }}/team/{{ tid }}" target="_blank" class="ext-link" title="View on StatsPlus">↗</a></h1>
 
 {# ── Summary Bar — KPI Cards ── #}
 {% macro rank_sub(r) %}

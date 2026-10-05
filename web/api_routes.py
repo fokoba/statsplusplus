@@ -163,6 +163,27 @@ def api_prospect(pid):
     return jsonify(data)
 
 
+@api_bp.route("/team-logo/<int:tid>")
+def team_logo(tid):
+    """Serve a cached team logo; minor-league affiliates use their parent club's."""
+    from statsplusplus.data.logos import logo_dir
+    d = logo_dir(Path(g.league_dir))
+    candidates = [tid]
+    try:
+        from web_league_context import get_db
+        row = get_db().execute("SELECT parent_team_id FROM teams WHERE team_id=?", (tid,)).fetchone()
+        if row and row["parent_team_id"]:
+            candidates.append(row["parent_team_id"])
+    except Exception:
+        pass
+    for t in candidates:
+        if (d / f"{t}.png").exists():
+            resp = send_from_directory(d, f"{t}.png", mimetype="image/png")
+            resp.headers["Cache-Control"] = "public, max-age=3600"
+            return resp
+    return ("", 404)
+
+
 @api_bp.route("/player-photo/<int:pid>")
 def player_photo(pid):
     """Serve the cached StatsPlus portrait, or a silhouette if we have none."""

@@ -1996,3 +1996,5 @@ td.stat-bad  { color: var(--red); }
 .player-photo { border-radius: 6px; border: 1px solid var(--border); object-fit: cover; background: var(--bg); align-self: center; margin-right: 12px; }
 .pp-photo { float: right; margin: 0 0 6px 10px; border-radius: 4px; border: 1px solid var(--border); object-fit: cover; }
 .pl-avatar { width: 20px; height: 20px; border-radius: 50%; object-fit: cover; object-position: 50% 15%; vertical-align: middle; margin-right: 6px; border: 1px solid var(--border); background: var(--bg); }
+.tm-logo { width: 18px; height: 18px; object-fit: contain; vertical-align: middle; margin-right: 6px; }
+.team-logo-hd { width: 40px; height: 40px; object-fit: contain; vertical-align: middle; margin-right: 10px; }

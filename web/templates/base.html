@@ -471,6 +471,17 @@
       a.parentNode.insertBefore(img, a);
     });
   })();
+  // Small team logos next to team links in tables
+  (function() {
+    document.querySelectorAll('table a.team-link').forEach(function(a) {
+      var m = (a.getAttribute('href') || '').match(/^\/team\/(\d+)/);
+      if (!m || (a.previousElementSibling && a.previousElementSibling.classList.contains('tm-logo'))) return;
+      var img = document.createElement('img');
+      img.className = 'tm-logo'; img.loading = 'lazy'; img.alt = '';
+      img.src = '/team-logo/' + m[1]; img.onerror = function() { img.remove(); };
+      a.parentNode.insertBefore(img, a);
+    });
+  })();
   // Ovr/Pot tier coloring — global, runs on any page with .ovr-color elements
   (function() {
     var tiers = [[80,'#3a6fd8'],[70,'#2196a8'],[60,'#27ae60'],[55,'#7daf24'],[50,'#b7b020'],[45,'#d4ac0d'],[40,'#f1c40f'],[35,'#f39c12'],[30,'#e67e22'],[25,'#d35400'],[20,'#c0392b']];

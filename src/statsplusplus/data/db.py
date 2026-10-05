@@ -476,6 +476,22 @@ CREATE TABLE IF NOT EXISTS depth_chart_roles (
     PRIMARY KEY (team_id, position, player_id)
 );
 
+-- Salary another team keeps paying after a trade (OOTP's "Retained Salary" on
+-- the player's Contract tab). The StatsPlus sync only exposes the gross
+-- contract, so without this table a 100%-retained player (e.g. Mines from
+-- CIN) looks like a full-price contract on our books: payroll, the Contracts
+-- page and the surplus engine all charge us salary we never pay. pct is the
+-- fraction of every remaining year's salary the OTHER team still covers
+-- (1.0 = we pay nothing). Applied on top of any Team Salary export override,
+-- never stored in salary_estimates, because a fresh export would overwrite it.
+CREATE TABLE IF NOT EXISTS retained_salary (
+    player_id           INTEGER PRIMARY KEY,
+    retained_by_team_id INTEGER,
+    pct                 REAL NOT NULL,
+    note                TEXT,
+    updated_at          TEXT
+);
+
 -- League-wide park factors (every team's home park), imported from a
 -- manually uploaded OOTP park-info export. Only the active team's own
 -- park is available any other way (config/park_factors.json) — this

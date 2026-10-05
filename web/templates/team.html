@@ -1449,6 +1449,7 @@ function intlFilterPers() {
               {%- if c.ntc %}<span class="opt-badge opt-ntc">NTC</span>{% endif %}
               {%- if c.to %}<span class="opt-badge opt-to">TO</span>{% endif %}
               {%- if c.po %}<span class="opt-badge opt-po">PO</span>{% endif %}
+              {%- if c.retained_pct %}<span class="opt-badge opt-ret" title="Another team keeps paying this share of his salary — excluded from your payroll">RET {{ (c.retained_pct * 100)|round|int }}%</span>{% endif %}
             </td>
           </tr>
           {% endfor %}
@@ -1501,7 +1502,8 @@ function intlFilterPers() {
           {% for p in payroll_summary.players %}
           <tr>
             <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a>
-              {%- if p.ntc %} <span class="opt-badge opt-ntc">NTC</span>{% endif %}</td>
+              {%- if p.ntc %} <span class="opt-badge opt-ntc">NTC</span>{% endif %}
+              {%- if p.retained_pct %} <span class="opt-badge opt-ret" title="Another team keeps paying this share of his salary — excluded from your payroll">RET {{ (p.retained_pct * 100)|round|int }}%</span>{% endif %}</td>
             {% for s in p.by_year %}
             <td{% if s and s.option %} class="opt-year"{% elif s and s.projected %} class="proj-year"{% endif %}>
               {%- if s %}{{ s.sal|money }}{% if s.option %}<sup>{{ s.option }}</sup>{% elif s.projected %}<sup>est</sup>{% endif %}{% else %}-{% endif -%}

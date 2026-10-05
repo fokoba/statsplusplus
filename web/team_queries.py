@@ -23,6 +23,8 @@ from web_league_context import (get_db, get_cfg, team_abbr_map, team_names_map,
                                  money_unit as _money_unit, money_divisor as _money_divisor,
                                  dev_cell as _dev_cell)
 
+from statsplusplus.data.retained_salary import get_retention_map as _get_retention_map
+
 # Local wrappers using request-scoped league_dir
 def _dollars_per_war():
     return _dpw_pkg(get_cfg().league_dir)
@@ -67,7 +69,9 @@ def _pap_context(conn, tid, year):
     sal_rows = conn.execute(
         "SELECT player_id, salary_0 FROM contracts WHERE player_id IN "
         "(SELECT player_id FROM players WHERE team_id=? AND level='1')", (tid,)).fetchall()
-    salaries = {r["player_id"]: r["salary_0"] or 0 for r in sal_rows}
+    retained = _get_retention_map(conn)
+    salaries = {r["player_id"]: (r["salary_0"] or 0) * (1 - retained.get(r["player_id"], 0.0))
+                for r in sal_rows}
     return team_g, dpw, salaries
 
 
@@ -2491,6 +2495,8 @@ def get_contracts(team_id):
     except Exception:
         pass
 
+    retained_by_pid = _get_retention_map(conn)
+
     out = []
     for r in rows:
         pid, name = r[0], r[1]
@@ -2502,6 +2508,10 @@ def get_contracts(team_id):
                 abs_year = game_year + (idx - cur_yr)
                 if abs_year in pid_uploaded:
                     salaries[idx] = pid_uploaded[abs_year]
+        # Salary another team still pays (OOTP "Retained Salary") isn't ours.
+        retained_pct = retained_by_pid.get(pid, 0.0)
+        if retained_pct:
+            salaries = [(s_ or 0) * (1 - retained_pct) for s_ in salaries]
         ntc, to, po = r[19], r[20], r[21]
         surplus, is_major = r[22], r[23]
         ps_fv, ps_age, ps_bucket = r[24], r[25], r[26]
@@ -2511,6 +2521,7 @@ def get_contracts(team_id):
         out.append({
             "pid": pid, "name": name,
             "salary": cur_sal, "years_left": yrs_left, "total_left": total_left,
+            "retained_pct": retained_pct,
             "ntc": ntc, "to": to, "po": po,
             "surplus": round(surplus / _money_divisor(), 1) if surplus else 0,
             "is_major": is_major,
@@ -2626,10 +2637,12 @@ def get_payroll_summary(team_id):
     horizon = 6
     future_years = [year + i for i in range(horizon)]
     min_sal = get_cfg().minimum_salary
+    retained_by_pid = _get_retention_map(conn)
     players = []
     totals = [0] * horizon
     for r in rows:
         pid, name = r[0], r[1]
+        keep = 1 - retained_by_pid.get(pid, 0.0)  # share of salary we actually pay
         yrs_total, cur_yr = r[2], r[3]
         sals = [r[4 + i] for i in range(15)]
         to, po, ntc = r[19], r[20], r[21]
@@ -2643,22 +2656,23 @@ def get_payroll_summary(team_id):
             abs_year = year + i
             if pid_uploaded and abs_year in pid_uploaded:
                 cell = pid_uploaded[abs_year]
-                sal = cell["amount"]
+                sal = cell["amount"] * keep
                 by_year.append({"sal": sal, "option": cell["option"], "projected": cell["is_estimate"]})
                 totals[i] += sal
             elif i in proj_map:
-                by_year.append({"sal": proj_map[i], "option": None, "projected": True})
-                totals[i] += proj_map[i]
+                by_year.append({"sal": proj_map[i] * keep, "option": None, "projected": True})
+                totals[i] += proj_map[i] * keep
             elif contract_yr < yrs_total:
                 is_option = (contract_yr == yrs_total - 1) and (to or po)
-                sal = sals[contract_yr]
+                sal = sals[contract_yr] * keep
                 by_year.append({"sal": sal, "option": "TO" if to and is_option else "PO" if po and is_option else None, "projected": False})
                 totals[i] += sal
             else:
                 by_year.append(None)
         if not any(s for s in by_year if s):
             continue
-        players.append({"pid": pid, "name": name, "by_year": by_year, "ntc": ntc})
+        players.append({"pid": pid, "name": name, "by_year": by_year, "ntc": ntc,
+                        "retained_pct": retained_by_pid.get(pid, 0.0)})
     players.sort(key=lambda p: -(p["by_year"][0]["sal"] if p["by_year"][0] else 0))
     return {"years": future_years, "players": players, "totals": totals}
 
@@ -3425,6 +3439,39 @@ def set_depth_chart_role(team_id, position, player_id, role, share=None):
             DO UPDATE SET role=excluded.role, share=excluded.share, updated_at=excluded.updated_at
         ''', (team_id, position, player_id, role, share, datetime.datetime.now().isoformat()))
     conn.commit()
+
+
+def list_retained_salaries():
+    """Every player with salary retained by another team, for the API/UI."""
+    conn = get_db()
+    rows = conn.execute(
+        """SELECT r.player_id, p.name, p.team_id, r.retained_by_team_id, r.pct, r.note, r.updated_at
+           FROM retained_salary r LEFT JOIN players p ON p.player_id = r.player_id
+           ORDER BY r.updated_at DESC"""
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def set_retained_salary(player_id, pct, retained_by_team_id=None, note=None):
+    """Set (or clear, if pct is falsy) the share of a player's salary another
+    team keeps paying, then refresh his stored surplus so every page that
+    reads player_surplus reflects it without waiting for the next full recalc.
+    """
+    from statsplusplus.data.retained_salary import set_retention
+    from contract_value import contract_value as _cv
+    conn = get_db()
+    set_retention(conn, player_id, pct, retained_by_team_id, note)
+
+    cv = _cv(player_id, league_dir=get_cfg().league_dir)
+    if cv:
+        surplus = cv["total_surplus"].get("base", 0)
+        bd = cv.get("breakdown")
+        surplus_yr1 = round(bd[0].get("surplus", 0)) if bd else 0
+        conn.execute(
+            "UPDATE player_surplus SET surplus=?, surplus_yr1=? WHERE player_id=? AND eval_date=?",
+            (surplus, surplus_yr1, player_id, _get_eval_date()),
+        )
+        conn.commit()
 
 
 def get_depth_chart(team_id):

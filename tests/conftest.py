@@ -210,6 +210,13 @@ CREATE TABLE IF NOT EXISTS depth_chart_roles (
     updated_at  TEXT,
     PRIMARY KEY (team_id, position, player_id)
 );
+CREATE TABLE IF NOT EXISTS retained_salary (
+    player_id           INTEGER PRIMARY KEY,
+    retained_by_team_id INTEGER,
+    pct                 REAL NOT NULL,
+    note                TEXT,
+    updated_at          TEXT
+);
 """
 
 # ── Seed data ────────────────────────────────────────────────────────────────

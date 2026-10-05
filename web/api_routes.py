@@ -10,7 +10,7 @@ import sys
 import threading
 from pathlib import Path
 
-from flask import Blueprint, g, jsonify, request, session
+from flask import Blueprint, g, jsonify, request, send_from_directory, session
 
 from statsplusplus.config.league_context import (
     atomic_write_text,
@@ -163,6 +163,21 @@ def api_prospect(pid):
     return jsonify(data)
 
 
+@api_bp.route("/player-photo/<int:pid>")
+def player_photo(pid):
+    """Serve the cached StatsPlus portrait, or a silhouette if we have none."""
+    from statsplusplus.data.photos import photo_dir
+    d = photo_dir(Path(g.league_dir))
+    if (d / f"{pid}.png").exists():
+        resp = send_from_directory(d, f"{pid}.png", mimetype="image/png")
+        resp.headers["Cache-Control"] = "public, max-age=3600"
+        return resp
+    resp = send_from_directory(Path(__file__).parent / "static" / "assets",
+                               "silhouette.svg", mimetype="image/svg+xml")
+    resp.headers["Cache-Control"] = "public, max-age=300"
+    return resp
+
+
 @api_bp.route("/api/player-popup/<int:pid>")
 def api_player_popup(pid):
     from player_queries import get_player_popup
@@ -228,6 +243,37 @@ def api_depth_chart_role():
         return jsonify({"ok": False, "error": str(e)}), 400
     except Exception as e:
         log.error("depth-chart-role POST failed: %s", e)
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@api_bp.route("/api/retained-salary", methods=["GET", "POST"])
+def api_retained_salary():
+    """List, set or clear salary another team keeps paying for a player we hold.
+
+    GET  -> {"retained": [{player_id, name, team_id, retained_by_team_id, pct, note, updated_at}, ...]}
+    POST -> body {player_id, pct, retained_by_team_id?, note?}. pct is the
+    fraction (0-1) of every remaining year the OTHER team still covers
+    (1.0 = we pay nothing). pct=0/omitted clears it. Payroll, the Contracts
+    page and the surplus engine all net it out.
+    """
+    import queries
+    if request.method == "GET":
+        return jsonify({"retained": queries.list_retained_salaries()})
+    data = request.get_json(silent=True) or {}
+    try:
+        player_id = int(data["player_id"])
+        pct = float(data.get("pct") or 0)
+        team = data.get("retained_by_team_id")
+        team = int(team) if team is not None else None
+    except (KeyError, TypeError, ValueError):
+        return jsonify({"ok": False, "error": "Missing/invalid player_id, pct, or retained_by_team_id"}), 400
+    try:
+        queries.set_retained_salary(player_id, pct, team, data.get("note"))
+        return jsonify({"ok": True})
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except Exception as e:
+        log.error("retained-salary POST failed: %s", e)
         return jsonify({"ok": False, "error": str(e)}), 500
 
 

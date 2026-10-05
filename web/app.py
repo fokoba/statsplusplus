@@ -15,18 +15,18 @@ for _p in (_SRC, _PROJECT_ROOT):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-# Reloader disabled (2026-10-01) — background Claude Code tasks regularly
-# edit source files in this same working tree while the dev server is
-# running, and Werkzeug's debug-mode auto-reloader restarts the whole
-# worker process on every watched-file change. Forrest reported the app
-# "crashing" multiple times in a day; traced it to exactly this — a restart
-# mid-request looks identical to a crash from the browser's side. Explicit
-# relaunch (the existing "relaunch localhost" workflow) now required to
-# pick up code changes. See the matching USE_RELOADER check below, which
-# keeps the auto-ingest background thread starting correctly either way —
-# WERKZEUG_RUN_MAIN is only set when the reloader spawns its watcher/worker
-# split, so without the reloader that guard alone would never fire.
-USE_RELOADER = False
+# Reloader back on (2026-10-03, Forrest's call). It was off from 2026-10-01
+# because background Claude Code tasks edit source files in this same working
+# tree while the dev server runs, and Werkzeug's debug-mode reloader restarts
+# the whole worker on every watched-file change — a restart mid-request looks
+# identical to a crash from the browser's side (Forrest saw "crashes" several
+# times in a day). Trade-off: code changes now apply without a manual
+# "relaunch localhost", at the cost of those restarts. Set this to False to
+# go back. The USE_RELOADER check below keeps the auto-ingest background
+# thread starting correctly either way — WERKZEUG_RUN_MAIN is only set when
+# the reloader spawns its watcher/worker split, so without the reloader that
+# guard alone would never fire.
+USE_RELOADER = True
 
 from flask import Flask, render_template, redirect, request, g, session
 import werkzeug.exceptions
@@ -105,6 +105,36 @@ if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not USE_RELOADER:
 
     import threading
     threading.Thread(target=_local_ingest_loop, daemon=True, name="local-ingest").start()
+
+
+# Background player-photo sync (weekly refresh): mirrors StatsPlus portraits
+# into data/<league>/photos/. Throttled and resumable; each pass only touches
+# photos older than a week, so it is a no-op most of the time.
+if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not USE_RELOADER:
+    def _photo_sync_loop():
+        import json as _json
+        import time
+        from statsplusplus.data.photos import sync_photos
+        time.sleep(60)  # let startup settle
+        while True:
+            try:
+                for ld in sorted(Path(_PROJECT_ROOT, "data").iterdir()):
+                    if not (ld / "league.db").exists():
+                        continue
+                    try:
+                        slug = _json.loads((ld / "config" / "league_settings.json").read_text()).get("statsplus_slug")
+                    except (OSError, ValueError):
+                        slug = None
+                    if slug:
+                        res = sync_photos(ld, slug)
+                        if res["downloaded"] or res["missing"]:
+                            log.info("photo_sync %s: %s", ld.name, res)
+            except Exception as e:
+                log.error("photo sync loop error: %s", e, exc_info=True)
+            time.sleep(3600)
+
+    import threading as _threading
+    _threading.Thread(target=_photo_sync_loop, daemon=True, name="photo-sync").start()
 
 
 _EXEMPT_PREFIXES = ("/settings", "/onboard", "/switch-league", "/refresh",

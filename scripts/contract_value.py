@@ -13,6 +13,7 @@ from statsplusplus.config.league_config import LeagueConfig
 from statsplusplus.config.league_config import dollars_per_war as _dollars_per_war_pkg
 from statsplusplus.config.league_config import league_minimum as _league_minimum_pkg
 from statsplusplus.data.db import get_connection
+from statsplusplus.data.retained_salary import get_retention as _get_retention, effective_retention as _effective_retention
 from statsplusplus.utils.positions import assign_bucket
 from statsplusplus.evaluation.war import peak_war_from_score as peak_war_from_ovr, aging_mult, stat_peak_war
 from statsplusplus.evaluation.arb import estimate_control as _estimate_control_pkg, arb_salary as _arb_salary, arb_salary_perpetual as _arb_salary_perp
@@ -210,6 +211,11 @@ def contract_value(player_id, retention_pct=0.0, _conn=None, _hist=None, league_
         return None
 
     pid, name, age, ovr, pot, bucket = result
+    # Salary another team already covers on this contract (OOTP "Retained Salary")
+    # follows the player wherever he goes, so it applies on top of any
+    # hypothetical retention a trade is being valued with.
+    standing_retention = _get_retention(conn, pid)
+    retention_pct = _effective_retention(standing_retention, retention_pct)
     c = conn.execute("SELECT * FROM contracts WHERE player_id=?", (pid,)).fetchone()
     # A released player keeps a contracts ROW (all zeros — years=0 etc.),
     # it isn't deleted, so "if not c" alone never catches this. Confirmed
@@ -422,6 +428,7 @@ def contract_value(player_id, retention_pct=0.0, _conn=None, _hist=None, league_
 
     actual_years = len(breakdown)
     flags = []
+    if standing_retention:           flags.append(f"{standing_retention * 100:.0f}% of salary retained by prior team")
     if c["no_trade"]:                flags.append("NTC")
     if c["last_year_team_option"]:   flags.append(f"team option yr {years_total}")
     if c["last_year_player_option"]: flags.append(f"player option yr {years_total}")

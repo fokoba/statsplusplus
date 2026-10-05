@@ -1095,6 +1095,7 @@ h2.league-header { color: #aaa; font-size: 0.95rem; text-transform: uppercase; l
   letter-spacing: 0.3px;
 }
 .opt-ntc { background: rgba(231,76,60,0.2); color: #e74c3c; }
+.opt-ret { background: rgba(46,204,113,0.2); color: #2ecc71; }
 .opt-to  { background: rgba(241,196,15,0.2); color: #f1c40f; }
 .opt-loan { background: rgba(180,120,40,0.2); color: #c8a84b; }
 .opt-po  { background: rgba(52,152,219,0.2); color: #3498db; }
@@ -1990,3 +1991,8 @@ td.stat-bad  { color: var(--red); }
 .h2h-none { color: var(--dim); font-size: 10px; }
 .h2h-matrix tr.highlight td { background: rgba(80, 140, 255, 0.06); }
 .h2h-matrix tr.highlight .h2h-self { background: var(--bg2); }
+
+/* ── Player photos ── */
+.player-photo { border-radius: 6px; border: 1px solid var(--border); object-fit: cover; background: var(--bg); align-self: center; margin-right: 12px; }
+.pp-photo { float: right; margin: 0 0 6px 10px; border-radius: 4px; border: 1px solid var(--border); object-fit: cover; }
+.pl-avatar { width: 20px; height: 20px; border-radius: 50%; object-fit: cover; object-position: 50% 15%; vertical-align: middle; margin-right: 6px; border: 1px solid var(--border); background: var(--bg); }

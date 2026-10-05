@@ -592,6 +592,7 @@
 
 {# ── Player Header ── #}
 <div class="summary-bar">
+  <img class="player-photo" src="/player-photo/{{ p.pid }}" width="60" height="90" alt="{{ p.name }}" loading="lazy">
   <div class="summary-item">
     <span class="label"><a class="team-link" href="/team/{{ p.tid }}">{{ p.team_abbr }}</a> · {{ p.level }}{% if p.promotion_readiness and p.promotion_readiness.tier in ('ready', 'knocking') %} <span class="promo-badge promo-{{ p.promotion_readiness.tier }}" title="{{ p.promotion_readiness.reasons|join('; ') }}">{{ p.promotion_readiness.label }}</span>{% endif %}{% if p.demotion_risk %} <span class="promo-badge promo-{{ p.demotion_risk.tier }}" title="{{ p.demotion_risk.reasons|join('; ') }}">{{ p.demotion_risk.label }}</span>{% endif %}</span>
     <span class="value">{{ p.name }} <a href="{{ statsplus_base }}/player/{{ p.pid }}" target="_blank" class="ext-link" title="View on StatsPlus">↗</a></span>

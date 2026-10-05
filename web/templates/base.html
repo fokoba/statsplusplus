@@ -335,7 +335,8 @@
     }
 
     function renderPopup(d) {
-      var h = '<div class="pp-header"><strong>' + d.name + '</strong> <span class="pp-dim">' +
+      var h = '<img class="pp-photo" src="/player-photo/' + d.pid + '" width="45" height="68" alt="">';
+      h += '<div class="pp-header"><strong>' + d.name + '</strong> <span class="pp-dim">' +
         d.age + 'y ' + (d.height || '') + ' ' + (d.bats || '') + '/' + (d.throws || '') + '</span></div>';
       h += '<div class="pp-meta">' + d.pos + ' · ' + d.team + ' · ' + d.level;
       if (d.ovr) h += ' · <span class="pp-dim">Ovr</span> ' + d.ovr;
@@ -416,6 +417,7 @@
       }
       fetch('/api/player-popup/' + pid).then(function(r) { return r.json(); }).then(function(d) {
         if (d.error) return;
+        d.pid = pid;
         cache[pid] = d;
         if (currentLink === link) {
           popup.innerHTML = renderPopup(d);
@@ -457,6 +459,17 @@
       hide();
     });
     popup.addEventListener('mouseleave', hide);
+  })();
+  // Small face avatars next to player links in tables (lazy-loaded, cached photos)
+  (function() {
+    document.querySelectorAll('table a.player-link').forEach(function(a) {
+      var m = (a.getAttribute('href') || '').match(/^\/player\/(\d+)/);
+      if (!m || a.previousElementSibling && a.previousElementSibling.classList.contains('pl-avatar')) return;
+      var img = document.createElement('img');
+      img.className = 'pl-avatar'; img.loading = 'lazy'; img.alt = '';
+      img.src = '/player-photo/' + m[1];
+      a.parentNode.insertBefore(img, a);
+    });
   })();
   // Ovr/Pot tier coloring — global, runs on any page with .ovr-color elements
   (function() {

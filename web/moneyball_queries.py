@@ -14,6 +14,7 @@ page load rather than needing a cached/precomputed table.
 
 import os, sys
 from collections import defaultdict
+from statsplusplus.data.retained_salary import get_retention_map as _get_retention_map
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, "scripts"))
@@ -85,6 +86,7 @@ def get_moneyball(team_id=None):
             uploaded_by_pid.setdefault(r["player_id"], {})[r["year"]] = r["amount"]
     except Exception:
         pass
+    retained_by_pid = _get_retention_map(conn)
     real_payroll = defaultdict(float)
     _org_rows = conn.execute("""
         SELECT c.player_id, c.salary_0, COALESCE(NULLIF(p.organization_id,0), NULLIF(p.parent_team_id,0), p.team_id) AS org_id
@@ -95,7 +97,7 @@ def get_moneyball(team_id=None):
         if r["org_id"] not in tids:
             continue
         sal = uploaded_by_pid.get(r["player_id"], {}).get(game_year, r["salary_0"] or 0)
-        real_payroll[r["org_id"]] += sal or 0
+        real_payroll[r["org_id"]] += (sal or 0) * (1 - retained_by_pid.get(r["player_id"], 0.0))
 
     team_stats = {}
     my_contracts = []
@@ -111,7 +113,7 @@ def get_moneyball(team_id=None):
             if not cv or not cv.get("breakdown"):
                 continue
             bd0 = cv["breakdown"][0]
-            sal = bd0["salary_full"] or 0
+            sal = bd0.get("salary_net", bd0["salary_full"]) or 0  # net of retained salary
             w = bd0["war_base"] or 0.0
             s = bd0["surplus"] or 0
             payroll += sal

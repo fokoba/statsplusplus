@@ -16,9 +16,11 @@ import json
 import logging
 import os
 import sqlite3
+import threading
 import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -26,7 +28,7 @@ log = logging.getLogger(__name__)
 PHOTO_URL = "https://statsplus.net/{slug}/reports/news/html/images/person_pictures/player_{pid}.png"
 USER_AGENT = "statsplusplus/1.0 (+https://github.com/statsplusplus)"
 STALE_SECS = 7 * 24 * 3600
-DEFAULT_DELAY = 0.5       # seconds between requests (StatsPlus 429s fast clients)
+DEFAULT_WORKERS = 8       # parallel downloads; backs off automatically on 429
 INDEX_NAME = "index.json"
 
 
@@ -78,14 +80,47 @@ def _candidate_ids(league_dir: Path) -> list[int]:
     return [r[0] for r in sorted(rows, key=lambda r: (rank(r), r[0]))]
 
 
-def sync_photos(league_dir: Path, slug: str, *, delay: float = DEFAULT_DELAY,
+def _fetch_one(league_dir: Path, slug: str, pid: int, entry: dict, pause: threading.Event):
+    """Fetch one photo. Returns (pid, kind, payload) with kind in
+    ok/unchanged/missing/rate_limited/error."""
+    headers = {"User-Agent": USER_AGENT}
+    if entry.get("etag") and photo_path(league_dir, pid).exists():
+        headers["If-None-Match"] = entry["etag"]
+    req = urllib.request.Request(PHOTO_URL.format(slug=slug, pid=pid), headers=headers)
+    while pause.is_set():
+        time.sleep(0.5)
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            data = r.read()
+            etag = r.headers.get("ETag")
+        tmp = photo_dir(league_dir) / f"{pid}.png.{threading.get_ident()}.tmp"
+        tmp.write_bytes(data)
+        os.replace(tmp, photo_path(league_dir, pid))
+        return pid, "ok", etag
+    except urllib.error.HTTPError as e:
+        if e.code == 304:
+            return pid, "unchanged", None
+        if e.code == 404:
+            return pid, "missing", None
+        if e.code == 429:
+            try:
+                wait = min(int(e.headers.get("Retry-After", "30")), 120)
+            except ValueError:
+                wait = 30
+            return pid, "rate_limited", wait
+        return pid, "error", None
+    except Exception:
+        return pid, "error", None
+
+
+def sync_photos(league_dir: Path, slug: str, *, workers: int = DEFAULT_WORKERS,
                 stale_secs: int = STALE_SECS, max_requests: int | None = None,
                 stop=None) -> dict:
-    """Download missing/stale player photos. Returns counts.
+    """Download missing/stale player photos in parallel. Returns counts.
 
+    On a 429 all workers pause for Retry-After; three rate limits in a row
+    end the pass, and the next pass resumes (it only touches stale entries).
     ``stop`` is an optional callable returning True to abort early.
-    Stops the pass if StatsPlus rate-limits us repeatedly; the next pass
-    resumes where this one left off (it only touches stale entries).
     """
     d = photo_dir(league_dir)
     d.mkdir(parents=True, exist_ok=True)
@@ -94,55 +129,45 @@ def sync_photos(league_dir: Path, slug: str, *, delay: float = DEFAULT_DELAY,
     counts = {"downloaded": 0, "unchanged": 0, "missing": 0, "errors": 0, "rate_limited": 0}
     todo = [pid for pid in _candidate_ids(league_dir)
             if now - idx.get(str(pid), {}).get("t", 0) > stale_secs]
-    requests = 0
+    if max_requests is not None:
+        todo = todo[:max_requests]
+    pause = threading.Event()
     consecutive_429 = 0
-    for pid in todo:
-        if (stop and stop()) or (max_requests is not None and requests >= max_requests):
-            break
-        entry = idx.get(str(pid), {})
-        headers = {"User-Agent": USER_AGENT}
-        if entry.get("etag") and photo_path(league_dir, pid).exists():
-            headers["If-None-Match"] = entry["etag"]
-        req = urllib.request.Request(PHOTO_URL.format(slug=slug, pid=pid), headers=headers)
-        requests += 1
-        try:
-            with urllib.request.urlopen(req, timeout=20) as r:
-                data = r.read()
-                etag = r.headers.get("ETag")
-            tmp = d / f"{pid}.png.tmp"
-            tmp.write_bytes(data)
-            os.replace(tmp, photo_path(league_dir, pid))
-            idx[str(pid)] = {"t": now, "s": 200, "etag": etag}
-            counts["downloaded"] += 1
-            consecutive_429 = 0
-        except urllib.error.HTTPError as e:
-            if e.code == 304:
-                idx[str(pid)] = {**entry, "t": now, "s": 200}
-                counts["unchanged"] += 1
-                consecutive_429 = 0
-            elif e.code == 404:
-                idx[str(pid)] = {"t": now, "s": 404}
-                counts["missing"] += 1
-                consecutive_429 = 0
-            elif e.code == 429:
-                counts["rate_limited"] += 1
+    done = 0
+    BATCH = workers * 25
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for start in range(0, len(todo), BATCH):
+            if stop and stop():
+                break
+            batch = todo[start:start + BATCH]
+            results = list(pool.map(
+                lambda pid: _fetch_one(league_dir, slug, pid, idx.get(str(pid), {}), pause), batch))
+            retry_wait = 0
+            for pid, kind, payload in results:
+                done += 1
+                if kind == "ok":
+                    idx[str(pid)] = {"t": now, "s": 200, "etag": payload}
+                    counts["downloaded"] += 1
+                elif kind == "unchanged":
+                    idx[str(pid)] = {**idx.get(str(pid), {}), "t": now, "s": 200}
+                    counts["unchanged"] += 1
+                elif kind == "missing":
+                    idx[str(pid)] = {"t": now, "s": 404}
+                    counts["missing"] += 1
+                elif kind == "rate_limited":
+                    counts["rate_limited"] += 1
+                    done -= 1  # will be retried next pass
+                    retry_wait = max(retry_wait, payload)
+                else:
+                    counts["errors"] += 1
+            _save_index(d, idx)
+            if retry_wait:
                 consecutive_429 += 1
                 if consecutive_429 >= 3:
-                    log.warning("photos: rate limited 3x in a row, pausing sync")
+                    log.warning("photos: rate limited 3 batches in a row, pausing sync")
                     break
-                try:
-                    wait = min(int(e.headers.get("Retry-After", "30")), 120)
-                except ValueError:
-                    wait = 30
-                time.sleep(wait)
-                continue
+                pause.set(); time.sleep(retry_wait); pause.clear()
             else:
-                counts["errors"] += 1
-        except Exception:
-            counts["errors"] += 1
-        if requests % 50 == 0:
-            _save_index(d, idx)
-        time.sleep(delay)
-    _save_index(d, idx)
-    counts["remaining"] = max(0, len(todo) - requests)
+                consecutive_429 = 0
+    counts["remaining"] = max(0, len(todo) - done)
     return counts

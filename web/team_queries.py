@@ -5060,15 +5060,21 @@ def _defense_observed_rows(conn, team_id, year, scope, composites):
     catcher/infield extras) for `scope` ("mlb", "milb", or "both") — one
     row per player per position actually played that season.
     """
-    where = "f.team_id=?"
-    params = [team_id]
+    # The pro-club rows only cover players who are on the MLB roster right now
+    # (p.team_id / p.level = current assignment): someone traded away (Yariv)
+    # or optioned to the minors (Alvarez) still has this season's stats under
+    # the club's team_id, but no longer belongs in the club's observed defense.
+    # Optioned players appear under the MiLB scope instead.
+    on_pro_roster = "f.team_id=? AND p.team_id=? AND p.level='1'"
     if scope == "milb":
         where = "p.parent_team_id=? AND f.league_id IS NOT NULL"
+        params = [team_id]
     elif scope == "both":
-        where = "(f.team_id=?) OR (p.parent_team_id=? AND f.league_id IS NOT NULL)"
-        params = [team_id, team_id]
+        where = f"({on_pro_roster}) OR (p.parent_team_id=? AND f.league_id IS NOT NULL)"
+        params = [team_id, team_id, team_id]
     else:
-        where = "f.team_id=? AND f.league_id IS NULL"
+        where = f"{on_pro_roster} AND f.league_id IS NULL"
+        params = [team_id, team_id]
 
     rows = conn.execute(f"""
         SELECT p.player_id, p.name, p.level, f.position, f.g, f.gs, f.ip,

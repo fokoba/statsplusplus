@@ -436,3 +436,28 @@ def test_get_payroll_summary_has_total():
     assert "players" in result
     assert "totals" in result
     assert "years" in result
+
+
+# ── Defense (observed): only players currently with the pro club ─────────────
+
+def test_defense_observed_mlb_excludes_traded_and_optioned_players():
+    import sqlite3
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript("""
+    CREATE TABLE players (player_id INTEGER, name TEXT, level TEXT, team_id INTEGER, parent_team_id INTEGER);
+    CREATE TABLE fielding_stats (player_id INT, year INT, team_id INT, position INT, g INT, gs INT, ip REAL,
+        tc INT, a INT, po INT, e INT, dp INT, pb INT, sba INT, rto INT, zr REAL, league_id INT);
+    CREATE TABLE latest_ratings (player_id INT, int_ INT, wrk_ethic INT, lead INT, loy INT, greed INT,
+        adaptability INT, personality_type TEXT);
+    """)
+    # 1 = on the club now; 2 = traded away (stats still under the club); 3 = optioned to AAA
+    conn.executemany("INSERT INTO players VALUES (?,?,?,?,?)", [
+        (1, "Stays", "1", TEAM_ID, 0), (2, "Traded", "1", 99, 0), (3, "Optioned", "2", 77, TEAM_ID)])
+    for pid in (1, 2, 3):
+        conn.execute("INSERT INTO fielding_stats VALUES (?,?,?,6,20,20,150,50,30,15,1,3,0,0,0,1.0,NULL)",
+                     (pid, YEAR, TEAM_ID))
+    names = {r["name"] for r in team_queries._defense_observed_rows(conn, TEAM_ID, YEAR, "mlb", {})}
+    assert names == {"Stays"}
+    both = {r["name"] for r in team_queries._defense_observed_rows(conn, TEAM_ID, YEAR, "both", {})}
+    assert "Traded" not in both and "Optioned" not in both and "Stays" in both

@@ -18,6 +18,30 @@ pytestmark = pytest.mark.live_api
 
 # --- Helpers ---
 
+# These tests run against whichever league is active (PPL is 1955, eMLB is
+# 2034, ...), so the season and sample player are derived from the live league
+# instead of hardcoding one league's data.
+
+@pytest.fixture(scope="module")
+def season():
+    return int(client.get_date()[:4])
+
+
+def _single_stint_pid(rows):
+    """A player with exactly one stats row (a player traded mid-season has one
+    row per team, which would make a "returns one row" check flaky)."""
+    assert rows, "No stats for the current season to sample a player from"
+    counts = {}
+    for r in rows:
+        counts[r["player_id"]] = counts.get(r["player_id"], 0) + 1
+    return next(pid for pid, n in counts.items() if n == 1)
+
+
+@pytest.fixture(scope="module")
+def sample_pid(season):
+    return _single_stint_pid(client.get_player_batting_stats(year=season, split=1))
+
+
 def assert_nonempty_list_of_dicts(result):
     assert isinstance(result, list), f"Expected list, got {type(result)}"
     assert len(result) > 0, "Expected non-empty list"
@@ -43,17 +67,17 @@ def test_get_players_ids_are_integers():
 
 # --- Batting stats ---
 
-def test_get_player_batting_stats_all():
-    result = client.get_player_batting_stats(year=2033, split=1)
+def test_get_player_batting_stats_all(season):
+    result = client.get_player_batting_stats(year=season, split=1)
     assert_nonempty_list_of_dicts(result)
 
-def test_get_player_batting_stats_single_player():
-    result = client.get_player_batting_stats(pid=232, year=2033, split=1)
+def test_get_player_batting_stats_single_player(season, sample_pid):
+    result = client.get_player_batting_stats(pid=sample_pid, year=season, split=1)
     assert len(result) == 1
-    assert result[0]["player_id"] == 232
+    assert result[0]["player_id"] == sample_pid
 
-def test_get_player_batting_stats_numeric_fields():
-    result = client.get_player_batting_stats(pid=232, year=2033, split=1)
+def test_get_player_batting_stats_numeric_fields(season, sample_pid):
+    result = client.get_player_batting_stats(pid=sample_pid, year=season, split=1)
     row = result[0]
     for field in ("ab", "h", "hr", "bb", "k"):
         assert isinstance(row[field], (int, float)), f"Field {field} not numeric"
@@ -61,21 +85,21 @@ def test_get_player_batting_stats_numeric_fields():
 
 # --- Pitching stats ---
 
-def test_get_player_pitching_stats_all():
-    result = client.get_player_pitching_stats(year=2033, split=1)
+def test_get_player_pitching_stats_all(season):
+    result = client.get_player_pitching_stats(year=season, split=1)
     assert_nonempty_list_of_dicts(result)
 
-def test_get_player_pitching_stats_single_player():
-    # Greg Briggs, Angels SP
-    result = client.get_player_pitching_stats(pid=35149, year=2033, split=1)
+def test_get_player_pitching_stats_single_player(season):
+    pid = _single_stint_pid(client.get_player_pitching_stats(year=season, split=1))
+    result = client.get_player_pitching_stats(pid=pid, year=season, split=1)
     assert len(result) == 1
-    assert result[0]["player_id"] == 35149
+    assert result[0]["player_id"] == pid
 
 
 # --- Fielding stats ---
 
-def test_get_player_fielding_stats_all():
-    result = client.get_player_fielding_stats(year=2033, split=1)
+def test_get_player_fielding_stats_all(season):
+    result = client.get_player_fielding_stats(year=season, split=1)
     assert_nonempty_list_of_dicts(result)
 
 
@@ -105,10 +129,13 @@ def test_get_teams_returns_records():
     result = client.get_teams()
     assert_nonempty_list_of_dicts(result)
 
-def test_get_teams_angels_present():
+def test_get_teams_have_ids():
+    """Every team row carries an ID (the old check looked for eMLB's Angels,
+    team 44, which only exists in that league)."""
     result = client.get_teams()
     ids = [t.get("ID") or t.get("id") for t in result]
-    assert 44 in ids, "Angels (team 44) not found in teams list"
+    assert ids and all(isinstance(i, int) for i in ids), "Teams missing integer IDs"
+    assert len(set(ids)) == len(ids), "Duplicate team IDs"
 
 
 # --- Date ---
@@ -136,20 +163,20 @@ def test_get_exports_has_current_date():
 
 # --- Team batting stats ---
 
-def test_get_team_batting_stats_returns_records():
-    result = client.get_team_batting_stats(year=2033, split=1)
+def test_get_team_batting_stats_returns_records(season):
+    result = client.get_team_batting_stats(year=season, split=1)
     assert_nonempty_list_of_dicts(result)
 
-def test_get_team_batting_stats_splits():
-    overall = client.get_team_batting_stats(year=2033, split=1)
-    vsl     = client.get_team_batting_stats(year=2033, split=2)
+def test_get_team_batting_stats_splits(season):
+    overall = client.get_team_batting_stats(year=season, split=1)
+    vsl     = client.get_team_batting_stats(year=season, split=2)
     assert len(overall) > 0 and len(vsl) > 0
 
 
 # --- Team pitching stats ---
 
-def test_get_team_pitching_stats_returns_records():
-    result = client.get_team_pitching_stats(year=2033, split=1)
+def test_get_team_pitching_stats_returns_records(season):
+    result = client.get_team_pitching_stats(year=season, split=1)
     assert_nonempty_list_of_dicts(result)
 
 

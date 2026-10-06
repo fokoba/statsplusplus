@@ -4218,12 +4218,18 @@ def get_org_overview(team_id):
             used_prospect_pids.add(p["pid"])
 
         n_rows = max(len(mlb_list), len(prosp_deduped), 1)
+        # Position players: the backup is the next man on the (manual-first)
+        # MLB list — the other side of a platoon, else the top bench option.
+        # SP/RP rows are already one pitcher each, so no backup column there.
+        _all_mlb = mlb_by_pos.get(pos, [])
+        backup = _all_mlb[1] if pos not in ("SP", "RP") and len(_all_mlb) > 1 else None
         for i in range(n_rows):
             mlb = [mlb_list[i]] if i < len(mlb_list) else []
             prosp = prosp_deduped[i] if i < len(prosp_deduped) else None
             position_depth.append({
                 "pos": pos if i == 0 else "",
                 "mlb": mlb, "prospect": prosp,
+                "backup": backup if i == 0 else None,
                 "is_first": i == 0,
                 "parent_pos": pos,
             })

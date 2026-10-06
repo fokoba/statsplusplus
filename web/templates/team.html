@@ -685,6 +685,9 @@
           <th>Ovr</th>
           <th>WAR</th>
           <th>Surplus</th>
+          <th class="left col-sep">MLB Backup</th>
+          <th>Ovr</th>
+          <th>Surplus</th>
           <th class="left col-sep">Pos</th>
           <th class="left">Top Prospect</th>
           <th>Age</th>
@@ -714,6 +717,16 @@
           <td class="{{ 'pos' if m.surplus > 0 else 'neg' if m.surplus < 0 else '' }}">${{ m.surplus }}{{ money_unit }}</td>
           {% else %}
           <td class="left text-dim">—</td><td></td><td></td><td></td><td></td>
+          {% endif %}
+          {% if row.backup %}
+            {% set b = row.backup %}
+          <td class="left col-sep"><a class="player-link" href="/player/{{ b.pid }}">{{ b.name }}</a></td>
+          <td><span class="ovr-color" data-g="{{ b.ovr }}">{{ b.ovr }}</span></td>
+          <td class="{{ 'pos' if b.surplus > 0 else 'neg' if b.surplus < 0 else '' }}">${{ b.surplus }}{{ money_unit }}</td>
+          {% elif row.is_first and row.parent_pos not in ('SP','RP') %}
+          <td class="left col-sep text-dim">—</td><td></td><td></td>
+          {% else %}
+          <td class="col-sep"></td><td></td><td></td>
           {% endif %}
           {% if row.prospect %}
             {% set p = row.prospect %}

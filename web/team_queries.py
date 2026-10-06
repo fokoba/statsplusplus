@@ -2701,6 +2701,12 @@ def get_roster_summary(team_id):
 
 
 def get_upcoming_fa(team_id):
+    """Players whose contracts expire within two years — or None for a
+    perpetual-arbitration league (PPL), where nobody actually reaches free
+    agency: expiring contracts auto-renew through arbitration under league
+    rules, so the list would be wrong."""
+    if get_cfg().perpetual_arb:
+        return None
     conn = get_db()
     ed = _get_eval_date()
 

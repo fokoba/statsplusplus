@@ -42,6 +42,18 @@ def _bucket_for(pos, role):
     return "HIT"
 
 
+def _current_mlb_team(conn, player_id):
+    """The MLB club a player currently belongs to (his org's parent club when
+    optioned). Pace is measured on this team only: a traded player's earlier
+    stint came in a different run environment/role and shouldn't set the
+    pace for his new team."""
+    r = conn.execute(
+        "SELECT COALESCE(NULLIF(parent_team_id, 0), team_id) AS tid FROM players WHERE player_id=?",
+        (player_id,),
+    ).fetchone()
+    return r["tid"] if r else None
+
+
 def get_war_pace(player_id, league_dir=None, conn=None):
     """Current-season WAR pace for one player, or None if no current-season
     MLB sample exists or the sample is below the minimum-trust threshold.
@@ -66,8 +78,9 @@ def get_war_pace(player_id, league_dir=None, conn=None):
             if cy is None:
                 return None
             s = conn.execute(
-                "SELECT ip, war FROM mlb_pitching_stats WHERE player_id=? AND year=? AND split_id=1",
-                (player_id, cy),
+                "SELECT SUM(ip) AS ip, SUM(war) AS war FROM mlb_pitching_stats "
+                "WHERE player_id=? AND year=? AND split_id=1 AND team_id=?",
+                (player_id, cy, _current_mlb_team(conn, player_id)),
             ).fetchone()
             if not s or s["ip"] is None or s["ip"] < MIN_PACE_SAMPLE_IP:
                 return None
@@ -77,8 +90,9 @@ def get_war_pace(player_id, league_dir=None, conn=None):
             if cy is None:
                 return None
             s = conn.execute(
-                "SELECT g, war FROM mlb_batting_stats WHERE player_id=? AND year=? AND split_id=1",
-                (player_id, cy),
+                "SELECT SUM(g) AS g, SUM(war) AS war FROM mlb_batting_stats "
+                "WHERE player_id=? AND year=? AND split_id=1 AND team_id=?",
+                (player_id, cy, _current_mlb_team(conn, player_id)),
             ).fetchone()
             if not s or s["g"] is None or s["g"] < MIN_PACE_SAMPLE_G:
                 return None
@@ -120,8 +134,11 @@ def get_all_war_paces(league_dir=None, conn=None):
         cy_h = conn.execute("SELECT MAX(year) FROM mlb_batting_stats").fetchone()[0]
         if cy_h is not None:
             rows = conn.execute(
-                "SELECT player_id, g, war FROM mlb_batting_stats "
-                "WHERE year=? AND split_id=1 AND g >= ? AND war IS NOT NULL",
+                "SELECT s.player_id, SUM(s.g) AS g, SUM(s.war) AS war "
+                "FROM mlb_batting_stats s JOIN players p ON p.player_id = s.player_id "
+                "WHERE s.year=? AND s.split_id=1 AND s.war IS NOT NULL "
+                "  AND s.team_id = COALESCE(NULLIF(p.parent_team_id, 0), p.team_id) "
+                "GROUP BY s.player_id HAVING SUM(s.g) >= ?",
                 (cy_h, MIN_PACE_SAMPLE_G),
             ).fetchall()
             for r in rows:
@@ -140,8 +157,11 @@ def get_all_war_paces(league_dir=None, conn=None):
         if cy_p is not None:
             role_map = dict(conn.execute("SELECT player_id, role FROM players").fetchall())
             rows = conn.execute(
-                "SELECT player_id, ip, war FROM mlb_pitching_stats "
-                "WHERE year=? AND split_id=1 AND ip >= ? AND war IS NOT NULL",
+                "SELECT s.player_id, SUM(s.ip) AS ip, SUM(s.war) AS war "
+                "FROM mlb_pitching_stats s JOIN players p ON p.player_id = s.player_id "
+                "WHERE s.year=? AND s.split_id=1 AND s.war IS NOT NULL "
+                "  AND s.team_id = COALESCE(NULLIF(p.parent_team_id, 0), p.team_id) "
+                "GROUP BY s.player_id HAVING SUM(s.ip) >= ?",
                 (cy_p, MIN_PACE_SAMPLE_IP),
             ).fetchall()
             for r in rows:

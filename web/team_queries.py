@@ -3389,12 +3389,12 @@ def get_depth_chart_roles(team_id):
     return out
 
 
-def get_sp_slots(team_id):
-    """Hard rotation order pinned by the user: {player_id: slot} (1 = SP1)."""
+def get_pitcher_slots(team_id, position):
+    """Hard display order pinned by the user for 'SP' or 'RP': {player_id: slot} (1 = first)."""
     conn = get_db()
     rows = conn.execute(
         "SELECT player_id, slot FROM depth_chart_roles "
-        "WHERE team_id=? AND position='SP' AND slot IS NOT NULL", (team_id,)
+        "WHERE team_id=? AND position=? AND slot IS NOT NULL", (team_id, position)
     ).fetchall()
     return {r["player_id"]: r["slot"] for r in rows}
 
@@ -3458,8 +3458,8 @@ def set_depth_chart_role(team_id, position, player_id, role, share=None, slot=No
                 raise ValueError(f"share must be in (0, 1], got {share!r}")
         if slot is not None:
             slot = int(slot)
-            if position != "SP" or slot < 1:
-                raise ValueError("slot is a 1-based rotation order and only applies to position 'SP'")
+            if position not in ("SP", "RP") or slot < 1:
+                raise ValueError("slot is a 1-based order and only applies to positions 'SP' and 'RP'")
         conn.execute('''
             INSERT INTO depth_chart_roles (team_id, position, player_id, role, share, slot, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -3560,7 +3560,8 @@ def get_depth_chart(team_id):
 
     manual_roles = get_depth_chart_roles(team_id)
     manual_shares = get_batting_role_shares(team_id)
-    sp_slots = get_sp_slots(team_id)
+    sp_slots = get_pitcher_slots(team_id, "SP")
+    rp_slots = get_pitcher_slots(team_id, "RP")
 
     lg = _load_la()
     lg_era = lg["pitching"]["era"]
@@ -4010,6 +4011,8 @@ def get_depth_chart(team_id):
             # order; everyone else keeps their automatic order after them.
             sp_fmt.sort(key=lambda p: sp_slots.get(p["pid"], 10_000))
         rp_fmt = [_fmt_pitcher(p) for p in rp_result if round(p.get("pt_pct", 0)) >= 2]
+        if off == 0 and rp_slots:
+            rp_fmt.sort(key=lambda p: rp_slots.get(p["pid"], 10_000))
         pos_war_map["SP"] = round(sum(p["war"] for p in sp_fmt), 1)
         pos_war_map["RP"] = round(sum(p["war"] for p in rp_fmt), 1)
 
@@ -4125,6 +4128,33 @@ def get_org_overview(team_id):
     for pos in mlb_by_pos:
         mlb_by_pos[pos].sort(key=lambda x: -x["ovr"])
 
+    # Follow the user's manual depth chart (Depth Chart tab) where one is set:
+    # hitters — manually-designated players lead each position (starter, then
+    # vR/vL platoon, then bench); pitchers — a manual SP/RP list is the whole
+    # list, in the pinned slot order (falling back to role tier, then share).
+    _hit_rank = {"starter": 0, "platoon_vr": 1, "platoon_vl": 2, "bench": 3}
+    for pos, roles in get_depth_chart_roles(team_id).items():
+        lst = mlb_by_pos.get(pos)
+        if not lst:
+            continue
+        lead = sorted((e for e in lst if e["pid"] in roles),
+                      key=lambda e: _hit_rank.get(roles[e["pid"]], 9))
+        mlb_by_pos[pos] = lead + [e for e in lst if e["pid"] not in roles]
+
+    _manual_p = get_pitcher_depth_chart_roles(team_id)
+    _pit_all = {e["pid"]: e for lst in (mlb_by_pos.get("SP", []), mlb_by_pos.get("RP", [])) for e in lst}
+    _tier = {"starter": 0, "spot_starter": 1, "closer": 2, "setup": 3, "middle_relief": 4, "long_relief": 5}
+    for pos in ("SP", "RP"):
+        roles = _manual_p.get(pos) or {}
+        if not roles:
+            continue
+        slots = get_pitcher_slots(team_id, pos)
+        picked = [_pit_all[pid] for pid in roles if pid in _pit_all]
+        picked.sort(key=lambda e: (slots.get(e["pid"], 10_000),
+                                   _tier.get(roles[e["pid"]][0], 9),
+                                   -(roles[e["pid"]][1] or 0)))
+        mlb_by_pos[pos] = picked
+
     # Top prospects per bucket (collect all, sorted by FV then surplus)
     prospect_by_pos = defaultdict(list)
     # age <= 25 matches this app's standard "prospect" cutoff everywhere else
@@ -4155,12 +4185,18 @@ def get_org_overview(team_id):
     # SP shows top 5, RP top 3, position players show 1 MLB + 1 prospect
     of_buckets = {"LF", "CF", "RF", "OF"}
     pos_slots = {"SP": 5, "RP": 3}
+    # A manual SP/RP list shows in full (e.g. a 4-man rotation, a 6-man pen)
+    mlb_slots = {pos: max(pos_slots[pos], len(mlb_by_pos.get(pos, []))) if _manual_p.get(pos) else pos_slots[pos]
+                 for pos in pos_slots}
+    for pos in ("SP", "RP"):
+        if _manual_p.get(pos):
+            mlb_slots[pos] = len(mlb_by_pos.get(pos, []))
     pos_order_list = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "SP", "RP"]
     position_depth = []
     used_prospect_pids = set()  # deduplicate prospects across positions
 
     for pos in pos_order_list:
-        n_mlb = pos_slots.get(pos, 1)
+        n_mlb = mlb_slots.get(pos, 1)
         n_prosp = pos_slots.get(pos, 1)
         mlb_list = mlb_by_pos.get(pos, [])[:n_mlb]
 

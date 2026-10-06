@@ -197,9 +197,27 @@ def test_get_contracts_shape():
 
 # ── get_upcoming_fa ──────────────────────────────────────────────────────────
 
-def test_get_upcoming_fa_returns_list():
-    result = team_queries.get_upcoming_fa(TEAM_ID)
-    assert isinstance(result, list)
+class _CfgWith:
+    """Real league config with perpetual_arb overridden."""
+    def __init__(self, real, perpetual_arb):
+        self._real, self.perpetual_arb = real, perpetual_arb
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+
+def test_get_upcoming_fa_returns_list_in_free_agency_league(monkeypatch):
+    real = team_queries.get_cfg()
+    monkeypatch.setattr(team_queries, "get_cfg", lambda: _CfgWith(real, False))
+    assert isinstance(team_queries.get_upcoming_fa(TEAM_ID), list)
+
+
+def test_get_upcoming_fa_is_none_in_perpetual_arb_league(monkeypatch):
+    """Nobody reaches free agency in a perpetual-arb league (PPL) — contracts
+    auto-renew through arbitration — so there is no list to show."""
+    real = team_queries.get_cfg()
+    monkeypatch.setattr(team_queries, "get_cfg", lambda: _CfgWith(real, True))
+    assert team_queries.get_upcoming_fa(TEAM_ID) is None
 
 
 # ── get_surplus_leaders ──────────────────────────────────────────────────────

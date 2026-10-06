@@ -792,9 +792,9 @@ h2.league-header { color: #aaa; font-size: 0.95rem; text-transform: uppercase; l
 .fv-badge-gray { background: rgba(138, 138, 154, 0.15); color: var(--text-dim); }
 
 /* Org tab */
-.org-top { display: grid; grid-template-columns: 1fr auto; gap: 16px; }
+.org-top { display: block; }
 .org-depth-panel { min-width: 0; }
-.org-retention-panel { min-width: 260px; max-width: 360px; }
+.org-retention-panel { min-width: 0; }
 .org-depth-table th, .org-depth-table td { padding: 4px 8px; }
 .org-group-top td { border-top: 1px solid var(--border); }
 .payroll-bars { display: flex; flex-direction: column; gap: 8px; }

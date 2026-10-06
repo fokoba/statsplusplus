@@ -751,38 +751,6 @@
     </table>
   </div>
 
-  {# ── Retention Priorities ── #}
-  <div class="panel org-retention-panel">
-    <h2>Retention Priorities</h2>
-    {% if org.retention %}
-    <table>
-      <thead>
-        <tr>
-          <th class="left" data-sort="str">Name</th>
-          <th>Pos</th>
-          <th>Ovr</th>
-          <th>Age</th>
-          <th>Ctrl</th>
-          <th>Surplus</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for p in org.retention %}
-        <tr>
-          <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
-          <td>{{ p.pos }}</td>
-          <td><span class="ovr-color" data-g="{{ p.ovr }}">{{ p.ovr }}</span></td>
-          <td>{{ p.age }}</td>
-          <td>{{ p.yrs_left }}yr</td>
-          <td class="pos">${{ p.surplus }}{{ money_unit }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% else %}
-    <p class="text-dim">No players with expiring control and positive surplus.</p>
-    {% endif %}
-  </div>
   </div>
 
   <div class="columns" style="margin-top:12px">
@@ -832,6 +800,39 @@
         {% endfor %}
       </div>
     </div>
+  </div>
+
+  {# ── Retention Priorities ── #}
+  <div class="panel org-retention-panel" style="margin-top:12px">
+    <h2>Retention Priorities</h2>
+    {% if org.retention %}
+    <table>
+      <thead>
+        <tr>
+          <th class="left" data-sort="str">Name</th>
+          <th>Pos</th>
+          <th>Ovr</th>
+          <th>Age</th>
+          <th>Ctrl</th>
+          <th>Surplus</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in org.retention %}
+        <tr>
+          <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
+          <td>{{ p.pos }}</td>
+          <td><span class="ovr-color" data-g="{{ p.ovr }}">{{ p.ovr }}</span></td>
+          <td>{{ p.age }}</td>
+          <td>{{ p.yrs_left }}yr</td>
+          <td class="pos">${{ p.surplus }}{{ money_unit }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="text-dim">No players with expiring control and positive surplus.</p>
+    {% endif %}
   </div>
 </div>
 

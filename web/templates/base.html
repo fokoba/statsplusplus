@@ -336,6 +336,7 @@
 
     function renderPopup(d) {
       var h = '<img class="pp-photo" src="/player-photo/' + d.pid + '" width="45" height="68" alt="">';
+      if (d.team_id) h += '<img class="pp-team-logo" src="/team-logo/' + d.team_id + '" width="22" height="22" alt="" title="' + (d.team || '') + '" onerror="this.remove()">';
       h += '<div class="pp-header"><strong>' + d.name + '</strong> <span class="pp-dim">' +
         d.age + 'y ' + (d.height || '') + ' ' + (d.bats || '') + '/' + (d.throws || '') + '</span></div>';
       h += '<div class="pp-meta">' + d.pos + ' · ' + d.team + ' · ' + d.level;

@@ -1998,3 +1998,6 @@ td.stat-bad  { color: var(--red); }
 .pl-avatar { width: 20px; height: 20px; border-radius: 50%; object-fit: cover; object-position: 50% 15%; vertical-align: middle; margin-right: 6px; border: 1px solid var(--border); background: var(--bg); }
 .tm-logo { width: 18px; height: 18px; object-fit: contain; vertical-align: middle; margin-right: 6px; }
 .team-logo-hd { width: 40px; height: 40px; object-fit: contain; vertical-align: middle; margin-right: 10px; }
+.tm-logo-col { width: 22px; height: 22px; object-fit: contain; vertical-align: middle; }
+.team-cell { text-align: center; }
+.pp-team-logo { float: right; clear: right; margin: 0 0 4px 10px; object-fit: contain; }

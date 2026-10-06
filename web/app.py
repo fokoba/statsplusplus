@@ -483,7 +483,9 @@ def team_minors_all(tid):
                    "level_num": a["level"]} for a in aff_rows]
     return render_template("team_minors_all.html",
                            team_name=name, team_id=tid,
-                           roster=roster, affiliates=affiliates)
+                           roster=roster, affiliates=affiliates,
+                           affiliate_names={**dict(_get_cfg().team_names_map),
+                                            **{a["team_id"]: a["name"] for a in affiliates}})
 
 
 @app.route("/league")

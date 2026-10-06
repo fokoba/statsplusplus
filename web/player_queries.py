@@ -2341,7 +2341,7 @@ def get_player_popup(pid):
 
     result = {
         "name": p["name"], "age": p["age"], "pos": pos_str,
-        "level": level_str, "team": team_name, "tid": org_id, "is_pitcher": is_pitcher,
+        "level": level_str, "team": team_name, "tid": org_id, "team_id": p["team_id"], "is_pitcher": is_pitcher,
         "ovr": r["ovr"] if r else None, "pot": r["pot"] if r else None,
         "height": _height_str(r["height"]) if r and r["height"] else None,
         "bats": r["bats"] if r else None, "throws": r["throws"] if r else None,

@@ -4666,6 +4666,16 @@ def get_org_minor_league_roster(parent_team_id):
     # agent/waiver pools.
     _PARK_FIT_BF_THRESHOLD = 150
     org_pids = [r[0] for r in rows]
+    # The affiliate each player is actually assigned to right now (for the
+    # Team logo column) — the row tuple above carries no team id.
+    _cur_team = {}
+    for _i in range(0, len(org_pids), 500):
+        _chunk = org_pids[_i:_i + 500]
+        for _r in conn.execute(
+            f"SELECT player_id, team_id FROM players WHERE player_id IN ({','.join('?' * len(_chunk))})",
+            _chunk,
+        ).fetchall():
+            _cur_team[_r[0]] = _r[1]
     pitcher_stats = {}
     lg_gb_pct = lg_k_pct = lg_bb_pct = None
     if park and org_pids:
@@ -4777,6 +4787,7 @@ def get_org_minor_league_roster(parent_team_id):
             "pos": display_p, "bt": bt,
             "level": level_name, "level_num": int(level) if level else 99,
             "is_pro": str(level) == "1",
+            "team_id": _cur_team.get(pid),
             "composite": composite, "ceiling": ceiling,
             "vr": _vrvl.get("vr"), "vl": _vrvl.get("vl"),
             "fv": fv, "fv_str": fv_str, "risk": risk,

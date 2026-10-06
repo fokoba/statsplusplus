@@ -92,6 +92,7 @@
     <thead>
       <tr>
         <th data-sort="str">Level</th>
+        <th data-sort="str" title="Affiliate this player is currently assigned to">Team</th>
         <th data-sort="pos" class="left">Pos</th>
         <th data-sort="str" class="left">Name</th>
         <th data-sort="num" data-sort-best="low">Age</th>
@@ -127,6 +128,7 @@
       {% for p in roster.hitters %}
       <tr data-level="{{ p.level_num }}" data-pos="{{ p.pos }}" data-40man="{{ '1' if p.on_40man else '0' }}" data-pro="{{ '1' if p.is_pro else '0' }}" data-ptype="{{ p.personality_type_class }}" data-dev-good="{{ '1' if p.dev_good else '' }}" data-dev-bad="{{ '1' if p.dev_bad else '' }}" data-historic-pace="{{ '1' if p.is_historic_pace else '' }}">
         <td data-sort-value="{{ p.level_num }}"><span class="level-badge level-{{ p.level|lower|replace('-','') }}">{{ p.level }}</span>{% if p.long_horizon %} <span title="Real level puts this player at fv_calc's longest development-horizon tier (3.5+ years to MLB) — treat Surplus as more speculative than a near-ready prospect's">⏳</span>{% endif %}</td>
+        <td class="team-cell" data-sort-value="{{ p.team_id or 0 }}">{% if p.team_id %}<a href="/team/{{ p.team_id }}" title="{{ affiliate_names.get(p.team_id, '') }}"><img class="tm-logo-col" src="/team-logo/{{ p.team_id }}" alt="{{ affiliate_names.get(p.team_id, '') }}" loading="lazy" onerror="this.remove()"></a>{% endif %}</td>
         <td class="left" data-sort-value="{{ p._pos_sort }}">{{ p.pos }}</td>
         <td class="left">
           <a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a>
@@ -204,6 +206,7 @@
       {% for p in roster.pitchers %}
       <tr data-level="{{ p.level_num }}" data-pos="{{ p.pos }}" data-40man="{{ '1' if p.on_40man else '0' }}" data-pro="{{ '1' if p.is_pro else '0' }}" data-ptype="{{ p.personality_type_class }}" data-dev-good="{{ '1' if p.dev_good else '' }}" data-dev-bad="{{ '1' if p.dev_bad else '' }}" data-historic-pace="{{ '1' if p.is_historic_pace else '' }}">
         <td data-sort-value="{{ p.level_num }}"><span class="level-badge level-{{ p.level|lower|replace('-','') }}">{{ p.level }}</span>{% if p.long_horizon %} <span title="Real level puts this player at fv_calc's longest development-horizon tier (3.5+ years to MLB) — treat Surplus as more speculative than a near-ready prospect's">⏳</span>{% endif %}</td>
+        <td class="team-cell" data-sort-value="{{ p.team_id or 0 }}">{% if p.team_id %}<a href="/team/{{ p.team_id }}" title="{{ affiliate_names.get(p.team_id, '') }}"><img class="tm-logo-col" src="/team-logo/{{ p.team_id }}" alt="{{ affiliate_names.get(p.team_id, '') }}" loading="lazy" onerror="this.remove()"></a>{% endif %}</td>
         <td class="left" data-sort-value="{{ p._pos_sort }}">{{ p.pos }}</td>
         <td class="left">
           <a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a>

@@ -10,8 +10,8 @@ Locks in two behaviors that a silent data-corruption bug depended on:
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from statsplus import client
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+from statsplusplus.client import statsplus as client
 
 
 def _header_after(cols: list[str]) -> list[str]:

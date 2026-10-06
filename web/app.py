@@ -5,8 +5,8 @@ import sys
 from pathlib import Path
 
 # Ensure imports resolve even when the package isn't pip-installed:
-#   - project root  → `from statsplus import client`
-#   - src/          → `import statsplusplus...` (src/ layout)
+#   - src/          → `import statsplusplus...` (src/ layout, incl. the API client)
+#   - project root  → legacy web-module imports
 # `pip install -e .` normally handles src/, but this makes the app robust if the
 # editable install didn't take (e.g. a locked-down environment).
 _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)

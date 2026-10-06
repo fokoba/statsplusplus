@@ -15,15 +15,11 @@ league's configured year.
 import json, os, sys
 from datetime import datetime, timezone
 from pathlib import Path
-
-# Ensure project root is on path for statsplus.client
-_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent.parent)
-if _PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, _PROJECT_ROOT)
+from typing import Any
 
 BASE = Path(__file__).resolve().parent.parent.parent.parent
 
-from statsplus import client
+from statsplusplus.client import statsplus as client
 from statsplusplus.data.db import get_connection as _get_connection, init_schema as _init_schema
 from statsplusplus.config.league_config import LeagueConfig
 from statsplusplus.config.league_context import get_league_dir
@@ -416,6 +412,11 @@ def _upsert_games(conn, rows):
            r.get("runs0"), r.get("runs1"), r.get("game_type"), r.get("played"),
            r.get("winning_pitcher"), r.get("losing_pitcher"), r.get("save_pitcher")) for r in rows])
 
+def _ip_from_outs(outs: float | None, ip: float | None) -> float | None:
+    """True decimal innings from precise outs; fall back to API's truncated ip."""
+    return outs / 3 if outs else ip
+
+
 def _upsert_team_stats(conn, year):
     tb = client.get_team_batting_stats(year=year, split=1)
     tp = client.get_team_pitching_stats(year=year, split=1)
@@ -431,7 +432,7 @@ def _upsert_team_stats(conn, year):
     conn.executemany(
         "INSERT OR REPLACE INTO team_pitching_stats VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         [(r["tid"], year, r.get("split_id", 1), r.get("name", ""),
-          r.get("outs") / 3 if r.get("outs") else r.get("ip"),
+          _ip_from_outs(r.get("outs"), r.get("ip")),
           r.get("era"), r.get("k"), r.get("bb"), r.get("ha"),
           r.get("r"), r.get("er"), r.get("hra"), r.get("g", 0),
           r.get("k_pct"), r.get("bb_pct"), r.get("fip"), r.get("babip"),
@@ -511,7 +512,7 @@ def _detect_league_structure(conn, year):
             clustered.add(tid)
 
     # Group into divisions
-    div_map = defaultdict(set)
+    div_map: dict = defaultdict(set)
     for tid in mlb_tids:
         div_map[find(tid)].add(tid)
 
@@ -622,7 +623,7 @@ def _detect_league_structure(conn, year):
             divisions_out = {}
             colors = ["#508cff", "#ff6b6b"]
             for lg_idx, (lg_name, divs) in enumerate(_STANDARD_MLB.items()):
-                lg_obj = {"name": lg_name, "short": lg_name,
+                lg_obj: dict[str, Any] = {"name": lg_name, "short": lg_name,
                           "color": colors[lg_idx], "divisions": {}}
                 for div_name, abbrs in divs.items():
                     tids = sorted(abbr_to_tid[a] for a in abbrs if a in abbr_to_tid)

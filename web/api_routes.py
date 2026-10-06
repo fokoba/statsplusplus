@@ -591,7 +591,7 @@ def api_player_percentile_history(pid):
 def api_draft_picks():
     """Fetch current draft picks from StatsPlus API."""
     try:
-        from statsplus import client
+        from statsplusplus.client import statsplus as client
         cfg = _get_cfg()
         slug = cfg.settings.get("statsplus_slug", "")
         cookie = get_statsplus_cookie(cfg.league_dir)
@@ -755,7 +755,7 @@ def api_draft_upload_list():
 
         settings = data.get("settings") or load_settings(league_dir)
 
-        ordered = build_pick_list(rows, adp, needs, num_teams, min(limit, 500),
+        ordered = build_pick_list(rows, adp, needs, num_teams, min(limit, 3000),
                                   settings=settings)
         ranked_ids = [str(r["player_id"]) for r in ordered]
 
@@ -937,7 +937,7 @@ def api_game_date():
     import queries
     local_date = queries.get_state().get("game_date", "")
     try:
-        from statsplus import client
+        from statsplusplus.client import statsplus as client
         cfg = _get_cfg()
         slug = cfg.settings.get("statsplus_slug", "")
         cookie = get_statsplus_cookie(cfg.league_dir)
@@ -1036,7 +1036,7 @@ def api_test_connection():
     cfg = _get_cfg()
     slug = cfg.settings.get("statsplus_slug", "")
     data = request.get_json(silent=True) or {}
-    from statsplus import client
+    from statsplusplus.client import statsplus as client
 
     # Token path (preferred) — validate via /tokencheck.
     token = (data.get("token") or "").strip()

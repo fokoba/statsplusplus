@@ -1719,7 +1719,7 @@ def get_draft_pool():
     # Try to get draft picks from API to determine state
     picks = []
     try:
-        from statsplus import client as _dc
+        from statsplusplus.client import statsplus as _dc
         from statsplusplus.config.league_context import get_statsplus_cookie, get_statsplus_token
         cfg = get_cfg()
         slug = cfg.settings.get("statsplus_slug", "")

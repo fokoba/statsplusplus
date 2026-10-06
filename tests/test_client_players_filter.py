@@ -9,9 +9,9 @@ retired players are captured once).
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from statsplus import client
+from statsplusplus.client import statsplus as client
 
 
 def _capture_url(monkeypatch):

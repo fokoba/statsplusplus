@@ -119,7 +119,7 @@ def _query_board(conn, pids):
 def _get_taken_pids():
     """Fetch already-drafted player IDs from StatsPlus API."""
     try:
-        from statsplus import client
+        from statsplusplus.client import statsplus as client
         from statsplusplus.config.league_context import get_statsplus_cookie, get_statsplus_token
         from statsplusplus.config.league_config import LeagueConfig
         cfg = LeagueConfig()
@@ -1014,7 +1014,7 @@ def cmd_pick(args):
 
 def cmd_upload(args):
     rows, adp, needs, num_teams, conn = load_board()
-    limit = min(args.top or 500, 500)
+    limit = min(args.top or 500, 3000)
     balance_bonus = 0 if args.no_balance else 2.0
 
     # Load settings from disk if available
@@ -1132,7 +1132,8 @@ def main():
                         help="Disable pitcher/hitter balance adjustment")
 
     p_upload = sub.add_parser("upload", help="Generate StatsPlus auto-draft file")
-    p_upload.add_argument("--top", type=int, default=500)
+    p_upload.add_argument("--top", type=int, default=500,
+                          help="Number of players to generate (max 3000; StatsPlus cap)")
     p_upload.add_argument("--no-balance", action="store_true",
                           help="Disable pitcher/hitter balance adjustment")
 

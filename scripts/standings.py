@@ -53,8 +53,7 @@ def _standings_from_db(year, league_dir=None):
 
 
 def _standings_from_api(year, league_dir=None):
-    sys.path.insert(0, BASE)
-    from statsplus import client
+    from statsplusplus.client import statsplus as client
 
     tb = client.get_team_batting_stats(year=year, split=1)
     tp = client.get_team_pitching_stats(year=year, split=1)

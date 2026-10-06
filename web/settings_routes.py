@@ -253,7 +253,7 @@ def onboard_step1():
     APP_CONFIG_PATH.write_text(json.dumps(app_cfg, indent=2) + "\n")
 
     try:
-        from statsplus import client
+        from statsplusplus.client import statsplus as client
         # Validate credentials cheaply. Do NOT kick off a /ratings export here —
         # /ratings is rate-limited to once per 5 min per team, and firing it on a
         # save/verify burns that budget so the user's next refresh gets refused.
@@ -379,7 +379,7 @@ def onboard_step3():
     if request.method == "GET":
         from statsplusplus.data import db as _db
         conn = _db.get_connection(league_dir)
-        from statsplus import client
+        from statsplusplus.client import statsplus as client
         api_teams = {t["ID"]: f"{t['Name']} {t['Nickname']}" for t in client.get_teams()
                      if t.get("Nickname")}
         mlb_ids = conn.execute('''

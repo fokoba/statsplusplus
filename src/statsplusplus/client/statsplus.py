@@ -362,6 +362,44 @@ def get_date() -> str:
     return _get("/date/").strip()
 
 
+def tokencheck(slug: str, token: str) -> tuple[bool, str]:
+    """Validate a StatsPlus API token against a league.
+
+    Uses the documented /tokencheck endpoint
+    (https://wiki.statsplus.net/web-tools/statsplus-api): returns the team ID
+    (plain text) on success, or HTTP 400 with "Invalid Token" / "Token expired".
+
+    Args:
+        slug: League URL slug (e.g. "emlb").
+        token: The per-team API token to validate.
+
+    Returns:
+        (ok, detail). On success ``ok`` is True and ``detail`` is the team ID.
+        On failure ``ok`` is False and ``detail`` is a human-readable reason.
+    """
+    if not token:
+        return False, "No token provided"
+    url = f"https://statsplus.net/{slug}/api/tokencheck/?token={token}"
+    req = urllib.request.Request(
+        url, headers={"Accept": "text/plain", "User-Agent": _USER_AGENT})
+    try:
+        with urllib.request.urlopen(req) as r:
+            body = r.read().decode().strip()
+        # Success is a team ID; guard against HTTP-200 message bodies too.
+        decision = _classify_message(body)
+        if decision == "auth_token":
+            return False, "Token expired or invalid"
+        return True, body
+    except urllib.error.HTTPError as e:
+        try:
+            detail = e.read().decode().strip() or f"HTTP {e.code}"
+        except Exception:
+            detail = f"HTTP {e.code}"
+        return False, detail
+    except Exception as e:
+        return False, str(e)
+
+
 def get_exports() -> Any:
     """Check available data exports."""
     return _json("/exports/")

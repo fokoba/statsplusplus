@@ -15,6 +15,7 @@ dependencies = [
 dev = [
     "pytest==8.3.5",
     "mypy==1.15.0",
+    "hypothesis==6.152.1",
 ]
 
 [project.scripts]
@@ -37,15 +38,24 @@ spp-web = "statsplusplus.web.app:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"statsplusplus.models" = ["py.typed"]
+"statsplusplus.evaluation" = ["py.typed"]
+"statsplusplus.config" = ["py.typed"]
+"statsplusplus.utils" = ["py.typed"]
+"statsplusplus.data" = ["py.typed"]
+"statsplusplus.client" = ["py.typed"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
 markers = [
     "real_web: drive the live Flask app against an on-disk fixture (skips the mocked web-context patch)",
+    "live_api: hits the real StatsPlus API (needs credentials; deselected in CI via -m 'not live_api')",
 ]
 
 [tool.mypy]
-packages = ["statsplusplus.models", "statsplusplus.evaluation", "statsplusplus.config", "statsplusplus.utils", "statsplusplus.data"]
+packages = ["statsplusplus.models", "statsplusplus.evaluation", "statsplusplus.config", "statsplusplus.utils", "statsplusplus.data", "statsplusplus.client"]
 strict = true
 
 [[tool.mypy.overrides]]

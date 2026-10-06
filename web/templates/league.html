@@ -598,6 +598,12 @@
     <div class="ds-footer">
       <div class="ds-footer-left">
         <span class="ds-league-label">League: {{ league_name }}</span>
+        <label id="ds-list-size-wrap" style="display:none;font-size:12px;white-space:nowrap;align-items:center;gap:4px">
+          List size:
+          <input type="number" id="ds-list-size" min="1" max="3000" value="500"
+                 title="Number of players to generate (max 3000)"
+                 style="width:70px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:12px">
+        </label>
         <select class="ds-copy-select" id="ds-copy-from" title="Copy settings from another league">
           <option value="">Copy from…</option>
           {% for lg in league_list if lg.slug != active_league_slug %}
@@ -1566,9 +1572,15 @@ function generateUploadList() {
   // Exclude already-drafted players
   var exclude = Object.keys(draftPicks).map(Number).filter(Boolean);
 
+  // List size from the settings modal input (default 500, StatsPlus max 3000).
+  var sizeInput = document.getElementById('ds-list-size');
+  var topN = sizeInput ? parseInt(sizeInput.value, 10) : 500;
+  if (!topN || topN < 1) topN = 500;
+  if (topN > 3000) topN = 3000;
+
   fetch('/api/draft-upload-list', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({top: 500, exclude: exclude})
+    body: JSON.stringify({top: topN, exclude: exclude})
   }).then(function(r) { return r.json(); }).then(function(d) {
     if (!d.ok) { results.innerHTML = '<p class="text-dim">Error: ' + d.error + '</p>'; return; }
     var html = '<div style="font-size:12px;margin-bottom:8px"><strong>' + d.count + ' players</strong> written to auto-draft file</div>';
@@ -1655,6 +1667,8 @@ function openDraftSettings(mode) {
   document.getElementById('ds-btn-save').style.display = _dsMode === 'settings' ? '' : 'none';
   document.getElementById('ds-btn-save-close').style.display = _dsMode === 'settings' ? '' : 'none';
   document.getElementById('ds-btn-generate').style.display = _dsMode === 'list' ? '' : 'none';
+  var _sizeWrap = document.getElementById('ds-list-size-wrap');
+  if (_sizeWrap) _sizeWrap.style.display = _dsMode === 'list' ? 'inline-flex' : 'none';
   // Load current settings from API
   fetch('/api/draft-settings').then(function(r) { return r.json(); }).then(function(d) {
     if (!d.ok) return;

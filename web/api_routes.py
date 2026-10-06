@@ -236,8 +236,10 @@ def api_waiver_wire():
 def api_depth_chart_role():
     """Set (or clear) a manual depth-chart role for a player at a position.
 
-    Body: {team_id, position, player_id, role, share?}. role="auto" (or
-    omitted) clears the override and falls back to the automatic algorithm.
+    Body: {team_id, position, player_id, role, share?, slot?}. `slot` (SP only,
+    1-based) pins the rotation display order: SP1, SP2, ...
+
+    role="auto" (or omitted) clears the override and falls back to the automatic algorithm.
 
     For pitcher positions ("SP"/"RP"), role is one of "starter"/"spot_starter"
     (SP) or "closer"/"setup"/"middle_relief"/"long_relief" (RP), and `share`
@@ -258,8 +260,9 @@ def api_depth_chart_role():
         return jsonify({"ok": False, "error": "Missing/invalid team_id, position, or player_id"}), 400
     role = data.get("role") or "auto"
     share = data.get("share")
+    slot = data.get("slot")
     try:
-        queries.set_depth_chart_role(team_id, position, player_id, role, share=share)
+        queries.set_depth_chart_role(team_id, position, player_id, role, share=share, slot=slot)
         return jsonify({"ok": True})
     except ValueError as e:
         return jsonify({"ok": False, "error": str(e)}), 400

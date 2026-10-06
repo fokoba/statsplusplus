@@ -3389,6 +3389,16 @@ def get_depth_chart_roles(team_id):
     return out
 
 
+def get_sp_slots(team_id):
+    """Hard rotation order pinned by the user: {player_id: slot} (1 = SP1)."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT player_id, slot FROM depth_chart_roles "
+        "WHERE team_id=? AND position='SP' AND slot IS NOT NULL", (team_id,)
+    ).fetchall()
+    return {r["player_id"]: r["slot"] for r in rows}
+
+
 def get_batting_role_shares(team_id):
     """Explicit playing-time shares pinned on batting bench roles: {position: {player_id: share}}."""
     conn = get_db()
@@ -3422,7 +3432,7 @@ def get_pitcher_depth_chart_roles(team_id):
     return out
 
 
-def set_depth_chart_role(team_id, position, player_id, role, share=None):
+def set_depth_chart_role(team_id, position, player_id, role, share=None, slot=None):
     """Set (or clear, if role is falsy/'auto') a manual depth-chart role.
 
     share: optional explicit playing-time fraction (0-1), only meaningful
@@ -3446,12 +3456,17 @@ def set_depth_chart_role(team_id, position, player_id, role, share=None):
             share = float(share)
             if not (0.0 < share <= 1.0):
                 raise ValueError(f"share must be in (0, 1], got {share!r}")
+        if slot is not None:
+            slot = int(slot)
+            if position != "SP" or slot < 1:
+                raise ValueError("slot is a 1-based rotation order and only applies to position 'SP'")
         conn.execute('''
-            INSERT INTO depth_chart_roles (team_id, position, player_id, role, share, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO depth_chart_roles (team_id, position, player_id, role, share, slot, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(team_id, position, player_id)
-            DO UPDATE SET role=excluded.role, share=excluded.share, updated_at=excluded.updated_at
-        ''', (team_id, position, player_id, role, share, datetime.datetime.now().isoformat()))
+            DO UPDATE SET role=excluded.role, share=excluded.share, slot=excluded.slot,
+                          updated_at=excluded.updated_at
+        ''', (team_id, position, player_id, role, share, slot, datetime.datetime.now().isoformat()))
     conn.commit()
 
 
@@ -3545,6 +3560,7 @@ def get_depth_chart(team_id):
 
     manual_roles = get_depth_chart_roles(team_id)
     manual_shares = get_batting_role_shares(team_id)
+    sp_slots = get_sp_slots(team_id)
 
     lg = _load_la()
     lg_era = lg["pitching"]["era"]
@@ -3989,6 +4005,10 @@ def get_depth_chart(team_id):
             pos_war_map[pos] = round(sum(p["war"] for p in players), 1)
 
         sp_fmt = [_fmt_pitcher(p) for p in sp_result if round(p.get("pt_pct", 0)) >= 2]
+        if off == 0 and sp_slots:
+            # Hard rotation order (SP1..SP5): pinned pitchers first, in slot
+            # order; everyone else keeps their automatic order after them.
+            sp_fmt.sort(key=lambda p: sp_slots.get(p["pid"], 10_000))
         rp_fmt = [_fmt_pitcher(p) for p in rp_result if round(p.get("pt_pct", 0)) >= 2]
         pos_war_map["SP"] = round(sum(p["war"] for p in sp_fmt), 1)
         pos_war_map["RP"] = round(sum(p["war"] for p in rp_fmt), 1)

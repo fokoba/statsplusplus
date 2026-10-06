@@ -466,12 +466,15 @@ CREATE TABLE IF NOT EXISTS rule5_eligible (
 -- set. NULL for batting-position rows, and NULL for pitcher rows where the
 -- user only specified a role tier (e.g. "long_relief") and wants the
 -- automatic within-tier weighting.
+-- slot: optional 1-based display order for SP rows (SP1..SP5), a hard sort
+-- that overrides the automatic ordering of the rotation list.
 CREATE TABLE IF NOT EXISTS depth_chart_roles (
     team_id     INTEGER NOT NULL,
     position    TEXT NOT NULL,
     player_id   INTEGER NOT NULL,
     role        TEXT NOT NULL,
     share       REAL,
+    slot        INTEGER,
     updated_at  TEXT,
     PRIMARY KEY (team_id, position, player_id)
 );
@@ -723,6 +726,8 @@ def _migrate_misc(conn: sqlite3.Connection) -> None:
     dcr_cols = {r[1] for r in conn.execute("PRAGMA table_info(depth_chart_roles)").fetchall()}
     if "share" not in dcr_cols:
         conn.execute("ALTER TABLE depth_chart_roles ADD COLUMN share REAL")
+    if "slot" not in dcr_cols:
+        conn.execute("ALTER TABLE depth_chart_roles ADD COLUMN slot INTEGER")
 
 
 # ---------------------------------------------------------------------------

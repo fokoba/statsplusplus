@@ -403,3 +403,65 @@ def get_projected_war(team_id=None):
         "n_excluded_no_track_record": n_no_track_record,
         "backtest_buckets": buckets_out,
     }
+
+
+def build_team_projection_table(pw_data, standings=None, names=None, abbrs=None):
+    """Roll the league-wide player projections up to one row per team.
+
+    Pure function over ``get_projected_war()``'s output so it can be tested
+    without a database. Team floor/ceiling combine the players' offsets from
+    baseline as independent errors (root-sum-of-squares) rather than summing
+    every player's 10th/90th percentile outcome, which would overstate the
+    spread: a whole roster does not hit its floor at once.
+
+    standings: optional {team_id: (w, l)}. Only players that made it into the
+    projection (enough current-season sample plus a prior season on record)
+    are counted, so ``n`` shows how much of each roster the totals cover.
+    """
+    import math
+    standings = standings or {}
+    names, abbrs = names or {}, abbrs or {}
+    agg = {}
+    for p in pw_data.get("players", []):
+        a = agg.setdefault(p["team_id"], {
+            "n": 0, "cur": 0.0, "base": 0.0, "dn": 0.0, "up": 0.0,
+            "val": 0.0, "sal": 0.0, "sur": 0.0})
+        a["n"] += 1
+        a["cur"] += p["current_war"]
+        a["base"] += p["baseline_war"]
+        a["dn"] += (p["baseline_war"] - p["floor_war"]) ** 2
+        a["up"] += (p["ceiling_war"] - p["baseline_war"]) ** 2
+        a["val"] += p["baseline_value"]
+        a["sal"] += p["salary"]
+        a["sur"] += p["surplus"]
+    out = []
+    for tid, a in agg.items():
+        w, l = standings.get(tid, (None, None))
+        gp = (w or 0) + (l or 0)
+        out.append({
+            "team_id": tid, "name": names.get(tid, f"Team {tid}"), "abbr": abbrs.get(tid, "?"),
+            "w": w, "l": l, "pct": round(w / gp, 3) if gp else None,
+            "n": a["n"], "current_war": round(a["cur"], 1),
+            "baseline_war": round(a["base"], 1),
+            "floor_war": round(a["base"] - math.sqrt(a["dn"]), 1),
+            "ceiling_war": round(a["base"] + math.sqrt(a["up"]), 1),
+            "baseline_value": round(a["val"]), "salary": round(a["sal"]),
+            "surplus": round(a["sur"]),
+            "observed_dpw": round(a["sal"] / a["base"]) if a["base"] > 0 else None,
+        })
+    out.sort(key=lambda r: -r["baseline_war"])
+    for i, r in enumerate(out):
+        r["rank"] = i + 1
+    return out
+
+
+def get_team_projection_table(pw_data=None):
+    """Team rows for the Moneyball page (see build_team_projection_table)."""
+    pw_data = pw_data or get_projected_war()
+    conn = get_db()
+    try:
+        standings = {r["team_id"]: (r["w"], r["l"])
+                     for r in conn.execute("SELECT team_id, w, l FROM standings")}
+    except Exception:
+        standings = {}
+    return build_team_projection_table(pw_data, standings, team_names_map(), team_abbr_map())

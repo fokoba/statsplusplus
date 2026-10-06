@@ -157,6 +157,59 @@
 
 {% if war_projection %}{% include "_war_projection.html" %}{% endif %}
 
+{# ── Projected WAR by team — all teams ── #}
+<div class="panel" style="margin-top:16px;">
+  <h2>Projected WAR by Team <span style="font-weight:400; color:var(--text-dim); font-size:12px">— every team, click any column to sort</span></h2>
+  <div class="mb-subtitle">
+    Each team's players from the league-wide projection below, rolled up. <strong>Baseline</strong> is the sum of the
+    players' projected end-of-season WAR. <strong>Floor</strong> and <strong>Ceiling</strong> combine the players' backtested
+    10th/90th percentile offsets as independent errors, so a team's spread is narrower than the sum of every
+    player's worst or best case. <strong>Players</strong> counts how many of the team's players are covered (enough
+    current-season sample and a prior season on record), so compare totals with that in mind.
+    <span class="pos">Highlighted</span>: your team.
+  </div>
+  <div class="pw-table-wrap">
+    <table id="team-proj-table">
+      <thead>
+        <tr>
+          <th data-sort="num" data-sort-best="low" title="Rank by projected (baseline) WAR">#</th>
+          <th data-sort="str" class="left">Team</th>
+          <th data-sort="num" title="Current record">W-L</th>
+          <th data-sort="num" title="Current winning percentage">Win%</th>
+          <th data-sort="num" title="Players covered by the projection">Players</th>
+          <th data-sort="num" title="Observed WAR so far this season">Current WAR</th>
+          <th data-sort="num" data-sort-selected="desc" title="Projected end-of-season WAR (sum of player baselines)">Baseline WAR</th>
+          <th data-sort="num" title="Bottom-10% outcome, errors combined as independent">Floor WAR</th>
+          <th data-sort="num" title="Top-10% outcome, errors combined as independent">Ceiling WAR</th>
+          <th data-sort="num">Baseline $</th>
+          <th data-sort="num">Salary</th>
+          <th data-sort="num" title="Baseline $ minus salary">Surplus</th>
+          <th data-sort="num" data-sort-best="low" title="Salary / baseline WAR — lower means better value">$/WAR</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in team_proj %}
+        <tr{% if t.team_id == tid %} style="background:rgba(80,180,255,0.10); font-weight:600"{% endif %}>
+          <td data-sort-value="{{ t.rank }}">{{ t.rank }}</td>
+          <td class="left"><a class="team-link" href="/team/{{ t.team_id }}">{{ t.name }}</a></td>
+          <td data-sort-value="{{ t.pct if t.pct is not none else -1 }}">{% if t.w is not none %}{{ t.w }}-{{ t.l }}{% else %}—{% endif %}</td>
+          <td data-sort-value="{{ t.pct if t.pct is not none else -1 }}">{% if t.pct is not none %}{{ '%.3f'|format(t.pct) }}{% else %}—{% endif %}</td>
+          <td>{{ t.n }}</td>
+          <td>{{ t.current_war }}</td>
+          <td>{{ t.baseline_war }}</td>
+          <td class="neg">{{ t.floor_war }}</td>
+          <td class="pos">{{ t.ceiling_war }}</td>
+          <td data-sort-value="{{ t.baseline_value }}">{{ fmt_money(t.baseline_value) }}</td>
+          <td data-sort-value="{{ t.salary }}">{{ fmt_money(t.salary) }}</td>
+          <td data-sort-value="{{ t.surplus }}" class="{{ 'pos' if t.surplus > 0 else 'neg' if t.surplus < 0 else '' }}">{{ fmt_money(t.surplus) }}</td>
+          <td data-sort-value="{{ t.observed_dpw if t.observed_dpw is not none else 999999999 }}">{{ fmt_dpw(t.observed_dpw) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
 {# ── Projected End-of-Season WAR — league-wide ── #}
 {% set pw = pw_data %}
 <div class="panel" style="margin-top:16px;">

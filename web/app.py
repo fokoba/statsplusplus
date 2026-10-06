@@ -413,6 +413,7 @@ def team_moneyball(tid):
     data = _mq.get_moneyball(tid)
     import projected_war_queries as _pwq
     pw_data = _pwq.get_projected_war()
+    team_proj = _pwq.get_team_projection_table(pw_data)
     war_projection = None
     war_emp = {}
     if cfg.league_dir.name.lower() == "ppl" and tid == 6:
@@ -425,7 +426,7 @@ def team_moneyball(tid):
         # to avoid embedding pw_data's ~700-player table twice on one page.
         seed_pids = {r["pid"] for r in war_projection.get("rows", [])}
         war_emp = {p["pid"]: p for p in pw_data["players"] if p["pid"] in seed_pids}
-    return render_template("moneyball.html", tid=tid, team_name=name, data=data, pw_data=pw_data,
+    return render_template("moneyball.html", tid=tid, team_name=name, data=data, pw_data=pw_data, team_proj=team_proj,
                            war_projection=war_projection, war_emp=war_emp,
                            breadcrumbs=[{"label": cfg.settings.get("league", "League"), "url": "/league"},
                                         {"label": name, "url": f"/team/{tid}"},

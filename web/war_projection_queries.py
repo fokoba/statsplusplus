@@ -31,45 +31,45 @@ DEFAULT_TEAM_IP = 1393        # PHA, 1954
 PITCHER_BATTING_AB = DEFAULT_TEAM_AB - DEFAULT_POSITION_AB - DEFAULT_PH_AB
 BASE_RHP_SHARE = 3986 / 6028  # PHA, 1954 plate appearances vs RHP
 
-# Exactly the 25-player plan agreed with the GM. AB sum = 4,912; IP sum = 1,393.
-# The vR fraction is *this player's expected AB mix*, not the team-wide
-# schedule mix; specialists are intentionally given asymmetric fractions.
+# The 25-player plan. Roster/workload defaults live here; the *role label*
+# shown on the page is derived at build time from the Depth Chart tab's manual
+# roles (see _role_labels) and only falls back to the text below when a player
+# has no manual role. Synced to the active 25 on 2026-10-06 (Austin optioned,
+# Thrift up for Lacefield's injury, Mines/Cano added, Davis/Yariv/McGaha/Rivera
+# gone). AB sum = 4,912; IP sum = 1,393. The vR fraction is *this player's
+# expected AB mix*, not the team-wide schedule mix.
 SEED = {
     24747: ("SP1", "SP", 250, None),
-    25181: ("SP2", "SP", 180, None),
-    26188: ("SP3", "SP", 235, None),
+    26188: ("SP2", "SP", 235, None),
+    25181: ("SP3", "SP", 235, None),
     23856: ("SP4", "SP", 250, None),
-    23718: ("Closer", "RP", 65, None),
-    23663: ("High leverage", "RP", 65, None),
-    23601: ("High leverage", "RP", 65, None),
-    25360: ("High leverage L", "RP", 60, None),
-    24627: ("Long relief L", "RP", 115, None),
-    22312: ("Long relief R", "RP", 108, None),
+    23718: ("Closer", "RP", 70, None),
+    25360: ("Closer", "RP", 70, None),
+    23663: ("Setup", "RP", 70, None),
+    23601: ("Setup", "RP", 70, None),
+    24627: ("Long relief", "RP", 143, None),
     23752: ("C vs R", "C", 375, .88),
-    24233: ("C vs L", "C", 231, .31),
+    22403: ("C vs L", "C", 231, .31),
     25260: ("1B vs R", "1B", 360, .96),
-    23770: ("3B vs R / 1B vs L", "3B", 540, .67),
-    24800: ("3B vs L", "3B", 185, .10),
-    24790: ("Everyday 2B", "2B", 545, BASE_RHP_SHARE),
-    25253: ("Everyday SS", "SS", 560, BASE_RHP_SHARE),
+    21573: ("1B vs L", "1B", 241, .10),
+    23770: ("Everyday 3B", "3B", 575, BASE_RHP_SHARE),
+    24790: ("Everyday 2B", "2B", 517, BASE_RHP_SHARE),
+    25258: ("2B bench", "2B", 28, BASE_RHP_SHARE),
+    25253: ("Everyday SS", "SS", 530, BASE_RHP_SHARE),
+    24460: ("SS bench", "SS", 30, BASE_RHP_SHARE),
     25180: ("Everyday LF", "LF", 535, BASE_RHP_SHARE),
+    24366: ("LF bench", "LF", 170, .30),
+    24661: ("RF bench", "RF", 100, BASE_RHP_SHARE),
     25625: ("CF vs R", "CF", 400, .95),
     24216: ("CF vs L", "CF", 206, .10),
     27407: ("Everyday RF", "RF", 550, BASE_RHP_SHARE),
-    24366: ("Corner OF / PH vs L", "LF", 127, .30),
-    21573: ("Corner IF / PH vs L", "1B", 127, .30),
     25323: ("PH vs R", "PH", 64, .95),
-    24723: ("Defensive 2B / SS", "2B", 107, BASE_RHP_SHARE),
 }
 
 # Expected defensive-position shares across each player's fielding work.
-# These do not change with the AB split override: if the GM changes a role,
-# a future role editor can update these explicitly.
 FIELD_MIX = {
-    23770: {"3B": 2/3, "1B": 1/3},
-    21573: {"1B": .52, "3B": .48},
-    24723: {"2B": .57, "SS": .43},
     24366: {"LF": .56, "RF": .44},
+    24661: {"RF": .55, "LF": .45},
 }
 
 POSITION_CODE = {"C": 2, "1B": 3, "2B": 4, "3B": 5, "SS": 6,
@@ -190,10 +190,7 @@ def _hitter_components(player, ab, vr_share, history, field_history, run_space):
     br_war = br_600 * (pa/600) / rpw
 
     primary = player["position"]
-    if player["pid"] == 23770:  # Reib plays 3B vs R and 1B vs L.
-        mix = {"3B": vr_share, "1B": 1-vr_share}
-    else:
-        mix = FIELD_MIX.get(player["pid"], {primary: 1.0}) if primary != "PH" else {}
+    mix = FIELD_MIX.get(player["pid"], {primary: 1.0}) if primary != "PH" else {}
     fielding_war = positional_war = 0.0
     fielding_fraction = 0.0 if primary == "PH" else .98
     for pos, share in mix.items():
@@ -257,6 +254,96 @@ def _pitcher_components(player, ip, history, weights):
     return components, half_width, None
 
 
+_HIT_ROLE_ORDER = {"starter": 0, "platoon_vr": 1, "platoon_vl": 2, "bench": 3}
+_RP_ROLE_LABEL = {"closer": "Closer", "setup": "Setup", "middle_relief": "Middle relief",
+                  "long_relief": "Long relief"}
+
+
+def _role_labels(team_id: int, games_per_season: int) -> dict:
+    """{pid: label} from the Depth Chart tab's manual roles — the page's roles
+    follow the depth chart instead of a hard-coded list. A player with no
+    manual role keeps the SEED fallback label."""
+    from team_queries import (get_depth_chart_roles, get_pitcher_depth_chart_roles,
+                              get_pitcher_slots, get_batting_role_shares)
+    labels: dict[int, list] = {}
+    bat = get_depth_chart_roles(team_id)
+    shares = get_batting_role_shares(team_id)
+    for pos, roles in bat.items():
+        for pid, role in roles.items():
+            if role == "starter":
+                text = f"Everyday {pos}"
+            elif role == "platoon_vr":
+                text = f"{pos} vs R"
+            elif role == "platoon_vl":
+                text = f"{pos} vs L"
+            else:
+                share = shares.get(pos, {}).get(pid)
+                text = f"{pos} bench" + (f" (~{round(share * games_per_season)} G)" if share else "")
+            labels.setdefault(pid, []).append((_HIT_ROLE_ORDER.get(role, 9), text))
+    pit = get_pitcher_depth_chart_roles(team_id)
+    for pos in ("SP", "RP"):
+        slots = get_pitcher_slots(team_id, pos)
+        for pid, (role, _share) in (pit.get(pos) or {}).items():
+            if pos == "SP":
+                text = f"SP{slots[pid]}" if pid in slots else ("Spot starter" if role == "spot_starter" else "Starter")
+            else:
+                text = _RP_ROLE_LABEL.get(role, "Reliever") + (f" (#{slots[pid]})" if pid in slots else "")
+            labels.setdefault(pid, []).append((0, text))
+    return {pid: " / ".join(t for _, t in sorted(parts)) for pid, parts in labels.items()}
+
+
+# Stabilization constants for blending observed pace into the rest-of-season
+# rate: weight on pace = sample / (sample + K). Hitters in PA, pitchers in IP
+# (the IP constants match _pitcher_components' prior-season blend).
+_PACE_K_PA = 400
+_PACE_K_IP = {"SP": 300, "RP": 110}
+
+
+def _observed_this_season(conn, pid, team_id, position):
+    """Current-season stats with the player's current club only (a traded
+    player's earlier stint came in a different environment — same rule as
+    war_pace.get_war_pace)."""
+    if position in ("SP", "RP"):
+        r = conn.execute(
+            "SELECT SUM(g) g, SUM(ip) sample, SUM((war + COALESCE(ra9war, war)) / 2.0) war "
+            "FROM mlb_pitching_stats WHERE player_id=? AND year=? AND split_id=1 AND team_id=?",
+            (pid, YEAR, team_id)).fetchone()
+    else:
+        r = conn.execute(
+            "SELECT SUM(g) g, SUM(pa) sample, SUM(war) war, SUM(ab) ab "
+            "FROM mlb_batting_stats WHERE player_id=? AND year=? AND split_id=1 AND team_id=?",
+            (pid, YEAR, team_id)).fetchone()
+    if not r or r["sample"] is None:
+        return {"g": 0, "sample": 0.0, "war": 0.0, "ab": 0}
+    return {"g": r["g"] or 0, "sample": float(r["sample"] or 0), "war": float(r["war"] or 0),
+            "ab": (r["ab"] if "ab" in r.keys() else 0) or 0}
+
+
+def _in_season_outlook(plan_total, half_width, obs, planned_workload, position, season_pct):
+    """Fold observed WAR and pace into the plan: observed-to-date plus a
+    rest-of-season projection that leans on the player's pace in proportion
+    to how much of it has been seen, with the planning band narrowing as the
+    season is played (only the remainder is uncertain)."""
+    rem = max(0.0, 1.0 - season_pct)
+    sample, war = obs["sample"], obs["war"]
+    unit_sample = obs["ab"] if position not in ("SP", "RP") and obs["ab"] else sample
+    pace_full = None
+    if unit_sample and unit_sample > 0:
+        pace_full = war / unit_sample * planned_workload   # full season at the planned workload
+    if pace_full is None:
+        weight, rate_full = 0.0, plan_total
+    else:
+        k = _PACE_K_PA if position not in ("SP", "RP") else _PACE_K_IP[position]
+        weight = min(.85, sample / (sample + k))
+        rate_full = weight * pace_full + (1 - weight) * plan_total
+    median = war + rem * rate_full
+    h = half_width * math.sqrt(rem)
+    return {"pace_full": None if pace_full is None else round(pace_full, 2),
+            "weight": round(weight, 2), "median": round(median, 2),
+            "floor": round(median - h, 2), "ceiling": round(median + h, 2),
+            "half": h}
+
+
 def build_projection(team_id: int, overrides: dict | None = None) -> dict:
     """Compute the 25-player plan; does not mutate the DB or saved settings."""
     if team_id != TEAM_ID or get_cfg().league_dir.name.lower() != "ppl":
@@ -293,10 +380,18 @@ def build_projection(team_id: int, overrides: dict | None = None) -> dict:
         if r["player_id"] in ids:
             field_hist[r["player_id"]].append(dict(r))
 
+    from statsplusplus.config.league_config import games_per_season
+    gps = games_per_season(cfg.league_dir)
+    gp = conn.execute(
+        "SELECT COUNT(*) FROM games WHERE played=1 AND game_type=0 AND date LIKE ? "
+        "AND (home_team=? OR away_team=?)", (f"{YEAR}%", team_id, team_id)).fetchone()[0] or 0
+    season_pct = min(gp / gps, 1.0) if gps else 0.0
+    labels = _role_labels(team_id, gps)
     rows = []
     for pid, (role, position, amount, default_vr) in SEED.items():
         if pid not in roster:
             continue
+        role = labels.get(pid, role) + (" · PH" if position == "PH" else "")
         p = dict(roster[pid], position=position)
         over = overrides.get(str(pid), {})
         ip = float(over.get("ip", amount)) if position in ("SP", "RP") else None
@@ -311,6 +406,8 @@ def build_projection(team_id: int, overrides: dict | None = None) -> dict:
         else:
             components, half, pa = _pitcher_components(p, ip, pit_hist[pid], model_weights)
         total = sum(components.values())
+        obs = _observed_this_season(conn, pid, team_id, position)
+        outlook = _in_season_outlook(total, half, obs, ab if ip is None else ip, position, season_pct)
         rows.append({
             "pid": pid, "name": p["name"], "role": role, "position": position,
             "ab": ab, "ip": ip, "vr_share": round(vr_share*100, 1) if vr_share is not None else None,
@@ -319,6 +416,12 @@ def build_projection(team_id: int, overrides: dict | None = None) -> dict:
             "components": {k: round(v, 2) for k,v in components.items()},
             "total": round(total, 2),
             "range": [round(total-half, 1), round(total+half, 1)],
+            "observed": {"war": round(obs["war"], 2), "g": obs["g"],
+                         "sample": round(obs["sample"], 1), "unit": "IP" if ip is not None else "PA"},
+            "pace_war": outlook["pace_full"], "pace_weight": outlook["weight"],
+            "outlook": {"floor": outlook["floor"], "median": outlook["median"],
+                        "ceiling": outlook["ceiling"]},
+            "_half_rem": outlook["half"],
             "sample": round(sum((r["pa"] or 0) for r in bat_hist[pid][1])) if ab is not None else
                       round(sum((r["ip"] or 0) for r in pit_hist[pid][1])),
         })
@@ -337,8 +440,18 @@ def build_projection(team_id: int, overrides: dict | None = None) -> dict:
     totals = {k: round(sum(r["components"][k] for r in rows), 2)
               for k in ("hitting", "pitching", "fielding", "baserunning", "positional", "replacement")}
     totals["total"] = round(sum(r["total"] for r in rows), 2)
+    # Team outlook: medians and observed add; the band combines the players'
+    # remaining-season half-widths as independent errors (root-sum-of-squares).
+    _med = sum(r["outlook"]["median"] for r in rows)
+    _band = math.sqrt(sum(r["_half_rem"] ** 2 for r in rows))
+    totals["observed"] = round(sum(r["observed"]["war"] for r in rows), 2)
+    totals["outlook"] = {"floor": round(_med - _band, 1), "median": round(_med, 1),
+                         "ceiling": round(_med + _band, 1)}
+    for r in rows:
+        r.pop("_half_rem", None)
     return {
         "year": YEAR, "team_id": team_id, "rows": rows, "outside": outside,
+        "season": {"games_played": gp, "games_per_season": gps, "pct": round(season_pct * 100, 1)},
         "missing": [pid for pid in SEED if pid not in roster],
         "totals": totals,
         "workload": {"hitter_ab": hitter_ab, "hitter_ab_target": DEFAULT_POSITION_AB+DEFAULT_PH_AB,

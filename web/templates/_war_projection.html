@@ -33,6 +33,11 @@
           <th title="Positional adjustment">Pos</th>
           <th title="Replacement-level playing-time credit">Repl</th>
           <th>Total</th><th title="Heuristic planning range; not a calibrated probability interval">Planning range</th>
+          <th title="Observed WAR this season with his current club (games played shown on hover)">Obs WAR</th>
+          <th title="Full-season WAR at his planned workload if he keeps producing at this season's rate (WAR per AB or per IP so far × planned AB/IP)">Pace</th>
+          <th title="New floor: observed WAR plus the rest-of-season projection minus the remaining-season uncertainty, which narrows as games are played (heuristic)">New floor</th>
+          <th title="New median: observed WAR to date + rest-of-season projection, which blends the plan with his pace — the more he has played, the more the pace counts">New median</th>
+          <th title="New ceiling: new median plus the remaining-season uncertainty (heuristic)">New ceiling</th>
           <th title="Cross-check against the empirically-calibrated in-season projection (Moneyball's Projected End-of-Season WAR table above) — baseline, with the backtested floor-ceiling range. Blank if this player doesn't yet have enough current-season sample to appear there.">Empirical (obs.)</th>
         </tr></thead>
         <tbody id="war-proj-body"></tbody>
@@ -88,7 +93,8 @@
       <div><small>Hitting</small><strong>${signed(t.hitting)}</strong></div>
       <div><small>Pitching</small><strong>${signed(t.pitching)}</strong></div>
       <div><small>Fielding</small><strong>${signed(t.fielding)}</strong></div>
-      <div><small>Other</small><strong>${signed(t.baserunning+t.positional+t.replacement)}</strong></div>`;
+      <div><small>Other</small><strong>${signed(t.baserunning+t.positional+t.replacement)}</strong></div>
+      <div title="Observed WAR to date plus the rest-of-season projection (pace-blended); band is floor to ceiling"><small>In-season outlook · ${data.season.games_played}/${data.season.games_per_season} G</small><strong>${signed(t.outlook.median)}</strong> <small>${signed(t.outlook.floor)} to ${signed(t.outlook.ceiling)}</small></div>`;
     const gap = (actual, target, unit) => {
       const delta = Math.round(actual-target);
       return `${Number(actual).toLocaleString()} / ${Number(target).toLocaleString()} ${unit} (${delta > 0 ? '+' : ''}${delta})`;
@@ -106,7 +112,7 @@
     const parts = [data.rows.filter(r => r.ab !== null), data.rows.filter(r => r.ip !== null)];
     let html = '';
     for (const [index, group] of parts.entries()) {
-      html += `<tr class="war-proj-group"><td colspan="15">${index ? 'Pitchers' : 'Position players'}</td></tr>`;
+      html += `<tr class="war-proj-group"><td colspan="20">${index ? 'Pitchers' : 'Position players'}</td></tr>`;
       group.sort((a,b) => b.total-a.total);
       for (const r of group) {
         const c = r.components;
@@ -123,6 +129,11 @@
           <td>${cell(c.positional)}</td><td>${cell(c.replacement)}</td>
           <td class="war-proj-total">${cell(r.total)}</td>
           <td>${signed(r.range[0])} to ${signed(r.range[1])}</td>
+          <td title="${r.observed.g} G · ${r.observed.sample} ${r.observed.unit}">${cell(r.observed.war)}</td>
+          <td title="Weight on pace in the rest-of-season rate: ${Math.round(r.pace_weight*100)}%"${r.pace_weight < .2 ? ' style="opacity:.5"' : ''}>${r.pace_war === null ? '<span style="color:var(--text-dim)">—</span>' : cell(r.pace_war)}</td>
+          <td class="neg">${signed(r.outlook.floor)}</td>
+          <td class="war-proj-total">${cell(r.outlook.median)}</td>
+          <td class="pos">${signed(r.outlook.ceiling)}</td>
           <td>${empiricalCell(r.pid)}</td>
         </tr>`;
       }
@@ -132,7 +143,9 @@
       <th>${w.hitter_ab}</th><th></th><th></th><th>${w.pitcher_ip}</th>
       <th>${cell(t.hitting)}</th><th>${cell(t.pitching)}</th><th>${cell(t.fielding)}</th>
       <th>${cell(t.baserunning)}</th><th>${cell(t.positional)}</th><th>${cell(t.replacement)}</th>
-      <th>${cell(t.total)}</th><th></th><th></th></tr>`;
+      <th>${cell(t.total)}</th><th></th>
+      <th>${cell(t.observed)}</th><th></th>
+      <th>${signed(t.outlook.floor)}</th><th>${cell(t.outlook.median)}</th><th>${signed(t.outlook.ceiling)}</th><th></th></tr>`;
     document.getElementById('war-proj-outside').innerHTML = data.outside.map(r => `<tr>
       <td class="left"><a class="player-link" href="/player/${r.pid}">${esc(r.name)}</a></td>
       <td>${esc(r.level)}</td><td>${r.active ? 'Yes' : 'No'}</td>

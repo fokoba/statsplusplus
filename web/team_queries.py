@@ -3389,6 +3389,20 @@ def get_depth_chart_roles(team_id):
     return out
 
 
+def get_batting_role_shares(team_id):
+    """Explicit playing-time shares pinned on batting bench roles: {position: {player_id: share}}."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT position, player_id, share FROM depth_chart_roles "
+        "WHERE team_id=? AND position NOT IN ('SP', 'RP') AND share IS NOT NULL AND role='bench'",
+        (team_id,)
+    ).fetchall()
+    out = {}
+    for r in rows:
+        out.setdefault(r["position"], {})[r["player_id"]] = r["share"]
+    return out
+
+
 def get_pitcher_depth_chart_roles(team_id):
     """Manual pitcher role overrides: {'SP': {pid: (role, share)}, 'RP': {pid: (role, share)}}.
 
@@ -3412,8 +3426,8 @@ def set_depth_chart_role(team_id, position, player_id, role, share=None):
     """Set (or clear, if role is falsy/'auto') a manual depth-chart role.
 
     share: optional explicit playing-time fraction (0-1), only meaningful
-    for pitcher positions ('SP'/'RP') — ignored (stored as NULL) for
-    batting positions.
+    for pitcher positions ('SP'/'RP') and for batting 'bench' roles (e.g.
+    7/154 for "seven games") — ignored (stored as NULL) otherwise.
     """
     import datetime
     conn = get_db()
@@ -3426,7 +3440,7 @@ def set_depth_chart_role(team_id, position, player_id, role, share=None):
         valid_roles = PITCHER_DEPTH_CHART_ROLES if position in ("SP", "RP") else DEPTH_CHART_ROLES
         if role not in valid_roles:
             raise ValueError(f"Unknown depth chart role for position {position!r}: {role!r}")
-        if position not in ("SP", "RP"):
+        if position not in ("SP", "RP") and role != "bench":
             share = None
         elif share is not None:
             share = float(share)
@@ -3530,6 +3544,7 @@ def get_depth_chart(team_id):
             _career_war_by_pid[r["player_id"]] = _career_war_by_pid.get(r["player_id"], 0.0) + (r["w"] or 0.0)
 
     manual_roles = get_depth_chart_roles(team_id)
+    manual_shares = get_batting_role_shares(team_id)
 
     lg = _load_la()
     lg_era = lg["pitching"]["era"]
@@ -3849,7 +3864,8 @@ def get_depth_chart(team_id):
         # future years keep using the automatic WAR-ranked allocation, since
         # roles may change as players age/depart.
         pos_result = allocate_playing_time(
-            players_by_pos, manual_roles=manual_roles if off == 0 else None)
+            players_by_pos, manual_roles=manual_roles if off == 0 else None,
+            manual_shares=manual_shares if off == 0 else None)
         if off == 0:
             year1_players_by_pos = players_by_pos
 

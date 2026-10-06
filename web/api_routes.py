@@ -244,8 +244,9 @@ def api_depth_chart_role():
     is an optional explicit playing-time fraction in (0, 1] — e.g. 0.33 for
     "gets a third of the rotation's innings". Omit `share` to let the
     within-tier weighting fill in the rest automatically (see
-    projections.allocate_pitcher_time). `share` is ignored for batting
-    positions.
+    projections.allocate_pitcher_time). For batting positions `share` is only
+    honoured on the "bench" role (e.g. 0.0455 = 7 of 154 games) and ignored
+    for other batting roles.
     """
     import queries
     data = request.get_json(silent=True) or {}

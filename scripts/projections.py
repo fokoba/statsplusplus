@@ -379,10 +379,15 @@ _PLATOON_VR_FRACTION = 0.60
 _PLATOON_VL_FRACTION = 0.40
 
 
-def _manual_position_entries(players, roles, pos):
+def _manual_position_entries(players, roles, pos, shares=None):
     """Build (player, share) entries for a position from manual role overrides.
 
     roles: dict of player_id -> role string (ROLE_STARTER/PLATOON_VR/PLATOON_VL/BENCH).
+    shares: optional dict of player_id -> explicit fraction (0-1) of the
+    position's playing time, honoured for BENCH entries only (e.g. 7/154 for
+    "seven games at 2B while the starter is hurt"). Explicit-share bench
+    players are carved out first and the starters/platoon keep their usual
+    baseline.
     Players at this position with no role entry are dropped — a manual
     designation is a full override, not a bias on top of the auto-ranking.
     """
@@ -417,7 +422,13 @@ def _manual_position_entries(players, roles, pos):
             entries.append((by_pid[pid], vl_total / len(vl_ids)))
         top_bucket = vr_total + vl_total
 
-    bench_bucket = max(1.0 - top_bucket, 0.0)
+    shares = shares or {}
+    pinned = [pid for pid in bench_ids if shares.get(pid)]
+    for pid in pinned:
+        entries.append((by_pid[pid], float(shares[pid])))
+    bench_ids = [pid for pid in bench_ids if pid not in pinned]
+
+    bench_bucket = max(1.0 - top_bucket - sum(float(shares[pid]) for pid in pinned), 0.0)
     if bench_ids and bench_bucket > 0:
         weights = [max(by_pid[pid].get("war_proj", 0) * by_pid[pid].get("level_discount", 1.0), 0.01)
                    for pid in bench_ids]
@@ -428,7 +439,8 @@ def _manual_position_entries(players, roles, pos):
     return entries
 
 
-def allocate_playing_time(players_by_pos, team_pa=None, team_ip=None, manual_roles=None):
+def allocate_playing_time(players_by_pos, team_pa=None, team_ip=None, manual_roles=None,
+                          manual_shares=None):
     """Allocate playing time across positions.
 
     players_by_pos: dict of position -> list of player dicts, each with:
@@ -479,7 +491,8 @@ def allocate_playing_time(players_by_pos, team_pa=None, team_ip=None, manual_rol
 
         pos_roles = manual_roles.get(pos)
         if pos_roles:
-            raw[pos] = _manual_position_entries(players, pos_roles, pos)
+            raw[pos] = _manual_position_entries(
+                players, pos_roles, pos, (manual_shares or {}).get(pos))
             continue
 
         # Compute effective WAR for ranking at this position.

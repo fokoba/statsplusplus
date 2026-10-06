@@ -302,11 +302,20 @@ def _weighted_war(seasons: list[dict[str, Any]]) -> float:
     """Compute weighted WAR from season list (most recent first)."""
     weights = list(_STAT_WEIGHTS[:len(seasons)])
     # Scale most recent year's weight by season completion fraction
-    weights[0] = weights[0] * float(seasons[0].get("season_pct", 1.0))
+    pct0 = float(seasons[0].get("season_pct", 1.0))
+    weights[0] = weights[0] * pct0
     effective_wars = [
         float(s["war"]) / (0.5 if s.get("incomplete") else 1.0)
         for s in seasons[:len(weights)]
     ]
+    # A partial current season's WAR is a *total to date*, not a full-season
+    # figure: down-weighting it alone still averaged e.g. 0.76 WAR through 27%
+    # of the season in as if it were a 0.76-WAR full year, dragging every
+    # in-season projection down (Tyllesen, 2026-10). Annualize it so the
+    # weight (3 x pct) and the value (war / pct) together reduce to 3 x war,
+    # i.e. playing-time-weighted.
+    if 0.0 < pct0 < 1.0:
+        effective_wars[0] /= pct0
     total_weight = sum(weights)
     if total_weight == 0:
         return 0.0

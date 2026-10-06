@@ -364,9 +364,9 @@ class TestStatPeakWar:
         ]}
         result = stat_peak_war(1, "SS", bat_hist, {})
         assert result is not None
-        # Weight[0] = 3 * 0.5 = 1.5, Weight[1] = 3
-        # (2.0*1.5 + 4.0*3) / (1.5+3) = 15/4.5 = 3.333
-        assert result == pytest.approx(15.0 / 4.5)
+        # Weight[0] = 3 * 0.5 = 1.5, Weight[1] = 3; the half-season's 2.0 WAR
+        # annualizes to 4.0, so (4.0*1.5 + 4.0*3) / 4.5 = 4.0
+        assert result == pytest.approx(4.0)
 
 
 # ---------------------------------------------------------------------------

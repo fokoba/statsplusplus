@@ -572,6 +572,18 @@ def calc_fv_from_dict(
                     if isinstance(raw, dict):
                         target.clear()
                         target.update({int(k): v for k, v in raw.items()})
+                # Hand-set per-league overrides live in MODEL_PARAMS (which
+                # calibrate() preserves) so a recalibration can't wipe them:
+                # e.g. GAP_CLOSURE_HITTER_OVERRIDE = {"22": 0.287, ...}.
+                _mp = w.get("MODEL_PARAMS") or {}
+                for key, target in [
+                    ("GAP_CLOSURE_HITTER_OVERRIDE", gap_closure_h),
+                    ("GAP_CLOSURE_PITCHER_OVERRIDE", gap_closure_p),
+                ]:
+                    raw = _mp.get(key)
+                    if isinstance(raw, dict) and raw:
+                        target.clear()
+                        target.update({int(k): float(v) for k, v in raw.items()})
             except (json.JSONDecodeError, OSError):
                 pass
 

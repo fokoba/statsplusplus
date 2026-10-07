@@ -231,6 +231,13 @@ def _upsert_ratings(conn, ratings, snapshot_date, keep_history=True):
               AND player_id IN (SELECT player_id FROM personality_overrides)
         """, (snapshot_date,))
 
+    # Re-apply the game's position ratings the API leaves at 0 (pitchers).
+    try:
+        from statsplusplus.data.position_overrides import apply_position_overrides
+        apply_position_overrides(conn, snapshot_date)
+    except Exception as e:  # never let this block a refresh
+        log.warning("position overrides not applied: %s", e)
+
 def _snapshot_ratings_history(conn, ratings, snapshot_date):
     """Append a monthly snapshot to ratings_history (one per in-game month)."""
     if not ratings:

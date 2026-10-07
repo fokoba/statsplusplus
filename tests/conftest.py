@@ -211,12 +211,28 @@ CREATE TABLE IF NOT EXISTS depth_chart_roles (
     updated_at  TEXT,
     PRIMARY KEY (team_id, position, player_id)
 );
+CREATE TABLE IF NOT EXISTS position_overrides (
+    player_id INTEGER PRIMARY KEY,
+    p INTEGER, pot_p INTEGER,
+    c INTEGER, pot_c INTEGER, first_b INTEGER, pot_first_b INTEGER,
+    second_b INTEGER, pot_second_b INTEGER, third_b INTEGER, pot_third_b INTEGER,
+    ss INTEGER, pot_ss INTEGER, lf INTEGER, pot_lf INTEGER,
+    cf INTEGER, pot_cf INTEGER, rf INTEGER, pot_rf INTEGER,
+    updated_at TEXT
+);
 CREATE TABLE IF NOT EXISTS retained_salary (
     player_id           INTEGER PRIMARY KEY,
     retained_by_team_id INTEGER,
     pct                 REAL NOT NULL,
     note                TEXT,
     updated_at          TEXT
+);
+CREATE TABLE IF NOT EXISTS depth_chart_exclusions (
+    team_id    INTEGER NOT NULL,
+    player_id  INTEGER NOT NULL,
+    note       TEXT,
+    updated_at TEXT,
+    PRIMARY KEY (team_id, player_id)
 );
 """
 

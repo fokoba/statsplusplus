@@ -843,6 +843,9 @@ _RATINGS_SYNC_MAP = [
 ]
 
 
+from statsplusplus.data.position_overrides import save_position_overrides as _save_pos_overrides
+
+
 def import_ratings_sync(file_bytes: bytes, league_dir=None) -> dict:
     """Sync ratings from an uploaded OOTP "All Columns" export into this
     league's own `ratings` table, keyed by player_id.
@@ -914,6 +917,11 @@ def import_ratings_sync(file_bytes: bytes, league_dir=None) -> dict:
                 [pid, snapshot_date] + [values[c] for c in cols],
             )
             inserted += 1
+
+        # Keep the game's position ratings (the API leaves a pitcher's at 0, and
+        # every monthly snapshot would wipe an export's values) — re-applied
+        # after each refresh. See statsplusplus/data/position_overrides.py.
+        _save_pos_overrides(conn, pid, values)
 
         # personality_type/adaptability survive refreshes separately from the
         # rest of `ratings` — the sanctioned API refresh never supplies either

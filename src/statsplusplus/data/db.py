@@ -439,6 +439,23 @@ CREATE TABLE IF NOT EXISTS salary_estimates (
 -- post-refresh backfill step (_upsert_ratings) copies these onto each new
 -- snapshot row. uploaded_at also powers the "last valid upload" reminder
 -- on the Custom Upload page.
+-- Position ratings (current + potential at every field position, plus P) from
+-- the game's own "All Columns" exports, kept by player_id. The StatsPlus API
+-- sync leaves a pitcher's position ratings at 0 — so a pitcher with premium
+-- outfield potential (Matt Cracco: LF/CF/RF Pot 95/85/85) was invisible, and
+-- every monthly API snapshot would wipe whatever an export had filled in.
+-- Re-applied onto the latest ratings after each refresh wherever the API value
+-- is blank/0 (see refresh._upsert_ratings / custom_upload.apply_position_overrides).
+CREATE TABLE IF NOT EXISTS position_overrides (
+    player_id INTEGER PRIMARY KEY,
+    p INTEGER, pot_p INTEGER,
+    c INTEGER, pot_c INTEGER, first_b INTEGER, pot_first_b INTEGER,
+    second_b INTEGER, pot_second_b INTEGER, third_b INTEGER, pot_third_b INTEGER,
+    ss INTEGER, pot_ss INTEGER, lf INTEGER, pot_lf INTEGER,
+    cf INTEGER, pot_cf INTEGER, rf INTEGER, pot_rf INTEGER,
+    updated_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS personality_overrides (
     player_id        INTEGER PRIMARY KEY,
     personality_type TEXT,
@@ -493,6 +510,20 @@ CREATE TABLE IF NOT EXISTS retained_salary (
     pct                 REAL NOT NULL,
     note                TEXT,
     updated_at          TEXT
+);
+
+-- Minor leaguers the user has ruled out of the depth chart projection. The
+-- depth chart pulls in AA/AAA prospects (FV 40+/50+) as future MLB playing
+-- time, but some have no real path to the big leagues (e.g. fringe relievers
+-- stuck in AAA). Rows here are filtered out of that prospect pool only: once a
+-- player is actually on the MLB roster he shows up regardless, so a later
+-- call-up needs no cleanup.
+CREATE TABLE IF NOT EXISTS depth_chart_exclusions (
+    team_id    INTEGER NOT NULL,
+    player_id  INTEGER NOT NULL,
+    note       TEXT,
+    updated_at TEXT,
+    PRIMARY KEY (team_id, player_id)
 );
 
 -- League-wide park factors (every team's home park), imported from a

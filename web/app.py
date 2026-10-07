@@ -15,6 +15,14 @@ for _p in (_SRC, _PROJECT_ROOT):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+# Launched with the bare framework interpreter (the Python.app binary, so macOS
+# applies the user's Full Disk Access grant for "Python" to the server and its
+# background OOTP ingest) rather than through the venv's python3 stub: the venv
+# isn't activated then, so add its packages to the path.
+_VENV_SITE = Path(_PROJECT_ROOT) / ".venv" / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"
+if _VENV_SITE.is_dir() and str(_VENV_SITE) not in sys.path:
+    sys.path.append(str(_VENV_SITE))
+
 # Reloader back on (2026-10-03, Forrest's call). It was off from 2026-10-01
 # because background Claude Code tasks edit source files in this same working
 # tree while the dev server runs, and Werkzeug's debug-mode reloader restarts

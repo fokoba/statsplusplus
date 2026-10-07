@@ -439,6 +439,23 @@ CREATE TABLE IF NOT EXISTS salary_estimates (
 -- post-refresh backfill step (_upsert_ratings) copies these onto each new
 -- snapshot row. uploaded_at also powers the "last valid upload" reminder
 -- on the Custom Upload page.
+-- Draft-day values for each draft-pool prospect, frozen once the draft starts so
+-- later model/ratings changes can't rewrite what the board showed on draft day.
+-- pot = the game's own POT; exp_round = expected round from POT rank in the pool.
+-- source: 'captured' (live while the draft was still ahead) or 'reconstructed'
+-- (re-run of the prior model on the draft-pool export, for drafts that predate this table).
+CREATE TABLE IF NOT EXISTS draft_day_snapshot (
+    draft_year INTEGER NOT NULL,
+    player_id  INTEGER NOT NULL,
+    pot        INTEGER,
+    fv         INTEGER,
+    fv_str     TEXT,
+    exp_round  INTEGER,
+    source     TEXT,
+    captured_at TEXT,
+    PRIMARY KEY (draft_year, player_id)
+);
+
 -- Position ratings (current + potential at every field position, plus P) from
 -- the game's own "All Columns" exports, kept by player_id. The StatsPlus API
 -- sync leaves a pitcher's position ratings at 0 — so a pitcher with premium

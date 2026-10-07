@@ -211,6 +211,12 @@ CREATE TABLE IF NOT EXISTS depth_chart_roles (
     updated_at  TEXT,
     PRIMARY KEY (team_id, position, player_id)
 );
+CREATE TABLE IF NOT EXISTS draft_day_snapshot (
+    draft_year INTEGER NOT NULL, player_id INTEGER NOT NULL,
+    pot INTEGER, fv INTEGER, fv_str TEXT, exp_round INTEGER,
+    source TEXT, captured_at TEXT,
+    PRIMARY KEY (draft_year, player_id)
+);
 CREATE TABLE IF NOT EXISTS position_overrides (
     player_id INTEGER PRIMARY KEY,
     p INTEGER, pot_p INTEGER,

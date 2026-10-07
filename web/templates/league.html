@@ -2136,7 +2136,11 @@ function renderDraftBoard(view) {
   var base = '<th class="dd-cmp-th" title="Compare">⚖</th><th data-sort="num">Rk</th><th data-sort="str">Pos</th><th data-sort="str" class="left">Name</th>' +
     '<th data-sort="num">Age</th><th data-sort="num" title="Expected draft round based on POT rank">ExpRd</th>' +
     '<th data-sort="num" title="Rank on the OSA Top 200 draft pipeline scouting list — manually entered from a pasted report; not every player on that list is draft-eligible this year">OSA Rk</th>' +
-    '<th data-sort="str">Lvl</th><th data-sort="num">Ovr</th><th data-sort="num">Pot</th><th data-sort="str">FV</th><th data-sort="num" title="Risk-adjusted surplus value over 6 years of team control. Hover cells for raw (undiscounted) value.">$Val</th>' +
+    '<th data-sort="str">Lvl</th><th data-sort="num">Ovr</th><th data-sort="num">Pot</th><th data-sort="str">FV</th>' +
+    '<th data-sort="num" title="Potential as the board showed it on draft day (frozen — later model/ratings changes do not move it). Reconstructed with the earlier model for drafts that predate the snapshot.">DD Pot</th>' +
+    '<th data-sort="num" title="FV as the board showed it on draft day (frozen)">DD FV</th>' +
+    '<th data-sort="num" title="Expected draft round on draft day (POT rank in the pool, frozen)">DD ExpRd</th>' +
+    '<th data-sort="num" title="Risk-adjusted surplus value over 6 years of team control. Hover cells for raw (undiscounted) value.">$Val</th>' +
     '<th data-sort="num" title="One-time signing bonus demand from the uploaded draft pool export (DEM column). &#39;Slot&#39; = will sign for the pick&#39;s assigned slot bonus — shown as an estimated $ cost from the slot-value curve, NOT free; &#39;Impos.&#39; = will not sign for any realistic bonus.">Bonus Ask</th>' +
     '<th data-sort="num" title="0-100 bang-for-buck score: 100 * (1 - ask/surplus), using the estimated slot cost for &#39;Slot&#39; asks. A $10 ask against $100K surplus scores ~100 (barely gives up any value); a $75K ask against $100K surplus scores 25 (gives up 3/4 the value). Unsignable = 0. Blank = no ask on file.">Bonus Value</th>' +
     '<th data-sort="str">Acc</th>' +
@@ -2194,6 +2198,7 @@ var DRAFT_SORT_MAP = {
   'Rk': 'rank', 'Pos': 'pos', 'Name': 'name', 'Age': 'age', 'Lvl': 'type',
   'Ovr': 'ovr', 'Pot': 'pot', 'FV': 'fv', '$Val': 'surplus', 'Acc': 'acc',
   'ExpRd': 'exp_round', 'OSA Rk': 'osa_rank',
+  'DD Pot': 'dd_pot', 'DD FV': 'dd_fv', 'DD ExpRd': 'dd_exp_round',
   'Bonus Ask': 'bonus_ask', 'Bonus Value': 'bonus_score',
   'C%': 'contrib_pct', 'R%': 'regular_pct', 'AS%': 'allstar_pct', 'Bust%': 'bust_pct',
   'Risk': 'risk', 'Loy': 'loy', 'Greed': 'greed', 'Grade': 'best_position_grade',
@@ -2211,6 +2216,9 @@ function _draftSortVal(p, key) {
     case 'fv': return p.fv;
     case 'surplus': return p.surplus || 0;
     case 'exp_round': return (p.adp && p.adp.exp_round) || 99;
+    case 'dd_pot': return p.dd_pot != null ? p.dd_pot : -1;
+    case 'dd_fv': return p.dd_fv != null ? p.dd_fv : -1;
+    case 'dd_exp_round': return p.dd_exp_round != null ? p.dd_exp_round : 99;
     case 'osa_rank': return p.osa_rank || 9999;
     case 'bonus_ask': return p.bonus_ask != null ? p.bonus_ask : -1;
     case 'bonus_score': return p.bonus_score != null ? p.bonus_score : -1;
@@ -2360,12 +2368,21 @@ function applyDraftFilters() {
     if (p.acc === 'L') flags += ' <span class="draft-flag draft-flag-acc" title="Low accuracy — development uncertain">⚠</span>';
     if (p.risk === 'Extreme') flags += ' <span class="draft-flag draft-flag-risk" title="Extreme bust risk">☠</span>';
     flags += _horizonFlag(p);
+    if (p.pos_player_flag) flags += ' <span class="draft-flag" style="color:#4caf50" title="Possible position player: ' + p.pos_player_flag + '">⚾ PP</span>';
     tr += '<td class="left"><a class="player-link" href="/player/' + p.pid + '">' + p.name + '</a>' + flags + '</td>';
     var _adp = p.adp || {};
     tr += '<td>' + p.age + '</td><td data-sort-value="' + (_adp.exp_round || 99) + '">' + (_adp.exp_round ? 'Rd' + _adp.exp_round : '-') + '</td>';
     tr += '<td data-sort-value="' + (p.osa_rank || 9999) + '">' + (p.osa_rank || '<span class="text-dim">—</span>') + '</td>';
     tr += '<td>' + lvlPill(p.type) + '</td>';
     tr += gtd(p.ovr) + gtd(p.pot) + '<td>' + fvPill(p.fv_str) + '</td>';
+    var ddSrc = p.dd_source === 'reconstructed' ? 'Reconstructed with the earlier model on the draft-pool export' : 'Captured before the draft';
+    if (p.dd_pot != null || p.dd_fv_str) {
+      tr += '<td class="text-dim" title="' + ddSrc + '" data-sort-value="' + (p.dd_pot != null ? p.dd_pot : -1) + '">' + (p.dd_pot != null ? p.dd_pot : '-') + '</td>';
+      tr += '<td class="text-dim" title="' + ddSrc + (p.dd_fv_str && p.dd_fv_str !== p.fv_str ? ' · now ' + p.fv_str : '') + '" data-sort-value="' + (p.dd_fv != null ? p.dd_fv : -1) + '">' + (p.dd_fv_str || '-') + '</td>';
+      tr += '<td class="text-dim" title="' + ddSrc + '" data-sort-value="' + (p.dd_exp_round != null ? p.dd_exp_round : 99) + '">' + (p.dd_exp_round != null ? 'Rd' + p.dd_exp_round : '-') + '</td>';
+    } else {
+      tr += '<td class="text-dim">—</td><td class="text-dim">—</td><td class="text-dim">—</td>';
+    }
     tr += '<td class="text-dim" style="font-size:12px" data-sort-value="' + (p.surplus || 0) + '" title="Adj: ' + fmtSurplus(p.surplus) + ' · Ceiling: ' + fmtSurplus(p.raw_surplus) + '">' + fmtSurplus(p.surplus) + '</td>';
     var bonusAskSort = p.bonus_ask != null ? p.bonus_ask : -1;
     var bonusAskDisplay = p.bonus_ask_raw || '<span class="text-dim">—</span>';

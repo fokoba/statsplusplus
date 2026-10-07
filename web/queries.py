@@ -26,6 +26,11 @@ def _norm(val):
 def _norm_floor(val, floor=20):
     return _norm_floor_raw(val, get_cfg().ratings_scale, floor)
 
+# "Possible position player" tag thresholds for pitchers on the draft board.
+PP_MIN_POS_GRADE = 60   # best position potential (20-80)
+PP_MIN_BAT_POT = 40     # batting potential composite (20-80): must be able to hit
+PP_MIN_EDGE = 10        # position grade must beat pitching potential by this much
+
 # Legacy module-level aliases — used by app.py and re-export consumers.
 # These are properties that re-evaluate each access via get_cfg().
 class _DynMap:
@@ -919,6 +924,49 @@ def _pool_is_stale(conn, pool_ids, amateur_levels):
     return (amateur / len(rows)) < _POOL_FRESH_MIN_AMATEUR_FRAC
 
 
+def _attach_draft_day(conn, results, draft_year):
+    """Attach frozen draft-day potential / FV / expected round to each prospect.
+
+    While the draft is still ahead (nobody in this year's class has a draft
+    round yet) the snapshot tracks the live board, so "draft day" means the
+    last look before the draft. Once picks exist it is frozen — later model or
+    ratings changes can no longer rewrite it. Drafts that predate this table
+    carry 'reconstructed' rows seeded from the draft-pool export instead.
+    """
+    if not results or draft_year is None:
+        return
+    import datetime
+    try:
+        drafted = conn.execute(
+            "SELECT COUNT(*) FROM players WHERE draft_year=? AND draft_round IS NOT NULL AND draft_round > 0",
+            (draft_year,)).fetchone()[0]
+        frozen = drafted > 0
+        if not frozen:
+            now = datetime.datetime.now().isoformat()
+            conn.executemany(
+                "INSERT INTO draft_day_snapshot (draft_year, player_id, pot, fv, fv_str, exp_round, source, captured_at) "
+                "VALUES (?,?,?,?,?,?,'captured',?) "
+                "ON CONFLICT(draft_year, player_id) DO UPDATE SET pot=excluded.pot, fv=excluded.fv, "
+                "fv_str=excluded.fv_str, exp_round=excluded.exp_round, source='captured', "
+                "captured_at=excluded.captured_at "
+                "WHERE draft_day_snapshot.source != 'reconstructed' AND ("
+                "draft_day_snapshot.pot IS NOT excluded.pot OR draft_day_snapshot.fv_str IS NOT excluded.fv_str "
+                "OR draft_day_snapshot.exp_round IS NOT excluded.exp_round)",
+                [(draft_year, r["pid"], r.get("pot"), r.get("fv"), r.get("fv_str"),
+                  (r.get("adp") or {}).get("exp_round"), now) for r in results])
+            conn.commit()
+        snap = {row["player_id"]: row for row in conn.execute(
+            "SELECT player_id, pot, fv, fv_str, exp_round, source FROM draft_day_snapshot WHERE draft_year=?",
+            (draft_year,))}
+    except Exception:
+        return
+    for r in results:
+        s_ = snap.get(r["pid"])
+        if s_:
+            r["dd_pot"], r["dd_fv"], r["dd_fv_str"] = s_["pot"], s_["fv"], s_["fv_str"]
+            r["dd_exp_round"], r["dd_source"] = s_["exp_round"], s_["source"]
+
+
 def _annotate_adp(results):
     """Add expected draft position (ADP) data to each prospect entry.
 
@@ -1480,6 +1528,21 @@ def get_draft_pool():
                 "cblk": ng(p.get("CBlk") or 0), "cfrm": ng(p.get("CFrm") or 0),
             }
             entry["best_position"], entry["best_position_grade"] = _best_position(_pit_defs)
+            # "Possible position player": a pitcher listing whose best position
+            # potential clearly beats his pitching potential AND who can hit —
+            # the game rates anyone at field positions, but a 20-grade bat can't
+            # play one (an elite-glove pitcher with Con 30/Gap 20/Pow 20 is not a
+            # position player).
+            _bpk = {"LF/RF": "COF"}.get(entry["best_position"], entry["best_position"])
+            _bpw = _hitter_weights_by_bucket.get(_bpk, _hitter_weights_by_bucket.get("COF", {}))
+            entry["bat_pot"] = compute_batting_composite(
+                ng(p.get("PotCntct")), ng(p.get("PotGap")), ng(p.get("PotPow")), ng(p.get("PotEye")), _bpw)
+            _bp_grade = entry["best_position_grade"] or 0
+            if (_bp_grade >= PP_MIN_POS_GRADE and (entry["bat_pot"] or 0) >= PP_MIN_BAT_POT
+                    and _bp_grade - (entry["pot"] or 0) >= PP_MIN_EDGE):
+                entry["pos_player_flag"] = (
+                    f"{entry['best_position']} {_bp_grade} potential, bat {entry['bat_pot']} "
+                    f"vs {entry['pot']} as a pitcher")
 
             # Specialist/Generalist balance score — current (not potential)
             # stuff/movement/control, matching custom_upload.py's evaluate_row().
@@ -1785,6 +1848,7 @@ def get_draft_pool():
         results = [_build_prospect(r) for r in rows]
         results.sort(key=lambda x: (x['surplus'], x['fv'] + (0.5 if '+' in x['fv_str'] else 0)), reverse=True)
         _annotate_adp(results)
+        _attach_draft_day(conn, results, draft_year)
         for i, r in enumerate(results):
             r['rank'] = i + 1
         _apply_slot_value_estimates(results)
@@ -1804,6 +1868,7 @@ def get_draft_pool():
             results.append(_build_prospect(r))
         results.sort(key=lambda x: (x['surplus'], x['fv'] + (0.5 if '+' in x['fv_str'] else 0)), reverse=True)
         _annotate_adp(results)
+        _attach_draft_day(conn, results, draft_year)
         for i, r in enumerate(results):
             r['rank'] = i + 1
         _apply_slot_value_estimates(results, {p["pid"]: p["overall"] for p in picks})
@@ -1821,6 +1886,7 @@ def get_draft_pool():
         results = [_build_prospect(r) for r in rows]
         results.sort(key=lambda x: (x['surplus'], x['fv'] + (0.5 if '+' in x['fv_str'] else 0)), reverse=True)
         _annotate_adp(results)
+        _attach_draft_day(conn, results, draft_year)
         for i, r in enumerate(results):
             r['rank'] = i + 1
         _apply_slot_value_estimates(results)

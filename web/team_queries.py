@@ -4672,6 +4672,12 @@ def get_org_minor_league_roster(parent_team_id):
     # agent/waiver pools.
     _PARK_FIT_BF_THRESHOLD = 150
     org_pids = [r[0] for r in rows]
+    # Rule 5 eligibility (from the game's R5 column, via the Rule 5 import) for
+    # the "Rule 5 eligible" filter.
+    try:
+        _r5_pids = {r[0] for r in conn.execute("SELECT player_id FROM rule5_eligible")}
+    except Exception:
+        _r5_pids = set()
     # The affiliate each player is actually assigned to right now (for the
     # Team logo column) — the row tuple above carries no team id.
     _cur_team = {}
@@ -4794,6 +4800,7 @@ def get_org_minor_league_roster(parent_team_id):
             "level": level_name, "level_num": int(level) if level else 99,
             "is_pro": str(level) == "1",
             "team_id": _cur_team.get(pid),
+            "rule5": pid in _r5_pids,
             "composite": composite, "ceiling": ceiling,
             "vr": _vrvl.get("vr"), "vl": _vrvl.get("vl"),
             "fv": fv, "fv_str": fv_str, "risk": risk,

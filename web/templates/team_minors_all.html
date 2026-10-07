@@ -48,6 +48,12 @@
     </div>
     <div class="filter-group">
       <label style="font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px">&nbsp;</label>
+      <label style="font-size:12px; color:var(--text); cursor:pointer; display:flex; align-items:center; gap:4px; margin-top:3px" title="Only players the game flags as Rule 5 eligible (from the last Rule 5 / player list import)">
+        <input type="checkbox" id="rule5-filter" onchange="applyFilters()"> Is Rule 5 eligible
+      </label>
+    </div>
+    <div class="filter-group">
+      <label style="font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px">&nbsp;</label>
       <label style="font-size:12px; color:var(--text); cursor:pointer; display:flex; align-items:center; gap:4px; margin-top:3px" title="Also shows the org's own MLB roster in these tables, for easy side-by-side comparison against your minor leaguers.">
         <input type="checkbox" id="pro-filter" onchange="applyFilters()"> Show pro players
       </label>
@@ -126,7 +132,7 @@
     </thead>
     <tbody>
       {% for p in roster.hitters %}
-      <tr data-level="{{ p.level_num }}" data-pos="{{ p.pos }}" data-40man="{{ '1' if p.on_40man else '0' }}" data-pro="{{ '1' if p.is_pro else '0' }}" data-ptype="{{ p.personality_type_class }}" data-dev-good="{{ '1' if p.dev_good else '' }}" data-dev-bad="{{ '1' if p.dev_bad else '' }}" data-historic-pace="{{ '1' if p.is_historic_pace else '' }}">
+      <tr data-level="{{ p.level_num }}" data-pos="{{ p.pos }}" data-40man="{{ '1' if p.on_40man else '0' }}" data-r5="{{ '1' if p.rule5 else '0' }}" data-pro="{{ '1' if p.is_pro else '0' }}" data-ptype="{{ p.personality_type_class }}" data-dev-good="{{ '1' if p.dev_good else '' }}" data-dev-bad="{{ '1' if p.dev_bad else '' }}" data-historic-pace="{{ '1' if p.is_historic_pace else '' }}">
         <td data-sort-value="{{ p.level_num }}"><span class="level-badge level-{{ p.level|lower|replace('-','') }}">{{ p.level }}</span>{% if p.long_horizon %} <span title="Real level puts this player at fv_calc's longest development-horizon tier (3.5+ years to MLB) — treat Surplus as more speculative than a near-ready prospect's">⏳</span>{% endif %}</td>
         <td class="team-cell" data-sort-value="{{ p.team_id or 0 }}">{% if p.team_id %}<a href="/team/{{ p.team_id }}" title="{{ affiliate_names.get(p.team_id, '') }}"><img class="tm-logo-col" src="/team-logo/{{ p.team_id }}" alt="{{ affiliate_names.get(p.team_id, '') }}" loading="lazy" onerror="this.remove()"></a>{% endif %}</td>
         <td class="left" data-sort-value="{{ p._pos_sort }}">{{ p.pos }}</td>
@@ -204,7 +210,7 @@
     </thead>
     <tbody>
       {% for p in roster.pitchers %}
-      <tr data-level="{{ p.level_num }}" data-pos="{{ p.pos }}" data-40man="{{ '1' if p.on_40man else '0' }}" data-pro="{{ '1' if p.is_pro else '0' }}" data-ptype="{{ p.personality_type_class }}" data-dev-good="{{ '1' if p.dev_good else '' }}" data-dev-bad="{{ '1' if p.dev_bad else '' }}" data-historic-pace="{{ '1' if p.is_historic_pace else '' }}">
+      <tr data-level="{{ p.level_num }}" data-pos="{{ p.pos }}" data-40man="{{ '1' if p.on_40man else '0' }}" data-r5="{{ '1' if p.rule5 else '0' }}" data-pro="{{ '1' if p.is_pro else '0' }}" data-ptype="{{ p.personality_type_class }}" data-dev-good="{{ '1' if p.dev_good else '' }}" data-dev-bad="{{ '1' if p.dev_bad else '' }}" data-historic-pace="{{ '1' if p.is_historic_pace else '' }}">
         <td data-sort-value="{{ p.level_num }}"><span class="level-badge level-{{ p.level|lower|replace('-','') }}">{{ p.level }}</span>{% if p.long_horizon %} <span title="Real level puts this player at fv_calc's longest development-horizon tier (3.5+ years to MLB) — treat Surplus as more speculative than a near-ready prospect's">⏳</span>{% endif %}</td>
         <td class="team-cell" data-sort-value="{{ p.team_id or 0 }}">{% if p.team_id %}<a href="/team/{{ p.team_id }}" title="{{ affiliate_names.get(p.team_id, '') }}"><img class="tm-logo-col" src="/team-logo/{{ p.team_id }}" alt="{{ affiliate_names.get(p.team_id, '') }}" loading="lazy" onerror="this.remove()"></a>{% endif %}</td>
         <td class="left" data-sort-value="{{ p._pos_sort }}">{{ p.pos }}</td>
@@ -352,6 +358,7 @@ function filterLevel(btn) {
 function applyFilters() {
   var posFilter = document.getElementById('pos-filter').value;
   var fortyOnly = document.getElementById('forty-man-filter').checked;
+  var rule5Only = document.getElementById('rule5-filter').checked;
   var showPro = document.getElementById('pro-filter').checked;
   var visibleCount = 0;
 
@@ -385,6 +392,8 @@ function applyFilters() {
       }
       // 40-man filter
       if (show && fortyOnly && tr.dataset['40man'] !== '1') show = false;
+      // Rule 5 eligible filter
+      if (show && rule5Only && tr.dataset.r5 !== '1') show = false;
       // Pro players are hidden by default — this page is "All Minor
       // Leaguers" first; the toggle opts into the comparison view.
       if (show && !showPro && tr.dataset.pro === '1') show = false;

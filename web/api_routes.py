@@ -516,6 +516,24 @@ def api_draft_detail(pid):
         pitches.sort(key=lambda x: x["pot"] or 0, reverse=True)
         out["pitches"] = pitches
         out["misc"] = {"vel": r.get("vel"), "stm": n(r.get("stm")), "hold": n(r.get("hold"))}
+        # Position-player ratings for pitchers too (only grades above 20), so a
+        # pitcher listing with a premium glove/bat isn't hidden.
+        pit_pos = {}
+        for col, label in [("c", "C"), ("first_b", "1B"), ("second_b", "2B"), ("third_b", "3B"),
+                           ("ss", "SS"), ("lf", "LF"), ("cf", "CF"), ("rf", "RF")]:
+            cur = n(r.get(col) or 0)
+            pot = n(r.get("pot_" + col) or 0)
+            if (cur and cur > 20) or (pot and pot > 20):
+                pit_pos[label] = [cur or 20, pot or 20]
+        if pit_pos:
+            out["positions"] = pit_pos
+            out["fielding"] = {
+                "cols": ["C", "IF", "OF"],
+                "range": [None, n(r.get("ifr")), n(r.get("ofr"))],
+                "error": [None, n(r.get("ife")), n(r.get("ofe"))],
+                "arm": [n(r.get("c_arm")), n(r.get("ifa")), n(r.get("ofa"))],
+                "tdp": n(r.get("tdp")), "c_blk": n(r.get("c_blk")), "c_frm": n(r.get("c_frm")),
+            }
     else:
         t_l, t_p, t_c = ["Con"], [n(r.get("pot_cntct"))], [n(r.get("cntct"))]
         if r.get("babip") or r.get("pot_babip"):

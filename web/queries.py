@@ -858,6 +858,7 @@ from team_queries import (get_summary, get_standings, get_division_standings,
                           get_depth_chart_roles, set_depth_chart_role,
                           get_pitcher_depth_chart_roles,
                           list_retained_salaries, set_retained_salary,
+                          get_depth_chart_exclusions, set_depth_chart_exclusion,
                           get_roster_hitters, get_roster_pitchers,
                           get_org_overview, get_draft_org_depth,
                           get_minor_league_team, get_minor_league_roster,
@@ -1462,7 +1463,23 @@ def get_draft_pool():
                 "best_pitch": best_p,
                 "pitches": pitch_data,
             }
-            entry["best_position"], entry["best_position_grade"] = None, None
+            # Position-player potential for pitchers too: the draft pool lists a
+            # player under his listed role (P), so a premium defender/hitter
+            # tagged as a pitcher (an elite-outfielder P, say) was invisible in
+            # the Hitters-only fielding columns. Same logic as the hitter branch.
+            _pit_defs = {}
+            for _pl, _pf in (("C","PotC"),("1B","Pot1B"),("2B","Pot2B"),("3B","Pot3B"),
+                             ("SS","PotSS"),("LF","PotLF"),("CF","PotCF"),("RF","PotRF")):
+                _v = ng(p.get(_pf) or 0)
+                if _v and _v > 20:
+                    _pit_defs[_pl] = _v
+            entry["defense"] = _pit_defs
+            entry["field"] = {
+                "ifr": ng(p.get("IFR") or 0), "ifa": ng(p.get("IFA") or 0),
+                "ofr": ng(p.get("OFR") or 0), "ofa": ng(p.get("OFA") or 0),
+                "cblk": ng(p.get("CBlk") or 0), "cfrm": ng(p.get("CFrm") or 0),
+            }
+            entry["best_position"], entry["best_position_grade"] = _best_position(_pit_defs)
 
             # Specialist/Generalist balance score — current (not potential)
             # stuff/movement/control, matching custom_upload.py's evaluate_row().

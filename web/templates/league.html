@@ -2177,6 +2177,10 @@ function renderDraftBoard(view) {
       '<th data-sort="num">SL</th><th data-sort="num">CH</th><th data-sort="num">CUT</th>' +
       '<th data-sort="num">SPL</th><th data-sort="num">FRK</th><th data-sort="num">CC</th>' +
       '<th data-sort="num">SCR</th><th data-sort="num">KC</th><th data-sort="num">KN</th><th data-sort="num">#P</th>' +
+      '<th data-sort="num" class="col-sep" title="Position-player potential: a pitcher listing can hide a premium defender or bat">C</th><th data-sort="num">1B</th><th data-sort="num">2B</th><th data-sort="num">3B</th>' +
+      '<th data-sort="num">SS</th><th data-sort="num">LF</th><th data-sort="num">CF</th><th data-sort="num">RF</th>' +
+      '<th data-sort="num" class="col-sep">IFR</th><th data-sort="num">IFA</th><th data-sort="num">OFR</th><th data-sort="num">OFA</th>' +
+      '<th data-sort="num">CBlk</th><th data-sort="num">CFrm</th>' +
       '<th data-sort="str" class="col-sep">W/E</th><th data-sort="str">Lead</th><th data-sort="str">Int</th></tr>';
   } else {
     thead.innerHTML = '<tr>' + base + '<th data-sort="str">Bat</th><th data-sort="str">Thr</th><th data-sort="num" class="col-sep" title="P(Contributor)">C%</th><th data-sort="num" title="P(Regular)">R%</th><th data-sort="num" title="P(All-Star)">AS%</th><th data-sort="num" title="Bust probability (1 - P(Contributor))">Bust%</th><th data-sort="str">Profile</th><th data-sort="str" class="col-sep" title="Value gap vs other GMs">ADP</th></tr>';
@@ -2430,6 +2434,15 @@ function applyDraftFilters() {
         tr += v ? '<td class="' + (pn==='FB' ? 'col-sep ' : '') + gradeClr(v) + '">' + v + '</td>' : '<td' + (pn==='FB' ? ' class="col-sep"' : '') + '>-</td>';
       });
       tr += '<td>' + t.num_pitches + '</td>';
+      var pd = p.defense || {}, pfl = p.field || {};
+      ['C','1B','2B','3B','SS','LF','CF','RF'].forEach(function(pos) {
+        var v = pd[pos];
+        tr += v ? '<td class="' + (pos==='C' ? 'col-sep ' : '') + gradeClr(v) + '">' + v + '</td>' : '<td' + (pos==='C' ? ' class="col-sep"' : '') + '>-</td>';
+      });
+      ['ifr','ifa','ofr','ofa','cblk','cfrm'].forEach(function(k, i) {
+        var v = pfl[k];
+        tr += v && v > 20 ? '<td class="' + (i===0 ? 'col-sep ' : '') + gradeClr(v) + '">' + v + '</td>' : '<td' + (i===0 ? ' class="col-sep"' : '') + '>-</td>';
+      });
       tr += '<td class="col-sep">' + charPill(p.we) + '</td><td>' + charPill(p.lead) + '</td><td>' + charPill(p.int) + '</td>';
     } else {
       // All view - B/T + outcome probabilities + ADP
@@ -2561,6 +2574,27 @@ function showCompare(pidA, pidB) {
       h += '<tr><td class="dd-rl">Stam</td>' + cv(d.misc.stm) + '</tr>';
       h += '<tr><td class="dd-rl">Hold</td>' + cv(d.misc.hold) + '</tr>';
       h += '</tbody></table>';
+      var ppos = d.positions;
+      if (ppos && Object.keys(ppos).length) {
+        var ppk = Object.keys(ppos);
+        h += '<table class="dd-grid"><thead><tr><td>Pos</td>';
+        ppk.forEach(function(q) { h += '<th>' + q + '</th>'; });
+        h += '</tr></thead><tbody><tr><td class="dd-rl">Cur</td>';
+        ppk.forEach(function(q) { h += cv(ppos[q][0]); });
+        h += '</tr><tr><td class="dd-rl">Pot</td>';
+        ppk.forEach(function(q) { h += cv(ppos[q][1]); });
+        h += '</tr></tbody></table>';
+        var pfd = d.fielding;
+        if (pfd) {
+          h += '<table class="dd-grid"><thead><tr><td>Field</td>';
+          pfd.cols.forEach(function(c) { h += '<th>' + c + '</th>'; });
+          h += '</tr></thead><tbody>';
+          h += '<tr><td class="dd-rl">Range</td>'; pfd.range.forEach(function(v) { h += cv(v); }); h += '</tr>';
+          h += '<tr><td class="dd-rl">Error</td>'; pfd.error.forEach(function(v) { h += cv(v); }); h += '</tr>';
+          h += '<tr><td class="dd-rl">Arm</td>'; pfd.arm.forEach(function(v) { h += cv(v); }); h += '</tr>';
+          h += '</tbody></table>';
+        }
+      }
       h += '<table class="dd-grid"><thead><tr><th colspan="2">Character</th></tr></thead><tbody>';
       h += '<tr><td class="dd-rl">W/E</td>' + ctd(d.we) + '</tr>';
       h += '<tr><td class="dd-rl">Leader</td>' + ctd(d.lead) + '</tr>';

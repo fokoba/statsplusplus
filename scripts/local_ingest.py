@@ -61,6 +61,23 @@ LEAGUE_FOLDERS: dict[str, list[Path]] = {
 }
 
 
+def unreadable_folders(league_slug: str) -> list[Path]:
+    """Export folders that exist but this process is not allowed to list.
+
+    macOS denies listing inside a sandboxed App Sandbox Container (eMLB's
+    OOTP27 folder) to a process without Full Disk Access, while the folder
+    still "exists". Reported to the UI/log so a blocked ingest isn't silent.
+    """
+    blocked: list[Path] = []
+    for folder in LEAGUE_FOLDERS.get(league_slug, []):
+        try:
+            if folder.exists():
+                next(folder.iterdir(), None)
+        except (PermissionError, OSError):
+            blocked.append(folder)
+    return blocked
+
+
 def _find_latest(folders: list[Path], must_contain: list[str],
                   must_not_contain: list[str] | None = None) -> Path | None:
     """Newest file across `folders` whose lowercased name contains every
@@ -221,7 +238,11 @@ def ingest_once(league_slug: str, league_dir) -> dict[str, str]:
     def _maybe(category, must_contain, importer, must_not_contain=None):
         f = _find_latest(folders, must_contain, must_not_contain)
         if f is None:
-            summary[category] = "not found"
+            blocked = unreadable_folders(league_slug)
+            summary[category] = (
+                f"BLOCKED: macOS denies this process access to {blocked[0]} — grant Full Disk Access "
+                "to the app running the server (System Settings > Privacy & Security)"
+                if blocked else "not found")
             return
         mtime = f.stat().st_mtime
         if state.get(category) == mtime:
@@ -349,7 +370,7 @@ CATEGORY_INFO = [
 ]
 
 
-def get_freshness(league_dir) -> dict:
+def get_freshness(league_dir, league_slug: str | None = None) -> dict:
     """Per-category freshness for this league's locally-ingested OOTP
     exports — feeds the 'Last Updated' hover checklist in base.html so
     Forrest can see what's being fed in and how stale each piece is,
@@ -385,7 +406,9 @@ def get_freshness(league_dir) -> dict:
 
     mtimes = [c["mtime"] for c in categories if c["mtime"] is not None]
     newest = max(mtimes) if mtimes else None
-    return {"newest_mtime": newest, "categories": categories}
+    blocked = unreadable_folders(league_slug) if league_slug else []
+    return {"newest_mtime": newest, "categories": categories,
+            "access_denied": [str(p) for p in blocked]}
 
 
 def ingest_all_leagues(data_root) -> dict[str, dict[str, str]]:

@@ -302,6 +302,36 @@ def api_retained_salary():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@api_bp.route("/api/depth-chart-exclusion", methods=["GET", "POST"])
+def api_depth_chart_exclusion():
+    """Rule minor leaguers out of (or back into) the depth chart projection.
+
+    GET  ?team_id=N -> {"excluded": [player_id, ...]}
+    POST -> body {team_id, player_id, excluded?=true, note?}. excluded=false
+    removes the rule. Only filters the prospect pool; a player already on the
+    MLB roster appears on the depth chart regardless.
+    """
+    import queries
+    if request.method == "GET":
+        try:
+            team_id = int(request.args["team_id"])
+        except (KeyError, ValueError):
+            return jsonify({"error": "team_id required"}), 400
+        return jsonify({"excluded": sorted(queries.get_depth_chart_exclusions(team_id))})
+    data = request.get_json(silent=True) or {}
+    try:
+        team_id = int(data["team_id"])
+        player_id = int(data["player_id"])
+    except (KeyError, TypeError, ValueError):
+        return jsonify({"ok": False, "error": "Missing/invalid team_id or player_id"}), 400
+    try:
+        queries.set_depth_chart_exclusion(team_id, player_id, bool(data.get("excluded", True)), data.get("note"))
+        return jsonify({"ok": True})
+    except Exception as e:
+        log.error("depth-chart-exclusion POST failed: %s", e)
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @api_bp.route("/api/org-players/<int:team_id>")
 def api_org_players(team_id):
     import trade_queries
@@ -960,7 +990,8 @@ def api_local_export_status():
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
     from local_ingest import get_freshness
 
-    info = get_freshness(_get_cfg().league_dir)
+    league_dir = _get_cfg().league_dir
+    info = get_freshness(league_dir, league_dir.name)
     newest = info["newest_mtime"]
     now = time.time()
     categories = []
@@ -969,13 +1000,14 @@ def api_local_export_status():
         categories.append({**c, "age_hours": round(age_hours, 1) if age_hours is not None else None})
     if newest is None:
         return jsonify({"newest": None, "age_hours": None, "stale": None,
-                         "categories": categories})
+                         "categories": categories, "access_denied": info["access_denied"]})
     age_hours = (now - newest) / 3600
     return jsonify({
         "newest": newest,
         "age_hours": round(age_hours, 1),
         "stale": age_hours > 24,
         "categories": categories,
+        "access_denied": info["access_denied"],
     })
 
 

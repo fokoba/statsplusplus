@@ -165,8 +165,16 @@
                  '</span><span class="local-export-row-age ' + ageCls + '">' + ageText + '</span></div>';
         }).join('');
 
+        var blocked = (d.access_denied || []).length > 0;
+        if (blocked) {
+          rows.insertAdjacentHTML('afterbegin', '<div class="local-export-row"><span class="local-export-row-age missing" ' +
+            'title="' + d.access_denied.join(', ') + '">macOS is blocking access to the OOTP export folder — ' +
+            'grant Full Disk Access to the app running this server</span></div>');
+        }
         var badgeText = document.createElement('span');
-        if (d.age_hours == null) {
+        if (blocked) {
+          badgeText.innerHTML = '<span class="sync-badge sync-stale" title="macOS is blocking the background import from the OOTP export folder. Grant Full Disk Access to the app running this server (System Settings > Privacy & Security), then relaunch.">Local export: BLOCKED</span>';
+        } else if (d.age_hours == null) {
           badgeText.innerHTML = '';
         } else {
           var h = d.age_hours;

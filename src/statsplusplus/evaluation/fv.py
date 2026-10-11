@@ -234,23 +234,24 @@ def calc_fv(
         and bucket not in ("SP", "RP")
         and run_anchor is not None
         and comp_mapping is not None
-        and comp_mapping.get("comp_sd", 0) > 0
+        and ("slope" in comp_mapping or comp_mapping.get("comp_sd", 0) > 0)
     )
     if ceiling_anchored:
-        from statsplusplus.evaluation.facet_runs import runs_to_war, saturate_war
+        from statsplusplus.evaluation.facet_runs import (
+            runs_to_war, saturate_war, composite_to_runs,
+        )
         from statsplusplus.evaluation.surplus import fv_from_peak_war
 
         # The ceiling_anchored guard already proves these are populated.
         assert comp_mapping is not None and run_anchor is not None
-        _cm: dict[str, float] = comp_mapping
+        _cm: dict[str, Any] = comp_mapping
         _anchor: dict[str, float] = run_anchor
 
-        def _score_to_runs(score: float) -> float:
-            z = (score - _cm["comp_mean"]) / _cm["comp_sd"]
-            return _cm["runs_mean"] + z * _cm["runs_sd"]
-
         # Future WAR from POTENTIAL (ceiling), tail-saturated to realistic caps.
-        ceiling_war = saturate_war(runs_to_war(_score_to_runs(pot), _anchor), _anchor)
+        # composite_to_runs inverts whichever mapping shape is calibrated
+        # (hybrid per-position affine, or the legacy z-map) back to runs.
+        _ceil_runs = composite_to_runs(float(pot), _cm, bucket)
+        ceiling_war = saturate_war(runs_to_war(_ceil_runs, _anchor), _anchor)
 
         # p(develops): probability of realizing the ceiling. Near-maxed (small
         # gap) → ~1.0 (what you see is what you get). Else empirical gap-closure

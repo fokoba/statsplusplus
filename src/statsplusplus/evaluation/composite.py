@@ -644,7 +644,7 @@ def _run_space_hitter_composite(tools, defense, bucket, run_space, positional_mo
             fld = (1 - scf) * fld + scf * obs_fld
 
     total = bat_tool + br_tool + fld + pos
-    return _fr.runs_to_composite(total, mapping)
+    return _fr.runs_to_composite(total, mapping, bucket)
 
 
 def compute_composite_hitter(

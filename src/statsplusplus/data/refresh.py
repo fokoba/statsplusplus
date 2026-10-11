@@ -1570,8 +1570,14 @@ def main():
         except Exception as e:
             log.warning("excluded-player purge failed: %s", e)
         if not skip_fv:
-            _run_evaluation_engine()
+            # Order matters: calibrate writes the per-league model weights
+            # (tool_weights.json: tool/def curves, run-space anchor, the
+            # runs→composite comp_mapping) that the evaluation engine CONSUMES.
+            # The engine must therefore run AFTER calibrate, or it computes
+            # composites with the PREVIOUS refresh's calibration — a one-refresh
+            # lag that silently delays any calibration/model change by a cycle.
             _run_calibrate()
+            _run_evaluation_engine()
             _run_fv_calc()
             log.info("=== Pipeline complete ===")
         else:

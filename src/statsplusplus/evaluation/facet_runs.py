@@ -27,7 +27,7 @@ Public API:
     runs_to_war(runs, anchor) -> float
     runs_to_war_saturated(runs, anchor) -> float   # tail-capped for ceiling FV
     saturate_war(war, anchor) -> float
-    runs_to_composite(runs, mapping) -> int
+    runs_to_composite(runs, mapping, bucket) -> int
 """
 
 from __future__ import annotations
@@ -416,19 +416,123 @@ def runs_to_war_saturated(runs_above_avg: float, anchor: Optional[dict[str, floa
     return saturate_war(runs_to_war(runs_above_avg, anchor), anchor)
 
 
-def runs_to_composite(runs_above_avg: float, mapping: Optional[dict[str, float]] = None) -> int:
-    """Map runs-above-average to a 20-80 composite via a calibrated affine map.
+def runs_to_composite(
+    runs_above_avg: float,
+    mapping: Optional[dict[str, Any]] = None,
+    bucket: Optional[str] = None,
+) -> int:
+    """Map runs-above-average to a 20-80 composite.
 
-    mapping = {"runs_mean", "runs_sd", "comp_mean", "comp_sd"} calibrated to the
-    current MLB composite distribution so the scale is preserved. Fallback maps
-    ~0 runs → 50 with a modest slope.
+    Two mapping shapes are supported:
+
+    **Hybrid (preferred)** — a WAR-anchored, per-position-centered map that
+    decompresses the scale (a global ``runs_sd``/``comp_sd`` z-map packed ~1 WAR
+    into ~2 composite points). ``mapping`` carries::
+
+        {"slope": pts_per_run,          # = pts_per_war / runs_per_win
+         "target_center": 50.0,         # a league-avg, avg-position hitter
+         "pts_per_war": 4.0,
+         "pos_centers": {bucket: population_runs_mean, ...},
+         "global_center": float,        # fallback center
+         "top_knee": 70.0, "cap": 80.0, # soft tanh above the knee
+         "floor": 20.0}                 # display clamp (internal value may be <20)
+
+        comp = target_center + pos_adj(bucket)*pts_per_war
+               + (runs - pos_center[bucket]) * slope
+        comp = soft-tanh toward cap above top_knee
+        comp = clamp(comp, floor, 80)   # bottom is a DISPLAY clamp only
+
+      Per-position centering makes a league-average player at EVERY position map
+      to ~``target_center`` plus its positional credit, so composites are
+      comparable across positions. The WAR-anchored slope fixes the compression.
+
+    **Legacy affine (back-compat)** — ``{"runs_mean","runs_sd","comp_mean",
+    "comp_sd"}``: z-score vs the MLB composite distribution. Used when the hybrid
+    keys are absent.
+
+    **Fallback** — ~0 runs → 50 with a modest slope.
     """
+    if mapping and "slope" in mapping:
+        tc = mapping.get("target_center", 50.0)
+        ppw = mapping.get("pts_per_war", 4.0)
+        slope = mapping["slope"]
+        centers = mapping.get("pos_centers") or {}
+        gc = mapping.get("global_center", 0.0)
+        center = centers.get(bucket, gc) if bucket else gc
+        pos_pts = POSITIONAL_WAR_ADJUSTMENTS.get(bucket or "", 0.0) * ppw
+        comp = tc + pos_pts + (runs_above_avg - center) * slope
+        # Soft-saturate the TOP tail toward the cap (a hard clip would re-compress
+        # the handful of true elites that overshoot). The bottom is NOT soft-
+        # saturated — a large, genuinely sub-replacement minor-league population
+        # legitimately falls below 20; we clamp it to the floor for DISPLAY only.
+        top_knee = mapping.get("top_knee", 70.0)
+        cap = mapping.get("cap", 80.0)
+        if comp > top_knee:
+            span = cap - top_knee
+            if span > 0:
+                comp = top_knee + span * math.tanh((comp - top_knee) / span)
+            else:
+                comp = min(comp, cap)
+        floor = mapping.get("floor", 20.0)
+        return int(round(max(floor, min(cap, comp))))
+
     if mapping and mapping.get("runs_sd", 0) > 0 and mapping.get("comp_sd", 0) > 0:
         z = (runs_above_avg - mapping["runs_mean"]) / mapping["runs_sd"]
         comp = mapping["comp_mean"] + z * mapping["comp_sd"]
     else:
         comp = 50.0 + runs_above_avg * 0.5
     return max(20, min(80, round(comp)))
+
+
+def composite_to_runs(
+    comp: float,
+    mapping: Optional[dict[str, Any]] = None,
+    bucket: Optional[str] = None,
+) -> float:
+    """Invert ``runs_to_composite``: map a 20-80 composite/ceiling score back to
+    runs-above-average. Used by the ceiling-anchored FV to recover the WAR a
+    POTENTIAL (ceiling) score implies.
+
+    Handles both mapping shapes. For the hybrid map it undoes the per-position
+    affine (and reverses the top soft-saturation so an elite, saturated ceiling
+    recovers its true pre-saturation run total). The bottom DISPLAY clamp is not
+    invertible and is irrelevant here — the FV path never passes a floored score
+    through this (ceilings are not sub-replacement).
+
+    Returns runs-above-average (unclamped).
+    """
+    # --- Hybrid inverse ---
+    if mapping and "slope" in mapping:
+        slope = mapping["slope"]
+        if not slope:
+            return 0.0
+        tc = mapping.get("target_center", 50.0)
+        ppw = mapping.get("pts_per_war", 4.0)
+        centers = mapping.get("pos_centers") or {}
+        gc = mapping.get("global_center", 0.0)
+        center = centers.get(bucket, gc) if bucket else gc
+        pos_pts = POSITIONAL_WAR_ADJUSTMENTS.get(bucket or "", 0.0) * ppw
+        # Reverse the top soft-saturation (tanh) so a saturated score recovers
+        # its true pre-saturation value before the linear inverse.
+        top_knee = mapping.get("top_knee", 70.0)
+        cap = mapping.get("cap", 80.0)
+        c = float(comp)
+        if c > top_knee:
+            span = cap - top_knee
+            # forward: comp = knee + span*tanh((raw-knee)/span); invert via atanh.
+            if span > 0:
+                frac = (c - top_knee) / span
+                frac = max(-0.999999, min(0.999999, frac))
+                c = top_knee + span * math.atanh(frac)
+        return center + (c - tc - pos_pts) / slope
+
+    # --- Legacy affine inverse ---
+    if mapping and mapping.get("comp_sd", 0) > 0 and mapping.get("runs_sd", 0) > 0:
+        z = (comp - mapping["comp_mean"]) / mapping["comp_sd"]
+        return mapping["runs_mean"] + z * mapping["runs_sd"]
+
+    # Fallback inverse of comp = 50 + runs*0.5
+    return (comp - 50.0) / 0.5
 
 
 # ---------------------------------------------------------------------------
@@ -540,4 +644,45 @@ def calibrate_composite_mapping(
         "runs_sd": _st.pstdev(total_runs_list),
         "comp_mean": comp_mean,
         "comp_sd": _st.pstdev(current_composites),
+    }
+
+
+def calibrate_hybrid_mapping(
+    pos_run_means: dict[str, float],
+    global_run_mean: float,
+    runs_per_win: float,
+    pts_per_war: float = 4.0,
+    target_center: float = 50.0,
+    top_knee: float = 70.0,
+    cap: float = 80.0,
+    floor: float = 20.0,
+) -> dict[str, Any]:
+    """Build the hybrid runs->composite mapping (per-position center + WAR slope).
+
+    Decouples the composite SPREAD from the (self-referential, compressed) prior
+    composite distribution. The slope is anchored to ``pts_per_war`` grade points
+    per 1 WAR, so one win of value is worth a chosen, honest number of composite
+    points (default 4.0 ~ doubles the old ~2 pts/WAR). Each position is centered
+    on its own population run-mean so a league-average player at every position
+    maps to ``target_center`` plus its positional credit (comparable across
+    positions). The top tail soft-saturates toward ``cap``; the bottom is a
+    display clamp at ``floor`` (a large sub-replacement MiLB population genuinely
+    falls below 20). Consumed by ``runs_to_composite`` (hybrid branch).
+
+    Args:
+        pos_run_means: {bucket: population tool-projected runs-mean}.
+        global_run_mean: fallback center for buckets without enough sample.
+        runs_per_win: the league's runs->WAR anchor (slope = pts_per_war/rpw).
+        pts_per_war: target composite points per 1 WAR of value.
+    """
+    rpw = runs_per_win if runs_per_win and runs_per_win > 0 else DEFAULT_RUNS_PER_WIN
+    return {
+        "slope": pts_per_war / rpw,
+        "pts_per_war": pts_per_war,
+        "target_center": target_center,
+        "pos_centers": {k: round(v, 2) for k, v in pos_run_means.items()},
+        "global_center": round(global_run_mean, 2),
+        "top_knee": top_knee,
+        "cap": cap,
+        "floor": floor,
     }

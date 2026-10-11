@@ -49,9 +49,14 @@ from statsplusplus.data.evaluation_engine import (
 )
 from statsplusplus.evaluation.composite import derive_tool_transform
 from statsplusplus.evaluation.woba import woba_weights_from_run_env, player_woba
+from statsplusplus.evaluation.fv import (
+    GAP_CLOSURE_HITTER_DEFAULT as _CLOSURE_PRIOR_HITTER,
+    GAP_CLOSURE_PITCHER_DEFAULT as _CLOSURE_PRIOR_PITCHER,
+)
 from statsplusplus.evaluation.constants import (
     TOOL_TRANSFORM_ANCHORS, TOOL_TRANSFORM_PRIOR, TOOL_TRANSFORM_DEFAULT_PRIOR,
 )
+from statsplusplus.evaluation.constants import COMPOSITE_PTS_PER_WAR
 HITTER_BUCKETS = ("C", "SS", "2B", "3B", "CF", "COF", "1B")
 PITCHER_BUCKETS = ("SP", "RP")
 
@@ -631,6 +636,7 @@ def _calibrate_run_space(conn, game_year, role_map, woba_wts, off_norm, result_h
     # curve population-centering fix. Run-totals use tool-PROJECTED wOBA (from
     # tool_woba_fit) so low-PA population members aren't stat-noise-driven.
     pop_runs = []; pop_comps = []
+    pop_runs_by_bucket: dict[str, list[float]] = {}
     if tool_woba_fit:
         prows = conn.execute("""SELECT r.*,p.pos,p.role,p.player_id
             FROM latest_ratings r JOIN players p ON r.player_id=p.player_id
@@ -650,15 +656,37 @@ def _calibrate_run_space(conn, game_year, role_map, woba_wts, off_norm, result_h
                                    {"speed": norm(r["speed"]), "steal": norm(r["steal"])},
                                    dt, bk, br_curve=br_curve, def_curve=def_curve,
                                    positional_models=pmodels, pa=600, runs_per_win=9.5)
+            # Per-bucket population run-mean (hybrid mapping center). Collected
+            # over the WHOLE MLB-level population (no composite gate) so each
+            # position's center reflects its true population, not the subset that
+            # already has a stored composite.
+            pop_runs_by_bucket.setdefault(bk, []).append(parts["total_runs"])
             if r["composite_score"] is not None:
                 pop_runs.append(parts["total_runs"]); pop_comps.append(r["composite_score"])
     import statistics as _st
     pop_runs_mean = _st.mean(pop_runs) if len(pop_runs) >= 10 else None
     pop_comp_mean = _st.mean(pop_comps) if len(pop_comps) >= 10 else None
-    comp_mapping = (
-        _fr.calibrate_composite_mapping(totals, comps, pop_runs_mean, pop_comp_mean)
-        if comps else {}
+
+    # Hybrid runs->composite mapping: per-position center (each bucket on its own
+    # population run-mean) + WAR-anchored slope (pts_per_war / runs_per_win),
+    # replacing the self-referential comp_sd=pstdev(prior composites) loop that
+    # re-froze the compression. The slope is derived from the league's own
+    # runs->WAR anchor, so one win of value is worth a fixed ~4 composite points.
+    rpw_anchor = anchor.get("runs_per_win", 9.5) if anchor else 9.5
+    pos_run_means = {bk: _st.mean(v) for bk, v in pop_runs_by_bucket.items() if len(v) >= 8}
+    global_run_mean = (
+        _st.mean([x for v in pop_runs_by_bucket.values() for x in v])
+        if pop_runs_by_bucket else (pop_runs_mean or 0.0)
     )
+    if pos_run_means:
+        comp_mapping = _fr.calibrate_hybrid_mapping(
+            pos_run_means, global_run_mean, rpw_anchor, pts_per_war=COMPOSITE_PTS_PER_WAR)
+    else:
+        # Fallback to the legacy affine map if the population sample is too thin.
+        comp_mapping = (
+            _fr.calibrate_composite_mapping(totals, comps, pop_runs_mean, pop_comp_mean)
+            if comps else {}
+        )
 
     return {
         "woba_scale": round(woba_scale, 4),
@@ -983,6 +1011,39 @@ def _calibrate_development_curves(conn):
                 closure[age] = round((terminal_real - real_x) / remaining, 2)
             else:
                 closure[age] = 0.0
+
+        # --- Survivorship correction (age-increasing shrink toward a prior) ---
+        # The cross-sectional closure above is upward-biased, worsening with age:
+        # the game revises POT *down* for players who fail to develop, so a
+        # washout's realization (OVR/POT) rises to ~1.0 as his ceiling is slashed
+        # to meet his stagnant OVR. The formula can't distinguish "closed the gap
+        # by developing" from "gap closed because POT was cut," so terminal_real
+        # (age ~26) is inflated by relabeled failures, which flattens the age
+        # falloff and over-credits older prospects' large unrealized gaps (e.g. a
+        # 24-yo AAA bat projected to reach an elite ceiling at the same rate as a
+        # 19-yo). We cannot measure true (longitudinal) closure yet — ratings_history
+        # spans ~1 year vs a 3-6 year development arc (tracked: survivorship-bias
+        # backlog item). As a principled interim correction we shrink the calibrated
+        # closure toward the conservative (vMLB-derived) prior, with the shrink
+        # increasing by age: trust the (less-contaminated) young data, lean on the
+        # prior at older ages where POT-slashing contamination dominates. Spares
+        # genuine young prospects (shrink 0 at age <=20); compresses only the older
+        # speculative tail. Replace with a longitudinal fit once history accumulates.
+        prior = _CLOSURE_PRIOR_PITCHER if label == "pitcher" else _CLOSURE_PRIOR_HITTER
+        for age in list(closure.keys()):
+            if age <= 20:
+                shrink = 0.0
+            elif age >= 25:
+                shrink = 0.80
+            else:
+                shrink = (age - 20) / 5.0 * 0.80  # linear ramp 20->25
+            if shrink > 0:
+                # nearest-age prior value (prior tables are keyed by int age)
+                pv = prior.get(age)
+                if pv is None:
+                    pk = min(prior.keys(), key=lambda k: abs(k - age))
+                    pv = prior[pk]
+                closure[age] = round((1.0 - shrink) * closure[age] + shrink * pv, 2)
 
         # Age runway: normalized to age 21 = 1.0.
         # Runway = remaining gap fraction relative to age 21's remaining gap.

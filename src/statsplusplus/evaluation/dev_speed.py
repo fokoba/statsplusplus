@@ -40,8 +40,15 @@ MAX_BASELINE_AGE = 25       # prospect age ceiling for the baseline population
 WIDE_GAP = 12               # POT-gap threshold for the "upside" qualifier
 
 # Reporting floor (below this the signal is too noisy to show a verdict).
+# MIN_COMPOSITE_REPORT is on the run-space composite scale (Session 97
+# decompression + per-position centering). The runs→composite map display-clamps
+# the bottom at 20, so a composite at/near 20 is floored and its movement is
+# noise. 25 sits just above that clamp: it excludes the clamped mass while
+# admitting essentially the full FV-45+ prospect population (whose trajectory is
+# meaningful) across all leagues. Recalibrated from 38 (an old-compressed-scale
+# value that, post-decompression, suppressed ~85-90% of prospects).
 MIN_AGE_REPORT = 18
-MIN_COMPOSITE_REPORT = 38
+MIN_COMPOSITE_REPORT = 25
 
 # Confidence-tier thresholds.
 _CONF_PA_FULL = 250         # PA (hitter) for full playing-time credit in the window

@@ -838,62 +838,11 @@ def _observed_career_facets(conn, player_id, run_space, bucket=None):
     }
 
 
-# MiLB level discount: how much a level's production translates toward MLB (and
-# how fast the bat stabilizes there). AAA close; low-A heavily discounted.
-_MILB_LEVEL_DISCOUNT = {1: 1.0, 2: 0.55, 3: 0.40, 4: 0.28, 5: 0.20, 6: 0.12, 7: 0.08, 8: 0.05}
-
-
-def _observed_milb_facets(conn, player_id, run_space, milb_league_map):
-    """Level-relative, level-discounted observed MiLB facet runs (prospects).
-
-    Bat: level-relative wRAA/600 vs the player's own MiLB league average wOBA,
-    level-discounted. Baserunning: level-discounted MiLB UBR. Defense: none
-    (MiLB fielding unavailable). Returns dict or None.
-    """
-    from statsplusplus.evaluation.woba import player_woba as _pw
-    wwts = run_space.get("woba_weights")
-    sc = run_space.get("woba_scale", 1.28)
-    if not wwts:
-        return None
-    seasons = conn.execute(
-        "SELECT year, league_id, pa, ubr, ab, h, d, t, hr, bb, ibb, hbp, sf "
-        "FROM batting_stats WHERE player_id=? AND league_id IS NOT NULL AND split_id=1 "
-        "AND pa>=50 ORDER BY year DESC LIMIT 3", (player_id,)).fetchall()
-    if not seasons:
-        return None
-    _lgwoba_cache = {}
-
-    def _milb_lg_woba(lid, year):
-        key = (lid, year)
-        if key not in _lgwoba_cache:
-            row = conn.execute(
-                "SELECT SUM(ab) ab,SUM(h) h,SUM(d) d,SUM(t) t,SUM(hr) hr,SUM(bb) bb,"
-                "SUM(ibb) ibb,SUM(hbp) hbp,SUM(sf) sf FROM batting_stats "
-                "WHERE league_id=? AND split_id=1 AND year=?", (lid, year)).fetchone()
-            _lgwoba_cache[key] = _pw(dict(row), wwts) if row and row["ab"] else None
-        return _lgwoba_cache[key]
-
-    num_bat = num_ubr = eff_pa = 0.0
-    recency = [1.0, 0.6, 0.3]
-    for i, s in enumerate(seasons):
-        wo = _pw(dict(s), wwts)
-        lgw = _milb_lg_woba(s["league_id"], s["year"])
-        if wo is None or lgw is None:
-            continue
-        lvl = (milb_league_map or {}).get(str(s["league_id"]), {}).get("level", 5)
-        disc = _MILB_LEVEL_DISCOUNT.get(lvl, 0.15)
-        rec = recency[i] if i < len(recency) else 0.2
-        wraa_600 = ((wo - lgw) / sc) * 600.0
-        num_bat += wraa_600 * disc * rec * s["pa"]
-        num_ubr += (s["ubr"] or 0.0) * disc * rec * s["pa"]
-        eff_pa += disc * rec * s["pa"]
-    if eff_pa <= 0:
-        return None
-    return {
-        "bat_runs": num_bat / eff_pa, "bat_pa": eff_pa,
-        "br_runs": num_ubr / eff_pa, "br_pa": eff_pa,
-        "fld_runs": None, "fld_ip": 0.0,  # MiLB fielding unavailable
-    }
+# NOTE: The former MiLB per-facet composite blend (`_observed_milb_facets` +
+# `_MILB_LEVEL_DISCOUNT`) was removed. A prospect's composite is now TOOL-ONLY —
+# MiLB production informs only the age-gated ceiling (PAC) and risk label, not
+# current-ability composite. See the `elif _run_space_hitter: pass` branch in the
+# hitter evaluation path for the rationale.
 
 
 def derive_composite_from_components(
@@ -2189,7 +2138,7 @@ def run(
         - Writes ``composite_score``, ``ceiling_score``, ``tool_only_score``,
           ``secondary_composite`` to the ``ratings`` table
         - Writes ``composite_score``, ``ceiling_score`` to ``ratings_history``
-          for the current snapshot date
+          at each player's latest snapshot (the current in-game month's row)
 
     Error handling:
         - Players with no tool ratings are skipped
@@ -2257,14 +2206,7 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
     _run_space = weights.get("run_space") or None
     from statsplusplus.utils.positions import load_positional_models as _lpm
     _positional_models = _lpm(league_dir)
-    # MiLB league->level map for prospect per-facet MiLB blend
-    _milb_league_map = {}
-    try:
-        import json as _json
-        _ls = _json.loads((league_dir / "config" / "league_settings.json").read_text())
-        _milb_league_map = _ls.get("milb_league_map", {}) or {}
-    except Exception:
-        _milb_league_map = {}
+
 
     # -- Load carrying tool config --
     ct_config = load_carrying_tool_config(league_dir)
@@ -2733,18 +2675,31 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
                         bucket=bucket,
                     )
         elif _run_space_hitter:
-            # Prospect (non-MLB) run-space per-facet MiLB blend: level-relative
-            # MiLB wRAA into the bat facet + MiLB UBR into baserunning (defense
-            # stays tool-only — MiLB fielding unavailable). Replaces the ceiling-
-            # only PAC signal with a run-level, stabilization-weighted blend.
-            _milb_obs = _observed_milb_facets(conn, player_id, _run_space, _milb_league_map)
-            if _milb_obs:
-                composite_score = compute_composite_hitter(
-                    hitter_tools, h_weights, defense_tools, def_weights, hitter_transforms,
-                    run_space=_run_space, bucket=bucket,
-                    positional_models=_positional_models, observed=_milb_obs,
-                    neutral_position=_neutral_pos,
-                )
+            # Prospect (non-MLB) composite stays TOOL-ONLY by design.
+            #
+            # We deliberately do NOT blend MiLB production into a prospect's
+            # CURRENT-ABILITY composite. The game's tool ratings are the
+            # authoritative current-ability signal, and MiLB stats are a lagging
+            # hint about where ratings are HEADED (an upside question), not
+            # evidence of present MLB-level ability — a dominant AA line does not
+            # translate 1:1 to MLB value. Routing it into composite was (a)
+            # un-age-gated (a 27-yo AAAA masher got the same bump as a 20-yo
+            # phenom) and (b) empirically an across-the-board inflator (~85% of
+            # prospects moved up), which pushed prospects above actual MLB
+            # regulars on current-ability rankings.
+            #
+            # The MiLB performance signal instead flows ONLY through the FV path,
+            # where it belongs: the age-gated Performance-Adjusted Ceiling (PAC,
+            # `compute_performance_adjusted_ceiling`) credits a YOUNG outperformer
+            # with more upside and penalizes an over-scouted non-producer, and the
+            # stat-risk modifier adjusts the risk label. Both are age-weighted and
+            # bounded — verified to cover BOTH the upward (young masher) and
+            # downward (over-scouted bust) cases the old composite blend targeted.
+            #
+            # (The MLB branch above DOES blend observed CAREER facet runs into the
+            # composite — a real MLB track record IS valid current-ability
+            # evidence; AA stats are not the same kind of evidence.)
+            pass
 
         # Step 2: MiLB stat blending (additive for all players with MiLB data)
         # Only applies when MLB stat blending hasn't already provided a strong signal.
@@ -2922,8 +2877,17 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
         WHERE player_id = ? AND snapshot_date = ?
     """, ratings_updates)
 
-    # -- Write to ratings_history for current snapshot --
-    # First check if ratings_history has the composite_score column
+    # -- Write recomputed scores back to each player's latest ratings_history row --
+    # ratings_history snapshots are taken once per in-game MONTH (dated to the
+    # first refresh of the month), while `ratings` advances to the latest game
+    # date. So the current `ratings` snapshot_date almost never matches a history
+    # row. Keying the UPDATE on that date matched zero rows (dead write), leaving
+    # the dev-history timeline frozen on stale (and, after a model change,
+    # off-scale) composites that disagreed with the player-page header.
+    # Fix: target each player's OWN latest history snapshot so the newest point on
+    # the development chart is always recomputed on the current model and equals
+    # the header value. (Within-month tool drift is ~4% of players; writing the
+    # current composite onto the month's row reflects their most-current grade.)
     try:
         hist_cols = {r[1] for r in conn.execute("PRAGMA table_info(ratings_history)").fetchall()}
         if "composite_score" in hist_cols:
@@ -2937,11 +2901,19 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
                 # rather than fail the whole batch write.
                 history_updates = [(*t[:7], *t[8:]) for t in history_updates]
             set_clause = ", ".join(f"{c} = ?" for c in set_cols)
+            latest_hist_date = dict(conn.execute(
+                "SELECT player_id, MAX(snapshot_date) FROM ratings_history GROUP BY player_id"
+            ).fetchall())
+            remapped = [
+                hu[:-1] + (latest_hist_date[hu[-2]],)
+                for hu in history_updates
+                if hu[-2] in latest_hist_date
+            ]
             conn.executemany(f"""
                 UPDATE ratings_history
                 SET {set_clause}
                 WHERE player_id = ? AND snapshot_date = ?
-            """, history_updates)
+            """, remapped)
     except Exception:
         pass  # ratings_history may not exist or may not have the columns yet
 

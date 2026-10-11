@@ -44,6 +44,13 @@ PEAK_AGE_HITTER: int = 28
 # wOBA for that season. When the anchor season is too small (early in a
 # league's life / an in-progress season), we fall back to this canonical set.
 
+# Hybrid runs->composite mapping: target composite points per 1 WAR of value.
+# The runs->composite slope = COMPOSITE_PTS_PER_WAR / league runs_per_win. This
+# anchors the composite SPREAD to WAR (one win ~ 4 grade points) instead of the
+# old self-referential comp_sd = pstdev(prior composites) loop, which re-froze
+# whatever compression already existed (a ~1 WAR gap read as only ~2 pts).
+COMPOSITE_PTS_PER_WAR: float = 4.0
+
 # Canonical wOBA linear weights (FanGraphs 2013). Used as the fixed shape that
 # gets run-environment-scaled, and as the small-sample fallback.
 CANONICAL_WOBA_WEIGHTS: dict[str, float] = {

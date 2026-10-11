@@ -263,11 +263,22 @@ def fielding_runs(
     """
     if bucket in ("1B", "DH"):
         return 0.0
-    # Primary range grade for the bucket (estimated positional rating if needed).
+    bcurve = (curve or {}).get(bucket) if curve else None
+    # Multi-tool positions (catcher: framing+blocking+arm; infield: range+error+
+    # arm+DP) blend several tools via calibrated per-tool weights instead of a
+    # single range grade. Any curve carrying a "weights" dict uses the blend.
+    if bcurve and bcurve.get("weights") and (bcurve.get("multitool") or bcurve.get("catcher")):
+        grade = _blended_def_grade(def_tools, bcurve["weights"])
+        if grade is None:
+            return 0.0
+        runs = _linear_curve(float(grade), bcurve, FIELDING_PRIOR_SLOPE)
+        if "clamp_lo" in bcurve and "clamp_hi" in bcurve:
+            runs = max(bcurve["clamp_lo"], min(bcurve["clamp_hi"], runs))
+        return runs
+    # Single range-grade path (outfield; any position without a multi-tool curve).
     grade = _primary_def_grade(def_tools, bucket, positional_models)
     if grade is None:
         return 0.0
-    bcurve = (curve or {}).get(bucket) if curve else None
     runs = _linear_curve(float(grade), bcurve, FIELDING_PRIOR_SLOPE)
     # Clamp to the position's observed ZR range (prevent steep-slope extrapolation
     # to absurd runs far from the calibration sample's grade range).
@@ -539,6 +550,15 @@ def composite_to_runs(
 # Calibration helpers (pure — fit curves from (grade, observed-runs) samples)
 # ---------------------------------------------------------------------------
 
+def _pstdev(xs: list[float]) -> float:
+    """Population standard deviation (0.0 for <2 points)."""
+    n = len(xs)
+    if n < 2:
+        return 0.0
+    m = sum(xs) / n
+    return math.sqrt(sum((x - m) ** 2 for x in xs) / n)
+
+
 def _ols_1var(xs: list[float], ys: list[float]) -> tuple[float, float, float]:
     """1-var OLS -> (intercept, slope, r)."""
     n = len(xs)
@@ -595,6 +615,138 @@ def calibrate_grade_runs_curve(
         "clamp_lo": round(sr[lo_i], 1),
         "clamp_hi": round(sr[hi_i], 1),
     }
+
+
+# Multi-tool defensive curves: positions whose defensive VALUE is not captured
+# by a single range grade blend several tools. The per-tool DB names (lowercase,
+# used by calibration) and the engine's extracted CamelCase keys both resolve via
+# the alias map. Catcher: framing + blocking + arm (no range/ZR). Infield: range
+# + error + arm + double-play (range leads at SS/2B; error+arm lead at 3B — see
+# the Session-97 infield-defense analysis; the Session-93 range-only result was
+# IF/OF-approximate and is superseded here by per-position multi-tool weights).
+CATCHER_DEF_TOOLS: tuple[str, ...] = ("c_frm", "c_blk", "c_arm")
+INFIELD_DEF_TOOLS: tuple[str, ...] = ("ifr", "ife", "ifa", "tdp")
+OUTFIELD_DEF_TOOLS: tuple[str, ...] = ("ofr", "ofe", "ofa")
+_DEF_TOOL_ALIASES: dict[str, tuple[str, ...]] = {
+    "c_frm": ("c_frm", "CFrm"),
+    "c_blk": ("c_blk", "CBlk"),
+    "c_arm": ("c_arm", "CArm"),
+    "ifr": ("ifr", "IFR"),
+    "ife": ("ife", "IFE"),
+    "ifa": ("ifa", "IFA"),
+    "tdp": ("tdp", "TDP"),
+    "ofr": ("ofr", "OFR"),
+    "ofe": ("ofe", "OFE"),
+    "ofa": ("ofa", "OFA"),
+}
+
+
+def _def_tool(def_tools: dict[str, float | int | None], key: str):
+    """Fetch a defensive tool value under either the lowercase or CamelCase key."""
+    for k in _DEF_TOOL_ALIASES.get(key, (key,)):
+        v = def_tools.get(k)
+        if v is not None:
+            return v
+    return None
+
+
+def _blended_def_grade(def_tools: dict[str, float | int | None],
+                       weights: dict[str, float]) -> Optional[float]:
+    """Weighted-blend defensive grade (20-80) from a multi-tool `weights` dict.
+
+    `weights` is the calibrated per-tool blend (keyed by canonical lowercase tool
+    names). Falls back to equal weights over the tools present. Returns None if no
+    weighted tool is available. Accepts either key casing (see aliases).
+    """
+    vals = [(_def_tool(def_tools, k), w) for k, w in weights.items()]
+    present = [(float(v), w) for v, w in vals if v is not None]
+    if not present:
+        return None
+    tw = sum(w for _, w in present)
+    if tw <= 0:  # no calibrated weights for the present tools — equal-weight them
+        return sum(v for v, _ in present) / len(present)
+    return sum(v * (w / tw) for v, w in present)
+
+
+def calibrate_multitool_curve(
+    tools: tuple[str, ...],
+    tool_rows: list[dict[str, float]],
+    observed_runs: list[float],
+    shrink: float = 0.6,
+    min_n: int = 8,
+    center_grade: Optional[float] = None,
+    weight_prior: Optional[dict[str, float]] = None,
+    prior_strength: float = 40.0,
+) -> Optional[dict[str, Any]]:
+    """Fit a multi-tool defensive-runs curve (catcher / infield).
+
+    Generalizes the single-range-tool curve to a weighted blend of several tools:
+      1) derive per-tool blend weights from each tool's standalone correlation
+         with observed defensive runs (negatives floored to 0),
+      2) SHRINK those weights toward `weight_prior` by sample size
+         (n/(n+prior_strength)) so thin per-position/per-league cells fall back to
+         the cross-league prior instead of fitting noise,
+      3) build the blended grade and fit a centered/clamped linear grade->runs
+         curve on it (reusing calibrate_grade_runs_curve).
+
+    `tool_rows`: list of normalized-grade dicts keyed by `tools` (aligned with
+    `observed_runs`). Returns a curve dict shaped for ``fielding_runs`` (with a
+    "weights" sub-dict + "multitool": True), or None if the sample is too thin.
+    """
+    if len(observed_runs) < min_n:
+        return None
+    n = len(observed_runs)
+    # 1) data-driven weights from each tool's regression SLOPE (runs per rating
+    # point) — NOT correlation. Correlation measures how much of the run VARIANCE
+    # a tool explains, which conflates importance with noise: a position where a
+    # tool drives large but noisy run swings gets a LOW correlation despite the
+    # tool mattering more (e.g. CF range vs corner — equal runs-per-point, but CF
+    # outcomes are noisier, so correlation wrongly down-weighted CF range). Slope
+    # is the right quantity: "how many runs does a point of this tool buy." Scaled
+    # by the tool's rating SD so the weight reflects realized run spread, then
+    # floored at 0 (a tool with no positive marginal value gets no weight).
+    data_w: dict[str, float] = {}
+    for k in tools:
+        pairs = [(r[k], observed_runs[i]) for i, r in enumerate(tool_rows)
+                 if r.get(k) is not None]
+        if len(pairs) >= min_n:
+            xs = [p[0] for p in pairs]
+            ys = [p[1] for p in pairs]
+            _, slope, _ = _ols_1var(xs, ys)
+            sd = _pstdev(xs)
+            data_w[k] = max(0.0, slope) * sd  # runs of spread this tool contributes
+    dsum = sum(data_w.values())
+    if dsum > 0:
+        data_w = {k: v / dsum for k, v in data_w.items()}
+    # 2) shrink toward the prior by sample size.
+    if weight_prior:
+        alpha = n / (n + prior_strength)  # 0..1 weight on the data fit
+        merged = {}
+        for k in tools:
+            dv = data_w.get(k, 0.0)
+            pv = weight_prior.get(k, 0.0)
+            merged[k] = alpha * dv + (1 - alpha) * pv
+        weights = merged
+    elif data_w:
+        weights = data_w
+    else:
+        weights = {k: 1.0 / len(tools) for k in tools}
+    wsum = sum(weights.values()) or 1.0
+    weights = {k: round(v / wsum, 3) for k, v in weights.items()}
+    # 3) blended grade + centered/clamped linear fit.
+    blended = [_blended_def_grade(r, weights) for r in tool_rows]
+    gx = [g for g in blended if g is not None]
+    gy = [observed_runs[i] for i, g in enumerate(blended) if g is not None]
+    if len(gx) < min_n:
+        return None
+    curve = calibrate_grade_runs_curve(gx, gy, FIELDING_PRIOR_SLOPE,
+                                       shrink=shrink, min_n=min_n,
+                                       center_grade=center_grade)
+    if curve is None:
+        return None
+    curve["weights"] = weights
+    curve["multitool"] = True
+    return curve
 
 
 def solve_war_anchor(

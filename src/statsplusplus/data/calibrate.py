@@ -500,32 +500,99 @@ def _calibrate_run_space(conn, game_year, role_map, woba_wts, off_norm, result_h
 
     # --- fielding per-position range->ZR curves ---
     def_curve = {}
-    pos_cfg = {"SS": (6, "ifr"), "2B": (4, "ifr"), "3B": (5, "ifr"),
-               "CF": (8, "ofr"), "COF": ("(7,9)", "ofr"), "C": (2, "c_arm")}
-    for bk, (code, tool) in pos_cfg.items():
-        codes = code if isinstance(code, str) else f"({code})"
-        rows = conn.execute(f"""SELECT r.{tool} t, f.zr FROM latest_ratings r
-            JOIN fielding_stats f ON r.player_id=f.player_id
+    ERROR_RUN = -0.5  # literature-anchored run value per fielding error
+
+    # --- outfield: multi-tool blend (range + error + arm) ---
+    # Target = observed OF defensive runs = ZR + (-0.5*errors) + arm runs (OOTP's
+    # `arm` column quantifies OF throwing value — base-advancement prevention —
+    # which ZR cannot see; same role as catcher `framing`). Range leads; error is
+    # IF-magnitude; arm is a real but modest, league-dependent contributor
+    # (strongest for RF/CF — but COF stays POOLED here, so the corner arm is an
+    # LF+RF blend). CF separate. (Supersedes the former range-only OF curve.)
+    _OF_PRIORS = {
+        "CF":  {"ofr": 0.55, "ofe": 0.25, "ofa": 0.20},
+        "COF": {"ofr": 0.55, "ofe": 0.28, "ofa": 0.17},
+    }
+    of_cfg = {"CF": "(8)", "COF": "(7,9)"}
+    for bk, codes in of_cfg.items():
+        rows = conn.execute(f"""SELECT r.ofr, r.ofe, r.ofa, f.g, f.zr, f.e, f.arm
+            FROM latest_ratings r JOIN fielding_stats f ON r.player_id=f.player_id
             WHERE f.position IN {codes} AND f.zr IS NOT NULL AND f.ip>=250
               AND f.year BETWEEN ? AND ?""", (year_lo, year_hi)).fetchall()
-        fx = [norm(x["t"]) for x in rows if x["t"] is not None]
-        fy = [x["zr"] for x in rows if x["t"] is not None]
-        # Population-mean grade at this position (all players who man it,
-        # not just the high-IP calibration starters) — the curve must be
-        # centered so a POPULATION-average fielder gets ~0 runs, else the whole
-        # population shifts negative when the qualified sample is more selective.
-        prows = conn.execute(f"""SELECT r.{tool} t FROM latest_ratings r
-            JOIN players p ON r.player_id=p.player_id
-            WHERE p.pos IN {codes} AND p.role NOT IN (11,12,13) AND r.{tool} IS NOT NULL""").fetchall()
-        pg = [norm(x["t"]) for x in prows if x["t"] is not None]
-        pop_mean = (sum(pg) / len(pg)) if pg else None
-        # Fielding is the noisiest facet AND the tool->ZR relationship plateaus at
-        # high grades (a plus fielder tops out ~+5-7 ZR, not the +10+ a steep
-        # linear slope extrapolates). Strong shrinkage + the robust-percentile
-        # clamp keep plus-grade fielders at realistic run values.
-        cur = _fr.calibrate_grade_runs_curve(fx, fy, _fr.FIELDING_PRIOR_SLOPE,
-                                             shrink=0.55, center_grade=pop_mean)
+        trows, obs = [], []
+        for x in rows:
+            g = x["g"] or 0
+            if g < 40:
+                continue
+            s = 162.0 / g
+            tr = {"ofr": norm(x["ofr"]), "ofe": norm(x["ofe"]), "ofa": norm(x["ofa"])}
+            if any(tr[k] is None for k in tr):
+                continue
+            trows.append(tr)
+            obs.append((x["zr"] or 0) * s + ERROR_RUN * (x["e"] or 0) * s + (x["arm"] or 0) * s)
+        cur = _fr.calibrate_multitool_curve(_fr.OUTFIELD_DEF_TOOLS, trows, obs,
+                                            shrink=0.55, weight_prior=_OF_PRIORS[bk],
+                                            prior_strength=40.0)
         if cur:
+            w = cur.get("weights", {})
+            prows = conn.execute(f"""SELECT r.ofr, r.ofe, r.ofa FROM latest_ratings r
+                JOIN players p ON r.player_id=p.player_id
+                WHERE p.pos IN {codes} AND p.role NOT IN (11,12,13) AND r.ofr IS NOT NULL""").fetchall()
+            pgb = [_fr._blended_def_grade({"ofr": norm(x["ofr"]), "ofe": norm(x["ofe"]),
+                                           "ofa": norm(x["ofa"])}, w) for x in prows]
+            pgb = [v for v in pgb if v is not None]
+            if pgb:
+                center = sum(pgb) / len(pgb)
+                cur["intercept"] = round(-cur["slope"] * center, 4)
+                cur["mean_grade"] = round(center, 1)
+            def_curve[bk] = cur
+
+    # --- infield: per-position multi-tool blend (range + error + arm + DP) ---
+    # Target = observed infield defensive runs = ZR + (-0.5 * errors)/162. Range
+    # leads at SS/2B; error+arm lead at 3B (validated Session-97). Each position's
+    # tool weights are fit from its own data then SHRUNK toward a cross-league
+    # positional prior by sample size, so thin cells don't fit noise. (Supersedes
+    # the former single-range IF curve — the Session-93 range-only result was an
+    # IF/OF-pooled approximation that mis-weighted 3B in particular.)
+    _IF_PRIORS = {
+        "SS": {"ifr": 0.40, "ife": 0.22, "ifa": 0.26, "tdp": 0.12},
+        "2B": {"ifr": 0.42, "ife": 0.24, "ifa": 0.18, "tdp": 0.16},
+        "3B": {"ifr": 0.25, "ife": 0.32, "ifa": 0.28, "tdp": 0.15},
+    }
+    for bk, code in (("SS", 6), ("2B", 4), ("3B", 5)):
+        rows = conn.execute("""SELECT r.ifr, r.ife, r.ifa, r.tdp, f.g, f.zr, f.e
+            FROM latest_ratings r JOIN fielding_stats f ON r.player_id=f.player_id
+            WHERE f.position=? AND f.zr IS NOT NULL AND f.ip>=400
+              AND f.year BETWEEN ? AND ?""", (code, year_lo, year_hi)).fetchall()
+        trows, obs = [], []
+        for x in rows:
+            g = x["g"] or 0
+            if g < 40:
+                continue
+            s = 162.0 / g
+            tr = {"ifr": norm(x["ifr"]), "ife": norm(x["ife"]),
+                  "ifa": norm(x["ifa"]), "tdp": norm(x["tdp"])}
+            if any(tr[k] is None for k in tr):
+                continue
+            trows.append(tr)
+            obs.append((x["zr"] or 0) * s + ERROR_RUN * (x["e"] or 0) * s)
+        cur = _fr.calibrate_multitool_curve(_fr.INFIELD_DEF_TOOLS, trows, obs,
+                                            shrink=0.55, weight_prior=_IF_PRIORS[bk],
+                                            prior_strength=40.0)
+        if cur:
+            # Population-center the blended grade (all players who man the position).
+            w = cur.get("weights", {})
+            prows = conn.execute("""SELECT r.ifr, r.ife, r.ifa, r.tdp FROM latest_ratings r
+                JOIN players p ON r.player_id=p.player_id
+                WHERE p.pos=? AND p.role NOT IN (11,12,13) AND r.ifr IS NOT NULL""", (code,)).fetchall()
+            pgb = [_fr._blended_def_grade({"ifr": norm(x["ifr"]), "ife": norm(x["ife"]),
+                                           "ifa": norm(x["ifa"]), "tdp": norm(x["tdp"])}, w)
+                   for x in prows]
+            pgb = [v for v in pgb if v is not None]
+            if pgb:
+                center = sum(pgb) / len(pgb)
+                cur["intercept"] = round(-cur["slope"] * center, 4)
+                cur["mean_grade"] = round(center, 1)
             def_curve[bk] = cur
 
     # --- positional ZR difficulty (data-driven bonus for real +ZR at hard
@@ -543,6 +610,8 @@ def _calibrate_run_space(conn, game_year, role_map, woba_wts, off_norm, result_h
     # more meaningful than the same +ZR at an easy position, so give the
     # OBSERVED (not tool-projected) fielding blend a bonus there. Fully
     # data-driven and self-calibrating per league.
+    pos_cfg = {"SS": (6, "ifr"), "2B": (4, "ifr"), "3B": (5, "ifr"),
+               "CF": (8, "ofr"), "COF": ("(7,9)", "ofr"), "C": (2, "c_arm")}
     fld_difficulty = {}
     for bk, (code, tool) in pos_cfg.items():
         codes = code if isinstance(code, str) else f"({code})"
@@ -559,6 +628,47 @@ def _calibrate_run_space(conn, game_year, role_map, woba_wts, off_norm, result_h
             # SS/CF/C) earns real, but bounded, extra credit.
             mult = min(1.5, max(1.0, 0.75 / pct_pos)) if pct_pos > 0 else 1.5
             fld_difficulty[bk] = round(mult, 3)
+    # --- catcher: full-profile (framing+blocking+arm) -> observed C-def runs ---
+    # Catcher value is framing + blocking + arm, NOT range/ZR — so it needs its
+    # own target and multi-tool predictor (the single-range-tool ZR curve crushes
+    # catcher defense to ~1 run of spread). OOTP exposes a per-season `framing`
+    # run column; combine it with range (zr) as the observed catcher-defense runs
+    # the sim actually produces (don't out-think the engine). Arm runs aren't
+    # populated in the export, so arm enters only as a rating predictor.
+    crows = conn.execute("""SELECT r.c_frm, r.c_blk, r.c_arm, f.g, f.framing, f.zr
+        FROM latest_ratings r JOIN fielding_stats f ON r.player_id=f.player_id
+        WHERE f.position=2 AND f.ip>=250 AND f.framing IS NOT NULL
+          AND f.year BETWEEN ? AND ?""", (year_lo, year_hi)).fetchall()
+    ctool_rows = []
+    cobs = []
+    for x in crows:
+        g = x["g"] or 0
+        if g < 20:
+            continue
+        s = 162.0 / g  # scale to a full-season run value
+        obs = ((x["framing"] or 0.0) + (x["zr"] or 0.0)) * s
+        ctool_rows.append({"c_frm": norm(x["c_frm"]), "c_blk": norm(x["c_blk"]),
+                           "c_arm": norm(x["c_arm"])})
+        cobs.append(obs)
+    # Population-mean blended catcher grade (center so an average catcher ~0 runs).
+    cpop = conn.execute("""SELECT r.c_frm, r.c_blk, r.c_arm FROM latest_ratings r
+        JOIN players p ON r.player_id=p.player_id
+        WHERE p.pos=2 AND r.c_frm IS NOT NULL""").fetchall()
+    ccur = _fr.calibrate_multitool_curve(_fr.CATCHER_DEF_TOOLS, ctool_rows, cobs,
+                                         shrink=0.6,
+                                         weight_prior={"c_frm": 0.5, "c_blk": 0.35, "c_arm": 0.15})
+    if ccur:
+        # Re-center on the population mean of the blended grade (not the qualified
+        # starter sample), mirroring the IF/OF population-centering.
+        w = ccur.get("weights", {})
+        pg = [_fr._blended_def_grade({"c_frm": norm(x["c_frm"]), "c_blk": norm(x["c_blk"]),
+                                      "c_arm": norm(x["c_arm"])}, w) for x in cpop]
+        pg = [v for v in pg if v is not None]
+        if pg:
+            center = sum(pg) / len(pg)
+            ccur["intercept"] = round(-ccur["slope"] * center, 4)
+            ccur["mean_grade"] = round(center, 1)
+        def_curve["C"] = ccur
 
     # --- tool->wOBA fit (for prospect/tool projection) ---
     fitrows = conn.execute("""SELECT r.cntct,r.gap,r.pow,r.eye,b.ab,b.h,b.d,b.t,b.hr,b.bb,b.ibb,b.hbp,b.sf
@@ -586,7 +696,13 @@ def _calibrate_run_space(conn, game_year, role_map, woba_wts, off_norm, result_h
         if w is None:
             continue
         ifr = norm(r["ifr"]); ofr = norm(r["ofr"])
-        dt = {bk: (ifr if bk in ("SS","2B","3B") else ofr), "ifr": ifr, "ofr": ofr}
+        # Full defensive tool set so the multi-tool IF/C blends resolve (not just
+        # the single range grade). Catcher/infield curves read ife/ifa/tdp/c_*.
+        dt = {bk: (ifr if bk in ("SS", "2B", "3B") else ofr),
+              "ifr": ifr, "ofr": ofr,
+              "ife": norm(r["ife"]), "ifa": norm(r["ifa"]), "tdp": norm(r["tdp"]),
+              "ofe": norm(r["ofe"]), "ofa": norm(r["ofa"]),
+              "c_frm": norm(r["c_frm"]), "c_blk": norm(r["c_blk"]), "c_arm": norm(r["c_arm"])}
         parts = _fr.total_runs(w, lg_woba, woba_scale,
                                {"speed": norm(r["speed"]), "steal": norm(r["steal"])},
                                dt, bk, br_curve=br_curve, def_curve=def_curve,

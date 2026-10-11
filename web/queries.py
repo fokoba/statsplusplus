@@ -1995,16 +1995,35 @@ def get_positional_rankings():
             # below 0.5, so the ratio alone handles that case.
             pitcher_is_sp[r["player_id"]] = (gs > 0 and gs / g > 0.5)
 
-    # Prospects with FV grades — only from MLB orgs
-    prospect_rows = conn.execute("""
-        SELECT p.player_id, p.name, p.age, pf.bucket, p.team_id, p.parent_team_id, p.organization_id,
-               pf.fv, pf.fv_str, pf.risk, r.true_ceiling, pf.prospect_surplus
-        FROM prospect_fv pf
-        JOIN players p ON pf.player_id = p.player_id
-        JOIN latest_ratings r ON r.player_id = p.player_id
-        WHERE pf.fv >= 40 AND p.age <= 25
-        ORDER BY pf.fv DESC, pf.prospect_surplus DESC
-    """).fetchall()
+    # Prospects with FV grades — only from MLB orgs. The dev_speed join is guarded
+    # on table existence so the view degrades gracefully on a league whose
+    # dev_speed table hasn't been populated yet (older data / pre-dev_speed refresh).
+    _has_dev = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='dev_speed'"
+    ).fetchone() is not None
+    if _has_dev:
+        prospect_rows = conn.execute("""
+            SELECT p.player_id, p.name, p.age, pf.bucket, p.team_id, p.parent_team_id, p.organization_id,
+                   pf.fv, pf.fv_str, pf.risk, r.true_ceiling, pf.prospect_surplus,
+                   ds.available, ds.css_class, ds.label, ds.confidence, ds.z
+            FROM prospect_fv pf
+            JOIN players p ON pf.player_id = p.player_id
+            JOIN latest_ratings r ON r.player_id = p.player_id
+            LEFT JOIN dev_speed ds ON pf.player_id = ds.player_id AND ds.eval_date = pf.eval_date
+            WHERE pf.fv >= 40 AND p.age <= 25
+            ORDER BY pf.fv DESC, pf.prospect_surplus DESC
+        """).fetchall()
+    else:
+        prospect_rows = conn.execute("""
+            SELECT p.player_id, p.name, p.age, pf.bucket, p.team_id, p.parent_team_id, p.organization_id,
+                   pf.fv, pf.fv_str, pf.risk, r.true_ceiling, pf.prospect_surplus,
+                   NULL, NULL, NULL, NULL, NULL
+            FROM prospect_fv pf
+            JOIN players p ON pf.player_id = p.player_id
+            JOIN latest_ratings r ON r.player_id = p.player_id
+            WHERE pf.fv >= 40 AND p.age <= 25
+            ORDER BY pf.fv DESC, pf.prospect_surplus DESC
+        """).fetchall()
 
     result = []
     for key, cfg in _POS_GROUPS:
@@ -2087,6 +2106,7 @@ def get_positional_rankings():
                     "fv": r["fv"], "fv_str": r["fv_str"], "risk": r["risk"],
                     "ceiling": r["true_ceiling"],
                     "surplus": round(r["prospect_surplus"] / _money_divisor(), 1) if r["prospect_surplus"] else 0,
+                    "dev": _dev_cell(r, 12),
                     "rank": len(group["prospects"]) + 1,
                 })
 

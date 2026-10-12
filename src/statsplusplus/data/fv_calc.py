@@ -437,6 +437,16 @@ def _compute_dev_speed_pass(conn, game_date: str, bucket_map: dict, league_dir: 
         by_player[r["player_id"]].append(d)
         age_of[r["player_id"]] = r["age"]
 
+    # Express all history on the latest model scale before measuring deltas.
+    # Steps differ for prospects (<=24, whose MiLB-stat blend/age terms moved) and
+    # established players, so measure the drift per (dev group, prospect flag).
+    ds.neutralize_scale_drift(by_player, {
+        pid: (ds.dev_group(bucket_map[pid][0]), age_of[pid] <= ds.MAX_BASELINE_AGE)
+        if pid in bucket_map and bucket_map[pid][0] else None
+        for pid in by_player})
+    draft_yr_of = dict(conn.execute("SELECT player_id, draft_year FROM players").fetchall())
+    cur_year = int(latest[:4])
+
     # acc + recent playing time (last 2 game-years)
     acc_of = dict(conn.execute("SELECT player_id, acc FROM latest_ratings").fetchall())
     yr = conn.execute("SELECT MAX(year) FROM batting_stats").fetchone()[0] or 0
@@ -472,17 +482,28 @@ def _compute_dev_speed_pass(conn, game_date: str, bucket_map: dict, league_dir: 
 
     baseline = ds.build_baseline(records)
 
+    def _run(peer_cuts):
+        outs = []
+        for pid, win in windows.items():
+            bucket, age = bucket_map[pid]
+            is_pit = bucket in ("SP", "RP")
+            pt = (ip_of.get(pid, 0) if is_pit else pa_of.get(pid, 0)) or 0
+            res = ds.compute_dev_speed(
+                bucket=bucket, age=age, window=win, baseline=baseline,
+                acc=acc_of.get(pid), playing_time=pt,
+                peak_age_hitter=peak_age_hitter, peak_age_pitcher=peak_age_pitcher,
+                rookie=(draft_yr_of.get(pid) or 0) >= cur_year,
+                peer_cuts=peer_cuts.get((ds.dev_group(bucket), ds.age_band(age))) if peer_cuts else None)
+            if res is not None:
+                outs.append((pid, res))
+        return outs
+
+    # Pass 1 measures the population's gap-closure distribution; pass 2 tags
+    # players relative to same-group, same-age peers.
+    _first = _run(None)
+    _cuts = ds.peer_gap_cuts([{**r, "band": ds.age_band(bucket_map[pid][1])} for pid, r in _first if r["available"]])
     out_rows = []
-    for pid, win in windows.items():
-        bucket, age = bucket_map[pid]
-        is_pit = bucket in ("SP", "RP")
-        pt = (ip_of.get(pid, 0) if is_pit else pa_of.get(pid, 0)) or 0
-        res = ds.compute_dev_speed(
-            bucket=bucket, age=age, window=win, baseline=baseline,
-            acc=acc_of.get(pid), playing_time=pt,
-            peak_age_hitter=peak_age_hitter, peak_age_pitcher=peak_age_pitcher)
-        if res is None:
-            continue
+    for pid, res in _run(_cuts):
         out_rows.append((
             pid, game_date, 1 if res["available"] else 0, res["z"], res["signal"],
             res["label"], res["css_class"], res["note"], res["gap"], res["d_ovr"],

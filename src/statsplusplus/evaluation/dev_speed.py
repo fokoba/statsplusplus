@@ -73,6 +73,89 @@ BEHIND_GAP_CLOSED_PCT = 0.05
 AT_RISK_SCORE = 4           # composite risk-score threshold for "at_risk"
 
 
+DRIFT_MIN_N = 15
+
+
+def neutralize_scale_drift(by_player: dict, group_of: dict, keys=("composite_score", "ceiling_score", "offensive_grade")) -> None:
+    """Put every snapshot of every player's history on the LATEST model scale, in place.
+
+    ratings_history is not on one scale: when the evaluation model changes, or
+    the engine re-scores only a player's newest row, composites step by several
+    points for everybody at once while the underlying tools haven't moved. Raw
+    composite deltas then read as development (or decline) that never happened
+    and poison gap-closure / gap-trend. A step is measured, per dev group and
+    per snapshot, as the median change in `key` among players whose tools were
+    IDENTICAL between consecutive snapshots (their true change is ~0), then
+    accumulated and subtracted so older rows are expressed on today's scale.
+    """
+    from collections import defaultdict
+    tool_keys = ("cntct", "gap", "pow", "eye", "stf", "mov", "ctrl")
+    for key in keys:
+        steps = defaultdict(list)   # (group, date_next) -> [delta among unchanged-tool players]
+        for pid, snaps in by_player.items():
+            g = group_of.get(pid)
+            for a, b in zip(snaps, snaps[1:]):
+                if a.get(key) is None or b.get(key) is None:
+                    continue
+                if all(a.get(t) == b.get(t) for t in tool_keys):
+                    steps[(g, b["snapshot_date"])].append(b[key] - a[key])
+        by_group_dates = defaultdict(dict)
+        for (g, d), v in steps.items():
+            if len(v) >= DRIFT_MIN_N:
+                by_group_dates[g][d] = _st.median(v)
+        for g, dd in by_group_dates.items():
+            dates = sorted(dd)
+            cum, run = {}, 0.0
+            for d in dates:
+                run += dd[d]
+                cum[d] = run
+            total = run
+            def cum_at(d):
+                c = 0.0
+                for dt in dates:
+                    if dt <= d:
+                        c = cum[dt]
+                    else:
+                        break
+                return c
+            for pid, snaps in by_player.items():
+                if group_of.get(pid) != g:
+                    continue
+                for sn in snaps:
+                    if sn.get(key) is not None:
+                        sn[key] = sn[key] + (total - cum_at(sn["snapshot_date"]))
+
+
+def peer_gap_cuts(results: list[dict]) -> dict:
+    """{(dev_group, age_band): {behind_closed_cut, not_closing_cut}} from the
+    population itself. The absolute gap-closure thresholds (5%/yr, trend >= -0.5)
+    were calibrated on a scale-contaminated history and flagged ~half of ALL
+    prospects; "behind" should mean slower than same-group, same-age peers:
+    gap closure in the bottom quartile, "not closing" = gap trend in the top
+    quartile (widening fastest). Cells under MIN_GROUP_N fall back to the
+    absolute defaults.
+    """
+    from collections import defaultdict
+    closed, trend = defaultdict(list), defaultdict(list)
+    for r in results:
+        k = (dev_group(r["bucket"]), r["band"])
+        if r.get("gap_closed_pct_yr") is not None:
+            closed[k].append(r["gap_closed_pct_yr"])
+        if r.get("gap_trend") is not None:
+            trend[k].append(r["gap_trend"])
+    def q(v, f):
+        v = sorted(v); return v[min(len(v) - 1, int(f * len(v)))]
+    out = {}
+    for k in set(closed) | set(trend):
+        cut = {}
+        if len(closed[k]) >= MIN_GROUP_N:
+            cut["behind_closed_cut"] = min(BEHIND_GAP_CLOSED_PCT, q(closed[k], 0.25))
+        if len(trend[k]) >= MIN_GROUP_N:
+            cut["not_closing_cut"] = max(GAP_NOT_CLOSING, q(trend[k], 0.75))
+        out[k] = cut
+    return out
+
+
 def age_band(age: int) -> str:
     lo = (int(age) // AGE_BAND_WIDTH) * AGE_BAND_WIDTH
     return f"{lo}-{lo + AGE_BAND_WIDTH - 1}"
@@ -290,6 +373,7 @@ def schedule_tag(
     *, z: Optional[float], gap: int, gap_first: Optional[float], gap_closed_pct_yr: Optional[float],
     gap_trend: Optional[float], stagnant: list[str], age: int, bucket: str,
     peak_age_hitter: int = PEAK_AGE_HITTER, peak_age_pitcher: int = PEAK_AGE_PITCHER,
+    behind_closed_cut: float = BEHIND_GAP_CLOSED_PCT, not_closing_cut: float = GAP_NOT_CLOSING,
 ) -> tuple[Optional[str], Optional[str], Optional[str]]:
     """(status, label, note) — the schedule/risk tag. Independent of
     classify()'s peer-relative label; combines age runway to typical peak,
@@ -307,8 +391,15 @@ def schedule_tag(
     near_peak = years_to_peak <= NEAR_PEAK_YEARS
     short_runway = years_to_peak <= SHORT_RUNWAY_YEARS
     wide_gap = gap >= WIDE_GAP
-    not_closing = gap_trend is not None and gap_trend >= GAP_NOT_CLOSING
+    not_closing = gap_trend is not None and gap_trend >= not_closing_cut
     n_stagnant = len(stagnant)
+    is_pitcher = bucket in ("SP", "RP")
+    # Pitchers have only three tools, and grades move in 5-pt steps, so two flat
+    # tools is the NORMAL state of a healthy pitcher (~half of 21-yo SPs were
+    # flat-or-down over a year). Count stagnation for them only when all three
+    # are flat AND the aggregate pace is below peers.
+    if is_pitcher and not (n_stagnant >= 3 and z < 0):
+        n_stagnant = 0
 
     risk = 0
     reasons = []
@@ -341,17 +432,17 @@ def schedule_tag(
     # player whose aggregate/peer-relative read looks fine because of one
     # hot tool, while the rest of his profile hasn't moved) — matching the
     # Ethan Wilson case this whole feature was built from.
-    stagnant_despite_ok_z = z is not None and z >= 0.5 and n_stagnant >= 2
+    stagnant_despite_ok_z = (not is_pitcher) and z is not None and z >= 0.5 and n_stagnant >= 2
     behind = (
         (z is not None and z <= -0.5)
-        or (wide_gap and (gap_closed_pct_yr is None or gap_closed_pct_yr <= BEHIND_GAP_CLOSED_PCT))
+        or (wide_gap and (gap_closed_pct_yr is None or gap_closed_pct_yr <= behind_closed_cut))
         or stagnant_despite_ok_z
     )
     if behind:
         note_bits = []
         if n_stagnant >= 2:
             note_bits.append(f"{n_stagnant} tools ({', '.join(stagnant)}) flat over the window")
-        if wide_gap and (gap_closed_pct_yr is None or gap_closed_pct_yr <= BEHIND_GAP_CLOSED_PCT):
+        if wide_gap and (gap_closed_pct_yr is None or gap_closed_pct_yr <= behind_closed_cut):
             note_bits.append("gap to ceiling not meaningfully closing")
         if z is not None and z <= -0.5:
             note_bits.append("trailing same-age/bucket peers")
@@ -370,6 +461,8 @@ def compute_dev_speed(
     playing_time: float = 0.0,
     peak_age_hitter: int = PEAK_AGE_HITTER,
     peak_age_pitcher: int = PEAK_AGE_PITCHER,
+    rookie: bool = False,
+    peer_cuts: Optional[dict] = None,
 ) -> Optional[dict[str, Any]]:
     """Top-level per-player dev-speed result, or None if the window is too short.
 
@@ -429,11 +522,12 @@ def compute_dev_speed(
     stagnant = stagnant_tools(window, bucket) if available else []
     gap_smoothed, gap_trend = gap_smoothed_and_trend(window)
     gap_closed_pct_yr = round(d_ovr / gap_first, 3) if gap_first > 0 else None
-    if available:
+    if available and not rookie:
         sched_status, sched_label, sched_note = schedule_tag(
             z=z, gap=gap, gap_first=gap_first, gap_closed_pct_yr=gap_closed_pct_yr,
             gap_trend=gap_trend, stagnant=stagnant, age=age, bucket=bucket,
             peak_age_hitter=peak_age_hitter, peak_age_pitcher=peak_age_pitcher,
+            **(peer_cuts or {}),
         )
     else:
         sched_status = sched_label = sched_note = None
@@ -463,6 +557,7 @@ def compute_dev_speed(
         "schedule_note": sched_note,
         "stagnant_tools": stagnant,
         "gap_closed_pct_yr": gap_closed_pct_yr,
+        "bucket": bucket, "gap_trend": gap_trend,
         "years_to_peak": round((peak_age_pitcher if is_pitcher else peak_age_hitter) - age, 1),
         "gap_smoothed": gap_smoothed,
         "gap_trend": gap_trend,

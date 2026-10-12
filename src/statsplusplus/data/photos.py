@@ -114,6 +114,55 @@ def _fetch_one(league_dir: Path, slug: str, pid: int, entry: dict, pause: thread
         return pid, "error", None
 
 
+def sync_local_photos(league_dir: Path, src_dir: Path) -> dict:
+    """Copy portraits straight from the game's own export folder
+    (``<save>.lg/news/html/images/person_pictures``). Those are what the game
+    shows right now, so they beat the StatsPlus mirror; only files newer than
+    the cached copy are taken."""
+    src_dir = Path(src_dir)
+    d = photo_dir(league_dir)
+    d.mkdir(parents=True, exist_ok=True)
+    idx = _load_index(d)
+    copied = 0
+    try:
+        files = list(src_dir.glob("player_*.png"))
+    except OSError:
+        return {"local_copied": 0}
+    for f in files:
+        try:
+            pid = int(f.stem.split("_", 1)[1])
+            dst = photo_path(league_dir, pid)
+            st = f.stat()
+            if dst.exists() and dst.stat().st_mtime >= st.st_mtime:
+                continue
+            tmp = d / f"{pid}.png.local.tmp"
+            tmp.write_bytes(f.read_bytes())
+            os.utime(tmp, (st.st_atime, st.st_mtime))
+            os.replace(tmp, dst)
+            idx[str(pid)] = {"t": time.time(), "s": 200, "src": "local"}
+            copied += 1
+        except (OSError, ValueError):
+            continue
+    if copied:
+        _save_index(d, idx)
+    return {"local_copied": copied}
+
+
+def local_photo_dir(league_slug: str) -> Path | None:
+    """Locate the game's person_pictures folder for a league, if on this Mac."""
+    home = Path.home()
+    saves = {"ppl": ("OOTP Baseball 26", "PPL.lg"), "emlb": ("OOTP Baseball 27", "eMLB.lg")}
+    if league_slug not in saves:
+        return None
+    game, lg = saves[league_slug]
+    for base in (home / "Application Support", home / "Library" / "Application Support"):
+        p = (base / "Out of the Park Developments" / game / "saved_games" / lg
+             / "news" / "html" / "images" / "person_pictures")
+        if p.is_dir():
+            return p
+    return None
+
+
 def sync_photos(league_dir: Path, slug: str, *, workers: int = DEFAULT_WORKERS,
                 stale_secs: int = STALE_SECS, max_requests: int | None = None,
                 stop=None) -> dict:

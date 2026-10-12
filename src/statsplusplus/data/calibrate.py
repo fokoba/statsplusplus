@@ -1922,6 +1922,56 @@ def _multivariate_ols(X, y):
     return beta
 
 
+def _derive_positional_adjustments(conn, shrink_k=20):
+    """Per-league positional WAR adjustments from observed results.
+
+    Regress WAR/600PA on the player's offense, baserunning and defense grades
+    plus a position indicator (PA-weighted, MLB regulars, last 3 seasons). The
+    position coefficients, centered on the PA-weighted mean, are what that
+    position earns in WAR beyond its players' ratings. Each is shrunk toward the
+    real-MLB default by n/(n+k) because small samples are noisy, and the
+    defaults stay for 1B-DH/SP/RP positions that can't be estimated this way.
+    Returns {bucket: adj} or {} if there isn't enough data.
+    """
+    from statsplusplus.utils.positions import _POSITIONAL_WAR_ADJ_DEFAULT as _PRIOR
+    bmap = {2: "C", 3: "1B", 4: "2B", 5: "3B", 6: "SS", 7: "COF", 8: "CF", 9: "COF"}
+    buckets = ["C", "1B", "2B", "3B", "SS", "CF", "COF"]
+    try:
+        y = conn.execute("SELECT MAX(year) FROM batting_stats").fetchone()[0]
+        if not y:
+            return {}
+        rows = conn.execute("""
+            SELECT p.pos, r.offensive_grade, r.baserunning_value, r.defensive_value,
+                   SUM(b.war) * 600.0 / SUM(b.pa), SUM(b.pa)
+            FROM batting_stats b JOIN players p ON p.player_id = b.player_id
+            JOIN latest_ratings r ON r.player_id = b.player_id
+            WHERE b.split_id = 1 AND b.year BETWEEN ? AND ? AND p.pos BETWEEN 2 AND 9
+              AND p.level = '1' AND r.offensive_grade IS NOT NULL
+              AND r.baserunning_value IS NOT NULL AND r.defensive_value IS NOT NULL
+            GROUP BY p.player_id HAVING SUM(b.pa) >= 300""", (y - 2, y)).fetchall()
+    except Exception:
+        return {}
+    if len(rows) < 80:
+        return {}
+    X, Y, bks = [], [], []
+    for r in rows:
+        bk = bmap[r[0]]
+        w = math.sqrt(r[5])
+        ind = [1.0 if bk == b else 0.0 for b in buckets]
+        X.append([w * v for v in (r[1], r[2], r[3], *ind)])
+        Y.append(w * r[4])
+        bks.append(bk)
+    beta = _multivariate_ols(X, Y)
+    eff = dict(zip(buckets, beta[3:]))
+    counts = {b: bks.count(b) for b in buckets}
+    mean = sum(eff[b] * counts[b] for b in buckets) / len(bks)
+    out = {}
+    for b in buckets:
+        n = counts[b]
+        out[b] = round((n / (n + shrink_k)) * (eff[b] - mean) + (shrink_k / (n + shrink_k)) * _PRIOR[b], 2)
+    return out
+
+
 def _calibrate_positional_models(conn):
     """Fit OLS models predicting positional ratings from defensive tools.
 
@@ -2120,6 +2170,7 @@ def calibrate(dry_run=False):
     # Step: Positional rating estimation models (before conn closes)
     print("\n=== Positional Rating Models ===")
     pos_models = _calibrate_positional_models(conn)
+    _pos_adj_derived = _derive_positional_adjustments(conn)
     if pos_models:
         for pos_col, model in pos_models.items():
             print(f"  {pos_col:<14} R²={model['r2']:.3f}  MAE={model['mae']:.1f}  N={model['n']}")
@@ -2250,6 +2301,11 @@ def calibrate(dry_run=False):
         weights["FV_TO_PEAK_WAR_COMPOSITE_SP"] = {str(k): v for k, v in comp_sp_fv.items()}
     if comp_rp_fv is not None:
         weights["FV_TO_PEAK_WAR_COMPOSITE_RP"] = {str(k): v for k, v in comp_rp_fv.items()}
+
+    # Per-league positional WAR adjustments (observed, shrunk to the MLB defaults)
+    if _pos_adj_derived:
+        weights["POSITIONAL_WAR_ADJ_DERIVED"] = _pos_adj_derived
+        print(f"  Positional WAR adjustments (derived): {_pos_adj_derived}")
 
     # Store positional models (calibrated above before conn.close())
     if pos_models:

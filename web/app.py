@@ -41,6 +41,8 @@ import werkzeug.exceptions
 import queries
 from statsplusplus.config.league_config import LeagueConfig, games_per_season
 from statsplusplus.config.league_context import get_league_dir, get_active_league_slug, APP_CONFIG_PATH
+
+_pos_adj_slug = None  # league whose positional WAR adjustments are currently applied
 from statsplusplus.utils.logging import get_logger
 
 log = get_logger("web")
@@ -122,7 +124,7 @@ if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not USE_RELOADER:
     def _photo_sync_loop():
         import json as _json
         import time
-        from statsplusplus.data.photos import sync_photos
+        from statsplusplus.data.photos import sync_photos, sync_local_photos, local_photo_dir
         from statsplusplus.data.logos import sync_logos, sync_team_page_logos
         from statsplusplus.config.league_context import get_statsplus_cookie
         time.sleep(60)  # let startup settle
@@ -135,6 +137,11 @@ if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not USE_RELOADER:
                         slug = _json.loads((ld / "config" / "league_settings.json").read_text()).get("statsplus_slug")
                     except (OSError, ValueError):
                         slug = None
+                    src = local_photo_dir(ld.name)
+                    if src:
+                        lres = sync_local_photos(ld, src)
+                        if lres["local_copied"]:
+                            log.info("local photo sync %s: %s", ld.name, lres)
                     if slug:
                         sync_logos(ld, slug)
                         sync_team_page_logos(ld, slug, cookie=get_statsplus_cookie(ld))
@@ -168,6 +175,12 @@ def _set_league_context():
     settings_exist = (league_dir / "config" / "league_settings.json").exists()
     if not settings_exist and not request.path.startswith(("/onboard", "/static")):
         return redirect("/onboard")
+    global _pos_adj_slug
+    if _pos_adj_slug != slug:
+        # positional WAR adjustments are per-league (see load_model_weights)
+        from statsplusplus.evaluation.constants import load_model_weights
+        load_model_weights(league_dir)
+        _pos_adj_slug = slug
     cfg = LeagueConfig(base_dir=league_dir)
     g.league_slug = slug
     g.league_dir = league_dir
@@ -527,7 +540,7 @@ def league():
             "color": lg["color"], "divisions": lg_divs,
         })
 
-    prospects = queries.get_top_prospects(100)
+    prospects = queries.get_top_prospects(200)
     all_prospects = queries.get_all_prospects()
     bat_leaders = queries.get_batting_leaders()
     pit_leaders = queries.get_pitching_leaders()

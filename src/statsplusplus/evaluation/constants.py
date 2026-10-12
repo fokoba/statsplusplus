@@ -484,14 +484,21 @@ def load_model_weights(league_dir: Path) -> ModelWeights:
     Returns:
         ModelWeights instance with parsed calibrated tables.
     """
+    from statsplusplus.utils.positions import apply_positional_adjustments
     path = league_dir / "config" / "model_weights.json"
     if not path.exists():
+        apply_positional_adjustments(None)
         return ModelWeights()
     try:
         with open(path) as f:
             raw = json.load(f)
+        # Hand-set MODEL_PARAMS override beats the calibrated value.
+        apply_positional_adjustments(
+            (raw.get("MODEL_PARAMS") or {}).get("POSITIONAL_WAR_ADJ")
+            or raw.get("POSITIONAL_WAR_ADJ_DERIVED"))
         return ModelWeights(raw=raw)
     except (json.JSONDecodeError, OSError):
+        apply_positional_adjustments(None)
         return ModelWeights()
 
 

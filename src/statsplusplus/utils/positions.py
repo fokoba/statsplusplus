@@ -41,6 +41,24 @@ POSITIONAL_WAR_ADJUSTMENTS: dict[str, float] = {
     "COF": -0.7, "1B": -1.2, "DH": -1.7, "SP": 0.0, "RP": -1.0,
 }
 
+_POSITIONAL_WAR_ADJ_DEFAULT: dict[str, float] = dict(POSITIONAL_WAR_ADJUSTMENTS)
+
+
+def apply_positional_adjustments(overrides: dict | None = None) -> None:
+    """Set the module-wide positional WAR adjustments for the league in play.
+
+    The defaults are real-MLB values. A league's own results can differ a lot
+    (PPL's catchers produce the LOWEST WAR per PA, not the highest), so
+    calibrate.py derives per-league values (shrunk toward the defaults) and
+    load_model_weights() applies them here. Mutates the shared dict in place so
+    every module that imported it sees the change. ``None`` restores defaults.
+    """
+    POSITIONAL_WAR_ADJUSTMENTS.clear()
+    POSITIONAL_WAR_ADJUSTMENTS.update(_POSITIONAL_WAR_ADJ_DEFAULT)
+    for k, v in (overrides or {}).items():
+        if k in POSITIONAL_WAR_ADJUSTMENTS and isinstance(v, (int, float)):
+            POSITIONAL_WAR_ADJUSTMENTS[k] = float(v)
+
 
 # ---------------------------------------------------------------------------
 # Level hierarchy

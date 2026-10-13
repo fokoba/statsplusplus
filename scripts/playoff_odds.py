@@ -42,9 +42,16 @@ _PCT_RE = re.compile(r"data-name='(-?[\d.]+)'")
 _ROW_RE = re.compile(r"<tr[^>]*>((?:(?!</tr>).)*?/team/(\d+)(?:(?!</tr>).)*?)</tr>", re.S)
 
 
-def _resolve_host(slug: str) -> str:
+def _resolve_host(slug: str, cookie: str = "") -> str:
+    # StatsPlus now answers an anonymous request with 403 instead of the
+    # redirect to the league's server, so resolve the host WITH the session
+    # cookie (the old anonymous call made every fetch fail silently and the
+    # page kept serving a stale cache).
+    headers = {"User-Agent": _USER_AGENT}
+    if cookie:
+        headers["Cookie"] = cookie
     req = urllib.request.Request(
-        f"{_STATSPLUS_ENTRY}/{slug}/playoffodds/", headers={"User-Agent": _USER_AGENT})
+        f"{_STATSPLUS_ENTRY}/{slug}/playoffodds/", headers=headers)
     resp = urllib.request.urlopen(req, timeout=15)
     return resp.geturl().split("/" + slug + "/")[0]
 
@@ -96,6 +103,11 @@ def get_playoff_odds_cached(league_dir: Path) -> Optional[dict[int, dict]]:
             cached = None
 
     fresh = get_playoff_odds(league_dir)
+    if not fresh and cached:
+        import logging
+        logging.getLogger("web").warning(
+            "playoff odds: fetch failed, serving cache from %s",
+            time.strftime("%Y-%m-%d %H:%M", time.localtime(raw.get("fetched_at", 0))))
     if fresh:
         try:
             cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -120,7 +132,7 @@ def get_playoff_odds(league_dir: Optional[Path] = None) -> Optional[dict[int, di
         cookie = get_statsplus_cookie(ld)
         if not cookie:
             return None
-        host = _resolve_host(slug)
+        host = _resolve_host(slug, cookie)
         req = urllib.request.Request(
             f"{host}/{slug}/playoffodds/",
             headers={"User-Agent": _USER_AGENT, "Cookie": cookie,

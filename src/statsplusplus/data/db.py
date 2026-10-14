@@ -62,13 +62,30 @@ def get_connection(league_dir: Optional[Path] = None) -> sqlite3.Connection:
     # signable pool). Drop+recreate on every connection since the view
     # needs updating even where CREATE VIEW IF NOT EXISTS already fired
     # with the old (buggy) definition on a previous connection.
-    conn.execute("DROP VIEW IF EXISTS latest_ratings")
-    conn.execute(
+    view_sql = (
         "CREATE VIEW latest_ratings AS "
         "SELECT r.* FROM ratings r "
         "WHERE r.snapshot_date = (SELECT MAX(r2.snapshot_date) FROM ratings r2 "
         "WHERE r2.player_id = r.player_id)"
     )
+    # Only (re)create when the stored definition differs. Dropping and
+    # recreating on EVERY connection raced when a page fires several requests
+    # at once ("view latest_ratings already exists" -> 500). Do the swap in one
+    # write transaction and tolerate losing the race to another connection.
+    cur = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='view' AND name='latest_ratings'"
+    ).fetchone()
+    if not cur or cur[0] != view_sql:
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute("DROP VIEW IF EXISTS latest_ratings")
+            conn.execute(view_sql)
+            conn.execute("COMMIT")
+        except sqlite3.OperationalError:
+            try:
+                conn.execute("ROLLBACK")
+            except sqlite3.OperationalError:
+                pass
     conn.row_factory = sqlite3.Row
     return conn
 

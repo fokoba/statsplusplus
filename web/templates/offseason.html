@@ -293,78 +293,217 @@
 
 {# ── Rule 5 ── #}
 {% if show.rule5 %}
-<div class="panel">
-  <h2>Rule 5 <span style="font-weight:400;color:var(--text-dim);font-size:13px">— protect &amp; draft targets</span></h2>
+<div class="panel r5-panel">
+  <h2>Rule 5 <span style="font-weight:400;color:var(--text-dim);font-size:13px">— protect &amp; draft</span></h2>
   {% if not rule5.available %}
   <p class="empty">
-    Rule 5 eligibility isn't populated yet. Run a refresh to pull the
-    <code>years_protected_from_rule_5</code> field, then this panel will show
-    your protection decisions and draftable targets.
+    Rule 5 eligibility isn't populated yet. Run a refresh to pull the service
+    fields, then this panel will show your protection decisions and draft board.
   </p>
   {% else %}
-  <h3 style="font-size:13px;margin:0 0 6px">Protect <span style="font-weight:400;color:var(--text-dim)">— your Rule 5-eligible players (off the 40-man); add worth-keeping talent or expose it</span></h3>
-  {% if rule5.protect %}
-  <table class="data-table sortable">
-    <thead>
-      <tr>
-        <th class="left">Player</th><th data-sort="pos" class="left">Pos</th><th data-sort="num">Age</th>
-        <th data-sort="text" class="left">Level</th><th data-sort="num">FV</th>
-        <th data-sort="text" class="left">Risk</th><th data-sort="num">Surplus</th>
-        <th class="left">Recommendation</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for p in rule5.protect %}
-      <tr>
-        <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
-        <td class="left" data-sort-value="{{ p.pos }}">{{ p.pos }}</td>
-        <td class="num">{{ p.age }}</td>
-        <td class="left">{{ p.level }}</td>
-        <td class="num" data-sort-value="{{ p.fv }}">{{ p.fv_str }}</td>
-        <td class="left">{{ p.risk }}</td>
-        <td class="num" data-sort-value="{{ p.surplus }}">{{ p.surplus|money }}</td>
-        <td class="left"><span class="tag tag-{{ p.rec_class }}">{{ p.rec }}</span></td>
-      </tr>
+
+  {# ── A. 40-man constraint header — gates every decision below ── #}
+  {% set fm = rule5.forty_man %}
+  <div class="r5-hero">
+    <div class="r5-roster {{ 'full' if fm.full else 'open' }}">
+      <div class="r5-roster-count">{{ fm.count }}<span class="r5-roster-cap">/ {{ fm.cap }}</span></div>
+      <div class="r5-roster-label">40-man roster</div>
+      <div class="r5-roster-sub">
+        {% if fm.full %}<span class="r5-warn">● Full — a pick or protect needs a move</span>
+        {% else %}<span class="r5-ok">● {{ fm.open }} spot{{ '' if fm.open == 1 else 's' }} open</span>{% endif %}
+      </div>
+    </div>
+    {% if rule5.draft_pos %}
+    <div class="r5-pick">
+      <div class="r5-pick-num">~{{ rule5.draft_pos.pick }}<span class="r5-pick-of">of {{ rule5.draft_pos.of }}</span></div>
+      <div class="r5-roster-label">projected pick</div>
+      <div class="r5-roster-sub"><span class="r5-dim">reverse record — approx.</span></div>
+    </div>
+    {% endif %}
+  </div>
+
+  {# Low-hanging fruit to clear a 40-man spot — fringe minor-league depth only.
+     Collapsible; defaults open when the roster is full (room is the active
+     constraint), collapsed otherwise. Hidden entirely if there's nothing. #}
+  {% if fm.cut_candidates %}
+  <details class="r5-cuts" {% if fm.full %}open{% endif %}>
+    <summary>🔧 Need room? {{ fm.cut_candidates|length }} low-cost 40-man cut candidate{{ '' if fm.cut_candidates|length == 1 else 's' }}
+      <span class="r5-dim">— fringe depth in the minors, lowest value first</span></summary>
+    <div class="r5-cut-list">
+      {% for c in fm.cut_candidates %}
+      <div class="r5-cut-row">
+        <span class="r5-cut-cc" title="Composite / Ceiling — current ability and upside">{{ c.composite }}<span class="r5-cc-sep">/</span>{{ c.ceiling }}</span>
+        <a class="r5-row-name player-link" href="/player/{{ c.pid }}">{{ c.name }}</a>
+        <span class="r5-row-meta">{{ c.pos }} · {{ c.age }}</span>
+        <span class="r5-lvl-pill lvl-{{ c.level|lower }}">{{ c.level }}</span>
+        {% if c.fv_str %}<span class="r5-cut-fv" title="Future Value (prospect)">FV {{ c.fv_str }}</span>{% endif %}
+        <span class="r5-cut-stat">{% if c.stat_line %}<span class="r5-stat-lvl">{{ c.stat_level }}</span> {{ c.stat_line }}{% else %}<span class="r5-dim">no game action</span>{% endif %}</span>
+      </div>
       {% endfor %}
-    </tbody>
-  </table>
-  {% else %}
-  <p class="empty">No Rule 5-eligible players in your org this offseason.</p>
+    </div>
+    <p class="r5-cut-note">Candidates are low-value 40-man depth, not your active roster — removing one opens a spot to protect or draft. The call is yours (contract, options, and roster rules apply).</p>
+  </details>
   {% endif %}
 
-  <h3 style="font-size:13px;margin:14px 0 6px">Draft targets <span style="font-weight:400;color:var(--text-dim)">— other orgs' exposed, MLB-viable players (FV 45+). A Rule 5 pick must stay on the active roster all year.</span></h3>
-  {% if rule5.targets %}
-  <table class="sortable">
-    <thead>
-      <tr>
-        <th class="left">Player</th><th data-sort="text" class="left">Org</th>
-        <th data-sort="pos" class="left">Pos</th><th data-sort="num">Age</th>
-        <th data-sort="text" class="left">Level</th><th data-sort="num">FV</th>
-        <th data-sort="text" class="left">Risk</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for t in rule5.targets %}
-      <tr>
-        <td class="left"><a class="player-link" href="/player/{{ t.pid }}">{{ t.name }}</a></td>
-        <td class="left">{{ t.team }}</td>
-        <td class="left" data-sort-value="{{ t.pos }}">{{ t.pos }}</td>
-        <td class="num">{{ t.age }}</td>
-        <td class="left">{{ t.level }}</td>
-        <td class="num" data-sort-value="{{ t.fv }}">{{ t.fv_str }}</td>
-        <td class="left">{{ t.risk }}</td>
-      </tr>
+  {% macro r5_card(p) %}
+  <div class="r5-card r5-rec-{{ p.rec_class }}{% if 'needs a 40-man move' in p.rec %} r5-needs-move{% endif %}">
+    <div class="r5-card-top">
+      <span class="r5-fv r5-fv-{{ p.rec_class }}">{{ p.fv_str }}</span>
+      <div class="r5-card-id">
+        <a class="r5-card-name player-link" href="/player/{{ p.pid }}">{{ p.name }}</a>
+        <div class="r5-card-sub">{{ p.pos }} · age {{ p.age }} · {{ p.level }}{% if p.risk %} · {{ p.risk }} risk{% endif %}</div>
+      </div>
+      <span class="r5-ready r5-ready-{{ p.readiness|replace('-','')|lower }}">{{ p.readiness }}</span>
+    </div>
+    <div class="r5-card-stat">
+      {% if p.stat_line %}
+        <span class="r5-stat-lvl">{{ p.stat_level }}</span>
+        <span class="r5-stat-line">{{ p.stat_line }}</span>
+        {% if p.stat_war is not none %}<span class="r5-war {{ 'pos' if p.stat_war >= 1.5 else 'neg' if p.stat_war < 0 else '' }}">{{ '%+.1f'|format(p.stat_war) }} WAR</span>{% endif %}
+      {% else %}<span class="r5-dim">no game action last season</span>{% endif %}
+    </div>
+    {% if 'needs a 40-man move' in p.rec %}<div class="r5-move-flag">⚠ 40-man full — protecting needs a corresponding move</div>{% endif %}
+  </div>
+  {% endmacro %}
+
+  {# Compact ROW — for the collapsed fringe/exposed tiers (many players). #}
+  {% macro r5_row(p) %}
+  <div class="r5-row r5-rec-{{ p.rec_class }}">
+    <span class="r5-row-fv r5-fv-{{ p.rec_class }}">{{ p.fv_str }}</span>
+    <div class="r5-row-id">
+      <a class="r5-row-name player-link" href="/player/{{ p.pid }}">{{ p.name }}</a>
+      <span class="r5-row-meta">{{ p.pos }} · {{ p.age }} · {{ p.level }}</span>
+    </div>
+    <span class="r5-ready r5-ready-{{ p.readiness|replace('-','')|lower }}">{{ p.readiness }}</span>
+    <span class="r5-row-stat">{% if p.stat_line %}<span class="r5-stat-lvl">{{ p.stat_level }}</span> {{ p.stat_line }}{% else %}<span class="r5-dim">no game action</span>{% endif %}</span>
+  </div>
+  {% endmacro %}
+
+  {# ── B. Protect — decision-first, triaged by tier ── #}
+  {% set pt = rule5.protect_tiers %}
+  <div class="r5-section">
+    <h3>🛡️ Protect <span class="sr-hint">worth a 40-man spot?</span></h3>
+    {% if rule5.protect %}
+    <p class="r5-legend">
+      <strong>Protect</strong> = add to the 40-man now · <strong>Consider</strong> = marginal, your call ·
+      <strong>MLB-ready</strong> = a rival could roster him this year (the real exposure risk).
+    </p>
+
+    {% if pt.protect %}
+    <div class="r5-tier">
+      <div class="r5-tier-head">Protect <span class="r5-tier-n">{{ pt.protect|length }}</span></div>
+      <div class="r5-card-grid">{% for p in pt.protect %}{{ r5_card(p) }}{% endfor %}</div>
+    </div>
+    {% endif %}
+
+    {% if pt.consider %}
+    <div class="r5-tier">
+      <div class="r5-tier-head">Consider <span class="r5-tier-n">{{ pt.consider|length }}</span></div>
+      <div class="r5-card-grid">{% for p in pt.consider %}{{ r5_card(p) }}{% endfor %}</div>
+    </div>
+    {% endif %}
+
+    {% if pt.fringe %}
+    <details class="r5-more">
+      <summary>show {{ pt.fringe|length }} more fringe (FV ≤ 35)</summary>
+      <div class="r5-tier">{% for p in pt.fringe %}{{ r5_row(p) }}{% endfor %}</div>
+    </details>
+    {% endif %}
+
+    {% if pt.exposed %}
+    <details class="r5-more r5-exposed">
+      <summary>{{ pt.exposed|length }} players exposed — not worth a 40-man spot</summary>
+      <div class="r5-tier">{% for p in pt.exposed %}{{ r5_row(p) }}{% endfor %}</div>
+    </details>
+    {% endif %}
+
+    {% if not pt.protect and not pt.consider %}
+    <p class="empty">No players worth protecting this offseason — your eligibles are all org depth.</p>
+    {% endif %}
+    {% else %}
+    <p class="empty">No Rule 5-eligible players in your org this offseason.</p>
+    {% endif %}
+  </div>
+
+  {# ── D. Needs strip + C. Draft board (table-primary) ── #}
+  <div class="r5-section">
+    <h3>🎯 Draft board <span class="sr-hint">a pick must stay on your active roster all season — lead with players who can stick</span></h3>
+
+    {% if rule5.needs %}
+    <div class="r5-needs">
+      <span class="r5-needs-label">Your thin spots:</span>
+      {% for n in rule5.needs %}<span class="r5-need-chip" data-need="{{ n }}">{{ n }}</span>{% endfor %}
+      <span class="r5-needs-hint">★ = fills one of these</span>
+    </div>
+    {% endif %}
+
+    {% if rule5.targets %}
+    {% if rule5.top_targets %}
+    <div class="r5-toptargets-label">Top realistic targets <span class="r5-dim">— MLB-ready, need-fills first</span></div>
+    <div class="r5-tt-grid">
+      {% for t in rule5.top_targets %}
+      <div class="r5-tt{% if t.fills_need %} r5-fills-need{% endif %}">
+        <span class="r5-fv r5-fv-good">{{ t.fv_str }}</span>
+        <div class="r5-tt-id">
+          <a class="r5-card-name player-link" href="/player/{{ t.pid }}">{% if t.fills_need %}★ {% endif %}{{ t.name }}</a>
+          <div class="r5-card-sub">{{ t.pos }} · {{ t.age }} · {{ t.level }} · {{ t.team }}</div>
+          <div class="r5-card-stat">
+            {% if t.stat_line %}<span class="r5-stat-lvl">{{ t.stat_level }}</span><span class="r5-stat-line">{{ t.stat_line }}</span>{% else %}<span class="r5-dim">no game action</span>{% endif %}
+          </div>
+        </div>
+      </div>
       {% endfor %}
-    </tbody>
-  </table>
-  {% else %}
-  <p class="empty">No MLB-viable Rule 5-eligible players available across the league.</p>
-  {% endif %}
-  <p style="color:var(--text-dim);font-size:12px">
-    Eligible = out of Rule 5 protection years (<code>years_protected_from_rule_5 = 0</code>) and not on the 40-man.
-    A drafted player must stay on the active roster the whole season or be offered back, so realistic targets are
-    near-MLB-ready (relievers, bench bats).
-  </p>
+    </div>
+    {% endif %}
+
+    <div class="r5-pool-head">
+      <span>Full eligible pool <span class="r5-dim">— <span id="r5-pool-count">{{ rule5.targets|length }}</span> shown</span></span>
+      <div class="r5-pool-filters">
+        <label class="r5-pool-filter">Readiness
+          <select id="r5-ready-filter">
+            <option value="mlb">MLB-ready only</option>
+            <option value="near" selected>Exclude Distant</option>
+            <option value="all">All</option>
+          </select>
+        </label>
+        <label class="r5-pool-filter"><input type="checkbox" id="r5-need-only"> fills a need</label>
+      </div>
+    </div>
+    <div class="fa-scroll">
+    <table class="sortable" id="r5-pool">
+      <thead><tr>
+        <th data-sort="pos" class="left">Pos</th>
+        <th class="left">Player</th><th data-sort="text" class="left">Org</th>
+        <th data-sort="num">Age</th>
+        <th data-sort="text" class="left">Level</th>
+        <th data-sort="text" class="left">Readiness</th>
+        <th data-sort="num" class="left">FV</th>
+        <th class="left" title="Last season's line and the level it was accrued at">Last season</th>
+        <th data-sort="text" class="left">Risk</th>
+        <th data-sort="num" class="center" title="Fills a need for your org">Need</th>
+      </tr></thead>
+      <tbody>
+        {% for t in rule5.targets %}
+        <tr class="r5-pool-row" data-need="{{ 1 if t.fills_need else 0 }}" data-readiness="{{ t.readiness }}">
+          <td class="left" data-sort-value="{{ t.pos }}">{{ t.pos }}</td>
+          <td class="left"><a class="player-link" href="/player/{{ t.pid }}">{{ t.name }}</a></td>
+          <td class="left">{{ t.team }}</td>
+          <td class="num">{{ t.age }}</td>
+          <td class="left"><span class="r5-lvl-pill lvl-{{ t.level|lower }}">{{ t.level }}</span></td>
+          <td class="left">{{ t.readiness }}</td>
+          <td class="left" data-sort-value="{{ t.fv }}"><span class="r5-fv-pill r5-fvp-{{ 'hi' if t.fv >= 55 else 'mid' if t.fv >= 45 else 'lo' }}">{{ t.fv_str }}</span></td>
+          <td class="left r5-pool-stat">{% if t.stat_line %}<span class="r5-stat-lvl">{{ t.stat_level }}</span> {{ t.stat_line }}{% else %}<span class="r5-dim">—</span>{% endif %}</td>
+          <td class="left">{{ t.risk }}</td>
+          <td class="center r5-need-cell" data-sort-value="{{ 1 if t.fills_need else 0 }}">{% if t.fills_need %}★{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p class="empty">No MLB-viable Rule 5-eligible players available across the league.</p>
+    {% endif %}
+  </div>
   {% endif %}
 </div>
 {% endif %}
@@ -512,6 +651,144 @@
   .fin-actions { display:flex; align-items:center; gap:10px; margin-top:14px; }
   .fin-msg { font-size:12px; color:var(--text-dim); }
   .fin-hint { color:var(--text-dim); font-size:11px; margin:10px 0 0; }
+
+  /* ── Rule 5 ── */
+  .r5-hero { display:flex; flex-wrap:wrap; gap:16px; margin:4px 0 20px; }
+  .r5-roster, .r5-pick { flex:0 0 auto; min-width:150px; padding:14px 18px; border-radius:10px;
+        border:1px solid var(--border); background:rgba(255,255,255,0.02); }
+  .r5-roster.open { border-color:var(--green); }
+  .r5-roster.full { border-color:var(--red); }
+  .r5-roster-count, .r5-pick-num { font-size:38px; font-weight:800; line-height:1; }
+  .r5-roster-cap, .r5-pick-of { font-size:16px; font-weight:400; color:var(--text-dim); margin-left:4px; }
+  .r5-roster-label { font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-dim); margin-top:6px; }
+  .r5-roster-sub { font-size:12px; margin-top:3px; }
+  .r5-ok { color:var(--green); } .r5-warn { color:var(--red); } .r5-dim { color:var(--text-dim); }
+
+  .r5-section { margin-top:22px; }
+  .r5-section h3 { margin:0 0 8px; font-size:14px; }
+
+  /* 40-man cut candidates */
+  .r5-cuts { margin:0 0 18px; padding:10px 14px; border:1px solid var(--border);
+        border-radius:8px; background:rgba(255,255,255,0.02); }
+  .r5-cuts summary { cursor:pointer; font-size:13px; font-weight:600; }
+  .r5-cuts summary .r5-dim { font-weight:400; font-size:12px; }
+  .r5-cuts[open] summary { margin-bottom:10px; }
+  .r5-cut-list { display:flex; flex-direction:column; gap:4px; }
+  .r5-cut-row { display:flex; align-items:center; gap:10px; padding:5px 8px; border-radius:6px;
+        background:rgba(255,255,255,0.015); font-size:12px; }
+  .r5-cut-row .r5-row-name { min-width:150px; }
+  .r5-cut-row .r5-row-meta { color:var(--text-dim); }
+  .r5-cut-cc { flex:0 0 auto; min-width:46px; text-align:center; font-weight:700; font-size:12px; color:var(--text); }
+  .r5-cc-sep { color:var(--text-dim); font-weight:400; margin:0 1px; }
+  .r5-cut-fv { flex:0 0 auto; font-size:10px; font-weight:700; padding:1px 6px; border-radius:9px;
+        background:rgba(78,204,163,0.12); color:var(--green); }
+  .r5-cut-stat { margin-left:auto; color:var(--text-dim); font-size:11px; white-space:nowrap; }
+  .r5-cut-note { font-size:11px; color:var(--text-dim); margin:10px 0 0; }
+  .r5-legend { font-size:11px; color:var(--text-dim); margin:0 0 12px; line-height:1.5; }
+  .r5-legend strong { color:var(--text); font-weight:600; }
+
+  /* Protect tiers — compact one-line rows */
+  .r5-tier { margin-bottom:12px; }
+  .r5-tier-head { font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-dim);
+        margin:0 0 5px; }
+  .r5-tier-n { background:var(--border); color:var(--text-dim); border-radius:9px; padding:0 7px; margin-left:4px; font-size:10px; }
+  .r5-row { display:flex; align-items:center; gap:12px; padding:7px 12px; border-radius:6px;
+        border:1px solid var(--border); background:rgba(255,255,255,0.02); margin-bottom:4px;
+        border-left-width:3px; }
+  .r5-row.r5-rec-good { border-left-color:var(--green); }
+  .r5-row.r5-rec-ok   { border-left-color:var(--amber,#d9a441); }
+  .r5-row.r5-rec-bad  { border-left-color:var(--border); opacity:0.75; }
+  .r5-row-fv { flex:0 0 auto; width:30px; text-align:center; font-weight:800; font-size:15px; color:var(--green); }
+  .r5-fv-ok  { color:var(--amber,#d9a441); } .r5-fv-bad { color:var(--text-dim); }
+  .r5-row-id { flex:0 0 auto; width:190px; min-width:0; display:flex; flex-direction:column; }
+  .r5-row-name { font-weight:600; font-size:13px; }
+  .r5-row-meta { font-size:11px; color:var(--text-dim); }
+  .r5-ready { flex:0 0 auto; font-size:10px; padding:2px 7px; border-radius:10px; background:var(--border); color:var(--text-dim); }
+  .r5-ready-mlbready { background:rgba(78,204,163,0.15); color:var(--green); }
+  .r5-ready-nearready { background:rgba(120,160,220,0.15); color:#8ab4f8; }
+  .r5-ready-distant { background:var(--border); color:var(--text-dim); }
+  .r5-row-stat { flex:1 1 auto; text-align:right; font-size:12px; color:var(--text-dim);
+        white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .r5-war { margin-left:8px; font-weight:700; font-size:11px; color:var(--text-dim); }
+  .r5-war.pos { color:var(--green); } .r5-war.neg { color:var(--red); }
+  .r5-move-flag { flex:0 0 auto; font-size:10px; color:var(--amber,#d9a441); white-space:nowrap; }
+
+  /* Protect/Consider CARDS — small prominent tiers */
+  .r5-card-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(300px,1fr)); gap:10px; }
+  .r5-card { padding:11px 13px; border-radius:9px; border:1px solid var(--border);
+        background:rgba(255,255,255,0.02); border-left-width:3px; display:flex; flex-direction:column; gap:8px; }
+  .r5-card.r5-rec-good { border-left-color:var(--green); }
+  .r5-card.r5-rec-ok   { border-left-color:var(--amber,#d9a441); }
+  .r5-card.r5-rec-bad  { border-left-color:var(--border); }
+  .r5-card.r5-needs-move { border-left-color:var(--amber,#d9a441); }
+  .r5-card-top { display:flex; align-items:center; gap:11px; }
+  .r5-fv { flex:0 0 auto; min-width:36px; height:36px; padding:0 8px; border-radius:8px;
+        display:flex; align-items:center; justify-content:center; font-weight:800; font-size:15px;
+        color:var(--green); background:rgba(78,204,163,0.12); }
+  .r5-fv-ok  { color:var(--amber,#d9a441); background:rgba(217,164,65,0.12); }
+  .r5-fv-bad { color:var(--text-dim); background:var(--border); }
+  .r5-fv-good { color:var(--green); background:rgba(78,204,163,0.12); }
+  .r5-card-id { flex:1 1 auto; min-width:0; }
+  .r5-card-name { font-weight:700; font-size:13px; }
+  .r5-card-sub { font-size:11px; color:var(--text-dim); margin-top:2px; }
+  .r5-card-stat { display:flex; align-items:baseline; gap:8px; font-size:12px; color:var(--text-dim);
+        flex-wrap:wrap; }
+  .r5-stat-lvl { flex:0 0 auto; font-size:10px; font-weight:700; padding:1px 6px; border-radius:4px;
+        background:var(--surface); border:1px solid var(--border); color:var(--text); letter-spacing:.02em; }
+  .r5-stat-line { flex:1 1 auto; }
+  .r5-card .r5-move-flag { font-size:11px; }
+
+  .r5-more { margin:4px 0 12px; }
+  .r5-more summary { cursor:pointer; font-size:12px; color:var(--text-dim); padding:4px 0; }
+  .r5-more summary:hover { color:var(--text); }
+  .r5-more[open] summary { margin-bottom:6px; }
+
+  /* Needs strip */
+  .r5-needs { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:12px;
+        padding:8px 12px; background:var(--surface); border:1px solid var(--border); border-radius:6px; }
+  .r5-needs-label { font-size:12px; color:var(--text-dim); }
+  .r5-need-chip { font-size:11px; padding:2px 9px; border-radius:10px;
+        background:rgba(233,69,96,0.12); border:1px solid var(--red); color:var(--red); }
+  .r5-needs-hint { font-size:11px; color:var(--text-dim); margin-left:auto; }
+
+  /* Top realistic targets — small curated card strip */
+  .r5-toptargets-label { font-size:12px; color:var(--text); margin:0 0 8px; }
+  .r5-tt-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(220px,1fr)); gap:10px; margin-bottom:16px; }
+  .r5-tt { display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:10px;
+        border:1px solid var(--border); background:rgba(255,255,255,0.02); }
+  .r5-tt.r5-fills-need { border-color:var(--green); background:rgba(78,204,163,0.06); }
+  .r5-fv { flex:0 0 auto; min-width:36px; height:36px; padding:0 8px; border-radius:8px;
+        display:flex; align-items:center; justify-content:center; font-weight:800; font-size:15px;
+        color:var(--green); background:rgba(78,204,163,0.12); }
+  .r5-fv-good { color:var(--green); background:rgba(78,204,163,0.12); }
+  .r5-tt-id { min-width:0; }
+  .r5-card-name { font-weight:700; font-size:13px; }
+  .r5-card-sub { font-size:11px; color:var(--text-dim); margin-top:2px; }
+
+  /* Full pool table */
+  .r5-pool-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; }
+  .r5-pool-head > span { font-size:12px; color:var(--text); }
+  .r5-pool-filter { font-size:12px; color:var(--text-dim); display:inline-flex; align-items:center; gap:6px; cursor:pointer; }
+  .r5-pool-filters { display:flex; align-items:center; gap:16px; }
+  .r5-pool-filter select { background:var(--bg); color:var(--text); border:1px solid var(--border);
+        border-radius:4px; padding:3px 6px; font-size:12px; cursor:pointer; }
+  .r5-pool-stat { font-size:11px; color:var(--text-dim); white-space:nowrap; }
+  /* Center alignment for the Need column (header + ★ cell align). */
+  #r5-pool th.center, #r5-pool td.center { text-align:center; }
+  .r5-need-cell { color:var(--green); }
+  /* Level pill — compact, level-tinted. */
+  .r5-lvl-pill { display:inline-block; font-size:10px; font-weight:700; padding:1px 7px; border-radius:9px;
+        background:var(--surface); border:1px solid var(--border); color:var(--text); letter-spacing:.02em; }
+  .r5-lvl-pill.lvl-mlb { background:rgba(78,204,163,0.15); border-color:var(--green); color:var(--green); }
+  .r5-lvl-pill.lvl-aaa { background:rgba(120,160,220,0.15); border-color:#8ab4f8; color:#8ab4f8; }
+  .r5-lvl-pill.lvl-aa  { background:rgba(217,164,65,0.12); border-color:var(--amber,#d9a441); color:var(--amber,#d9a441); }
+  /* FV pill — tiered, fixed width so numbers align under the FV header. */
+  .r5-fv-pill { display:inline-block; min-width:26px; text-align:center; font-size:11px; font-weight:800;
+        padding:1px 6px; border-radius:6px; background:var(--border); color:var(--text-dim); }
+  .r5-fv-pill.r5-fvp-hi  { background:rgba(78,204,163,0.18); color:var(--green); }
+  .r5-fv-pill.r5-fvp-mid { background:rgba(217,164,65,0.15); color:var(--amber,#d9a441); }
+  .r5-fv-pill.r5-fvp-lo  { background:var(--border); color:var(--text-dim); }
+
 </style>
 
 {% endblock %}
@@ -716,6 +993,7 @@
   syncButtons();
 })();
 
+// Rule 5 draft pool — readiness + "fills a need" filters, with a live count.
 // Finance panel — save the game's FA/extension figures.
 (function () {
   var panel = document.getElementById('finance-panel');

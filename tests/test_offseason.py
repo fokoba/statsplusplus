@@ -351,13 +351,15 @@ def test_rule5_unavailable_when_field_null(q):
 
 
 def test_rule5_protect_lists_eligible_prospect(q):
-    """A prospect whose protection clock has run out (ypr=0) and who is off the
-    40-man surfaces on the protect side with a recommendation."""
+    """A prospect whose accumulated pro service has reached one short of his
+    protection window (pro_service_years >= ypr - 1) and who is off the 40-man
+    surfaces on the protect side with a recommendation."""
     conn = q.get_db()
     # Bob Prospect (103): AA SS, FV 50, in prospect_fv, on TEAM_ID.
+    # ypr=5 window, 4 pro years → 4 >= 5-1 → exposed.
     conn.execute(
-        "UPDATE players SET years_protected_from_rule_5=0, is_on_secondary=0 "
-        "WHERE player_id=103")
+        "UPDATE players SET years_protected_from_rule_5=5, pro_service_years=4, "
+        "is_on_secondary=0 WHERE player_id=103")
     conn.commit()
     res = q.get_rule5(TEAM_ID)
     assert res["available"] is True
@@ -366,25 +368,57 @@ def test_rule5_protect_lists_eligible_prospect(q):
     assert names["Bob Prospect"]["rec"] == "Protect"  # FV 50 -> protect
 
 
+def test_rule5_off_by_one_boundary(q):
+    """Eligibility is pro_service_years >= ypr - 1 (OOTP exposes a year before the
+    raw window elapses). A player exactly one year short of that (ypr-2) is still
+    shielded; at ypr-1 he is exposed."""
+    conn = q.get_db()
+    # ypr=5: eligible at pro_service 4 (5-1), NOT at 3 (5-2).
+    conn.execute(
+        "UPDATE players SET years_protected_from_rule_5=5, pro_service_years=3, "
+        "is_on_secondary=0 WHERE player_id=103")
+    conn.commit()
+    assert "Bob Prospect" not in {p["name"] for p in q.get_rule5(TEAM_ID)["protect"]}
+
+    conn.execute("UPDATE players SET pro_service_years=4 WHERE player_id=103")
+    conn.commit()
+    assert "Bob Prospect" in {p["name"] for p in q.get_rule5(TEAM_ID)["protect"]}
+
+
 def test_rule5_on_40man_excluded_from_protect(q):
     """A player already on the 40-man (is_on_secondary=1) is not exposed and
     must not appear as a protect decision."""
     conn = q.get_db()
     conn.execute(
-        "UPDATE players SET years_protected_from_rule_5=0, is_on_secondary=1 "
-        "WHERE player_id=103")
+        "UPDATE players SET years_protected_from_rule_5=5, pro_service_years=4, "
+        "is_on_secondary=1 WHERE player_id=103")
     conn.commit()
     res = q.get_rule5(TEAM_ID)
     assert "Bob Prospect" not in {p["name"] for p in res["protect"]}
 
 
 def test_rule5_shielded_prospect_excluded(q):
-    """A prospect still within the protection window (ypr>0) is not eligible."""
+    """A prospect still well within the protection window (pro service far below
+    ypr - 1) is not eligible."""
     conn = q.get_db()
     conn.execute(
-        "UPDATE players SET years_protected_from_rule_5=3, is_on_secondary=0 "
-        "WHERE player_id=103")
+        "UPDATE players SET years_protected_from_rule_5=5, pro_service_years=1, "
+        "is_on_secondary=0 WHERE player_id=103")
     conn.commit()
     res = q.get_rule5(TEAM_ID)
     assert res["available"] is True
     assert "Bob Prospect" not in {p["name"] for p in res["protect"]}
+
+
+def test_rule5_mlb_player_off_40man_is_eligible(q):
+    """MLB-level players (level '1') are NOT excluded: a player on the active
+    roster but off the 40-man is exposed to the Rule 5 draft. Only the level-0
+    historical/retired/FA pool is excluded."""
+    conn = q.get_db()
+    # Joe Hitter (100): level '1' (MLB) on TEAM_ID. Make him eligible.
+    conn.execute(
+        "UPDATE players SET years_protected_from_rule_5=5, pro_service_years=4, "
+        "is_on_secondary=0 WHERE player_id=100")
+    conn.commit()
+    res = q.get_rule5(TEAM_ID)
+    assert "Joe Hitter" in {p["name"] for p in res["protect"]}

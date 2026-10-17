@@ -469,9 +469,30 @@ def runs_to_composite(
         slope = mapping["slope"]
         centers = mapping.get("pos_centers") or {}
         gc = mapping.get("global_center", 0.0)
-        center = centers.get(bucket, gc) if bucket else gc
         pos_pts = POSITIONAL_WAR_ADJUSTMENTS.get(bucket or "", 0.0) * ppw
-        comp = tc + pos_pts + (runs_above_avg - center) * slope
+        if mapping.get("global_center_mode"):
+            # Position-blind OFFENSIVE center: every position shares the same
+            # offensive zero (the global non-positional run mean), so a given
+            # bat/glove maps to the same composite regardless of position. The
+            # position's VALUE is credited exactly once, via ``pos_pts``. The
+            # player's own positional-adjustment runs are removed from
+            # ``runs_above_avg`` first so they are not counted a second time
+            # inside the (runs - center) term (``total_runs`` folds posAdj in).
+            # Fixes the per-position-TOTAL-runs center, which centered each
+            # position on its own population mean (bat included) and thereby
+            # graded players RELATIVE TO THEIR POSITION — inflating weak-hitting
+            # catchers and deflating strong-hitting CF (Session 100).
+            pos_runs = POSITIONAL_WAR_ADJUSTMENTS.get(bucket or "", 0.0) * (
+                ppw / slope if slope else 0.0
+            )
+            # pos_runs here is posAdj expressed in run units via the WAR anchor:
+            # posAdj_WAR * runs_per_win. ppw/slope == runs_per_win (slope =
+            # ppw/runs_per_win), so this recovers the run-space positional adj.
+            off_runs = runs_above_avg - pos_runs
+            comp = tc + pos_pts + (off_runs - gc) * slope
+        else:
+            center = centers.get(bucket, gc) if bucket else gc
+            comp = tc + pos_pts + (runs_above_avg - center) * slope
         # Soft-saturate the TOP tail toward the cap (a hard clip would re-compress
         # the handful of true elites that overshoot). The bottom is NOT soft-
         # saturated — a large, genuinely sub-replacement minor-league population
@@ -535,6 +556,15 @@ def composite_to_runs(
                 frac = (c - top_knee) / span
                 frac = max(-0.999999, min(0.999999, frac))
                 c = top_knee + span * math.atanh(frac)
+        if mapping.get("global_center_mode"):
+            # Inverse of: comp = tc + pos_pts + (off_runs - gc)*slope, where
+            # off_runs = total_runs - pos_runs. Return TOTAL runs (incl. posAdj)
+            # so the ceiling-anchored FV recovers the same run basis WAR expects.
+            pos_runs = POSITIONAL_WAR_ADJUSTMENTS.get(bucket or "", 0.0) * (
+                ppw / slope if slope else 0.0
+            )
+            off_runs = gc + (c - tc - pos_pts) / slope
+            return off_runs + pos_runs
         return center + (c - tc - pos_pts) / slope
 
     # --- Legacy affine inverse ---
@@ -808,33 +838,49 @@ def calibrate_hybrid_mapping(
     top_knee: float = 70.0,
     cap: float = 80.0,
     floor: float = 20.0,
+    global_off_mean: float | None = None,
 ) -> dict[str, Any]:
-    """Build the hybrid runs->composite mapping (per-position center + WAR slope).
+    """Build the hybrid runs->composite mapping (global offensive center + WAR slope).
 
     Decouples the composite SPREAD from the (self-referential, compressed) prior
     composite distribution. The slope is anchored to ``pts_per_war`` grade points
     per 1 WAR, so one win of value is worth a chosen, honest number of composite
-    points (default 4.0 ~ doubles the old ~2 pts/WAR). Each position is centered
-    on its own population run-mean so a league-average player at every position
-    maps to ``target_center`` plus its positional credit (comparable across
-    positions). The top tail soft-saturates toward ``cap``; the bottom is a
-    display clamp at ``floor`` (a large sub-replacement MiLB population genuinely
-    falls below 20). Consumed by ``runs_to_composite`` (hybrid branch).
+    points (default 4.0 ~ doubles the old ~2 pts/WAR).
+
+    **Centering (Session 100):** every position shares ONE offensive center
+    (``global_off_mean`` — the population mean of NON-positional runs
+    bat+br+fld), with position credited exactly once via the positional
+    adjustment (``pos_pts`` in ``runs_to_composite``). This replaces the earlier
+    per-position TOTAL-runs center, which centered each position on its own
+    population mean (bat included) and thereby graded players RELATIVE TO THEIR
+    POSITION — inflating weak-hitting catchers and deflating strong-hitting CF.
+    ``pos_centers`` is retained for diagnostics/back-compat but is NOT used when
+    ``global_center_mode`` is set. The top tail soft-saturates toward ``cap``;
+    the bottom is a display clamp at ``floor``.
 
     Args:
-        pos_run_means: {bucket: population tool-projected runs-mean}.
-        global_run_mean: fallback center for buckets without enough sample.
+        pos_run_means: {bucket: population tool-projected TOTAL-runs mean}.
+            Retained for diagnostics only under the global-center model.
+        global_run_mean: population mean of TOTAL runs (back-compat fallback).
+        global_off_mean: population mean of NON-positional runs (bat+br+fld) —
+            the position-blind offensive center. When provided, enables
+            ``global_center_mode``. Falls back to ``global_run_mean`` if None
+            (legacy behavior with per-position centers).
         runs_per_win: the league's runs->WAR anchor (slope = pts_per_war/rpw).
         pts_per_war: target composite points per 1 WAR of value.
     """
     rpw = runs_per_win if runs_per_win and runs_per_win > 0 else DEFAULT_RUNS_PER_WIN
-    return {
+    out: dict[str, Any] = {
         "slope": pts_per_war / rpw,
         "pts_per_war": pts_per_war,
         "target_center": target_center,
         "pos_centers": {k: round(v, 2) for k, v in pos_run_means.items()},
-        "global_center": round(global_run_mean, 2),
+        "global_center": round(
+            (global_off_mean if global_off_mean is not None else global_run_mean), 2),
         "top_knee": top_knee,
         "cap": cap,
         "floor": floor,
     }
+    if global_off_mean is not None:
+        out["global_center_mode"] = True
+    return out

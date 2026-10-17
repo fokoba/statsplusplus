@@ -752,6 +752,7 @@ def _calibrate_run_space(conn, game_year, role_map, woba_wts, off_norm, result_h
     # curve population-centering fix. Run-totals use tool-PROJECTED wOBA (from
     # tool_woba_fit) so low-PA population members aren't stat-noise-driven.
     pop_runs = []; pop_comps = []
+    pop_off_runs: list[float] = []
     pop_runs_by_bucket: dict[str, list[float]] = {}
     if tool_woba_fit:
         prows = conn.execute("""SELECT r.*,p.pos,p.role,p.player_id
@@ -777,6 +778,9 @@ def _calibrate_run_space(conn, game_year, role_map, woba_wts, off_norm, result_h
             # position's center reflects its true population, not the subset that
             # already has a stored composite.
             pop_runs_by_bucket.setdefault(bk, []).append(parts["total_runs"])
+            # Non-positional (offensive) runs = total minus the positional
+            # adjustment — the position-blind offensive center (Session 100).
+            pop_off_runs.append(parts["total_runs"] - parts.get("positional_adj", 0.0))
             if r["composite_score"] is not None:
                 pop_runs.append(parts["total_runs"]); pop_comps.append(r["composite_score"])
     import statistics as _st
@@ -795,8 +799,10 @@ def _calibrate_run_space(conn, game_year, role_map, woba_wts, off_norm, result_h
         if pop_runs_by_bucket else (pop_runs_mean or 0.0)
     )
     if pos_run_means:
+        global_off_mean = _st.mean(pop_off_runs) if len(pop_off_runs) >= 10 else None
         comp_mapping = _fr.calibrate_hybrid_mapping(
-            pos_run_means, global_run_mean, rpw_anchor, pts_per_war=COMPOSITE_PTS_PER_WAR)
+            pos_run_means, global_run_mean, rpw_anchor,
+            pts_per_war=COMPOSITE_PTS_PER_WAR, global_off_mean=global_off_mean)
     else:
         # Fallback to the legacy affine map if the population sample is too thin.
         comp_mapping = (
@@ -2303,9 +2309,14 @@ def calibrate(dry_run=False):
         weights["FV_TO_PEAK_WAR_COMPOSITE_RP"] = {str(k): v for k, v in comp_rp_fv.items()}
 
     # Per-league positional WAR adjustments (observed, shrunk to the MLB defaults)
+    # NOTE (2026-10-17): the derived per-league positional adjustments are NOT
+    # written any more. The catcher over-credit they compensated for was really
+    # the runs->composite map centring each position on its own total-run mean;
+    # upstream v1.19.0 fixed that at the root (global offensive center), and the
+    # standard defaults are correct under it. Applying both would double-correct
+    # (undervalue catchers). The derivation helper is kept as a diagnostic.
     if _pos_adj_derived:
-        weights["POSITIONAL_WAR_ADJ_DERIVED"] = _pos_adj_derived
-        print(f"  Positional WAR adjustments (derived): {_pos_adj_derived}")
+        print(f"  Positional WAR adjustments (diagnostic only, not applied): {_pos_adj_derived}")
 
     # Store positional models (calibrated above before conn.close())
     if pos_models:

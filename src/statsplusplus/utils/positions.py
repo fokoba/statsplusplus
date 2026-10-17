@@ -35,7 +35,11 @@ POS_SORT_ORDER: dict[str, int] = {
     "LF": 9, "CF": 10, "RF": 11, "OF": 10, "DH": 12,
 }
 
-# WAR-based positional adjustment (runs above average position player)
+# WAR-based positional adjustment (WAR above an average-position player over a
+# full season). These encode the DEFENSIVE SPECTRUM — the relative difficulty of
+# each position — a structural property of the sport/engine, not of a league's
+# run environment, so a single table applies across leagues (unlike the facet
+# run VALUES, which are per-league calibrated).
 POSITIONAL_WAR_ADJUSTMENTS: dict[str, float] = {
     "C": 1.2, "SS": 0.7, "2B": 0.3, "CF": 0.25, "3B": 0.2,
     "COF": -0.7, "1B": -1.2, "DH": -1.7, "SP": 0.0, "RP": -1.0,

@@ -30,7 +30,7 @@ RATINGS_SQL = """
            p.name AS Name, p.age AS Age, p.team_id, p.parent_team_id, p.organization_id, p.level, p.pos, p.role,
            p.free_agent AS FreeAgent, p.draft_eligible AS DraftEligible,
            r.ovr AS Ovr, r.pot AS Pot,
-           r.composite_score, r.ceiling_score, r.secondary_composite,
+           r.composite_score, r.ceiling_score, r.secondary_composite, r.tool_only_score AS ToolOnly,
            r.cntct AS Cntct, r.gap AS Gap, r.pow AS Pow, r.eye AS Eye, r.ks AS Ks,
            r.speed AS Speed, r.steal AS Steal,
            r.stf AS Stf, r.mov AS Mov, r.ctrl AS Ctrl, r.ctrl_r AS Ctrl_R, r.ctrl_l AS Ctrl_L,

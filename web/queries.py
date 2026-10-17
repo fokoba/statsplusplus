@@ -262,6 +262,155 @@ def get_pitching_leaders(yr=None):
     return result
 
 
+# Stat sets offered by the Advanced (scatter/distribution) tab. Order defines the
+# dropdown order; the first entry is the default stat shown in the 1D view.
+SCATTER_HITTER_STATS = ["OPS", "AVG", "OBP", "SLG", "ISO", "HR", "SB",
+                        "BB%", "K%", "WAR", "Comp", "Surplus"]
+SCATTER_PITCHER_STATS = ["ERA", "FIP", "WHIP", "K/9", "BB/9", "HR/9", "K/BB",
+                         "IP", "WAR", "Comp"]
+
+
+def get_scatter_data(yr=None):
+    """League-wide per-player stat points for the Advanced scatter/distribution tab.
+
+    Returns ``{"hitters": [...], "pitchers": [...], "hitter_stats": [...],
+    "pitcher_stats": [...]}`` where each player point is a dict of the stat
+    values (keys match the *_STATS lists) plus name/team/mine. Only MLB-level
+    players who clear the same games-scaled qualifier used by the leaders panels
+    are included (hitters 3.1 PA/team-game, pitchers 1.0 IP/team-game). "mine" is
+    1 when the player's org matches ``my_team_id``. Pure display data — no eval.
+    """
+    yr = yr or year()
+    conn = get_db()
+    _abbr = team_abbr_map()
+    my_tid = get_my_team_id()
+    # Use the latest year that actually HAS stats, not the state game-year — in
+    # the offseason the current season (e.g. 2035) is unplayed, so year() points
+    # at an empty year. Fall back to the newest year present in the stat tables.
+    row = conn.execute("SELECT MAX(year) FROM mlb_batting_stats").fetchone()
+    stat_bat_yr = row[0] if row and row[0] else yr
+    row = conn.execute("SELECT MAX(year) FROM mlb_pitching_stats").fetchone()
+    stat_pit_yr = row[0] if row and row[0] else yr
+    tip = conn.execute(
+        "SELECT AVG(ip) FROM team_pitching_stats WHERE year=? AND split_id=1", (stat_pit_yr,)
+    ).fetchone()
+    team_g = round(tip[0] / 9) if tip and tip[0] else 0
+    pa_qual = max(1, round(3.1 * team_g))
+    ip_qual = max(1, round(1.0 * team_g))
+    # Server sends a LOWER floor than the qualified mark so the client slider can
+    # loosen the threshold (show part-time players) or tighten it to qualified.
+    pa_floor = max(1, round(0.5 * team_g))   # ~ half the qualified PA
+    ip_floor = max(1, round(0.2 * team_g))   # ~ a fifth of the qualified IP
+
+    # Hitters — aggregate per player (SUM across stints so a mid-season trade is
+    # one row with full-season totals, not one row per team). Rates are recomputed
+    # from the summed components, not averaged across stints.
+    _POS = {1: 'P', 2: 'C', 3: '1B', 4: '2B', 5: '3B', 6: 'SS', 7: 'LF', 8: 'CF', 9: 'RF', 10: 'DH'}
+    hrows = conn.execute("""
+        SELECT p.name, p.team_id, p.pos,
+               COALESCE(NULLIF(p.organization_id,0), NULLIF(p.parent_team_id,0), p.team_id) AS org,
+               SUM(b.pa) pa, SUM(b.ab) ab, SUM(b.h) h, SUM(b.d) d, SUM(b.t) t,
+               SUM(b.hr) hr, SUM(b.bb) bb, SUM(b.k) k, SUM(b.sb) sb,
+               SUM(b.hbp) hbp, SUM(b.sf) sf, SUM(b.war) war,
+               lr.composite_score AS composite, ps.surplus AS surplus
+        FROM mlb_batting_stats b
+        JOIN players p ON p.player_id = b.player_id
+        LEFT JOIN latest_ratings lr ON lr.player_id = b.player_id
+        LEFT JOIN player_surplus ps ON ps.player_id = b.player_id
+          AND ps.eval_date = (SELECT MAX(eval_date) FROM player_surplus)
+        WHERE b.year=? AND b.split_id=1 AND p.level='1'
+        GROUP BY b.player_id
+        HAVING SUM(b.pa) >= ?
+    """, (stat_bat_yr, pa_floor)).fetchall()
+    hitters = []
+    for r in hrows:
+        pa = r["pa"] or 0
+        ab = r["ab"] or 0
+        if pa < 1 or ab < 1:
+            continue
+        h = r["h"] or 0
+        s1 = h - (r["d"] or 0) - (r["t"] or 0) - (r["hr"] or 0)
+        tb = s1 + 2*(r["d"] or 0) + 3*(r["t"] or 0) + 4*(r["hr"] or 0)
+        avg = h / ab
+        obp = (h + (r["bb"] or 0) + (r["hbp"] or 0)) / pa
+        slg = tb / ab
+        hitters.append({
+            "name": r["name"], "team": _abbr.get(r["team_id"], "?"),
+            "pos": _POS.get(r["pos"], "?"),
+            "mine": 1 if r["org"] == my_tid else 0, "pt": pa,
+            "OPS": round(obp + slg, 3),
+            "AVG": round(avg, 3), "OBP": round(obp, 3), "SLG": round(slg, 3),
+            "ISO": round(slg - avg, 3),
+            "HR": r["hr"] or 0, "SB": r["sb"] or 0,
+            "BB%": round(100 * (r["bb"] or 0) / pa, 1),
+            "K%": round(100 * (r["k"] or 0) / pa, 1),
+            "WAR": round(r["war"] or 0, 1),
+            "Comp": r["composite"],
+            "Surplus": round((r["surplus"] or 0) / 1e6, 1) if r["surplus"] is not None else None,
+        })
+
+    # Pitchers — aggregate per player (SUM across stints); ERA and all rates
+    # recomputed from summed er/outs/ip, not averaged. FIP C ~3.10.
+    FIP_C = 3.10
+    prows = conn.execute("""
+        SELECT p.name, p.team_id, p.role,
+               COALESCE(NULLIF(p.organization_id,0), NULLIF(p.parent_team_id,0), p.team_id) AS org,
+               SUM(ps.ip) ip, SUM(ps.outs) outs, SUM(ps.er) er, SUM(ps.k) k,
+               SUM(ps.bb) bb, SUM(ps.ha) ha, SUM(ps.hra) hra,
+               SUM(ps.gs) gs, SUM(ps.g) g,
+               SUM(ps.war) war, SUM(ps.ra9war) ra9war, lr.composite_score AS composite
+        FROM mlb_pitching_stats ps
+        JOIN players p ON p.player_id = ps.player_id
+        LEFT JOIN latest_ratings lr ON lr.player_id = ps.player_id
+        LEFT JOIN player_surplus psu ON psu.player_id = ps.player_id
+          AND psu.eval_date = (SELECT MAX(eval_date) FROM player_surplus)
+        WHERE ps.year=? AND ps.split_id=1 AND p.level='1'
+        GROUP BY ps.player_id
+        HAVING SUM(ps.ip) >= ?
+    """, (stat_pit_yr, ip_floor)).fetchall()
+    pitchers = []
+    for r in prows:
+        # Prefer precise innings from outs; fall back to stored ip.
+        outs = r["outs"] or 0
+        ip = (outs / 3.0) if outs else (r["ip"] or 0)
+        if ip < 1:
+            continue
+        g = r["g"] or 0
+        gs = r["gs"] or 0
+        # SP = starts a majority of appearances (usage split, not raw role).
+        is_sp = (gs > 0 and gs / g > 0.5) if g > 0 else (str(r["role"]) == '11')
+        k = r["k"] or 0
+        bb = r["bb"] or 0
+        hra = r["hra"] or 0
+        er = r["er"] or 0
+        war = r["war"] or 0
+        if r["ra9war"] is not None:
+            war = (war + r["ra9war"]) / 2
+        era = (er * 9.0 / ip) if ip else 0
+        pitchers.append({
+            "name": r["name"], "team": _abbr.get(r["team_id"], "?"),
+            "pos": "SP" if is_sp else "RP",
+            "mine": 1 if r["org"] == my_tid else 0, "pt": round(ip, 1),
+            "ERA": round(era, 2),
+            "FIP": round((13 * hra + 3 * bb - 2 * k) / ip + FIP_C, 2),
+            "WHIP": round(((r["ha"] or 0) + bb) / ip, 2),
+            "K/9": round(9 * k / ip, 1), "BB/9": round(9 * bb / ip, 1),
+            "HR/9": round(9 * hra / ip, 1),
+            "K/BB": round(k / bb, 1) if bb else round(float(k), 1),
+            "IP": round(ip, 1), "WAR": round(war, 1),
+            "Comp": r["composite"],
+        })
+
+    return {
+        "hitters": hitters, "pitchers": pitchers,
+        "hitter_stats": SCATTER_HITTER_STATS, "pitcher_stats": SCATTER_PITCHER_STATS,
+        "hitter_pos": ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"],
+        "pitcher_pos": ["SP", "RP"],
+        "pa_qual": pa_qual, "ip_qual": ip_qual,
+        "pa_floor": pa_floor, "ip_floor": ip_floor,
+    }
+
+
 def search_players(query):
     """League-wide player search. Returns up to 15 matches (MLB first, then prospects)."""
     if not query or len(query) < 2:

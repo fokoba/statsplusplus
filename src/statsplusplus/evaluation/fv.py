@@ -186,6 +186,7 @@ def calc_fv(
     comp_mapping: Optional[dict[str, float]] = None,
     weights: Any = None,
     fv_strength: float = 1.0,
+    tool_ovr: Optional[int] = None,
 ) -> tuple[int, str, float]:
     """Compute FV grade and risk label for a prospect.
 
@@ -253,19 +254,45 @@ def calc_fv(
         _ceil_runs = composite_to_runs(float(pot), _cm, bucket)
         ceiling_war = saturate_war(runs_to_war(_ceil_runs, _anchor), _anchor)
 
-        # p(develops): probability of realizing the ceiling. Near-maxed (small
-        # gap) → ~1.0 (what you see is what you get). Else empirical gap-closure
-        # rate for age, scaled by fv_strength (upside-friendliness).
-        if gap <= 2:
+        # Current-ability WAR (the already-owned FLOOR), from the PURE TOOL grade
+        # — NOT the stat-blended composite. The FV grade is a development
+        # projection off RATINGS (tool → potential); the stat blend that moves an
+        # MLB player's composite around is current-ability noise, not unrealized
+        # development, so it must not set the floor or define the gap. Using the
+        # stat-blended composite manufactured a phantom gap for finished players
+        # (e.g. a 2B with tool_only==ceiling==53 but stat-dragged composite 50 ate
+        # a 43% discount on a gap that does not exist). The defensive-runs value is
+        # already in the tool grade, so the glove is still credited. Falls back to
+        # ``ovr`` when no tool grade is supplied (back-compat / non-run-space).
+        _cur_score = float(tool_ovr if tool_ovr is not None else ovr)
+        _cur_runs = composite_to_runs(_cur_score, _cm, bucket)
+        current_war = saturate_war(runs_to_war(_cur_runs, _anchor), _anchor)
+
+        # Development gap from the TOOL grade to potential (ratings-based), not
+        # the stat-blended composite. A finished player (tool == ceiling) has
+        # gap 0 → p_dev 1.0 and reads straight off his ceiling WAR.
+        tool_gap = max(0, int(round(effective_pot - _cur_score)))
+
+        # p(develops): probability of realizing the REMAINING gap. Near-maxed
+        # (small gap) → ~1.0. Else empirical gap-closure rate for age, scaled by
+        # fv_strength (upside-friendliness).
+        if tool_gap <= 2:
             p_dev = 1.0
         else:
             closure_tbl = gap_closure_table or GAP_CLOSURE_HITTER_DEFAULT
             p_dev = max(0.0, min(1.0, _interp_table(closure_tbl, age) * fv_strength))
 
-        # Bust fallback: a prospect who doesn't develop lands ~replacement
-        # (sent down / washes out), NOT a negative full-season regular.
-        fallback_war = -0.3
-        expected_war = p_dev * ceiling_war + (1.0 - p_dev) * fallback_war
+        # Discount only the UNDEVELOPED DELTA, not the whole projection. A player
+        # already owns his current ability; only the gap between current and
+        # ceiling is speculative, so only that increment carries the development
+        # discount. For an advanced prospect (high current_war) the floor
+        # dominates; for a young flier (near-replacement current_war) almost all
+        # value is still in the discounted delta — so the fliers stay correctly
+        # volatile and are never re-inflated (validated cross-league Session 100).
+        # Replaces the old flat -0.3 "washout" fallback that discarded a near-
+        # finished prospect's real floor (e.g. a composite-50 AAA SS graded FV 40
+        # when his owned ability alone is ~2 WAR / FV 45).
+        expected_war = current_war + p_dev * (ceiling_war - current_war)
 
         war_floor = _anchor.get("sat_bot")
         fv = fv_from_peak_war(expected_war, bucket, weights, war_floor=war_floor)
@@ -620,6 +647,13 @@ def calc_fv_from_dict(
 
     ovr = p.get("Ovr") or 0
     pot = p.get("Pot") or 0
+    # Pure tool grade (computed 20-80, like composite but WITHOUT the MLB stat
+    # blend) — the ceiling-anchored FV uses this for the current-ability floor and
+    # the development gap so stats don't move the FV grade. None for leagues/paths
+    # without a stored tool_only_score (calc_fv falls back to ovr).
+    tool_ovr = p.get("ToolOnly")
+    if tool_ovr is not None:
+        tool_ovr = int(tool_ovr)
     age = p["Age"]
     bucket = p["_bucket"]
     is_pitcher = bool(p.get("_is_pitcher"))
@@ -652,6 +686,7 @@ def calc_fv_from_dict(
         comp_mapping=comp_mapping,
         weights=_weights,
         fv_strength=FV_CEILING_STRENGTH,
+        tool_ovr=tool_ovr,
     )
 
     # Mutate player dict (legacy behavior)

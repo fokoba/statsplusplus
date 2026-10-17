@@ -703,41 +703,73 @@
 <div class="panel">
   <h2>Player Evaluation</h2>
 
-  {# ── Now / Ceiling boxes ── #}
-  <div style="display:flex; gap:24px; margin-bottom:16px">
-    {# NOW #}
-    <div style="flex:1; background:var(--surface); border-radius:8px; padding:12px; text-align:center">
-      <div style="color:var(--text-dim); font-size:11px; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px">Now</div>
-      <div style="font-size:32px; font-weight:700"><span class="ovr-color" data-g="{{ p.composite_score }}">{{ p.composite_score }}</span></div>
-      {% if p.two_way_scores %}
-      <div style="font-size:12px; margin-top:4px; color:var(--text-dim)">
-        P: {{ p.two_way_scores.pitcher_composite }} · H: {{ p.two_way_scores.hitter_composite }} · Combined: <span style="color:var(--text); font-weight:600">{{ p.two_way_scores.combined_value }}</span>
-      </div>
-      {% endif %}
-      {% if p.mlb_context %}
-      {% set ctx = p.mlb_context %}
-      {% set cdiff = p.composite_score - ctx.median %}
-      <div style="font-size:12px; margin-top:4px">
-        <span style="color:var(--text-dim)">#{{ ctx.comp_rank }}/{{ ctx.n }} MLB {{ p.valuation.bucket if p.valuation else '' }}</span>
-      </div>
-      <div style="font-size:11px; margin-top:2px">
-        <span style="{% if cdiff > 3 %}color:#4caf50{% elif cdiff < -3 %}color:#f44336{% else %}color:var(--text-dim){% endif %}">{{ "%+d"|format(cdiff) }} vs median ({{ ctx.median }})</span>
-        · <span style="color:var(--text-dim)">{{ ctx.comp_tier }}</span>
-      </div>
-      {% endif %}
+  {# ── Now / Ceiling + positional bell curve (merged into the chart) ── #}
+  {% set bk = p.valuation.bucket if p.valuation else '' %}
+  {% set has_curve = p.mlb_context and p.mlb_context.curve and p.mlb_context.curve.cur_x is defined %}
+  {% set ceil_val = p.true_ceiling or p.ceiling_score %}
+  <div style="background:var(--surface); border-radius:8px; padding:14px 16px; margin-bottom:16px">
+    {% if has_curve %}
+    {% set cv = p.mlb_context.curve %}
+    {% set ctx = p.mlb_context %}
+    <div style="font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:1px; margin-bottom:2px">
+      Evaluation vs MLB {{ bk }}s
     </div>
-    {# CEILING #}
-    <div style="flex:1; background:var(--surface); border-radius:8px; padding:12px; text-align:center">
-      <div style="color:var(--text-dim); font-size:11px; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px">Ceiling</div>
-      <div style="font-size:32px; font-weight:700"><span class="ovr-color" data-g="{{ p.true_ceiling or p.ceiling_score }}">{{ p.true_ceiling or p.ceiling_score }}</span></div>
-      {% if p.mlb_context %}
-      {% set cldiff = (p.true_ceiling or p.ceiling_score) - ctx.median %}
-      <div style="font-size:12px; margin-top:4px">
-        <span style="{% if cldiff > 3 %}color:#4caf50{% elif cldiff < -3 %}color:#f44336{% else %}color:var(--text-dim){% endif %}">{{ "%+d"|format(cldiff) }} vs MLB {{ p.valuation.bucket if p.valuation else '' }} median ({{ ctx.median }})</span>
-      </div>
-      <div style="font-size:11px; color:var(--text-dim)">{{ ctx.ceil_tier }}</div>
+    <svg viewBox="0 0 {{ cv.vb_w }} {{ cv.vb_h }}" width="100%" style="display:block; height:auto">
+      {# fills: solid green up to NOW (the field he beats), gold NOW→CEILING, empty beyond #}
+      <polygon points="{{ cv.fill_now }}" fill="#4caf50" opacity="0.30"/>
+      {% if cv.gap %}<polygon points="{{ cv.gap }}" fill="#e9c46a" opacity="0.20"/>{% endif %}
+      {# value-labeled gridlines (composite scale), solid at avg #}
+      {% for g in cv.grid %}
+      <line x1="{{ g.x }}" y1="{{ cv.top_y }}" x2="{{ g.x }}" y2="{{ cv.base_y }}"
+            stroke="var(--border)" stroke-width="{% if g.avg %}1{% else %}0.75{% endif %}"
+            {% if not g.avg %}stroke-dasharray="3 3"{% endif %}/>
+      <text x="{{ g.x }}" y="{{ cv.vb_h - 1 }}" fill="var(--text-dim)" font-size="8" text-anchor="middle">{{ g.label }}</text>
+      {% endfor %}
+      {# bell outline + baseline #}
+      <polyline points="{{ cv.line }}" fill="none" stroke="#5aa9e6" stroke-width="2"/>
+      <line x1="0" y1="{{ cv.base_y }}" x2="{{ cv.vb_w }}" y2="{{ cv.base_y }}" stroke="var(--border)" stroke-width="1"/>
+      {# ceiling marker (hollow gold); value label sits in the top band so it never
+         clips. The SOLID marker line spans only curve-point → baseline (never
+         above the curve); a faint dotted leader links the top-band label to the dot. #}
+      {% if cv.ceil_x is defined %}
+      {% set clx = [[cv.ceil_x, 388]|min, 12]|max %}
+      <line x1="{{ cv.ceil_x }}" y1="25" x2="{{ cv.ceil_x }}" y2="{{ cv.ceil_y }}" stroke="#e9c46a" stroke-width="1" stroke-dasharray="2 2" opacity="0.5"/>
+      <line x1="{{ cv.ceil_x }}" y1="{{ cv.ceil_y }}" x2="{{ cv.ceil_x }}" y2="{{ cv.base_y }}" stroke="#e9c46a" stroke-width="2"/>
+      <circle cx="{{ cv.ceil_x }}" cy="{{ cv.ceil_y }}" r="4" fill="var(--surface)" stroke="#e9c46a" stroke-width="2"/>
+      <text x="{{ clx }}" y="9" fill="#e9c46a" font-size="7" text-anchor="middle" opacity="0.85">CEIL</text>
+      <text x="{{ clx }}" y="22" fill="#e9c46a" font-size="14" font-weight="700" text-anchor="middle">{{ ceil_val }}</text>
       {% endif %}
+      {# current marker (solid green) #}
+      {% set cnx = [[cv.cur_x, 388]|min, 12]|max %}
+      <line x1="{{ cv.cur_x }}" y1="25" x2="{{ cv.cur_x }}" y2="{{ cv.cur_y }}" stroke="#4caf50" stroke-width="1" stroke-dasharray="2 2" opacity="0.5"/>
+      <line x1="{{ cv.cur_x }}" y1="{{ cv.cur_y }}" x2="{{ cv.cur_x }}" y2="{{ cv.base_y }}" stroke="#4caf50" stroke-width="2"/>
+      <circle cx="{{ cv.cur_x }}" cy="{{ cv.cur_y }}" r="4" fill="#4caf50"/>
+      <text x="{{ cnx }}" y="9" fill="#4caf50" font-size="7" text-anchor="middle" opacity="0.85">NOW</text>
+      <text x="{{ cnx }}" y="22" fill="#4caf50" font-size="14" font-weight="700" text-anchor="middle">{{ p.composite_score }}</text>
+    </svg>
+    <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--text-dim); margin-top:4px">
+      <span><span style="color:#4caf50">Now</span> #{{ ctx.comp_rank }}/{{ ctx.n }} · {{ ctx.comp_tier }}{% if not cv.same %} · better than ~{{ cv.cur_pct }}%{% endif %}</span>
+      {% if cv.ceil_x is defined %}<span><span style="color:#e9c46a">Ceiling</span> #{{ ctx.ceil_rank }} · {{ ctx.ceil_tier }}</span>{% endif %}
     </div>
+    {% if p.two_way_scores %}
+    <div style="font-size:11px; margin-top:2px; color:var(--text-dim)">Two-way: P {{ p.two_way_scores.pitcher_composite }} · H {{ p.two_way_scores.hitter_composite }} · Combined <span style="color:var(--text); font-weight:600">{{ p.two_way_scores.combined_value }}</span></div>
+    {% endif %}
+    {% else %}
+    {# Fallback (no MLB-context pool, e.g. thin position): plain Now/Ceiling numbers #}
+    <div style="display:flex; gap:24px">
+      <div style="flex:1; text-align:center">
+        <div style="color:#4caf50; font-size:11px; text-transform:uppercase; letter-spacing:1px">Now</div>
+        <div style="font-size:30px; font-weight:700"><span class="ovr-color" data-g="{{ p.composite_score }}">{{ p.composite_score }}</span></div>
+      </div>
+      <div style="flex:1; text-align:center">
+        <div style="color:#e9c46a; font-size:11px; text-transform:uppercase; letter-spacing:1px">Ceiling</div>
+        <div style="font-size:30px; font-weight:700"><span class="ovr-color" data-g="{{ ceil_val }}">{{ ceil_val }}</span></div>
+      </div>
+    </div>
+    {% if p.two_way_scores %}
+    <div style="font-size:11px; margin-top:6px; color:var(--text-dim); text-align:center">Two-way: P {{ p.two_way_scores.pitcher_composite }} · H {{ p.two_way_scores.hitter_composite }} · Combined <span style="color:var(--text); font-weight:600">{{ p.two_way_scores.combined_value }}</span></div>
+    {% endif %}
+    {% endif %}
   </div>
 
   {# ── Component bars ── #}

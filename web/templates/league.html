@@ -38,6 +38,7 @@
   <button class="tab" data-tab="standings">Standings</button>
   <button class="tab" data-tab="prospects">Prospects</button>
   <button class="tab" data-tab="rankings">Rankings</button>
+  <button class="tab" data-tab="advanced">Advanced</button>
   <button class="tab" data-tab="waivers">Waivers</button>
   <button class="tab" data-tab="trade">Trade</button>
   <button class="tab" data-tab="draft">Draft</button>
@@ -368,6 +369,199 @@
 {% endfor %}
 {% endif %}
 </div>
+
+{# ══════ Advanced Tab (distribution / scatter) ══════ #}
+<div class="tab-content" id="tab-advanced">
+  <div class="panel" style="max-width:100%">
+    <h2>Advanced Stats</h2>
+    <div style="display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin-bottom:10px; font-size:13px">
+      <span style="display:inline-flex; border:1px solid var(--border); border-radius:5px; overflow:hidden">
+        <span id="adv-bat" class="adv-side active" onclick="advSide('bat', this)" style="padding:5px 12px; cursor:pointer">Hitters</span>
+        <span id="adv-pit" class="adv-side" onclick="advSide('pit', this)" style="padding:5px 12px; cursor:pointer">Pitchers</span>
+      </span>
+      <span>Stat: <select id="adv-x"></select></span>
+      <span id="adv-ywrap" style="display:none">vs <select id="adv-y"></select></span>
+      <button class="btn btn-sm" id="adv-add">+ add metric</button>
+      <button class="btn btn-sm" id="adv-rm" style="display:none">× remove</button>
+      <span style="display:inline-flex; align-items:center; gap:6px">
+        <label id="adv-thlabel" for="adv-thresh" style="color:var(--text-dim)">min</label>
+        <input type="range" id="adv-thresh" style="width:120px; vertical-align:middle">
+      </span>
+      <span style="font-size:12px; color:var(--text-dim); margin-left:auto">
+        <span style="color:#4caf50">●</span> {{ my_abbr }} &nbsp; <span style="color:#5aa9e6">●</span> league
+      </span>
+    </div>
+    <div id="adv-posrow" style="display:flex; gap:5px; align-items:center; flex-wrap:wrap; margin-bottom:10px; font-size:12px">
+      <span style="color:var(--text-dim)">Positions:</span>
+      <span id="adv-poschips" style="display:inline-flex; gap:5px; flex-wrap:wrap"></span>
+      <span style="color:var(--text-dim)">·</span>
+      <span class="adv-poschip" onclick="advPosAll(true)" style="opacity:0.8">All</span>
+      <span class="adv-poschip" onclick="advPosAll(false)" style="opacity:0.8">None</span>
+    </div>
+    <div id="adv-wrap" style="position:relative; width:100%; max-width:1100px">
+      <svg id="adv-chart" width="100%" style="display:block; height:auto"></svg>
+      <div id="adv-tip" style="position:absolute; pointer-events:none; background:#000; border:1px solid var(--border); border-radius:5px; padding:6px 9px; font-size:12px; display:none; z-index:20; white-space:nowrap"></div>
+    </div>
+    <div id="adv-corr" style="font-size:12px; color:var(--text-dim); margin-top:6px; min-height:16px"></div>
+    <div id="adv-note" style="font-size:12px; color:var(--text-dim); margin-top:2px"></div>
+  </div>
+</div>
+<style>.adv-side{color:var(--text-dim)} .adv-side.active{background:var(--surface); color:var(--text)}
+.adv-poschip{padding:3px 9px; border:1px solid var(--border); border-radius:12px; cursor:pointer; color:var(--text-dim); user-select:none}
+.adv-poschip.on{background:var(--surface); color:var(--text); border-color:#5aa9e6}</style>
+<script>
+(function(){
+  const SC = {{ scatter|tojson }};
+  const svg=document.getElementById('adv-chart'), tip=document.getElementById('adv-tip'),
+        xs=document.getElementById('adv-x'), ys=document.getElementById('adv-y'),
+        yw=document.getElementById('adv-ywrap'), addb=document.getElementById('adv-add'),
+        rmb=document.getElementById('adv-rm'), note=document.getElementById('adv-note'),
+        corr=document.getElementById('adv-corr'),
+        thr=document.getElementById('adv-thresh'), thrlab=document.getElementById('adv-thlabel'),
+        poschips=document.getElementById('adv-poschips');
+  let side='bat', mode2d=false, thresh=0, posOn=new Set();
+  // Larger logical canvas; the SVG scales to the panel width via viewBox.
+  const W=1000, PAD_L=70, PAD_R=24;
+  function pool(){ return side==='bat'?SC.hitters:SC.pitchers; }
+  function stats(){ return side==='bat'?SC.hitter_stats:SC.pitcher_stats; }
+  function posList(){ return side==='bat'?SC.hitter_pos:SC.pitcher_pos; }
+  function shown(){ return pool().filter(d=>(d.pt||0)>=thresh && posOn.has(d.pos)); }
+  function buildChips(){
+    posOn=new Set(posList());  // all on by default
+    poschips.innerHTML='';
+    posList().forEach(pz=>{
+      const el=document.createElement('span');
+      el.className='adv-poschip on'; el.textContent=pz; el.dataset.pos=pz;
+      el.onclick=()=>{ if(posOn.has(pz)){posOn.delete(pz); el.classList.remove('on');}
+                       else {posOn.add(pz); el.classList.add('on');} draw(); };
+      poschips.appendChild(el);
+    });
+  }
+  window.advPosAll=function(on){ posOn=on?new Set(posList()):new Set();
+    poschips.querySelectorAll('.adv-poschip').forEach(el=>el.classList.toggle('on', on)); draw(); };
+  function setupSlider(){
+    // span the server floor → ~1.5× the qualified mark; default at qualified.
+    const qual = side==='bat'?SC.pa_qual:SC.ip_qual;
+    const floor = side==='bat'?SC.pa_floor:SC.ip_floor;
+    const maxv = Math.round(qual*1.5);
+    thr.min=floor; thr.max=maxv; thr.step=Math.max(1,Math.round((maxv-floor)/60));
+    thr.value=qual; thresh=qual;
+  }
+  function fillSel(){
+    xs.innerHTML=''; ys.innerHTML='';
+    stats().forEach(s=>{ xs.add(new Option(s,s)); ys.add(new Option(s,s)); });
+    xs.value=stats()[0]; ys.value=stats()[Math.min(1,stats().length-1)];
+  }
+  function range(k){ const v=shown().map(d=>d[k]).filter(x=>x!=null);
+    if(!v.length) return [0,1];
+    let lo=Math.min(...v), hi=Math.max(...v); const p=(hi-lo)*0.06||1;
+    let loPad=lo-p; const hiPad=hi+p;
+    // Don't pad below a natural floor of 0 when all values are non-negative
+    // (e.g. HR, ERA, rate stats can't go negative — avoid an axis minimum of -2.3).
+    if(lo>=0 && loPad<0) loPad=0;
+    return [loPad,hiPad]; }
+  function mean(k){ const v=shown().map(d=>d[k]).filter(x=>x!=null);
+    return v.length? v.reduce((a,b)=>a+b,0)/v.length : null; }
+  function fmt(v){ return +(+v).toFixed(3); }
+  function linreg(pts){ // pts: [[x,y]] -> {m,b,r2,r}
+    const n=pts.length; if(n<3) return null;
+    let sx=0,sy=0,sxx=0,syy=0,sxy=0;
+    for(const [x,y] of pts){ sx+=x; sy+=y; sxx+=x*x; syy+=y*y; sxy+=x*y; }
+    const dx=n*sxx-sx*sx; if(dx===0) return null;
+    const m=(n*sxy-sx*sy)/dx, b=(sy-m*sx)/n;
+    const dy=n*syy-sy*sy; const r=(dy>0)?(n*sxy-sx*sy)/Math.sqrt(dx*dy):0;
+    return {m,b,r,r2:r*r};
+  }
+  function draw(){
+    const P=pool(), xk=xs.value;
+    // shown items carry their index in the full pool (for tooltip lookup)
+    const data=P.map((d,i)=>({d,i})).filter(o=>(o.d.pt||0)>=thresh && posOn.has(o.d.pos));
+    const unit = side==='bat'?'PA':'IP';
+    thrlab.textContent = 'min '+thresh+' '+unit;
+    corr.textContent='';
+    note.textContent = data.length+' '+(side==='bat'?'hitters':'pitchers')+' shown (≥'+thresh+' '+unit+')'+
+      (mode2d?' · each dot a player, hover for detail':' · vertical thickness = how many players share that value');
+    let s='';
+    if(!mode2d){
+      const Hh=360; svg.setAttribute('viewBox',`0 0 ${W} ${Hh}`);
+      const T=24,B=50,[x0,x1]=range(xk);
+      const px=v=>PAD_L+(v-x0)/(x1-x0)*(W-PAD_L-PAD_R);
+      const midY=T+(Hh-T-B)/2;
+      for(let i=0;i<=6;i++){ const gx=x0+(x1-x0)*i/6;
+        s+=`<line x1="${px(gx)}" y1="${T}" x2="${px(gx)}" y2="${Hh-B}" stroke="#262626"/>`;
+        s+=`<text x="${px(gx)}" y="${Hh-B+18}" fill="#999" font-size="14" text-anchor="middle">${fmt(gx)}</text>`; }
+      s+=`<line x1="${PAD_L}" y1="${midY}" x2="${W-PAD_R}" y2="${midY}" stroke="#333"/>`;
+      s+=`<text x="${(PAD_L+W-PAD_R)/2}" y="${Hh-6}" fill="#ccc" font-size="16" text-anchor="middle">${xk}</text>`;
+      // mean line (vertical) across the shown pool
+      const mx=mean(xk);
+      if(mx!=null){ const mxp=px(mx);
+        s+=`<line x1="${mxp}" y1="${T}" x2="${mxp}" y2="${Hh-B}" stroke="#bbb" stroke-width="1.5"/>`;
+        s+=`<text x="${mxp}" y="${T-4}" fill="#bbb" font-size="12" text-anchor="middle">mean ${fmt(mx)}</text>`; }
+      // Beeswarm: bin by pixel column, stack dots symmetrically outward from the
+      // center line so denser x-values radiate wider (violin silhouette).
+      const DOT=5, SP=10, COLW=11;
+      const pts=data.filter(o=>o.d[xk]!=null).sort((a,b)=>a.d[xk]-b.d[xk]);
+      const colCount={}; const placed=[];
+      for(const o of pts){
+        const xpix=px(o.d[xk]); const col=Math.round(xpix/COLW);
+        const k=(colCount[col]||0); colCount[col]=k+1;
+        const step=Math.ceil(k/2)*(k%2===1?1:-1);
+        const cy=Math.max(T+DOT, Math.min(Hh-B-DOT, midY + step*SP));
+        placed.push({o, cx:xpix, cy});
+      }
+      placed.sort((a,b)=>a.o.d.mine-b.o.d.mine).forEach(p=>{
+        s+=`<circle class="advdot" data-i="${p.o.i}" cx="${p.cx.toFixed(1)}" cy="${p.cy.toFixed(1)}" r="${p.o.d.mine?6:4}" fill="${p.o.d.mine?'#4caf50':'#5aa9e6'}" fill-opacity="${p.o.d.mine?0.95:0.55}" stroke="${p.o.d.mine?'#fff':'none'}" stroke-width="0.8"/>`; });
+    } else {
+      const Hh=620; svg.setAttribute('viewBox',`0 0 ${W} ${Hh}`);
+      const yk=ys.value, T=20,B=54,[x0,x1]=range(xk),[y0,y1]=range(yk);
+      const px=v=>PAD_L+(v-x0)/(x1-x0)*(W-PAD_L-PAD_R), py=v=>Hh-B-(v-y0)/(y1-y0)*(Hh-T-B);
+      for(let i=0;i<=6;i++){ const gx=x0+(x1-x0)*i/6, gy=y0+(y1-y0)*i/6;
+        s+=`<line x1="${px(gx)}" y1="${T}" x2="${px(gx)}" y2="${Hh-B}" stroke="#262626"/>`;
+        s+=`<line x1="${PAD_L}" y1="${py(gy)}" x2="${W-PAD_R}" y2="${py(gy)}" stroke="#262626"/>`;
+        s+=`<text x="${px(gx)}" y="${Hh-B+18}" fill="#999" font-size="14" text-anchor="middle">${fmt(gx)}</text>`;
+        s+=`<text x="${PAD_L-8}" y="${py(gy)+4}" fill="#999" font-size="14" text-anchor="end">${fmt(gy)}</text>`; }
+      s+=`<text x="${(PAD_L+W-PAD_R)/2}" y="${Hh-8}" fill="#ccc" font-size="16" text-anchor="middle">${xk}</text>`;
+      s+=`<text x="18" y="${(T+Hh-B)/2}" fill="#ccc" font-size="16" text-anchor="middle" transform="rotate(-90 18 ${(T+Hh-B)/2})">${yk}</text>`;
+      // mean crosshairs (vertical x-mean, horizontal y-mean) over the shown pool
+      const mx=mean(xk), my=mean(yk);
+      if(mx!=null){ const mxp=px(mx);
+        s+=`<line x1="${mxp}" y1="${T}" x2="${mxp}" y2="${Hh-B}" stroke="#bbb" stroke-width="1.3" opacity="0.8"/>`;
+        s+=`<text x="${mxp+3}" y="${T+12}" fill="#bbb" font-size="11">mean ${fmt(mx)}</text>`; }
+      if(my!=null){ const myp=py(my);
+        s+=`<line x1="${PAD_L}" y1="${myp}" x2="${W-PAD_R}" y2="${myp}" stroke="#bbb" stroke-width="1.3" opacity="0.8"/>`;
+        s+=`<text x="${W-PAD_R-3}" y="${myp-3}" fill="#bbb" font-size="11" text-anchor="end">mean ${fmt(my)}</text>`; }
+      // regression line + r/R2
+      const pairs=data.filter(o=>o.d[xk]!=null&&o.d[yk]!=null).map(o=>[o.d[xk],o.d[yk]]);
+      const reg=linreg(pairs);
+      if(reg){
+        const yA=reg.m*x0+reg.b, yB=reg.m*x1+reg.b;
+        s+=`<line x1="${px(x0)}" y1="${py(Math.max(y0,Math.min(y1,yA)))}" x2="${px(x1)}" y2="${py(Math.max(y0,Math.min(y1,yB)))}" stroke="#e9c46a" stroke-width="2" stroke-dasharray="6 4" opacity="0.85"/>`;
+        corr.innerHTML=`Correlation: <span style="color:#e9c46a">r = ${reg.r.toFixed(2)}</span> · R² = ${reg.r2.toFixed(2)} <span style="opacity:0.7">(n=${pairs.length})</span>`;
+      }
+      data.filter(o=>o.d[xk]!=null&&o.d[yk]!=null).sort((a,b)=>a.d.mine-b.d.mine).forEach(o=>{
+        s+=`<circle class="advdot" data-i="${o.i}" cx="${px(o.d[xk])}" cy="${py(o.d[yk])}" r="${o.d.mine?6:4}" fill="${o.d.mine?'#4caf50':'#5aa9e6'}" fill-opacity="${o.d.mine?0.95:0.55}" stroke="${o.d.mine?'#fff':'none'}" stroke-width="0.8"/>`; });
+    }
+    svg.innerHTML=s;
+  }
+  svg.addEventListener('mousemove',e=>{ const t=e.target;
+    if(t.classList && t.classList.contains('advdot')){ const d=pool()[+t.dataset.i], xk=xs.value;
+      let txt='<b>'+d.name+'</b> <span style="color:#888">'+d.team+' · '+d.pos+'</span><br>'+xk+': '+d[xk];
+      if(mode2d) txt+=' · '+ys.value+': '+d[ys.value];
+      txt+='<br><span style="color:#888">'+(side==='bat'?d.pt+' PA':d.pt+' IP')+'</span>';
+      tip.innerHTML=txt; tip.style.display='block';
+      const w=document.getElementById('adv-wrap').getBoundingClientRect();
+      tip.style.left=(e.clientX-w.left+12)+'px'; tip.style.top=(e.clientY-w.top+12)+'px';
+    } else tip.style.display='none'; });
+  svg.addEventListener('mouseleave',()=>tip.style.display='none');
+  window.advSide=function(sd,el){ side=sd; document.querySelectorAll('.adv-side').forEach(x=>x.classList.remove('active')); el.classList.add('active'); fillSel(); setupSlider(); buildChips(); draw(); };
+  addb.onclick=()=>{ mode2d=true; yw.style.display=''; addb.style.display='none'; rmb.style.display=''; draw(); };
+  rmb.onclick=()=>{ mode2d=false; yw.style.display='none'; addb.style.display=''; rmb.style.display='none'; draw(); };
+  thr.oninput=()=>{ thresh=+thr.value; draw(); };
+  xs.onchange=draw; ys.onchange=draw;
+  // init when the Advanced tab is first shown (data is small, so just init now)
+  fillSel(); setupSlider(); buildChips(); draw();
+})();
+</script>
 
 {# ══════ Waivers Tab ══════ #}
 <div class="tab-content" id="tab-waivers">

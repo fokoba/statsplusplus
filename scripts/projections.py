@@ -384,10 +384,10 @@ def _manual_position_entries(players, roles, pos, shares=None):
 
     roles: dict of player_id -> role string (ROLE_STARTER/PLATOON_VR/PLATOON_VL/BENCH).
     shares: optional dict of player_id -> explicit fraction (0-1) of the
-    position's playing time, honoured for BENCH entries only (e.g. 7/154 for
-    "seven games at 2B while the starter is hurt"). Explicit-share bench
-    players are carved out first and the starters/platoon keep their usual
-    baseline.
+    position's playing time, honoured for BENCH entries (e.g. 7/154 for
+    "seven games at 2B while the starter is hurt") and for STARTER entries
+    (1.0 = every game). Explicit-share bench players are carved out first and
+    the starters/platoon keep their usual baseline.
     Players at this position with no role entry are dropped — a manual
     designation is a full override, not a bias on top of the auto-ranking.
     """
@@ -401,11 +401,18 @@ def _manual_position_entries(players, roles, pos, shares=None):
     entries = []
     top_bucket = 0.0
 
+    shares = shares or {}
     if starter_ids:
-        share_each = baseline / len(starter_ids)
+        # An explicit share on a starter (e.g. 1.0 for "plays every day while
+        # the incumbent is injured") replaces the baseline; starters without
+        # one split whatever the baseline leaves.
+        pinned_starters = {pid: float(shares[pid]) for pid in starter_ids if shares.get(pid)}
+        free_starters = [pid for pid in starter_ids if pid not in pinned_starters]
+        free_bucket = max(baseline - sum(pinned_starters.values()), 0.0) if pinned_starters else baseline
         for pid in starter_ids:
-            entries.append((by_pid[pid], share_each))
-        top_bucket = baseline
+            share = pinned_starters.get(pid, free_bucket / len(free_starters) if free_starters else 0.0)
+            entries.append((by_pid[pid], share))
+        top_bucket = sum(sh for _p, sh in entries)
     elif vr_ids or vl_ids:
         vr_total = baseline * _PLATOON_VR_FRACTION if vr_ids else 0.0
         vl_total = baseline * _PLATOON_VL_FRACTION if vl_ids else 0.0
@@ -422,7 +429,6 @@ def _manual_position_entries(players, roles, pos, shares=None):
             entries.append((by_pid[pid], vl_total / len(vl_ids)))
         top_bucket = vr_total + vl_total
 
-    shares = shares or {}
     pinned = [pid for pid in bench_ids if shares.get(pid)]
     for pid in pinned:
         entries.append((by_pid[pid], float(shares[pid])))
@@ -591,7 +597,17 @@ def allocate_playing_time(players_by_pos, team_pa=None, team_ip=None, manual_rol
             if pos == "DH":
                 player_dh_pa[pid] = player_dh_pa.get(pid, 0) + pos_pa * share
 
+    # A starter pinned to an explicit share is taken at his word: the usual
+    # ~95% rest-day cap would otherwise shave a "plays every day" designation.
+    uncapped = set()
+    for pos, pos_roles in manual_roles.items():
+        for pid, role in (pos_roles or {}).items():
+            if role == ROLE_STARTER and ((manual_shares or {}).get(pos) or {}).get(pid):
+                uncapped.add(pid)
+
     for pid, total in player_total_pa.items():
+        if pid in uncapped:
+            continue
         # Check if this player is a catcher at any position
         is_catcher = any(pos == "C" and any(pp["player_id"] == pid for pp, _ in entries)
                          for pos, entries in raw.items())
@@ -667,6 +683,10 @@ _RP_ROLE_LABEL = {
 # splitting whatever share the full-time starters didn't explicitly claim —
 # e.g. "starts twice for every 10 Valdes starts" is a small fraction of a
 # full starter's workload, not an equal share.
+# Bullpen slots the depth chart shows. Five: that's how many real big-league
+# relievers the org carries now, and a bigger pool just pulls AAA arms into the
+# projection. Raise this if the org ever carries more.
+RP_POOL_SIZE = 5
 _SP_SPOT_WEIGHT = 0.3
 
 
@@ -758,8 +778,12 @@ def allocate_pitcher_time(sp_list, rp_list, team_ip=None,
     manual_rp_roles = manual_rp_roles or {}
     rp_list = sorted(rp_list, key=lambda x: x["war_proj"] * x.get("level_discount", 1.0),
                       reverse=True)
-    n_rp = min(len(rp_list), 8)
-    pool = rp_list[:n_rp]
+    # Relievers the user tagged are always in the bullpen; the remaining slots
+    # go to the best of the rest by projected WAR.
+    tagged = [p for p in rp_list if p["player_id"] in manual_rp_roles]
+    untagged = [p for p in rp_list if p["player_id"] not in manual_rp_roles]
+    pool = (tagged + untagged)[:RP_POOL_SIZE]
+    pool.sort(key=lambda x: x["war_proj"] * x.get("level_discount", 1.0), reverse=True)
 
     pinned = {pid: share for pid, (_role, share) in manual_rp_roles.items() if share}
     pinned_total = min(sum(pinned.values()), 1.0)

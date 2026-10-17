@@ -24,6 +24,7 @@ from web_league_context import (get_db, get_cfg, team_abbr_map, team_names_map,
                                  dev_cell as _dev_cell)
 
 from statsplusplus.data.retained_salary import get_retention_map as _get_retention_map
+from statsplusplus.data.minor_pay import minor_min_pay_map as _minor_min_pay_map, exact_current_salary as _exact_current_salary
 
 # Local wrappers using request-scoped league_dir
 def _dollars_per_war():
@@ -2322,7 +2323,7 @@ def get_free_agent_candidates(team_id=None):
             "draft_pool_excluded": draft_pool_excluded, "signable_pool": signable_pool}
 
 
-def get_farm(team_id=None, limit=None):
+def get_farm(team_id=None, limit=None, sub40=False):
     """Farm system players who meaningfully contribute to farm surplus —
     age <= 25 (this app's standard prospect cutoff) and FV >= 40 (same
     "real prospect" bar the Farm Depth panel's counts already use), so this
@@ -2332,10 +2333,15 @@ def get_farm(team_id=None, limit=None):
     limit=None returns the full list (sorted, ranked); pass a number to cap
     it (the Player Development tab's table defaults to showing the top 15
     client-side but loads the full list for its "show all" toggle).
+
+    sub40=True returns the complement instead: age <= 25, FV under 40, with
+    positive surplus. Those rows feed the table's "Include FV under 40"
+    checkbox only; they stay out of every farm total and ranking.
     """
     conn = get_db()
     tid = team_id or my_team_id()
     ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
+    fv_clause = "pf.fv < 40 AND pf.prospect_surplus > 0" if sub40 else "pf.fv >= 40"
 
     rows = conn.execute(f"""
         SELECT p.name, p.age, p.level, pf.fv, pf.fv_str, pf.bucket, pf.prospect_surplus, p.player_id, p.pos,
@@ -2348,7 +2354,7 @@ def get_farm(team_id=None, limit=None):
         LEFT JOIN latest_ratings r ON pf.player_id=r.player_id
         LEFT JOIN dev_speed ds ON pf.player_id=ds.player_id AND ds.eval_date=pf.eval_date
         WHERE pf.eval_date=? AND {ORG_ID_SQL}=?
-              AND p.age <= 25 AND pf.fv >= 40
+              AND p.age <= 25 AND {fv_clause}
     """, (ed, tid)).fetchall()
 
     # Ranked by surplus (the app's value measure), FV only as the tiebreak —
@@ -2496,6 +2502,7 @@ def get_contracts(team_id):
         pass
 
     retained_by_pid = _get_retention_map(conn)
+    minor_pay = _minor_min_pay_map(conn, league_minimum())
 
     out = []
     for r in rows:
@@ -2508,6 +2515,11 @@ def get_contracts(team_id):
                 abs_year = game_year + (idx - cur_yr)
                 if abs_year in pid_uploaded:
                     salaries[idx] = pid_uploaded[abs_year]
+                    if idx == cur_yr:
+                        salaries[idx] = _exact_current_salary(r[4 + idx], salaries[idx])
+        # League-minimum player in the minors: the game pays only 16.5% now.
+        if pid in minor_pay and cur_yr < len(salaries):
+            salaries[cur_yr] = minor_pay[pid]
         # Salary another team still pays (OOTP "Retained Salary") isn't ours.
         retained_pct = retained_by_pid.get(pid, 0.0)
         if retained_pct:
@@ -2522,6 +2534,7 @@ def get_contracts(team_id):
             "pid": pid, "name": name,
             "salary": cur_sal, "years_left": yrs_left, "total_left": total_left,
             "retained_pct": retained_pct,
+            "minors_pay": pid in minor_pay,
             "ntc": ntc, "to": to, "po": po,
             "surplus": round(surplus / _money_divisor(), 1) if surplus else 0,
             "is_major": is_major,
@@ -2638,6 +2651,7 @@ def get_payroll_summary(team_id):
     future_years = [year + i for i in range(horizon)]
     min_sal = get_cfg().minimum_salary
     retained_by_pid = _get_retention_map(conn)
+    minor_pay = _minor_min_pay_map(conn, lmin)
     players = []
     totals = [0] * horizon
     for r in rows:
@@ -2654,9 +2668,17 @@ def get_payroll_summary(team_id):
         for i in range(horizon):
             contract_yr = cur_yr + i
             abs_year = year + i
-            if pid_uploaded and abs_year in pid_uploaded:
+            if i == 0 and pid in minor_pay:
+                # League-minimum player in the minors: paid 16.5% right now.
+                sal = minor_pay[pid]
+                by_year.append({"sal": sal, "option": None, "projected": False})
+                totals[i] += sal
+            elif pid_uploaded and abs_year in pid_uploaded:
                 cell = pid_uploaded[abs_year]
-                sal = cell["amount"] * keep
+                amt = cell["amount"]
+                if i == 0 and contract_yr < len(sals):
+                    amt = _exact_current_salary(sals[contract_yr], amt)
+                sal = amt * keep
                 by_year.append({"sal": sal, "option": cell["option"], "projected": cell["is_estimate"]})
                 totals[i] += sal
             elif i in proj_map:
@@ -2672,7 +2694,8 @@ def get_payroll_summary(team_id):
         if not any(s for s in by_year if s):
             continue
         players.append({"pid": pid, "name": name, "by_year": by_year, "ntc": ntc,
-                        "retained_pct": retained_by_pid.get(pid, 0.0)})
+                        "retained_pct": retained_by_pid.get(pid, 0.0),
+                        "minors_pay": pid in minor_pay})
     players.sort(key=lambda p: -(p["by_year"][0]["sal"] if p["by_year"][0] else 0))
     return {"years": future_years, "players": players, "totals": totals}
 
@@ -3395,6 +3418,38 @@ def get_depth_chart_roles(team_id):
     return out
 
 
+def get_depth_chart_exclusions(team_id):
+    """Player ids the user has ruled out of the depth chart's prospect pool."""
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            "SELECT player_id FROM depth_chart_exclusions WHERE team_id=?", (team_id,)
+        ).fetchall()
+    except Exception:
+        return set()
+    return {r["player_id"] for r in rows}
+
+
+def set_depth_chart_exclusion(team_id, player_id, excluded=True, note=None):
+    """Rule a minor leaguer in/out of the depth chart projection (see the
+    depth_chart_exclusions table comment). excluded=False removes the row."""
+    import datetime
+    conn = get_db()
+    if excluded:
+        conn.execute(
+            "INSERT INTO depth_chart_exclusions (team_id, player_id, note, updated_at) "
+            "VALUES (?, ?, ?, ?) ON CONFLICT(team_id, player_id) DO UPDATE SET "
+            "note=excluded.note, updated_at=excluded.updated_at",
+            (team_id, player_id, note, datetime.datetime.now().isoformat()),
+        )
+    else:
+        conn.execute(
+            "DELETE FROM depth_chart_exclusions WHERE team_id=? AND player_id=?",
+            (team_id, player_id),
+        )
+    conn.commit()
+
+
 def get_pitcher_slots(team_id, position):
     """Hard display order pinned by the user for 'SP' or 'RP': {player_id: slot} (1 = first)."""
     conn = get_db()
@@ -3410,7 +3465,7 @@ def get_batting_role_shares(team_id):
     conn = get_db()
     rows = conn.execute(
         "SELECT position, player_id, share FROM depth_chart_roles "
-        "WHERE team_id=? AND position NOT IN ('SP', 'RP') AND share IS NOT NULL AND role='bench'",
+        "WHERE team_id=? AND position NOT IN ('SP', 'RP') AND share IS NOT NULL AND role IN ('bench', 'starter')",
         (team_id,)
     ).fetchall()
     out = {}
@@ -3456,7 +3511,7 @@ def set_depth_chart_role(team_id, position, player_id, role, share=None, slot=No
         valid_roles = PITCHER_DEPTH_CHART_ROLES if position in ("SP", "RP") else DEPTH_CHART_ROLES
         if role not in valid_roles:
             raise ValueError(f"Unknown depth chart role for position {position!r}: {role!r}")
-        if position not in ("SP", "RP") and role != "bench":
+        if position not in ("SP", "RP") and role not in ("bench", "starter"):
             share = None
         elif share is not None:
             share = float(share)
@@ -3736,7 +3791,10 @@ def get_depth_chart(team_id):
                 break
 
 
+    excluded_pids = get_depth_chart_exclusions(team_id)
     for row in prospect_rows:
+        if row["player_id"] in excluded_pids:
+            continue
         bucket = row["bucket"]
         role = 11 if bucket == "SP" else (12 if bucket == "RP" else 0)
         _ovr = _resolve_depth_score(row, is_pitcher=(bucket in ("SP", "RP")))
@@ -3802,6 +3860,30 @@ def get_depth_chart(team_id):
     by_year = {}
     prev_names = set()
     year1_players_by_pos = {}
+
+    # ── Current-season progress ─────────────────────────────────────────
+    # Year 0 isn't a fresh season: some innings and PA are already banked.
+    # Allocate only what's LEFT (team PA/IP scaled by games remaining) so
+    # each player's projection is "played to date + rest of season", not a
+    # full-season guess laid on top of a season that's partly over.
+    _gps_n = _gps(get_cfg().league_dir)
+    try:
+        _wl = conn.execute(
+            "SELECT w, l FROM standings WHERE team_id=? ORDER BY fetched_date DESC LIMIT 1",
+            (team_id,)).fetchone()
+    except Exception:  # no standings synced yet: treat as a fresh season
+        _wl = None
+    games_played = (_wl["w"] + _wl["l"]) if _wl else 0
+    games_played = min(max(games_played, 0), _gps_n)
+    ros_frac = max(_gps_n - games_played, 0) / _gps_n if _gps_n else 1.0
+    ros_frac = max(ros_frac, 0.01)
+    actual_bat = {r["player_id"]: (r["pa"] or 0, r["war"] or 0.0) for r in conn.execute(
+        "SELECT player_id, SUM(pa) AS pa, SUM(war) AS war FROM mlb_batting_stats "
+        "WHERE team_id=? AND year=? AND split_id=1 GROUP BY player_id", (team_id, year)).fetchall()}
+    actual_pit = {r["player_id"]: (r["ip"] or 0.0, r["war"] or 0.0) for r in conn.execute(
+        "SELECT player_id, SUM(ip) AS ip, SUM(war) AS war FROM mlb_pitching_stats "
+        "WHERE team_id=? AND year=? AND split_id=1 GROUP BY player_id", (team_id, year)).fetchall()}
+    banked_ids = set()  # players whose to-date numbers are already shown once
 
     for off in (0, 1, 2):
         yr = year + off
@@ -3883,11 +3965,24 @@ def get_depth_chart(team_id):
         players_by_pos = {}
         for pos, e in hitter_entries:
             players_by_pos.setdefault(pos, []).append(e)
+        # A manual role is the user's decision, not a rating threshold: a player
+        # tagged at a position he isn't rated for (e.g. a 2B filling in at 1B)
+        # still has to be in that position's pool for the role to apply.
+        if off == 0:
+            for _mpos, _mroles in manual_roles.items():
+                _present = {e["player_id"] for e in players_by_pos.get(_mpos, [])}
+                for _pid in _mroles:
+                    if _pid in _present:
+                        continue
+                    _src = next((e for _p, e in hitter_entries if e["player_id"] == _pid), None)
+                    if _src is not None:
+                        players_by_pos.setdefault(_mpos, []).append(dict(_src, pos_weight=1.0))
         # Manual role overrides only apply to the current year (off == 0) —
         # future years keep using the automatic WAR-ranked allocation, since
         # roles may change as players age/depart.
         pos_result = allocate_playing_time(
-            players_by_pos, manual_roles=manual_roles if off == 0 else None,
+            players_by_pos, team_pa=DEFAULT_TEAM_PA * (ros_frac if off == 0 else 1.0),
+            manual_roles=manual_roles if off == 0 else None,
             manual_shares=manual_shares if off == 0 else None)
         if off == 0:
             year1_players_by_pos = players_by_pos
@@ -3966,16 +4061,21 @@ def get_depth_chart(team_id):
                 # MLB SP who didn't make top 5 stays as 6th starter / swingman
                 sp_keep.append(p)
         sp_result, rp_result = allocate_pitcher_time(
-            sp_keep, rp_pool,
+            sp_keep, rp_pool, team_ip=DEFAULT_TEAM_IP * (ros_frac if off == 0 else 1.0),
             manual_sp_roles=manual_pitcher_roles["SP"] if manual_pitcher_roles else None,
             manual_rp_roles=manual_pitcher_roles["RP"] if manual_pitcher_roles else None,
         )
 
         # ── Format output ───────────────────────────────────────────────
-        def _fmt_hitter(p):
+        # Current year: pt_pct / pa / ip are the REST-OF-SEASON allocation
+        # (shares of the remaining PA/IP). `war` is the full-season figure:
+        # WAR already banked + projected rest-of-season WAR. To-date numbers
+        # are attached once per player (at his main position / pitching
+        # list) so the season total isn't double counted.
+        def _fmt_hitter(p, pos=None):
             w = round(p["war_proj"], 1)
             pt = p["pt_pct"]
-            return {
+            out = {
                 "pid": p["player_id"], "name": p["name"], "age": p["age"] + off,
                 "level": p.get("_level", "MLB"),
                 "pt_pct": pt, "pa": p["pa"],
@@ -3983,13 +4083,25 @@ def get_depth_chart(team_id):
                 "full_war": w,
                 "ops_plus": round(p.get("ovr_ops_plus", 0)),
             }
+            if off == 0:
+                war_ros = w * pt / 100 * ros_frac
+                pa_td, war_td = (0, 0.0)
+                if p["player_id"] not in banked_ids and primary_pos.get(p["player_id"]) == pos:
+                    pa_td, war_td = actual_bat.get(p["player_id"], (0, 0.0))
+                    banked_ids.add(p["player_id"])
+                out.update({
+                    "pa_to_date": int(pa_td), "pa_total": int(pa_td) + p["pa"],
+                    "war_to_date": round(war_td, 1), "war_ros": round(war_ros, 1),
+                    "war": round(war_td + war_ros, 1),
+                })
+            return out
 
         def _fmt_pitcher(p):
             w = round(p["war_proj"], 1)
             ip = p.get("ip", 0)
             is_sp = p.get("role") == 11 or p.get("bucket") == "SP"
             full_ip = 200 if is_sp else 70
-            return {
+            out = {
                 "pid": p["player_id"], "name": p["name"], "age": p["age"] + off,
                 "level": p.get("_level", "MLB"),
                 "pt_pct": p.get("pt_pct", 0), "ip": ip,
@@ -3999,6 +4111,26 @@ def get_depth_chart(team_id):
                 "fip": round(p.get("_fip", 5.0), 2),
                 "rp_role": p.get("rp_role", ""),
             }
+            if off == 0:
+                ip_td, war_td = (0.0, 0.0)
+                if p["player_id"] not in banked_ids:
+                    ip_td, war_td = actual_pit.get(p["player_id"], (0.0, 0.0))
+                    banked_ids.add(p["player_id"])
+                out.update({
+                    "ip_to_date": round(ip_td, 1), "ip_total": round(ip_td + ip, 1),
+                    "war_to_date": round(war_td, 1), "war_ros": out["war"],
+                    "war": round(war_td + out["war"], 1),
+                })
+            return out
+
+        # Each hitter's main position (largest share), for attaching to-date PA.
+        primary_pos = {}
+        _best = {}
+        for _pos, _plist in pos_result.items():
+            for _p in _plist:
+                if _p.get("pt_pct", 0) > _best.get(_p["player_id"], -1):
+                    _best[_p["player_id"]] = _p.get("pt_pct", 0)
+                    primary_pos[_p["player_id"]] = _pos
 
         positions = {}
         pos_war_map = {}
@@ -4006,7 +4138,7 @@ def get_depth_chart(team_id):
         if _has_dh:
             _field_positions.append("DH")
         for pos in _field_positions:
-            players = [_fmt_hitter(p) for p in pos_result.get(pos, [])
+            players = [_fmt_hitter(p, pos) for p in pos_result.get(pos, [])
                        if p["pa"] > 0 and round(p.get("pt_pct", 0)) >= 2]
             positions[pos] = players
             pos_war_map[pos] = round(sum(p["war"] for p in players), 1)
@@ -4026,6 +4158,28 @@ def get_depth_chart(team_id):
         departed = sorted(prev_names - curr_names) if off > 0 else []
         prev_names = curr_names
 
+        total_war = round(sum(pos_war_map.values()), 1)
+        season = None
+        if off == 0:
+            # Production already banked by players no longer in this projection
+            # (traded, released, or below the 2% display cutoff) still counts
+            # toward the season, so add it to the team total.
+            gone_pa = sum(v[0] for k, v in actual_bat.items() if k not in banked_ids)
+            gone_ip = sum(v[0] for k, v in actual_pit.items() if k not in banked_ids)
+            gone_war = sum(v[1] for k, v in actual_bat.items() if k not in banked_ids) + \
+                sum(v[1] for k, v in actual_pit.items() if k not in banked_ids)
+            total_war = round(total_war + gone_war, 1)
+            season = {
+                "games_played": games_played, "games_total": _gps_n,
+                "games_remaining": _gps_n - games_played,
+                "ros_frac": round(ros_frac, 3),
+                "ros_team_pa": round(DEFAULT_TEAM_PA * ros_frac),
+                "ros_team_ip": round(DEFAULT_TEAM_IP * ros_frac),
+                "unlisted_pa_to_date": int(gone_pa),
+                "unlisted_ip_to_date": round(gone_ip, 1),
+                "unlisted_war_to_date": round(gone_war, 1),
+            }
+
         by_year[yr] = {
             "positions": positions,
             "pos_war": pos_war_map,
@@ -4033,8 +4187,9 @@ def get_depth_chart(team_id):
             "rp": rp_fmt,
             "team_pa": DEFAULT_TEAM_PA,
             "team_ip": DEFAULT_TEAM_IP,
-            "total_war": round(sum(pos_war_map.values()), 1),
+            "total_war": total_war,
             "departed": departed,
+            "season": season,
         }
 
     # ── Role candidates (current year only) for the Depth Chart Roles tab ──
@@ -4139,12 +4294,35 @@ def get_org_overview(team_id):
     # vR/vL platoon, then bench); pitchers — a manual SP/RP list is the whole
     # list, in the pinned slot order (falling back to role tier, then share).
     _hit_rank = {"starter": 0, "platoon_vr": 1, "platoon_vl": 2, "bench": 3}
+    _hit_shares = get_batting_role_shares(team_id)
+    _all_hit = {e["pid"]: e for lst in mlb_by_pos.values() for e in lst}
+
+    def _entry_for_new_player(pid):
+        # A player tagged at a position but with no fielding line for this team
+        # yet (just acquired or recalled) still has to be listed there.
+        r = conn.execute(
+            "SELECT p.player_id, p.name, p.age, ps.ovr, ps.surplus, "
+            "COALESCE((SELECT SUM(b.war) FROM mlb_batting_stats b WHERE b.player_id=p.player_id "
+            "AND b.year=? AND b.split_id=1), 0) AS war "
+            "FROM players p LEFT JOIN player_surplus ps ON ps.player_id=p.player_id AND ps.eval_date=? "
+            "WHERE p.player_id=?", (year, ed_s, pid)).fetchone()
+        return _entry(r) if r else None
+
     for pos, roles in get_depth_chart_roles(team_id).items():
-        lst = mlb_by_pos.get(pos)
+        lst = list(mlb_by_pos.get(pos, []))
+        have = {e["pid"] for e in lst}
+        for pid in roles:
+            if pid not in have:
+                e = _all_hit.get(pid) or _entry_for_new_player(pid)
+                if e:
+                    lst.append(e)
         if not lst:
             continue
+        sh = _hit_shares.get(pos, {})
+        # Role tier first (starter, vR, vL, bench); within a tier, the bigger
+        # explicit share leads (e.g. 85% Hartman ahead of 15% Lacefield).
         lead = sorted((e for e in lst if e["pid"] in roles),
-                      key=lambda e: _hit_rank.get(roles[e["pid"]], 9))
+                      key=lambda e: (_hit_rank.get(roles[e["pid"]], 9), -(sh.get(e["pid"]) or 0)))
         mlb_by_pos[pos] = lead + [e for e in lst if e["pid"] not in roles]
 
     _manual_p = get_pitcher_depth_chart_roles(team_id)
@@ -4200,6 +4378,7 @@ def get_org_overview(team_id):
     pos_order_list = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "SP", "RP"]
     position_depth = []
     used_prospect_pids = set()  # deduplicate prospects across positions
+    shown_pids = set()          # hitters already shown as a starter/backup above
 
     for pos in pos_order_list:
         n_mlb = mlb_slots.get(pos, 1)
@@ -4228,7 +4407,17 @@ def get_org_overview(team_id):
         # MLB list — the other side of a platoon, else the top bench option.
         # SP/RP rows are already one pitcher each, so no backup column there.
         _all_mlb = mlb_by_pos.get(pos, [])
-        backup = _all_mlb[1] if pos not in ("SP", "RP") and len(_all_mlb) > 1 else None
+        backup = None
+        if pos not in ("SP", "RP") and len(_all_mlb) > 1:
+            # Skip anyone already shown earlier in this table (e.g. the LF
+            # backup isn't repeated as the RF backup) unless nobody else is left.
+            _cands = [e for e in _all_mlb[1:] if e["pid"] not in shown_pids]
+            backup = (_cands or _all_mlb[1:])[0]
+        if pos not in ("SP", "RP"):
+            if _all_mlb:
+                shown_pids.add(_all_mlb[0]["pid"])
+            if backup:
+                shown_pids.add(backup["pid"])
         for i in range(n_rows):
             mlb = [mlb_list[i]] if i < len(mlb_list) else []
             prosp = prosp_deduped[i] if i < len(prosp_deduped) else None

@@ -432,7 +432,11 @@
     var age = '<span class="dc-age">' + p.age + '</span>';
     var pt = '<span class="dc-pt">' + Math.round(p.pt_pct) + '%</span>';
     var main = '<span class="dc-stat">' + fmt(p[stat], stat) + '</span>';
-    return '<div class="' + cls + '"><span class="dc-name">' + name + lvl + '</span>' + age + main + pt + '</div>';
+    var tip = p.pa_total != null
+      ? ' title="Season: ' + p.pa_to_date + ' PA played + ' + Math.round(p.pa) + ' PA projected = ' + p.pa_total +
+        ' PA. WAR: ' + p.war_to_date.toFixed(1) + ' banked + ' + p.war_ros.toFixed(1) + ' rest of season. % is the share of remaining PA."'
+      : '';
+    return '<div class="' + cls + '"' + tip + '><span class="dc-name">' + name + lvl + '</span>' + age + main + pt + '</div>';
   }
 
   function pitcherRow(p, stat, prefix) {
@@ -441,7 +445,11 @@
     var age = '<span class="dc-age">' + p.age + '</span>';
     var pt = '<span class="dc-pt">' + Math.round(p.pt_pct) + '%</span>';
     var main = '<span class="dc-stat">' + fmt(p[stat], stat) + '</span>';
-    return '<div class="dc-pitcher">' +
+    var tip = p.ip_total != null
+      ? ' title="Season: ' + p.ip_to_date.toFixed(1) + ' IP pitched + ' + p.ip.toFixed(1) + ' IP projected = ' + p.ip_total.toFixed(1) +
+        ' IP. WAR: ' + p.war_to_date.toFixed(1) + ' banked + ' + p.war_ros.toFixed(1) + ' rest of season. % is the share of remaining IP."'
+      : '';
+    return '<div class="dc-pitcher"' + tip + '>' +
       (prefix ? '<span class="dc-pit-num dc-role-' + (prefix.replace('.','') || '').toLowerCase() + '">' + prefix + '</span>' : '') +
       '<span class="dc-name"><a class="player-link" href="/player/' + p.pid + '">' + short + '</a>' + lvl + '</span>' + main + pt + '</div>';
   }
@@ -1463,7 +1471,7 @@ function intlFilterPers() {
               {%- if c.ntc %}<span class="opt-badge opt-ntc">NTC</span>{% endif %}
               {%- if c.to %}<span class="opt-badge opt-to">TO</span>{% endif %}
               {%- if c.po %}<span class="opt-badge opt-po">PO</span>{% endif %}
-              {%- if c.retained_pct %}<span class="opt-badge opt-ret" title="Another team keeps paying this share of his salary — excluded from your payroll">RET {{ (c.retained_pct * 100)|round|int }}%</span>{% endif %}
+              {%- if c.retained_pct %}<span class="opt-badge opt-ret" title="Another team keeps paying this share of his salary — excluded from your payroll">RET {{ (c.retained_pct * 100)|round|int }}%</span>{% endif %}{%- if c.minors_pay %}<span class="opt-badge opt-ret" title="League-minimum player in the minors — the game pays only 16.5% of his salary until he's called up">MiL 16.5%</span>{% endif %}
             </td>
           </tr>
           {% endfor %}
@@ -1519,7 +1527,7 @@ function intlFilterPers() {
           <tr>
             <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a>
               {%- if p.ntc %} <span class="opt-badge opt-ntc">NTC</span>{% endif %}
-              {%- if p.retained_pct %} <span class="opt-badge opt-ret" title="Another team keeps paying this share of his salary — excluded from your payroll">RET {{ (p.retained_pct * 100)|round|int }}%</span>{% endif %}</td>
+              {%- if p.retained_pct %} <span class="opt-badge opt-ret" title="Another team keeps paying this share of his salary — excluded from your payroll">RET {{ (p.retained_pct * 100)|round|int }}%</span>{% endif %}{%- if p.minors_pay %} <span class="opt-badge opt-ret" title="League-minimum player in the minors — the game pays only 16.5% of his salary until he's called up">MiL 16.5%</span>{% endif %}</td>
             {% for s in p.by_year %}
             <td{% if s and s.option %} class="opt-year"{% elif s and s.projected %} class="proj-year"{% endif %}>
               {%- if s %}{{ s.sal|money }}{% if s.option %}<sup>{{ s.option }}</sup>{% elif s.projected %}<sup>est</sup>{% endif %}{% else %}-{% endif -%}
@@ -1551,6 +1559,11 @@ function intlFilterPers() {
         {% if farm|length > 15 %}
         <button type="button" class="btn btn-sm" id="farm-toggle-btn" onclick="toggleFarmRows()">Show all {{ farm|length }}</button>
         {% endif %}
+        {% if farm_sub40 %}
+        <label style="font-size:12px; color:var(--text-dim); cursor:pointer" title="Prospects aged 25 or younger below FV 40 who still carry positive surplus (mostly young international signees). They aren't counted in the farm totals or rankings.">
+          <input type="checkbox" id="farm-sub40-box" onchange="toggleFarmSub40()"> Include FV under 40 ({{ farm_sub40|length }})
+        </label>
+        {% endif %}
         <button type="button" class="btn btn-sm" onclick="exportTableCSV('farm-system-table', 'farm_system.csv')" title="Export every currently-shown row as CSV">⬇ CSV</button>
       </div>
       <table id="farm-system-table">
@@ -1572,6 +1585,19 @@ function intlFilterPers() {
             <td class="left">{{ p.fv_str }}{% if p.risk %} <span style="font-size:10px;color:{% if p.risk == 'Low' %}#4caf50{% elif p.risk == 'Medium' %}#ffc107{% elif p.risk == 'High' %}#ff9800{% else %}#f44336{% endif %}">{{ p.risk[0] }}</span>{% endif %}</td>
             <td{% if p.dev %} data-sort-value="{{ p.dev.z }}"{% endif %}>{% if p.dev %}<span class="dev-{{ p.dev.css_class }}"{% if p.dev.dim %} style="opacity:0.5"{% endif %} title="{{ p.dev.label }} ({{ p.dev.z }} SD · {{ p.dev.confidence }} conf)">{{ p.dev.icon }}</span>{% if p.dev.schedule_badge_text %} <span class="sched-badge {{ p.dev.schedule_badge_css }}" title="{{ p.dev.schedule_label }}: {{ p.dev.schedule_note }}">{{ p.dev.schedule_badge_text }}</span>{% endif %}{% endif %}</td>
             <td data-sort-value="{{ p.confidence.score }}"><span class="gr-pill gr-pill-{% if p.confidence.tier == 'A' %}elite{% elif p.confidence.tier == 'B' %}good{% elif p.confidence.tier == 'C' %}mid{% elif p.confidence.tier == 'D' %}poor{% else %}bad{% endif %}" title="Confidence {{ p.confidence.tier }} ({{ p.confidence.score }}/100){% if p.confidence.reasons %}: {{ p.confidence.reasons|join(', ') }}{% else %} — no flagged concerns{% endif %}">{{ p.confidence.tier }}</span></td>
+            <td class="left">{{ p.level }}{% if p.long_horizon %} <span title="Real level puts this player at fv_calc's longest development-horizon tier (3.5+ years to MLB) — treat Surplus as more speculative than a near-ready prospect's">⏳</span>{% endif %}</td>
+            <td>${{ p.surplus }}{{ money_unit }}</td>
+          </tr>
+          {% endfor %}
+          {% for p in farm_sub40 %}
+          <tr class="farm-row-sub40" style="display:none">
+            <td data-sort-value="9999">–</td>
+            <td data-sort-value="{{ p.pos_order }}">{{ p.bucket }}</td>
+            <td><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
+            <td>{{ p.age }}</td>
+            <td class="left">{{ p.fv_str }}{% if p.risk %} <span style="font-size:10px;color:{% if p.risk == 'Low' %}#4caf50{% elif p.risk == 'Medium' %}#ffc107{% elif p.risk == 'High' %}#ff9800{% else %}#f44336{% endif %}">{{ p.risk[0] }}</span>{% endif %}</td>
+            <td{% if p.dev %} data-sort-value="{{ p.dev.z }}"{% endif %}>{% if p.dev %}<span class="dev-{{ p.dev.css_class }}"{% if p.dev.dim %} style="opacity:0.5"{% endif %} title="{{ p.dev.label }} ({{ p.dev.z }} SD · {{ p.dev.confidence }} conf)">{{ p.dev.icon }}</span>{% endif %}</td>
+            <td data-sort-value="{{ p.confidence.score }}"><span class="gr-pill gr-pill-{% if p.confidence.tier == 'A' %}elite{% elif p.confidence.tier == 'B' %}good{% elif p.confidence.tier == 'C' %}mid{% elif p.confidence.tier == 'D' %}poor{% else %}bad{% endif %}" title="Confidence {{ p.confidence.tier }} ({{ p.confidence.score }}/100)">{{ p.confidence.tier }}</span></td>
             <td class="left">{{ p.level }}{% if p.long_horizon %} <span title="Real level puts this player at fv_calc's longest development-horizon tier (3.5+ years to MLB) — treat Surplus as more speculative than a near-ready prospect's">⏳</span>{% endif %}</td>
             <td>${{ p.surplus }}{{ money_unit }}</td>
           </tr>
@@ -1655,6 +1681,12 @@ function intlFilterPers() {
 </div>
 
 <script>
+function toggleFarmSub40() {
+  var on = document.getElementById('farm-sub40-box').checked;
+  document.querySelectorAll('#farm-system-table .farm-row-sub40').forEach(function(tr) {
+    tr.style.display = on ? '' : 'none';
+  });
+}
 function toggleFarmRows() {
   var btn = document.getElementById('farm-toggle-btn');
   var extra = document.querySelectorAll('#farm-system-table .farm-row-extra');

@@ -99,7 +99,7 @@ def _calc_eta(level, ovr, pot):
         base = max(base - 1, 0)
     return year() + base
 
-def get_top_prospects(n=100):
+def get_top_prospects(n=200):
     conn = get_db()
     ed = _get_prospect_eval_date()
 
@@ -114,7 +114,8 @@ def get_top_prospects(n=100):
                r.height, r.bats, r.throws, r.ovr, r.pot,
                r.composite_score, r.ceiling_score, pf.risk,
                ds.available, ds.css_class, ds.label, ds.confidence, ds.z,
-               ds.schedule_status, ds.schedule_label, ds.schedule_note
+               ds.schedule_status, ds.schedule_label, ds.schedule_note,
+               r.acc
         FROM prospect_fv pf
         JOIN players p ON pf.player_id=p.player_id
         LEFT JOIN latest_ratings r ON pf.player_id=r.player_id
@@ -148,6 +149,7 @@ def get_top_prospects(n=100):
              "height": fmt_ht(r[10]),
              "bats": r[11] or "", "throws": r[12] or "",
              "composite_score": r[15], "ceiling_score": r[16], "risk": r[17],
+             "acc": r[26] or "",
              "dev": _dev_cell(r, 18)}
             for i, r in enumerate(rows)]
 
@@ -459,7 +461,8 @@ def get_all_prospects():
                r.height, r.bats, r.throws, r.ovr, r.pot,
                r.composite_score, r.ceiling_score, pf.risk,
                ds.available, ds.css_class, ds.label, ds.confidence, ds.z,
-               ds.schedule_status, ds.schedule_label, ds.schedule_note
+               ds.schedule_status, ds.schedule_label, ds.schedule_note,
+               r.acc
         FROM prospect_fv pf
         JOIN players p ON pf.player_id=p.player_id
         LEFT JOIN latest_ratings r ON pf.player_id=r.player_id
@@ -493,6 +496,7 @@ def get_all_prospects():
              "height": fmt_ht(r[10]),
              "bats": r[11] or "", "throws": r[12] or "",
              "composite_score": r[15], "ceiling_score": r[16], "risk": r[17],
+             "acc": r[26] or "",
              "dev": _dev_cell(r, 18)}
             for r in rows]
 

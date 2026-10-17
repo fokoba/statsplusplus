@@ -256,7 +256,7 @@
     <div class="prospect-table-wrap">
       {# Sub-tabs with inline dropdowns #}
       <div class="prospect-modes">
-        <button class="prospect-mode active" data-mode="top100">Top 100</button>
+        <button class="prospect-mode active" data-mode="top100">Top 200</button>
         <div class="prospect-mode-group">
           <select class="prospect-mode-select" id="select-team">
             <option value="" disabled selected>Top 30 by Team</option>
@@ -266,6 +266,10 @@
           <select class="prospect-mode-select" id="select-position">
             <option value="" disabled selected>All Prospects by Position</option>
           </select>
+        </div>
+        <div class="prospect-acc-filter" title="Scouting accuracy on each prospect's ratings. Uncheck a group to hide it.">
+          <label><input type="checkbox" id="acc-high" checked> High confidence (H/VH)</label>
+          <label><input type="checkbox" id="acc-low" checked> Average or below (A/L/VL)</label>
         </div>
         <div class="prospect-filters" id="top100-filter">
           <select id="top100-team-filter">
@@ -293,6 +297,12 @@
 {# ══════ Rankings Tab ══════ #}
 <div class="tab-content" id="tab-rankings">
 <style>
+.prospect-acc-filter { display:inline-flex; gap:14px; align-items:center; margin-left:auto; font-size:12px; color:var(--text-dim); }
+.prospect-acc-filter label { cursor:pointer; white-space:nowrap; }
+.acc-badge { font-size:11px; font-weight:600; padding:1px 6px; border-radius:3px; }
+.acc-hi { background:rgba(46,204,113,0.18); color:#2ecc71; }
+.acc-avg { background:rgba(255,193,7,0.15); color:#ffc107; }
+.acc-lo { background:rgba(244,67,54,0.15); color:#f44336; }
 .pos-group { display: none; }
 .pos-group.active { display: block; }
 .pos-subtab { display:inline-block; padding:6px 12px; cursor:pointer; border-radius:4px; font-size:13px; font-weight:500; color:var(--text-dim); }
@@ -975,15 +985,16 @@ POS_ORDER.forEach(p => { const o = document.createElement('option'); o.value = p
 let currentMode = 'top100';
 
 const COLS = {
-  top100:   ['#','Player','Position','Team','Level','ETA','Age','Ht','B/T','FV','Dev','Comp','Surplus'],
-  team:     ['#','Player','Position','Level','ETA','Age','Ht','B/T','FV','Dev','Comp','Surplus'],
-  position: ['#','Player','Team','Level','ETA','Age','Ht','B/T','FV','Dev','Comp','Surplus'],
+  top100:   ['#','Player','Position','Team','Level','ETA','Age','Ht','B/T','FV','Dev','Comp','Acc','Surplus'],
+  team:     ['#','Player','Position','Level','ETA','Age','Ht','B/T','FV','Dev','Comp','Acc','Surplus'],
+  position: ['#','Player','Team','Level','ETA','Age','Ht','B/T','FV','Dev','Comp','Acc','Surplus'],
 };
 const LEFT_COLS = new Set(['Player','Team','Level']);
 const COL_TIPS = {
   'FV': 'Future Value — ceiling quality vs MLB positional median. Letter = risk (L=Low, M=Medium, H=High, E=Extreme)',
   'Dev': 'Development pace vs same-position/age peers (⚡ rising · ⚠ stalled · ↗ on pace). Dimmed = low confidence.',
   'Comp': 'Composite — tool-weighted current ability on the 20-80 scale',
+  'Acc': 'Scouting accuracy — how far to trust these ratings. VH/H = high confidence; A/L/VL = average or below',
   'Surplus': 'Projected on-field value minus salary over remaining team control',
   'ETA': 'Estimated year of MLB debut based on age and level',
 };
@@ -996,8 +1007,22 @@ function renderHead() {
     }).join('') + '</tr>';
 }
 
+// Scouting-accuracy filter (checkbox pair): H/VH vs A/L/VL.
+const accHighBox = document.getElementById('acc-high');
+const accLowBox = document.getElementById('acc-low');
+const ACC_HIGH = new Set(['VH', 'H']);
+function accOk(p) {
+  return ACC_HIGH.has(p.acc) ? accHighBox.checked : accLowBox.checked;
+}
+function accBadge(acc) {
+  if (!acc) return '—';
+  const cls = ACC_HIGH.has(acc) ? 'acc-hi' : acc === 'A' ? 'acc-avg' : 'acc-lo';
+  return `<span class="acc-badge ${cls}">${acc}</span>`;
+}
+let lastProspectArgs = [];
 function renderProspects(list, maxRows, singleTeam) {
-  const rows = maxRows ? list.slice(0, maxRows) : list;
+  lastProspectArgs = [list, maxRows, singleTeam];
+  const rows = (maxRows ? list.slice(0, maxRows) : list).filter(accOk);
   const mode = currentMode;
   const useOrigRank = mode === 'top100';
   const maxSurplus = Math.max(...rows.map(p => p.surplus || 0), 1);
@@ -1017,6 +1042,7 @@ function renderProspects(list, maxRows, singleTeam) {
     c += `<td>${fvBadge(p.fv, p.fv_str, p.risk)}</td>`;
     c += `<td>${devCell(p.dev)}</td>`;
     c += `<td>${p.composite_score || '—'}</td>`;
+    c += `<td>${accBadge(p.acc)}</td>`;
     c += `<td class="surplus-cell"><span class="surplus-track"><span class="surplus-bar" style="width:${surpPct}%"></span><span class="surplus-val">$${p.surplus}${MONEY_UNIT}</span></span></td>`;
     return `<tr${hl}>${c}</tr>`;
   }).join('');
@@ -1078,7 +1104,7 @@ top100Btn.addEventListener('click', () => {
   top100Filter.value = '';
   prospectSearch.value = '';
   renderHead();
-  renderProspects(TOP100, 100);
+  renderProspects(TOP100, TOP100.length);
 });
 
 // Team select
@@ -1105,7 +1131,10 @@ selPos.addEventListener('change', () => {
   renderProspects(ALL_PROSPECTS.filter(match));
 });
 
-// Top 100 team filter
+accHighBox.addEventListener('change', () => renderProspects(...lastProspectArgs));
+accLowBox.addEventListener('change', () => renderProspects(...lastProspectArgs));
+
+// Top 200 team filter
 top100Filter.addEventListener('change', applyTop100Filters);
 prospectSearch.addEventListener('input', applyTop100Filters);
 
@@ -1115,13 +1144,13 @@ function applyTop100Filters() {
   let list = TOP100;
   if (team) list = list.filter(p => p.team === team);
   if (query) list = list.filter(p => p.name.toLowerCase().includes(query));
-  renderProspects(list, 100, !!team);
+  renderProspects(list, TOP100.length, !!team);
 }
 
 // Init
 top100FilterWrap.style.display = '';
 renderHead();
-renderProspects(TOP100, 100);
+renderProspects(TOP100, TOP100.length);
 
 /* ── Prospect Side Panel ── */
 const panel = document.getElementById('prospect-panel');

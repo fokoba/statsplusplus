@@ -1093,6 +1093,17 @@ def get_rule5(team_id):
         "AND (p.is_on_secondary IS NULL OR p.is_on_secondary != 1) "
         "AND p.level != '0'"
     )
+    # The game's own "Rule 5 Draft Eligible" export (rule5_eligible, auto-imported
+    # from the OOTP export folder) is authoritative where it exists: the service-
+    # year rule above is only a proxy (in PPL it flagged ~460 more players than
+    # the game lists). Use the game's list when present, the proxy otherwise, so
+    # this panel and the All MiLB "Is Rule 5 eligible" filter always agree.
+    if conn.execute("SELECT 1 FROM rule5_eligible LIMIT 1").fetchone():
+        eligible = (
+            "p.player_id IN (SELECT player_id FROM rule5_eligible) "
+            "AND (p.is_on_secondary IS NULL OR p.is_on_secondary != 1) "
+            "AND p.level != '0'"
+        )
 
     # 40-man roster state — gates and contextualizes every protect decision.
     forty_count = _forty_man_count(conn, team_id)

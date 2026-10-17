@@ -4865,6 +4865,14 @@ def get_org_minor_league_roster(parent_team_id):
     # the "Rule 5 eligible" filter.
     try:
         _r5_pids = {r[0] for r in conn.execute("SELECT player_id FROM rule5_eligible")}
+        if not _r5_pids:
+            # No game export imported yet: fall back to the service-year rule the
+            # Offseason Rule 5 panel uses (kept in step with get_rule5).
+            _r5_pids = {r[0] for r in conn.execute(
+                "SELECT player_id FROM players WHERE pro_service_years IS NOT NULL "
+                "AND years_protected_from_rule_5 IS NOT NULL "
+                "AND pro_service_years >= years_protected_from_rule_5 - 1 "
+                "AND (is_on_secondary IS NULL OR is_on_secondary != 1) AND level != '0'")}
     except Exception:
         _r5_pids = set()
     # The affiliate each player is actually assigned to right now (for the

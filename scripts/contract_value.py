@@ -94,8 +94,29 @@ def estimate_control(conn, player_id, age, salary, bucket=None):
 # Override load_stat_history to pass league's DH rule
 from statsplusplus.evaluation.war import load_stat_history as _load_stat_history_pkg
 
+_stat_history_cache = {}
+
+
 def load_stat_history(conn, game_date):
-    return _load_stat_history_pkg(conn, game_date, dh_rule=_cfg.settings.get("dh_rule", "Universal DH"))
+    """Season-stat history for WAR projection. Cached per (database file state,
+    game date): contract_value() is called hundreds of times per page when the
+    caller doesn't pass its own history, and rebuilding it each time took ~80 ms
+    x ~70 misses (5+ s) on the team page. The key includes the DB file's mtime
+    and size, so a refresh/import invalidates it automatically."""
+    import os
+    try:
+        db_file = conn.execute("PRAGMA database_list").fetchone()[2]
+        st = os.stat(db_file)
+        key = (db_file, st.st_mtime_ns, st.st_size, game_date)
+    except Exception:
+        key = None
+    if key is not None and key in _stat_history_cache:
+        return _stat_history_cache[key]
+    res = _load_stat_history_pkg(conn, game_date, dh_rule=_cfg.settings.get("dh_rule", "Universal DH"))
+    if key is not None:
+        _stat_history_cache.clear()      # keep one entry: old states are dead weight
+        _stat_history_cache[key] = res
+    return res
 
 _state_cache = {}
 _perp_arb_model_cache = {}

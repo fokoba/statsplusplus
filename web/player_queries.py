@@ -1102,6 +1102,7 @@ def get_player(pid):
         bb_pct_p = bb / bf * 100 if bf else 0
         k_bb_pct = k_pct - bb_pct_p
         gb_pct = gb / (gb + fb) * 100 if (gb + fb) else 0
+        hr_fb_pct = hra / fb * 100 if fb else 0
         siera_k = k / bf if bf else 0
         siera_bb = bb / bf if bf else 0
         siera = (6.145 - 16.986 * siera_k + 11.434 * siera_bb
@@ -1114,7 +1115,7 @@ def get_player(pid):
             "fip": fip, "siera": siera, "babip": p_babip,
             "hr9": hr9, "bb9": bb9, "k9": k9, "era_plus": era_plus,
             "k_pct": k_pct, "bb_pct": bb_pct_p, "k_bb_pct": k_bb_pct,
-            "gb_pct": gb_pct,
+            "gb_pct": gb_pct, "hr_fb_pct": hr_fb_pct,
             # raw counts preserved for multi-stint aggregation
             "_er": er, "_hra": hra, "_bf": bf, "_hp": hp, "_ha": ha,
             "_gb": gb, "_fb": fb,
@@ -1164,6 +1165,7 @@ def get_player(pid):
             bb_pct_p = bb / bf * 100 if bf else 0
             k_bb_pct = k_pct - bb_pct_p
             gb_pct = gb / (gb + fb) * 100 if (gb + fb) else 0
+            hr_fb_pct = hra / fb * 100 if fb else 0
             siera_k = k / bf if bf else 0
             siera_bb = bb / bf if bf else 0
             siera = (6.145 - 16.986*siera_k + 11.434*siera_bb
@@ -1175,7 +1177,7 @@ def get_player(pid):
                 "fip": fip, "siera": siera, "babip": p_babip,
                 "hr9": hr9, "bb9": bb9, "k9": k9, "era_plus": era_plus,
                 "k_pct": k_pct, "bb_pct": bb_pct_p, "k_bb_pct": k_bb_pct,
-                "gb_pct": gb_pct,
+                "gb_pct": gb_pct, "hr_fb_pct": hr_fb_pct,
                 "stints": stints,
             }
             result.append(agg)
@@ -2153,6 +2155,7 @@ def get_player(pid):
         _c_bb_pct = _c_bb / _c_bf * 100 if _c_bf else 0
         _c_k_bb = _c_k_pct - _c_bb_pct
         _c_gb_pct = _c_gb / (_c_gb + _c_fb) * 100 if (_c_gb + _c_fb) else 0
+        _c_hr_fb_pct = _c_hra / _c_fb * 100 if _c_fb else 0
         _c_siera_k = _c_k / _c_bf if _c_bf else 0
         _c_siera_bb = _c_bb / _c_bf if _c_bf else 0
         _c_siera = (6.145 - 16.986 * _c_siera_k + 11.434 * _c_siera_bb
@@ -2160,7 +2163,8 @@ def get_player(pid):
         pit_career = {
             "g": _c_g, "gs": _c_gs, "ip": _c_ip, "era": _c_era, "era_plus": _c_era_plus,
             "fip": _c_fip, "siera": _c_siera, "k_pct": _c_k_pct, "bb_pct": _c_bb_pct,
-            "k_bb_pct": _c_k_bb, "gb_pct": _c_gb_pct, "babip": _c_babip,
+            "k_bb_pct": _c_k_bb, "gb_pct": _c_gb_pct, "hr_fb_pct": _c_hr_fb_pct,
+            "babip": _c_babip,
             "w": _c_w, "l": _c_l, "sv": _c_sv, "hld": _c_hld, "war": round(_c_war, 1),
         }
 

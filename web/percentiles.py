@@ -194,6 +194,7 @@ PITCHER_PCTILE_STATS = [
     ("k9", "K/9", False),
     ("bb9", "BB/9", True),
     ("hr9", "HR/9", True),
+    ("hr_fb_pct", "HR/FB%", True),
     ("gb_pct", "GB%", False),
     ("babip", "BABIP", True),
     ("war", "WAR", False),
@@ -636,6 +637,7 @@ def get_pitcher_percentiles(pid, split_id=1, year=None, level=None):
         babip_d = bf - k - hra - bb - hp
         babip = (ha - hra) / babip_d if babip_d > 0 else 0
         gb_pct = 100.0 * _gb / (_gb + _fb) if (_gb + _fb) > 0 else 0
+        hr_fb_pct = 100.0 * hra / _fb if _fb > 0 else 0
         k_pct = k / bf if bf else 0
         bb_pct = bb / bf if bf else 0
         siera = (6.145 - 16.986 * k_pct + 11.434 * bb_pct
@@ -643,6 +645,7 @@ def get_pitcher_percentiles(pid, split_id=1, year=None, level=None):
         stats = {
             "era": era or 99, "fip": fip, "siera": siera, "era_plus": era_plus,
             "k9": k9, "bb9": bb9, "hr9": hr9, "gb_pct": gb_pct, "babip": babip,
+            "hr_fb_pct": hr_fb_pct,
             "war": war or 0,
             "war_rate": (war or 0) * 200 / ip if ip else 0,
         }
@@ -698,6 +701,8 @@ def get_pitcher_percentiles(pid, split_id=1, year=None, level=None):
             continue
         if key == "gb_pct" and not _has_gb_data:
             continue
+        if key == "hr_fb_pct" and not _has_gb_data:
+            continue  # HR/FB% needs fb data, same source as GB%
         val = player[key]
         pctile = _pctile(val, [pool[p][key] for p in pool])
         if inverted:
@@ -746,7 +751,7 @@ def get_pitcher_percentiles(pid, split_id=1, year=None, level=None):
                     thresh = _tag_threshold(r_pctile)
                     tag = "hot" if gap >= thresh else ("cold" if gap <= -thresh else None)
 
-        fmt = "d" if key == "era_plus" else (".1f" if key in ("k9", "bb9", "hr9", "war", "war_rate", "gb_pct") else ".2f" if key in ("era", "fip", "siera") else ".3f")
+        fmt = "d" if key == "era_plus" else (".1f" if key in ("k9", "bb9", "hr9", "war", "war_rate", "gb_pct", "hr_fb_pct") else ".2f" if key in ("era", "fip", "siera") else ".3f")
         result.append({"label": label, "value": val, "pctile": pctile, "tag": tag,
                        "qualified": qualified, "expected": expected,
                        "expected_range": _expected_range(expected, player_ip, rp_min_ip if is_rp else min_ip),

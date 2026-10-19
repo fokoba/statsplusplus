@@ -268,8 +268,34 @@ def get_pitching_leaders(yr=None):
 # dropdown order; the first entry is the default stat shown in the 1D view.
 SCATTER_HITTER_STATS = ["OPS", "AVG", "OBP", "SLG", "ISO", "HR", "SB",
                         "BB%", "K%", "WAR", "Comp", "Surplus"]
-SCATTER_PITCHER_STATS = ["ERA", "FIP", "WHIP", "K/9", "BB/9", "HR/9", "K/BB",
+SCATTER_PITCHER_STATS = ["ERA", "FIP", "WHIP", "K/9", "BB/9", "HR/9", "HR/FB%", "K/BB",
                          "IP", "WAR", "Comp"]
+
+# Current (not potential) tool ratings offered as scatter axes — grouped under a
+# "Ratings" optgroup in the UI, distinct from the stat axes above. Served
+# normalized to the 20-80 scale (via _norm) so the axis is scale-consistent
+# across leagues. The "ratings vs stats" view (e.g. Stuff × K/9) uses the 2D
+# regression + r² to show how well a tool tracks production league-wide.
+SCATTER_HITTER_RATINGS = ["Contact", "Power", "Eye", "Gap", "Speed"]
+SCATTER_PITCHER_RATINGS = ["Stuff", "Movement", "Control", "Stamina"]
+
+# Better-direction per axis key: "high" = higher is better, "low" = lower is
+# better, "neutral" = directionless (a scale/volume stat with no good/bad end).
+# Drives the chart's good-zone gradient and the goodness-oriented r sign. Single
+# source of truth — keys match the *_STATS / *_RATINGS lists above. Anything not
+# listed is treated as neutral (no gradient, no r-flip).
+SCATTER_STAT_DIRECTION = {
+    # Hitter stats
+    "OPS": "high", "AVG": "high", "OBP": "high", "SLG": "high", "ISO": "high",
+    "HR": "high", "SB": "high", "BB%": "high", "K%": "low", "WAR": "high",
+    "Comp": "neutral", "Surplus": "high",
+    # Pitcher stats
+    "ERA": "low", "FIP": "low", "WHIP": "low", "K/9": "high", "BB/9": "low",
+    "HR/9": "low", "HR/FB%": "low", "K/BB": "high", "IP": "neutral",
+    # Ratings (all higher = better)
+    "Contact": "high", "Power": "high", "Eye": "high", "Gap": "high", "Speed": "high",
+    "Stuff": "high", "Movement": "high", "Control": "high", "Stamina": "high",
+}
 
 
 def get_scatter_data(yr=None):
@@ -286,6 +312,10 @@ def get_scatter_data(yr=None):
     conn = get_db()
     _abbr = team_abbr_map()
     my_tid = get_my_team_id()
+
+    def _rt(v):
+        """Normalize a raw tool rating to the 20-80 scale; None when unrated."""
+        return _norm(v) if v is not None else None
     # Use the latest year that actually HAS stats, not the state game-year — in
     # the offseason the current season (e.g. 2035) is unplayed, so year() points
     # at an empty year. Fall back to the newest year present in the stat tables.
@@ -309,12 +339,13 @@ def get_scatter_data(yr=None):
     # from the summed components, not averaged across stints.
     _POS = {1: 'P', 2: 'C', 3: '1B', 4: '2B', 5: '3B', 6: 'SS', 7: 'LF', 8: 'CF', 9: 'RF', 10: 'DH'}
     hrows = conn.execute("""
-        SELECT p.name, p.team_id, p.pos,
+        SELECT b.player_id, p.name, p.team_id, p.pos,
                COALESCE(NULLIF(p.organization_id,0), NULLIF(p.parent_team_id,0), p.team_id) AS org,
                SUM(b.pa) pa, SUM(b.ab) ab, SUM(b.h) h, SUM(b.d) d, SUM(b.t) t,
                SUM(b.hr) hr, SUM(b.bb) bb, SUM(b.k) k, SUM(b.sb) sb,
                SUM(b.hbp) hbp, SUM(b.sf) sf, SUM(b.war) war,
-               lr.composite_score AS composite, ps.surplus AS surplus
+               lr.composite_score AS composite, ps.surplus AS surplus,
+               lr.cntct, lr.pow, lr.eye, lr.gap, lr.speed
         FROM mlb_batting_stats b
         JOIN players p ON p.player_id = b.player_id
         LEFT JOIN latest_ratings lr ON lr.player_id = b.player_id
@@ -337,6 +368,7 @@ def get_scatter_data(yr=None):
         obp = (h + (r["bb"] or 0) + (r["hbp"] or 0)) / pa
         slg = tb / ab
         hitters.append({
+            "pid": r["player_id"],
             "name": r["name"], "team": _abbr.get(r["team_id"], "?"),
             "pos": _POS.get(r["pos"], "?"),
             "mine": 1 if r["org"] == my_tid else 0, "pt": pa,
@@ -349,18 +381,22 @@ def get_scatter_data(yr=None):
             "WAR": round(r["war"] or 0, 1),
             "Comp": r["composite"],
             "Surplus": round((r["surplus"] or 0) / 1e6, 1) if r["surplus"] is not None else None,
+            # Current tool ratings, normalized to 20-80 (None when unrated).
+            "Contact": _rt(r["cntct"]), "Power": _rt(r["pow"]), "Eye": _rt(r["eye"]),
+            "Gap": _rt(r["gap"]), "Speed": _rt(r["speed"]),
         })
 
     # Pitchers — aggregate per player (SUM across stints); ERA and all rates
     # recomputed from summed er/outs/ip, not averaged. FIP C ~3.10.
     FIP_C = 3.10
     prows = conn.execute("""
-        SELECT p.name, p.team_id, p.role,
+        SELECT ps.player_id, p.name, p.team_id, p.role,
                COALESCE(NULLIF(p.organization_id,0), NULLIF(p.parent_team_id,0), p.team_id) AS org,
                SUM(ps.ip) ip, SUM(ps.outs) outs, SUM(ps.er) er, SUM(ps.k) k,
-               SUM(ps.bb) bb, SUM(ps.ha) ha, SUM(ps.hra) hra,
+               SUM(ps.bb) bb, SUM(ps.ha) ha, SUM(ps.hra) hra, SUM(ps.fb) fb,
                SUM(ps.gs) gs, SUM(ps.g) g,
-               SUM(ps.war) war, SUM(ps.ra9war) ra9war, lr.composite_score AS composite
+               SUM(ps.war) war, SUM(ps.ra9war) ra9war, lr.composite_score AS composite,
+               lr.stf, lr.mov, lr.ctrl, lr.stm
         FROM mlb_pitching_stats ps
         JOIN players p ON p.player_id = ps.player_id
         LEFT JOIN latest_ratings lr ON lr.player_id = ps.player_id
@@ -390,6 +426,7 @@ def get_scatter_data(yr=None):
             war = (war + r["ra9war"]) / 2
         era = (er * 9.0 / ip) if ip else 0
         pitchers.append({
+            "pid": r["player_id"],
             "name": r["name"], "team": _abbr.get(r["team_id"], "?"),
             "pos": "SP" if is_sp else "RP",
             "mine": 1 if r["org"] == my_tid else 0, "pt": round(ip, 1),
@@ -398,14 +435,41 @@ def get_scatter_data(yr=None):
             "WHIP": round(((r["ha"] or 0) + bb) / ip, 2),
             "K/9": round(9 * k / ip, 1), "BB/9": round(9 * bb / ip, 1),
             "HR/9": round(9 * hra / ip, 1),
+            "HR/FB%": round(100 * hra / r["fb"], 1) if r["fb"] else None,
             "K/BB": round(k / bb, 1) if bb else round(float(k), 1),
             "IP": round(ip, 1), "WAR": round(war, 1),
             "Comp": r["composite"],
+            # Current tool ratings, normalized to 20-80 (None when unrated).
+            "Stuff": _rt(r["stf"]), "Movement": _rt(r["mov"]),
+            "Control": _rt(r["ctrl"]), "Stamina": _rt(r["stm"]),
         })
+
+    # League-average reference values per axis key (for the optional "League avg"
+    # reference line). Sourced from league_averages.json — only the keys it
+    # actually carries; everything else (ratings, K/9, counting stats) has no
+    # league-average entry and the line simply won't draw for those axes.
+    lgavg = {}
+    try:
+        from web_league_context import league_averages as _load_la
+        _la = _load_la() or {}
+        _b = _la.get("batting", {})
+        _p = _la.get("pitching", {})
+        _m = {
+            "OPS": _b.get("ops"), "AVG": _b.get("avg"), "OBP": _b.get("obp"),
+            "SLG": _b.get("slg"), "ISO": _b.get("iso"), "BB%": _b.get("bb_pct"),
+            "K%": _b.get("k_pct"),
+            "ERA": _p.get("era"), "FIP": _p.get("fip"),
+        }
+        lgavg = {k: round(v, 3) for k, v in _m.items() if v is not None}
+    except Exception:
+        lgavg = {}
 
     return {
         "hitters": hitters, "pitchers": pitchers,
         "hitter_stats": SCATTER_HITTER_STATS, "pitcher_stats": SCATTER_PITCHER_STATS,
+        "hitter_ratings": SCATTER_HITTER_RATINGS, "pitcher_ratings": SCATTER_PITCHER_RATINGS,
+        "direction": SCATTER_STAT_DIRECTION,
+        "lgavg": lgavg,
         "hitter_pos": ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"],
         "pitcher_pos": ["SP", "RP"],
         "pa_qual": pa_qual, "ip_qual": ip_qual,

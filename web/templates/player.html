@@ -1561,7 +1561,7 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
       <tr>
         <th data-sort="num">Year</th><th class="left" data-sort="text">Level</th><th class="left" data-sort="text">Team</th><th data-sort="num">G</th><th data-sort="num">GS</th><th data-sort="num">IP</th>
         <th data-sort="num" data-sort-best="low">ERA</th><th data-sort="num">ERA+</th><th data-sort="num" data-sort-best="low">FIP</th><th data-sort="num" data-sort-best="low">SIERA</th>
-        <th data-sort="num">K%</th><th data-sort="num" data-sort-best="low">BB%</th><th data-sort="num">K-BB%</th><th data-sort="num">GB%</th><th data-sort="num">BABIP</th>
+        <th data-sort="num">K%</th><th data-sort="num" data-sort-best="low">BB%</th><th data-sort="num">K-BB%</th><th data-sort="num">GB%</th><th data-sort="num" data-sort-best="low">HR/FB%</th><th data-sort="num">BABIP</th>
         <th data-sort="num">W</th><th data-sort="num" data-sort-best="low">L</th><th data-sort="num">SV</th><th data-sort="num">HLD</th>
         <th data-sort="num">WAR</th>
       </tr>
@@ -1569,8 +1569,8 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
     <tbody>
     {# Combine MLB and MiLB pitching stats, sorted by year #}
     {% set all_pit = [] %}
-    {% for s in p.pit_stats %}{% set _ = all_pit.append({"src":"mlb","year":s.year,"g":s.g,"gs":s.gs,"ip":s.ip,"era":s.era,"era_plus":s.era_plus,"fip":s.fip,"siera":s.siera,"k_pct":s.k_pct,"bb_pct":s.bb_pct,"k_bb_pct":s.k_bb_pct,"gb_pct":s.gb_pct,"babip":s.babip,"w":s.w,"l":s.l,"sv":s.sv,"hld":s.hld,"war":s.war,"team":s.team,"stints":s.stints if s.stints is defined else none}) %}{% endfor %}
-    {% for s in p.milb_pit_stats %}{% set _ = all_pit.append({"src":"milb","year":s.year,"g":s.g,"gs":s.gs,"ip":s.ip,"era":s.era,"era_plus":none,"fip":none,"siera":none,"k_pct":s.k_pct,"bb_pct":s.bb_pct,"k_bb_pct":s.k_bb_pct,"gb_pct":s.gb_pct,"babip":s.babip,"w":s.w,"l":s.l,"sv":s.sv,"hld":s.hld,"war":s.war,"team":s.team_name,"level_label":s.level_label,"league_name":s.league_name,"stints":none}) %}{% endfor %}
+    {% for s in p.pit_stats %}{% set _ = all_pit.append({"src":"mlb","year":s.year,"g":s.g,"gs":s.gs,"ip":s.ip,"era":s.era,"era_plus":s.era_plus,"fip":s.fip,"siera":s.siera,"k_pct":s.k_pct,"bb_pct":s.bb_pct,"k_bb_pct":s.k_bb_pct,"gb_pct":s.gb_pct,"hr_fb_pct":s.hr_fb_pct,"babip":s.babip,"w":s.w,"l":s.l,"sv":s.sv,"hld":s.hld,"war":s.war,"team":s.team,"stints":s.stints if s.stints is defined else none}) %}{% endfor %}
+    {% for s in p.milb_pit_stats %}{% set _ = all_pit.append({"src":"milb","year":s.year,"g":s.g,"gs":s.gs,"ip":s.ip,"era":s.era,"era_plus":none,"fip":none,"siera":none,"k_pct":s.k_pct,"bb_pct":s.bb_pct,"k_bb_pct":s.k_bb_pct,"gb_pct":s.gb_pct,"hr_fb_pct":none,"babip":s.babip,"w":s.w,"l":s.l,"sv":s.sv,"hld":s.hld,"war":s.war,"team":s.team_name,"level_label":s.level_label,"league_name":s.league_name,"stints":none}) %}{% endfor %}
     {% for s in all_pit|sort(attribute='year') %}
     <tr{% if s.stints %} class="totals-row"{% endif %} data-level="{% if s.src == 'mlb' %}MLB{% else %}{{ s.level_label }}{% endif %}">
       <td>{{ s.year }}{% if s.stints %} <span class="stint-count">({{ s.stints|length }} teams)</span>{% endif %}</td>
@@ -1582,7 +1582,7 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
       <td>{% if s.fip is not none %}{{ "%.2f"|format(s.fip) }}{% else %}-{% endif %}</td>
       <td>{% if s.siera is not none %}{{ "%.2f"|format(s.siera) }}{% else %}-{% endif %}</td>
       <td>{{ "%.1f"|format(s.k_pct) }}</td><td>{{ "%.1f"|format(s.bb_pct) }}</td><td>{{ "%.1f"|format(s.k_bb_pct) }}</td>
-      <td>{{ "%.1f"|format(s.gb_pct) }}</td><td>{{ "%.3f"|format(s.babip) }}</td>
+      <td>{{ "%.1f"|format(s.gb_pct) }}</td><td>{% if s.hr_fb_pct is not none %}{{ "%.1f"|format(s.hr_fb_pct) }}{% else %}-{% endif %}</td><td>{{ "%.3f"|format(s.babip) }}</td>
       <td>{{ s.w }}</td><td>{{ s.l }}</td><td>{{ s.sv }}</td><td>{{ s.hld }}</td>
       <td>{{ "%.1f"|format(s.war) }}</td>
     </tr>
@@ -1593,6 +1593,7 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
       <td>{{ "%.2f"|format(st.era) if st.era is not none else "-" }}</td><td>-</td>
       <td>{{ "%.2f"|format(st.fip) }}</td><td>-</td>
       <td>{{ "%.1f"|format(st.k_pct) }}</td><td>{{ "%.1f"|format(st.bb_pct) }}</td><td>{{ "%.1f"|format(st.k_bb_pct) }}</td><td>{{ "%.1f"|format(st.gb_pct) }}</td>
+      <td>{% if st.hr_fb_pct is not none %}{{ "%.1f"|format(st.hr_fb_pct) }}{% else %}-{% endif %}</td>
       <td>{{ "%.3f"|format(st.babip) }}</td>
       <td>{{ st.w }}</td><td>{{ st.l }}</td><td>{{ st.sv }}</td><td>{{ st.hld }}</td>
       <td>{{ "%.1f"|format(st.war) }}</td>
@@ -1611,7 +1612,7 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
       <td><strong>{{ "%.2f"|format(p.pit_career.fip) }}</strong></td>
       <td>{{ "%.2f"|format(p.pit_career.siera) }}</td>
       <td>{{ "%.1f"|format(p.pit_career.k_pct) }}</td><td>{{ "%.1f"|format(p.pit_career.bb_pct) }}</td><td>{{ "%.1f"|format(p.pit_career.k_bb_pct) }}</td>
-      <td>{{ "%.1f"|format(p.pit_career.gb_pct) }}</td><td>{{ "%.3f"|format(p.pit_career.babip) }}</td>
+      <td>{{ "%.1f"|format(p.pit_career.gb_pct) }}</td><td>{% if p.pit_career.hr_fb_pct is not none %}{{ "%.1f"|format(p.pit_career.hr_fb_pct) }}{% else %}-{% endif %}</td><td>{{ "%.3f"|format(p.pit_career.babip) }}</td>
       <td>{{ p.pit_career.w }}</td><td>{{ p.pit_career.l }}</td><td>{{ p.pit_career.sv }}</td><td>{{ p.pit_career.hld }}</td>
       <td><strong>{{ "%.1f"|format(p.pit_career.war) }}</strong></td>
     </tr>

@@ -87,6 +87,52 @@ def _add_offseason_entities(league_dir):
          is_major=1, season_year=YEAR, years=2, current_year=0,
          salary_0=6_000_000, salary_1=8_000_000,
          last_year_team_option=1, last_year_option_buyout=1_000_000)
+
+    # 401: a TRADED player — now on TEAM_ID's roster (team_id=TEAM_ID) but his
+    # contract row still carries the PRE-TRADE contract_team_id (2). The API
+    # retains the original signing team in contract_team_id after a mid-season
+    # trade, so attributing by it would wrongly list him under team 2 and hide
+    # him from TEAM_ID. Regression guard for the ORG_ID_SQL attribution fix.
+    # Same option shape as 400 so he surfaces on the Contract Options panel.
+    _ins("players", player_id=401, name="Trade Deadline Guy", age=31, team_id=TEAM_ID,
+         parent_team_id=0, level="1", pos=8, role=0)
+    _ins("ratings", player_id=401, snapshot_date=EVAL_DATE, ovr=55, pot=55,
+         composite_score=55, ceiling_score=58, league_id=1, bats="R", throws="R")
+    _ins("player_surplus", player_id=401, eval_date=EVAL_DATE, name="Trade Deadline Guy",
+         bucket="CF", age=31, ovr=55, fv=50, fv_str="50",
+         surplus=0, surplus_yr1=0, level="MLB",
+         team_id=TEAM_ID, parent_team_id=0)
+    _ins("batting_stats", player_id=401, year=2033, team_id=TEAM_ID, split_id=1,
+         pa=500, ab=460, h=130, hr=18, rbi=70, bb=35, k=95, avg=0.283, obp=0.345, slg=0.470, war=2.0)
+    _ins("contracts", player_id=401, team_id=TEAM_ID, contract_team_id=2,
+         is_major=1, season_year=YEAR, years=2, current_year=0,
+         salary_0=5_000_000, salary_1=7_000_000,
+         last_year_team_option=1, last_year_option_buyout=1_000_000)
+
+    # --- Arbitration eligibility (standard-arb gate) ---
+    # 410: Danny-Haas case — arb-eligible by SERVICE (3 completed years) but
+    #      still on a MINIMUM deal. Must appear on the arb board; the old
+    #      `sal <= min_sal` skip wrongly dropped him. 3*172+5 = 521 days.
+    # 411: 6+ completed years → graduated to free agency → must NOT appear on
+    #      the standard-arb board. 6*172+10 = 1042 days.
+    _ins("players", player_id=410, name="Danny Haas", age=25, team_id=TEAM_ID,
+         parent_team_id=0, level="1", pos=5, role=0, mlb_service_days=521)
+    _ins("players", player_id=411, name="Vic Veteran", age=31, team_id=TEAM_ID,
+         parent_team_id=0, level="1", pos=3, role=0, mlb_service_days=1042)
+    for pid, name, bkt in ((410, "Danny Haas", "3B"), (411, "Vic Veteran", "1B")):
+        _ins("ratings", player_id=pid, snapshot_date=EVAL_DATE, ovr=52, pot=52,
+             composite_score=52, ceiling_score=55, league_id=1, bats="R", throws="R")
+        _ins("player_surplus", player_id=pid, eval_date=EVAL_DATE, name=name,
+             bucket=bkt, age=27, ovr=52, fv=50, fv_str="50",
+             surplus=4_000_000, surplus_yr1=0, level="MLB",
+             team_id=TEAM_ID, parent_team_id=0)
+    # Both on expiring deals so the SQL's (years-current_year)<=1 clause includes
+    # them. 410 is on the league minimum (720000 per fixture settings).
+    _ins("contracts", player_id=410, team_id=TEAM_ID, contract_team_id=TEAM_ID,
+         is_major=1, season_year=YEAR, years=1, current_year=0, salary_0=720_000)
+    _ins("contracts", player_id=411, team_id=TEAM_ID, contract_team_id=TEAM_ID,
+         is_major=1, season_year=YEAR, years=1, current_year=0, salary_0=12_000_000)
+
     conn.commit()
     conn.close()
 
@@ -240,6 +286,43 @@ def test_option_decisions_empty_when_none(q):
     """A team with no option contracts returns empty buckets (team 2 has none)."""
     res = q.get_option_decisions(2)
     assert res == {"this_offseason": [], "upcoming": []}
+
+
+def test_traded_player_attributed_by_current_org_not_contract_team(q):
+    """A mid-season-traded player (now on TEAM_ID) whose contract row still
+    carries the PRE-TRADE contract_team_id must be attributed to his CURRENT
+    org, not the stale signing team. Guards the contract-queries bug where the
+    API retains the original team in contract_team_id after a trade.
+
+    Fixture player 401: team_id=TEAM_ID, contract_team_id=2, option contract.
+    """
+    # Surfaces on TEAM_ID's options board (his current org) …
+    mine = q.get_option_decisions(TEAM_ID)
+    names_mine = {o["name"] for o in mine["this_offseason"] + mine["upcoming"]}
+    assert "Trade Deadline Guy" in names_mine
+    # … and NOT on team 2's (the stale contract_team_id), which has no options.
+    theirs = q.get_option_decisions(2)
+    names_theirs = {o["name"] for o in theirs["this_offseason"] + theirs["upcoming"]}
+    assert "Trade Deadline Guy" not in names_theirs
+
+
+def test_arb_board_includes_min_salary_eligible_player(q):
+    """A player arb-eligible by SERVICE TIME (3 completed years) but still on a
+    minimum deal must appear on the arb board — eligibility is a service-time
+    property, not a salary one (the Danny Haas case). Guards against the old
+    `sal <= min_sal: continue` skip."""
+    board = {a["name"]: a for a in q.get_arbitration(TEAM_ID)}
+    assert "Danny Haas" in board
+    # svc 521 days = 3 completed years → arb_year 1 → first-arb curve, which
+    # (prior == min) floors inert, so the projection exceeds the minimum.
+    assert board["Danny Haas"]["proj_salary"] > 720_000
+
+
+def test_arb_board_excludes_free_agent_eligible(q):
+    """A player with 6+ completed service years has graduated to free agency
+    (standard arb) and must NOT appear on the arb board."""
+    board = {a["name"] for a in q.get_arbitration(TEAM_ID)}
+    assert "Vic Veteran" not in board
 
 
 def test_set_phase_persists(league, monkeypatch):

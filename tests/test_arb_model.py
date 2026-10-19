@@ -72,3 +72,25 @@ def test_arb_salary_above_minimum():
         for ovr in (45, 55, 65):
             s = arb_salary(ovr, bucket, 1, MIN_SAL, MIN_SAL)
             assert s > MIN_SAL, f"{bucket} Ovr{ovr} arb yr1 below minimum"
+
+
+# ---------------------------------------------------------------------------
+# First-arb prior-salary floor (standard arbitration never decreases)
+# ---------------------------------------------------------------------------
+
+def test_arb_year1_never_cuts_below_prior():
+    """A player already earning above the first-arb curve must not be re-priced
+    DOWN by the arb_year==1 branch. Standard arbitration salaries don't decrease
+    on a tender (the Kerwin case: comp 50, prior $4.5M, curve would say ~$3.8M)."""
+    from statsplusplus.evaluation.arb import arb_salary
+    curve = round(ARB_HITTER_BASE * math.exp(ARB_HITTER_EXP * 50))
+    high_prior = curve + 3_000_000  # clearly above the curve
+    s = arb_salary(50, 'SS', 1, high_prior, MIN_SAL)
+    assert s == high_prior, "arb yr1 cut a player below his prior salary"
+
+def test_arb_year1_curve_unchanged_for_true_first_timer():
+    """A genuine first-time arb player comes off a ~minimum deal, so the floor
+    does NOT bind — he still gets the pure OVR-curve estimate."""
+    from statsplusplus.evaluation.arb import arb_salary
+    expected = round(ARB_HITTER_BASE * math.exp(ARB_HITTER_EXP * 55))
+    assert arb_salary(55, 'SS', 1, MIN_SAL, MIN_SAL) == expected

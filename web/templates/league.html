@@ -408,6 +408,10 @@
       <span class="adv-poschip" onclick="advPosAll(true)" style="opacity:0.8">All</span>
       <span class="adv-poschip" onclick="advPosAll(false)" style="opacity:0.8">None</span>
     </div>
+    <div id="adv-toggles" style="display:flex; gap:5px; align-items:center; flex-wrap:wrap; margin-bottom:10px; font-size:12px">
+      <span style="color:var(--text-dim)">Show:</span>
+      <span id="adv-toggle-chips" style="display:inline-flex; gap:5px; flex-wrap:wrap"></span>
+    </div>
     <div id="adv-wrap" style="position:relative; width:100%; max-width:1100px">
       <svg id="adv-chart" width="100%" style="display:block; height:auto"></svg>
       <div id="adv-tip" style="position:absolute; pointer-events:none; background:#000; border:1px solid var(--border); border-radius:5px; padding:6px 9px; font-size:12px; display:none; z-index:20; white-space:nowrap"></div>
@@ -418,7 +422,8 @@
 </div>
 <style>.adv-side{color:var(--text-dim)} .adv-side.active{background:var(--surface); color:var(--text)}
 .adv-poschip{padding:3px 9px; border:1px solid var(--border); border-radius:12px; cursor:pointer; color:var(--text-dim); user-select:none}
-.adv-poschip.on{background:var(--surface); color:var(--text); border-color:#5aa9e6}</style>
+.adv-poschip.on{background:var(--surface); color:var(--text); border-color:#5aa9e6}
+.advdot{cursor:pointer}</style>
 <script>
 (function(){
   const SC = {{ scatter|tojson }};
@@ -428,12 +433,46 @@
         rmb=document.getElementById('adv-rm'), note=document.getElementById('adv-note'),
         corr=document.getElementById('adv-corr'),
         thr=document.getElementById('adv-thresh'), thrlab=document.getElementById('adv-thlabel'),
-        poschips=document.getElementById('adv-poschips');
+        poschips=document.getElementById('adv-poschips'),
+        togchips=document.getElementById('adv-toggle-chips');
   let side='bat', mode2d=false, thresh=0, posOn=new Set();
+  // Chart indicators the user can toggle. Defaults keep the view clean (line +
+  // mean + good-zone on; heavier analytical overlays off). Persisted per browser.
+  const TOGGLES=[
+    {k:'line',  label:'Regression line', def:true,  d2only:true},
+    {k:'band',  label:'Confidence band', def:false, d2only:true},
+    {k:'out',   label:'Outliers',        def:false, d2only:true},
+    {k:'quad',  label:'Quadrants',       def:false, d2only:true},
+    {k:'mean',  label:'Mean lines',      def:true,  d2only:false},
+    {k:'zone',  label:'Good-zone shading',def:true, d2only:false},
+    {k:'lgavg', label:'League avg',      def:false, d2only:false},
+  ];
+  let tog={};
+  (function loadTog(){
+    let saved={};
+    try{ saved=JSON.parse(localStorage.getItem('advToggles')||'{}'); }catch(e){}
+    TOGGLES.forEach(t=>{ tog[t.k] = (t.k in saved)?!!saved[t.k]:t.def; });
+  })();
+  function saveTog(){ try{ localStorage.setItem('advToggles', JSON.stringify(tog)); }catch(e){} }
+  function on(k){ return !!tog[k]; }
+  let _lastReg=null;  // {m,b} of the current 2D fit, for residual-on-hover
+  function buildToggleChips(){
+    togchips.innerHTML='';
+    TOGGLES.forEach(t=>{
+      const el=document.createElement('span');
+      el.className='adv-poschip'+(tog[t.k]?' on':''); el.textContent=t.label;
+      if(t.d2only) el.title='Applies to the 2-metric (scatter) view';
+      el.onclick=()=>{ tog[t.k]=!tog[t.k]; el.classList.toggle('on', tog[t.k]); saveTog(); draw(); };
+      togchips.appendChild(el);
+    });
+  }
   // Larger logical canvas; the SVG scales to the panel width via viewBox.
   const W=1000, PAD_L=70, PAD_R=24;
   function pool(){ return side==='bat'?SC.hitters:SC.pitchers; }
   function stats(){ return side==='bat'?SC.hitter_stats:SC.pitcher_stats; }
+  function ratings(){ return side==='bat'?SC.hitter_ratings:SC.pitcher_ratings; }
+  function dir(k){ return (SC.direction&&SC.direction[k])||'neutral'; }  // 'high'|'low'|'neutral'
+  function lgAvg(k){ return (SC.lgavg && k in SC.lgavg) ? SC.lgavg[k] : null; }
   function posList(){ return side==='bat'?SC.hitter_pos:SC.pitcher_pos; }
   function shown(){ return pool().filter(d=>(d.pt||0)>=thresh && posOn.has(d.pos)); }
   function buildChips(){
@@ -459,7 +498,21 @@
   }
   function fillSel(){
     xs.innerHTML=''; ys.innerHTML='';
-    stats().forEach(s=>{ xs.add(new Option(s,s)); ys.add(new Option(s,s)); });
+    // Grouped: a "Stats" optgroup then a "Ratings" optgroup (current tools,
+    // normalized 20-80). The 2D regression over a rating × stat pair shows how
+    // well a tool tracks production league-wide.
+    function build(sel){
+      const gS=document.createElement('optgroup'); gS.label='Stats';
+      stats().forEach(s=>gS.appendChild(new Option(s,s)));
+      sel.appendChild(gS);
+      const rr=ratings();
+      if(rr && rr.length){
+        const gR=document.createElement('optgroup'); gR.label='Ratings';
+        rr.forEach(s=>gR.appendChild(new Option(s,s)));
+        sel.appendChild(gR);
+      }
+    }
+    build(xs); build(ys);
     xs.value=stats()[0]; ys.value=stats()[Math.min(1,stats().length-1)];
   }
   function range(k){ const v=shown().map(d=>d[k]).filter(x=>x!=null);
@@ -473,6 +526,47 @@
   function mean(k){ const v=shown().map(d=>d[k]).filter(x=>x!=null);
     return v.length? v.reduce((a,b)=>a+b,0)/v.length : null; }
   function fmt(v){ return +(+v).toFixed(3); }
+  // Whole-number axis ticks for integer-valued axes (ratings on the 20-80 scale,
+  // HR, SB, Comp, IP) — fractional tick labels like "41.167" are meaningless for
+  // these. Rate stats (ERA, AVG, OPS, K/9) keep decimals. Detected from the data:
+  // an axis whose every shown value is an integer is an integer axis.
+  function isIntAxis(k){ const v=shown().map(d=>d[k]).filter(x=>x!=null);
+    return v.length>0 && v.every(x=>Number.isInteger(x)); }
+  function fmtAxis(k, v){ return isIntAxis(k) ? Math.round(v) : fmt(v); }
+  // Good-zone gradient: a very subtle green wash toward the "better" end (1D) or
+  // corner (2D), so the desirable region reads at a glance WITHOUT inverting any
+  // axis (the numbers stay honest). Driven by the per-stat direction map. Neutral
+  // axes contribute no pull. Returns an SVG <defs>+<rect> string to draw UNDER
+  // the gridlines/dots, or '' when neither axis has a direction.
+  let _gzc=0;
+  function goodZone1d(xk, bx, by, bw, bh){
+    const d=dir(xk); if(d==='neutral') return '';
+    // Good end: high → right (x2=1), low → left (x2=0).
+    const x2 = d==='high' ? 1 : 0, x1 = d==='high' ? 0 : 1;
+    const id='gz'+(++_gzc);
+    return `<defs><linearGradient id="${id}" x1="${x1}" y1="0" x2="${x2}" y2="0">`
+      +`<stop offset="0" stop-color="#4caf50" stop-opacity="0"/>`
+      +`<stop offset="1" stop-color="#4caf50" stop-opacity="0.10"/></linearGradient></defs>`
+      +`<rect x="${bx}" y="${by}" width="${bw}" height="${bh}" fill="url(#${id})"/>`;
+  }
+  function goodZone2d(xk, yk, bx, by, bw, bh){
+    const dxp=dir(xk), dyp=dir(yk);
+    if(dxp==='neutral' && dyp==='neutral') return '';
+    // Good corner in gradient coords (0,0)=top-left … x: high→right, low→left;
+    // y: high→bottom-data = top-pixel, so "good" high-y is the TOP (y small).
+    // SVG py() already maps high data values to small y (top), so:
+    //   x good end: high→x2=1 (right), low→0 (left), neutral→center 0.5
+    //   y good end: high→y2=0 (top),  low→1 (bottom), neutral→center 0.5
+    const gx = dxp==='neutral'?0.5:(dxp==='high'?1:0);
+    const gy = dyp==='neutral'?0.5:(dyp==='high'?0:1);
+    const id='gz'+(++_gzc);
+    // Radial wash centered on the good corner.
+    return `<defs><radialGradient id="${id}" cx="${gx}" cy="${gy}" r="1.1">`
+      +`<stop offset="0" stop-color="#4caf50" stop-opacity="0.12"/>`
+      +`<stop offset="0.6" stop-color="#4caf50" stop-opacity="0.03"/>`
+      +`<stop offset="1" stop-color="#4caf50" stop-opacity="0"/></radialGradient></defs>`
+      +`<rect x="${bx}" y="${by}" width="${bw}" height="${bh}" fill="url(#${id})"/>`;
+  }
   function linreg(pts){ // pts: [[x,y]] -> {m,b,r2,r}
     const n=pts.length; if(n<3) return null;
     let sx=0,sy=0,sxx=0,syy=0,sxy=0;
@@ -493,20 +587,27 @@
       (mode2d?' · each dot a player, hover for detail':' · vertical thickness = how many players share that value');
     let s='';
     if(!mode2d){
+      _lastReg=null;
       const Hh=360; svg.setAttribute('viewBox',`0 0 ${W} ${Hh}`);
       const T=24,B=50,[x0,x1]=range(xk);
       const px=v=>PAD_L+(v-x0)/(x1-x0)*(W-PAD_L-PAD_R);
       const midY=T+(Hh-T-B)/2;
+      if(on('zone')) s+=goodZone1d(xk, PAD_L, T, W-PAD_L-PAD_R, (Hh-B)-T);
       for(let i=0;i<=6;i++){ const gx=x0+(x1-x0)*i/6;
         s+=`<line x1="${px(gx)}" y1="${T}" x2="${px(gx)}" y2="${Hh-B}" stroke="#262626"/>`;
-        s+=`<text x="${px(gx)}" y="${Hh-B+18}" fill="#999" font-size="14" text-anchor="middle">${fmt(gx)}</text>`; }
+        s+=`<text x="${px(gx)}" y="${Hh-B+18}" fill="#999" font-size="14" text-anchor="middle">${fmtAxis(xk,gx)}</text>`; }
       s+=`<line x1="${PAD_L}" y1="${midY}" x2="${W-PAD_R}" y2="${midY}" stroke="#333"/>`;
       s+=`<text x="${(PAD_L+W-PAD_R)/2}" y="${Hh-6}" fill="#ccc" font-size="16" text-anchor="middle">${xk}</text>`;
       // mean line (vertical) across the shown pool
       const mx=mean(xk);
-      if(mx!=null){ const mxp=px(mx);
+      if(on('mean') && mx!=null){ const mxp=px(mx);
         s+=`<line x1="${mxp}" y1="${T}" x2="${mxp}" y2="${Hh-B}" stroke="#bbb" stroke-width="1.5"/>`;
-        s+=`<text x="${mxp}" y="${T-4}" fill="#bbb" font-size="12" text-anchor="middle">mean ${fmt(mx)}</text>`; }
+        s+=`<text x="${mxp}" y="${T-4}" fill="#bbb" font-size="12" text-anchor="middle">mean ${fmtAxis(xk,mx)}</text>`; }
+      // league-average reference line (distinct from the shown-pool mean)
+      const la1=lgAvg(xk);
+      if(on('lgavg') && la1!=null && la1>=x0 && la1<=x1){ const lap=px(la1);
+        s+=`<line x1="${lap}" y1="${T}" x2="${lap}" y2="${Hh-B}" stroke="#e9c46a" stroke-width="1" stroke-dasharray="3 3" opacity="0.7"/>`;
+        s+=`<text x="${lap}" y="${Hh-B+34}" fill="#e9c46a" font-size="11" text-anchor="middle">lg avg ${fmtAxis(xk,la1)}</text>`; }
       // Beeswarm: bin by pixel column, stack dots symmetrically outward from the
       // center line so denser x-values radiate wider (violin silhouette).
       const DOT=5, SP=10, COLW=11;
@@ -525,31 +626,90 @@
       const Hh=620; svg.setAttribute('viewBox',`0 0 ${W} ${Hh}`);
       const yk=ys.value, T=20,B=54,[x0,x1]=range(xk),[y0,y1]=range(yk);
       const px=v=>PAD_L+(v-x0)/(x1-x0)*(W-PAD_L-PAD_R), py=v=>Hh-B-(v-y0)/(y1-y0)*(Hh-T-B);
+      if(on('zone')) s+=goodZone2d(xk, yk, PAD_L, T, W-PAD_L-PAD_R, (Hh-B)-T);
       for(let i=0;i<=6;i++){ const gx=x0+(x1-x0)*i/6, gy=y0+(y1-y0)*i/6;
         s+=`<line x1="${px(gx)}" y1="${T}" x2="${px(gx)}" y2="${Hh-B}" stroke="#262626"/>`;
         s+=`<line x1="${PAD_L}" y1="${py(gy)}" x2="${W-PAD_R}" y2="${py(gy)}" stroke="#262626"/>`;
-        s+=`<text x="${px(gx)}" y="${Hh-B+18}" fill="#999" font-size="14" text-anchor="middle">${fmt(gx)}</text>`;
-        s+=`<text x="${PAD_L-8}" y="${py(gy)+4}" fill="#999" font-size="14" text-anchor="end">${fmt(gy)}</text>`; }
+        s+=`<text x="${px(gx)}" y="${Hh-B+18}" fill="#999" font-size="14" text-anchor="middle">${fmtAxis(xk,gx)}</text>`;
+        s+=`<text x="${PAD_L-8}" y="${py(gy)+4}" fill="#999" font-size="14" text-anchor="end">${fmtAxis(yk,gy)}</text>`; }
       s+=`<text x="${(PAD_L+W-PAD_R)/2}" y="${Hh-8}" fill="#ccc" font-size="16" text-anchor="middle">${xk}</text>`;
       s+=`<text x="18" y="${(T+Hh-B)/2}" fill="#ccc" font-size="16" text-anchor="middle" transform="rotate(-90 18 ${(T+Hh-B)/2})">${yk}</text>`;
-      // mean crosshairs (vertical x-mean, horizontal y-mean) over the shown pool
+      // Quadrant labels — name the four regions split at the two means, so each
+      // corner is self-documenting (e.g. high-stuff/low-K = underperforming).
+      if(on('quad')){
+        const mX=mean(xk), mY=mean(yk);
+        if(mX!=null && mY!=null){
+          const lx=PAD_L+8, rx=W-PAD_R-8, ty=T+14, by2=Hh-B-8;
+          const q=(x,y,anc,txt)=>`<text x="${x}" y="${y}" fill="#777" font-size="11" text-anchor="${anc}" font-style="italic">${txt}</text>`;
+          s+=q(rx,ty,'end',`↑${yk} · ↑${xk}`);
+          s+=q(lx,ty,'start',`↑${yk} · ↓${xk}`);
+          s+=q(rx,by2,'end',`↓${yk} · ↑${xk}`);
+          s+=q(lx,by2,'start',`↓${yk} · ↓${xk}`);
+        }
+      }
+      // mean crosshairs over the shown pool
       const mx=mean(xk), my=mean(yk);
-      if(mx!=null){ const mxp=px(mx);
+      if(on('mean') && mx!=null){ const mxp=px(mx);
         s+=`<line x1="${mxp}" y1="${T}" x2="${mxp}" y2="${Hh-B}" stroke="#bbb" stroke-width="1.3" opacity="0.8"/>`;
-        s+=`<text x="${mxp+3}" y="${T+12}" fill="#bbb" font-size="11">mean ${fmt(mx)}</text>`; }
-      if(my!=null){ const myp=py(my);
+        s+=`<text x="${mxp+3}" y="${T+12}" fill="#bbb" font-size="11">mean ${fmtAxis(xk,mx)}</text>`; }
+      if(on('mean') && my!=null){ const myp=py(my);
         s+=`<line x1="${PAD_L}" y1="${myp}" x2="${W-PAD_R}" y2="${myp}" stroke="#bbb" stroke-width="1.3" opacity="0.8"/>`;
-        s+=`<text x="${W-PAD_R-3}" y="${myp-3}" fill="#bbb" font-size="11" text-anchor="end">mean ${fmt(my)}</text>`; }
-      // regression line + r/R2
+        s+=`<text x="${W-PAD_R-3}" y="${myp-3}" fill="#bbb" font-size="11" text-anchor="end">mean ${fmtAxis(yk,my)}</text>`; }
+      // league-average crosshairs (distinct from the shown-pool mean)
+      const laX=lgAvg(xk), laY=lgAvg(yk);
+      if(on('lgavg') && laX!=null && laX>=x0 && laX<=x1){ const p=px(laX);
+        s+=`<line x1="${p}" y1="${T}" x2="${p}" y2="${Hh-B}" stroke="#e9c46a" stroke-width="1" stroke-dasharray="3 3" opacity="0.6"/>`; }
+      if(on('lgavg') && laY!=null && laY>=y0 && laY<=y1){ const p=py(laY);
+        s+=`<line x1="${PAD_L}" y1="${p}" x2="${W-PAD_R}" y2="${p}" stroke="#e9c46a" stroke-width="1" stroke-dasharray="3 3" opacity="0.6"/>`; }
+      // regression line + r/R2 (+ optional confidence band + outlier rings)
       const pairs=data.filter(o=>o.d[xk]!=null&&o.d[yk]!=null).map(o=>[o.d[xk],o.d[yk]]);
       const reg=linreg(pairs);
-      if(reg){
-        const yA=reg.m*x0+reg.b, yB=reg.m*x1+reg.b;
-        s+=`<line x1="${px(x0)}" y1="${py(Math.max(y0,Math.min(y1,yA)))}" x2="${px(x1)}" y2="${py(Math.max(y0,Math.min(y1,yB)))}" stroke="#e9c46a" stroke-width="2" stroke-dasharray="6 4" opacity="0.85"/>`;
-        corr.innerHTML=`Correlation: <span style="color:#e9c46a">r = ${reg.r.toFixed(2)}</span> · R² = ${reg.r2.toFixed(2)} <span style="opacity:0.7">(n=${pairs.length})</span>`;
+      const SMALL_N=10;  // below this a line is noise — suppress it
+      _lastReg = (reg && pairs.length>=SMALL_N) ? {m:reg.m, b:reg.b} : null;
+      if(reg && pairs.length>=SMALL_N){
+        // ±1 standard-error-of-estimate confidence band (how tight the fit is).
+        if(on('band')){
+          let sse=0; for(const [x,y] of pairs){ const e=y-(reg.m*x+reg.b); sse+=e*e; }
+          const se=Math.sqrt(sse/(pairs.length-2));
+          const clampY=v=>Math.max(y0,Math.min(y1,v));
+          const yAu=reg.m*x0+reg.b+se, yBu=reg.m*x1+reg.b+se;
+          const yAl=reg.m*x0+reg.b-se, yBl=reg.m*x1+reg.b-se;
+          s+=`<polygon points="${px(x0)},${py(clampY(yAu))} ${px(x1)},${py(clampY(yBu))} ${px(x1)},${py(clampY(yBl))} ${px(x0)},${py(clampY(yAl))}" fill="#e9c46a" opacity="0.08"/>`;
+        }
+        if(on('line')){
+          const yA=reg.m*x0+reg.b, yB=reg.m*x1+reg.b;
+          s+=`<line x1="${px(x0)}" y1="${py(Math.max(y0,Math.min(y1,yA)))}" x2="${px(x1)}" y2="${py(Math.max(y0,Math.min(y1,yB)))}" stroke="#e9c46a" stroke-width="2" stroke-dasharray="6 4" opacity="0.85"/>`;
+        }
+        // Goodness-oriented r: when BOTH axes have a better-direction, flip the
+        // displayed sign so POSITIVE always means "the relationship runs toward
+        // better" (e.g. Stuff↑ × ERA↓ shows +, not −). r² unchanged.
+        const dx_=dir(xk), dy_=dir(yk);
+        let rShown=reg.r, oriented=false;
+        if(dx_!=='neutral' && dy_!=='neutral'){
+          oriented=true;
+          const flip=(dx_==='low')!==(dy_==='low');
+          rShown = flip ? -reg.r : reg.r;
+        }
+        const rHint = oriented ? ` <span style="opacity:0.7">(+ = toward better)</span>` : '';
+        corr.innerHTML=`Correlation: <span style="color:#e9c46a">r = ${rShown>=0?'+':''}${rShown.toFixed(2)}</span> · R² = ${reg.r2.toFixed(2)} <span style="opacity:0.7">(n=${pairs.length})</span>${rHint}`;
+      } else if(reg){
+        corr.innerHTML=`<span style="opacity:0.7">Too few players (n=${pairs.length}) for a reliable fit — loosen the filter.</span>`;
+      } else corr.textContent='';
+      // Residual outliers — the players furthest from the regression prediction,
+      // i.e. who most beat / miss their expected production. Ring the top few.
+      let outSet=new Set();
+      if(on('out') && reg && pairs.length>=SMALL_N){
+        const withRes=data.filter(o=>o.d[xk]!=null&&o.d[yk]!=null)
+          .map(o=>({o, res:o.d[yk]-(reg.m*o.d[xk]+reg.b)}));
+        withRes.sort((a,b)=>Math.abs(b.res)-Math.abs(a.res));
+        withRes.slice(0, Math.min(6, withRes.length)).forEach(w=>outSet.add(w.o.i));
       }
       data.filter(o=>o.d[xk]!=null&&o.d[yk]!=null).sort((a,b)=>a.d.mine-b.d.mine).forEach(o=>{
-        s+=`<circle class="advdot" data-i="${o.i}" cx="${px(o.d[xk])}" cy="${py(o.d[yk])}" r="${o.d.mine?6:4}" fill="${o.d.mine?'#4caf50':'#5aa9e6'}" fill-opacity="${o.d.mine?0.95:0.55}" stroke="${o.d.mine?'#fff':'none'}" stroke-width="0.8"/>`; });
+        const isOut=outSet.has(o.i);
+        const rr=o.d.mine?6:(isOut?5.5:4);
+        const stroke=isOut?'#e9c46a':(o.d.mine?'#fff':'none');
+        const sw=isOut?1.6:0.8;
+        s+=`<circle class="advdot" data-i="${o.i}" cx="${px(o.d[xk])}" cy="${py(o.d[yk])}" r="${rr}" fill="${o.d.mine?'#4caf50':'#5aa9e6'}" fill-opacity="${o.d.mine?0.95:0.55}" stroke="${stroke}" stroke-width="${sw}"/>`; });
     }
     svg.innerHTML=s;
   }
@@ -557,19 +717,32 @@
     if(t.classList && t.classList.contains('advdot')){ const d=pool()[+t.dataset.i], xk=xs.value;
       let txt='<b>'+d.name+'</b> <span style="color:#888">'+d.team+' · '+d.pos+'</span><br>'+xk+': '+d[xk];
       if(mode2d) txt+=' · '+ys.value+': '+d[ys.value];
+      if(mode2d && _lastReg && d[xs.value]!=null && d[ys.value]!=null){
+        const pred=_lastReg.m*d[xs.value]+_lastReg.b;
+        const res=d[ys.value]-pred;
+        const sign=res>=0?'+':'';
+        txt+=`<br><span style="color:#e9c46a; font-size:11px">${sign}${(+res).toFixed(2)} vs expected ${ys.value}</span>`;
+      }
       txt+='<br><span style="color:#888">'+(side==='bat'?d.pt+' PA':d.pt+' IP')+'</span>';
+      txt+='<br><span style="color:#5aa9e6; font-size:11px">click → player page</span>';
       tip.innerHTML=txt; tip.style.display='block';
       const w=document.getElementById('adv-wrap').getBoundingClientRect();
       tip.style.left=(e.clientX-w.left+12)+'px'; tip.style.top=(e.clientY-w.top+12)+'px';
     } else tip.style.display='none'; });
   svg.addEventListener('mouseleave',()=>tip.style.display='none');
+  // Click a dot → that player's page (point dicts carry pid).
+  svg.addEventListener('click',e=>{ const t=e.target;
+    if(t.classList && t.classList.contains('advdot')){
+      const d=pool()[+t.dataset.i];
+      if(d && d.pid) window.location.href='/player/'+d.pid;
+    }});
   window.advSide=function(sd,el){ side=sd; document.querySelectorAll('.adv-side').forEach(x=>x.classList.remove('active')); el.classList.add('active'); fillSel(); setupSlider(); buildChips(); draw(); };
   addb.onclick=()=>{ mode2d=true; yw.style.display=''; addb.style.display='none'; rmb.style.display=''; draw(); };
   rmb.onclick=()=>{ mode2d=false; yw.style.display='none'; addb.style.display=''; rmb.style.display='none'; draw(); };
   thr.oninput=()=>{ thresh=+thr.value; draw(); };
   xs.onchange=draw; ys.onchange=draw;
   // init when the Advanced tab is first shown (data is small, so just init now)
-  fillSel(); setupSlider(); buildChips(); draw();
+  fillSel(); setupSlider(); buildChips(); buildToggleChips(); draw();
 })();
 </script>
 

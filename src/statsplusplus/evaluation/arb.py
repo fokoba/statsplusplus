@@ -70,7 +70,20 @@ def arb_salary(
         return round(rp_base * (0.75 + 0.25 * (arb_year - 1)) * scale)
 
     if arb_year == 1:
-        return round(ARB_HITTER_BASE * math.exp(ARB_HITTER_EXP * ovr) * scale)
+        curve = round(ARB_HITTER_BASE * math.exp(ARB_HITTER_EXP * ovr) * scale)
+        # Under STANDARD arbitration, a tendered salary never decreases — so a
+        # player already earning above the first-arb curve (a legitimately
+        # above-curve first-timer, or one mis-routed here with a non-minimum
+        # prior) must not be re-priced DOWN to the curve. Floor at prior_salary,
+        # but only when it exceeds the minimum: a true first-timer comes off a
+        # ~minimum deal, so the floor doesn't bind and he gets the pure curve.
+        #
+        # This is the STANDARD-arb function. Perpetual/indefinite-arb leagues
+        # (e.g. PPL, where arb CAN decrease on performance) route through
+        # arb_salary_perpetual instead and are unaffected by this floor.
+        if prior_salary > min_sal:
+            return max(curve, prior_salary)
+        return curve
 
     raise_amt = max(ARB_RAISE_MIN, round(ARB_RAISE_INTERCEPT + ARB_RAISE_SLOPE * ovr))
     return prior_salary + round(raise_amt * scale)

@@ -42,3 +42,11 @@ def test_tagged_reliever_makes_the_pen_ahead_of_better_untagged_arms():
     ids = {p["player_id"] for p in rp}
     assert 99 in ids
     assert len(ids) == RP_POOL_SIZE
+
+
+def test_more_tagged_relievers_than_pool_size_all_make_the_pen():
+    n = RP_POOL_SIZE + 1
+    rp = [_p(i, war=1.0 - 0.1 * i) for i in range(1, n + 3)]
+    tagged = {i: ("setup", None) for i in range(1, n + 1)}
+    _, rp_result = allocate_pitcher_time([], rp, team_ip=1400, manual_rp_roles=tagged)
+    assert {p["player_id"] for p in rp_result} >= set(tagged)

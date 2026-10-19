@@ -782,7 +782,9 @@ def allocate_pitcher_time(sp_list, rp_list, team_ip=None,
     # go to the best of the rest by projected WAR.
     tagged = [p for p in rp_list if p["player_id"] in manual_rp_roles]
     untagged = [p for p in rp_list if p["player_id"] not in manual_rp_roles]
-    pool = (tagged + untagged)[:RP_POOL_SIZE]
+    # Every tagged reliever makes the pen even when that is more than RP_POOL_SIZE
+    # (a six-man pen with six tagged arms must not silently drop the sixth).
+    pool = (tagged + untagged)[:max(RP_POOL_SIZE, len(tagged))]
     pool.sort(key=lambda x: x["war_proj"] * x.get("level_discount", 1.0), reverse=True)
 
     pinned = {pid: share for pid, (_role, share) in manual_rp_roles.items() if share}

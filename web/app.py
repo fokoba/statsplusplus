@@ -675,6 +675,22 @@ def offseason():
     )
 
 
+@app.route("/international")
+def international():
+    """Multi-scout international amateur valuation + bid planner."""
+    import international_queries as iq
+    from web_league_context import money_unit, money_divisor
+    cfg = _get_cfg()
+    ln = cfg.settings.get("league", "League")
+    report = iq.build_report(g.league_dir)
+    return render_template(
+        "international.html",
+        breadcrumbs=[{"label": ln, "url": "/league"},
+                     {"label": "International", "url": "/international"}],
+        report=report, unit=money_unit(), divisor=money_divisor(),
+    )
+
+
 @app.route("/player/<int:pid>")
 def player(pid):
     p = queries.get_player(pid)

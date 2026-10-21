@@ -1,0 +1,293 @@
+{% extends "base.html" %}
+{% block content %}
+{% macro money(v) -%}{%- if v is none -%}–{%- else -%}${{ '%.1f'|format(v / divisor) }}{{ unit|lower }}{%- endif -%}{%- endmacro %}
+
+<h1 class="page-title">🌎 International Scouting Valuation</h1>
+<p class="intl-sub">Upload the OOTP <em>international amateur "all columns"</em> view as seen by up to three scouts. Each report is run through the same model as the rest of Dominator (composite, potential, FV, surplus); the page blends them, takes the middle scout, rates confidence, and proposes low / average / high bids.</p>
+
+{# ── Uploads ── #}
+<div class="panel" id="intl-uploads">
+  <h2>Scout reports</h2>
+  <div class="intl-slots">
+    {% for i in range(3) %}
+    {% set sl = report.slots[i] %}
+    <div class="intl-slot" data-slot="{{ i }}">
+      <div class="intl-slot-head">Scout {{ i + 1 }}{% if sl %} — <strong>{{ sl.label }}</strong>{% endif %}</div>
+      {% if sl %}
+      <div class="intl-slot-meta">{{ sl.filename }}<br>uploaded {{ sl.uploaded_at }}</div>
+      {% endif %}
+      <input type="text" class="intl-label" maxlength="12" placeholder="Label (e.g. MIL)" value="{{ sl.label if sl else '' }}">
+      <input type="file" class="intl-file" accept=".csv,text/csv">
+      <div class="intl-slot-actions">
+        <button type="button" class="intl-btn intl-upload">{{ 'Replace' if sl else 'Upload' }}</button>
+        {% if sl %}<button type="button" class="intl-btn intl-clear">Clear</button>{% endif %}
+      </div>
+      <div class="intl-msg"></div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+{% if not report.rows %}
+<div class="panel"><p class="empty">Upload at least one scout report to see valuations.</p></div>
+{% else %}
+
+{# ── Settings + planner ── #}
+<div class="panel" id="intl-plan">
+  <h2>Budget &amp; bid tiers</h2>
+  <div class="intl-plan-grid">
+    <label>Cash to spend ({{ unit|lower }})
+      <input type="number" id="intl-cash" step="any" value="{{ (report.cash / divisor)|round(1) }}">
+    </label>
+    <label>Low bid share (%)
+      <input type="number" id="intl-t-low" step="0.1" value="{{ (report.tiers.low * 100)|round(1) }}">
+    </label>
+    <label>Average bid share (%)
+      <input type="number" id="intl-t-avg" step="0.1" value="{{ (report.tiers.avg * 100)|round(1) }}">
+    </label>
+    <label>High bid share (%)
+      <input type="number" id="intl-t-high" step="0.1" value="{{ (report.tiers.high * 100)|round(1) }}">
+    </label>
+    <button type="button" class="intl-btn" id="intl-save">Save</button>
+  </div>
+  <div class="intl-plan-bar">
+    <label>Planning tier
+      <select id="intl-tier"><option value="low">Low</option><option value="avg" selected>Average</option><option value="high">High</option></select>
+    </label>
+    <button type="button" class="intl-btn" id="intl-autofill" title="Tick the best remaining targets by blended surplus until the cash runs out">Auto-fill by surplus</button>
+    <button type="button" class="intl-btn" id="intl-unselect">Clear ticks</button>
+    <span class="intl-total">Selected: <strong id="intl-sel-total">$0</strong> of <strong id="intl-cash-show">$0</strong> · remaining <strong id="intl-remaining">$0</strong> · <span id="intl-sel-count">0</span> players · expected surplus <strong id="intl-sel-surplus">$0</strong></span>
+  </div>
+  <p class="intl-note">Bids are a share of the <strong>blended</strong> report's probability-weighted career surplus (the same figure the add-candidates page uses). Cash does not carry over, so use the High tier for your top targets and Low for depth. Confidence combines each report's scouting accuracy with how closely the scouts agree on potential.</p>
+</div>
+
+{# ── Table ── #}
+<div class="panel">
+  <div class="intl-filters">
+    <label>Show
+      <select id="intl-kind"><option value="all">Hitters + pitchers</option><option value="H">Hitters</option><option value="P">Pitchers</option></select>
+    </label>
+    <label><input type="checkbox" id="intl-pos-only" checked> Hide players worth $0</label>
+    <label>Min confidence
+      <select id="intl-minconf"><option value="1">Any</option><option value="2">Low+</option><option value="3">Average+</option><option value="4">High+</option><option value="5">Very High</option></select>
+    </label>
+    <input type="text" id="intl-find" placeholder="Filter name…" autocomplete="off">
+    <span class="intl-count"><span id="intl-shown">0</span> shown</span>
+  </div>
+  <div class="intl-scroll">
+  <table class="intl-table" id="intl-table">
+    <thead>
+      <tr class="intl-group">
+        <th colspan="4"></th>
+        {% for s in report.scouts %}<th colspan="2" class="intl-scoutcol">{{ s.label }}</th>{% endfor %}
+        <th colspan="2" class="intl-blendcol">Blended</th>
+        <th colspan="2">Median scout</th>
+        <th colspan="5">Verdict</th>
+        <th colspan="3" class="intl-bidcol">Proposed bid</th>
+        <th colspan="2"></th>
+      </tr>
+      <tr>
+        <th></th>
+        <th data-sort="text">Player</th>
+        <th data-sort="text">Pos</th>
+        <th data-sort="num">Age</th>
+        {% for s in report.scouts %}
+        <th data-sort="num" title="{{ s.label }}: current composite / potential">Cur/Pot</th>
+        <th data-sort="num" title="{{ s.label }} FV">FV</th>
+        {% endfor %}
+        <th data-sort="num" title="Blended current / potential">Cur/Pot</th>
+        <th data-sort="num">FV</th>
+        <th data-sort="num" title="Middle scout current / potential">Cur/Pot</th>
+        <th data-sort="num">FV</th>
+        <th data-sort="text">Risk</th>
+        <th data-sort="num" title="Confidence: scouting accuracy adjusted by scout agreement">Conf</th>
+        <th data-sort="num" title="Highest minus lowest potential across scouts">Spread</th>
+        <th data-sort="num" title="Blended probability-weighted career surplus">Surplus</th>
+        <th data-sort="num" title="Median-scout surplus">Med. surplus</th>
+        <th data-sort="num">Low</th>
+        <th data-sort="num">Avg</th>
+        <th data-sort="num">High</th>
+        <th data-sort="num" title="Asking demand from the export">Ask</th>
+        <th data-sort="num" title="Running total of the planning tier in current sort order">Cum.</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for r in report.rows %}
+      {% set is_p = r.pos in ('SP','RP','CL','P') %}
+      <tr data-kind="{{ 'P' if is_p else 'H' }}" data-conf="{{ r.conf }}" data-surplus="{{ r.blend.surplus }}"
+          data-low="{{ r.bids.low }}" data-avg="{{ r.bids.avg }}" data-high="{{ r.bids.high }}"
+          data-name="{{ r.name|lower }}">
+        <td><input type="checkbox" class="intl-pick"></td>
+        <td><a href="/player/{{ r.pid }}">{{ r.name }}</a></td>
+        <td data-sort-value="0">{{ r.pos }}</td>
+        <td>{{ r.age }}</td>
+        {% for p in r.per %}
+        <td data-sort-value="{{ p.pot }}" title="{{ p.label }} accuracy: {{ p.acc_label }}">{{ p.comp }} / <strong>{{ p.pot }}</strong> <span class="intl-acc intl-acc-{{ p.acc }}">{{ p.acc }}</span></td>
+        <td>{{ p.fv }}</td>
+        {% endfor %}
+        {% for _ in range(report.scouts|length - r.per|length) %}<td>–</td><td>–</td>{% endfor %}
+        <td data-sort-value="{{ r.blend.pot }}" class="intl-blendcell">{{ r.blend.comp }} / <strong>{{ r.blend.pot }}</strong></td>
+        <td class="intl-blendcell"><strong>{{ r.blend.fv }}</strong></td>
+        <td data-sort-value="{{ r.median.pot }}">{{ r.median.comp }} / <strong>{{ r.median.pot }}</strong></td>
+        <td>{{ r.median.fv }}</td>
+        <td>{{ r.blend.risk }}</td>
+        <td data-sort-value="{{ r.conf }}" class="intl-conf intl-conf-{{ r.conf }}">{{ r.conf_label }}</td>
+        <td data-sort-value="{{ r.spread }}">{{ r.spread }}</td>
+        <td data-sort-value="{{ r.blend.surplus }}"><strong>{{ money(r.blend.surplus) }}</strong></td>
+        <td data-sort-value="{{ r.median.surplus }}">{{ money(r.median.surplus) }}</td>
+        <td data-sort-value="{{ r.bids.low }}">{{ money(r.bids.low) }}</td>
+        <td data-sort-value="{{ r.bids.avg }}">{{ money(r.bids.avg) }}</td>
+        <td data-sort-value="{{ r.bids.high }}">{{ money(r.bids.high) }}</td>
+        <td data-sort-value="{{ r.demand or 0 }}" title="{{ r.difficulty }}">{{ money(r.demand) }}</td>
+        <td class="intl-cum" data-sort-value="0">–</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+
+<style>
+  .intl-sub { color:var(--text-dim); font-size:13px; max-width:900px; margin:-4px 0 14px; }
+  .intl-slots { display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:14px; }
+  .intl-slot { border:1px solid var(--border); border-radius:8px; padding:12px; display:flex; flex-direction:column; gap:8px; }
+  .intl-slot-head { font-weight:700; }
+  .intl-slot-meta { font-size:11px; color:var(--text-dim); word-break:break-all; }
+  .intl-slot input[type=text] { background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:4px; padding:5px 8px; font-size:13px; }
+  .intl-slot-actions { display:flex; gap:8px; }
+  .intl-btn { background:none; border:1px solid var(--green); color:var(--green); border-radius:5px; padding:5px 12px; cursor:pointer; font-size:12px; }
+  .intl-btn:hover { background:rgba(78,204,163,0.15); }
+  .intl-msg { font-size:12px; min-height:16px; color:var(--text-dim); }
+  .intl-plan-grid { display:flex; flex-wrap:wrap; gap:14px; align-items:flex-end; }
+  .intl-plan-grid label, .intl-plan-bar label, .intl-filters label { display:flex; flex-direction:column; gap:3px; font-size:11px; color:var(--text-dim); }
+  .intl-filters label { flex-direction:row; align-items:center; gap:6px; }
+  .intl-plan-grid input, .intl-plan-bar select, .intl-filters select, .intl-filters input[type=text] { background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:4px; padding:5px 8px; font-size:13px; }
+  .intl-plan-grid input { width:130px; }
+  .intl-plan-bar { display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; margin-top:14px; }
+  .intl-total { font-size:13px; color:var(--text-dim); }
+  .intl-total strong { color:var(--text); }
+  .intl-note { color:var(--text-dim); font-size:12px; margin:10px 0 0; max-width:900px; }
+  .intl-filters { display:flex; flex-wrap:wrap; gap:16px; align-items:center; margin-bottom:10px; }
+  .intl-count { font-size:12px; color:var(--text-dim); margin-left:auto; }
+  .intl-scroll { overflow-x:auto; }
+  .intl-table { border-collapse:collapse; font-size:12px; white-space:nowrap; }
+  .intl-table th, .intl-table td { padding:4px 7px; border-bottom:1px solid var(--border); text-align:right; }
+  .intl-table th:nth-child(2), .intl-table td:nth-child(2), .intl-table th:nth-child(3), .intl-table td:nth-child(3) { text-align:left; }
+  .intl-group th { text-align:center; font-size:11px; color:var(--text-dim); border-bottom:none; }
+  .intl-scoutcol { color:var(--text); }
+  .intl-blendcell { background:rgba(78,204,163,0.07); }
+  .intl-acc { font-size:9px; color:var(--text-dim); margin-left:2px; }
+  .intl-acc-L, .intl-acc-VL { color:var(--red); }
+  .intl-acc-H, .intl-acc-VH { color:var(--green); }
+  .intl-conf { font-weight:700; }
+  .intl-conf-5, .intl-conf-4 { color:var(--green); }
+  .intl-conf-2, .intl-conf-1 { color:var(--red); }
+  .intl-table tr.intl-in td { background:rgba(78,204,163,0.10); }
+  .intl-table tr.intl-picked td { background:rgba(217,164,65,0.14); }
+  .intl-table tr.intl-hidden { display:none; }
+</style>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const post = (url, body, isForm) => fetch(url, isForm ? {method:'POST', body} :
+      {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)}).then(r => r.json());
+
+  // ── uploads ──
+  document.querySelectorAll('.intl-slot').forEach(card => {
+    const slot = card.dataset.slot, msg = card.querySelector('.intl-msg');
+    card.querySelector('.intl-upload').addEventListener('click', () => {
+      const f = card.querySelector('.intl-file').files[0];
+      if (!f) { msg.textContent = 'Choose a CSV first.'; return; }
+      const fd = new FormData();
+      fd.append('slot', slot); fd.append('file', f); fd.append('label', card.querySelector('.intl-label').value);
+      msg.textContent = 'Uploading and evaluating…';
+      post('/api/international/upload', fd, true).then(r => {
+        if (r.ok) location.reload(); else msg.textContent = r.error || 'Upload failed';
+      }).catch(() => msg.textContent = 'Upload failed');
+    });
+    const clr = card.querySelector('.intl-clear');
+    if (clr) clr.addEventListener('click', () => post('/api/international/clear', {slot: Number(slot)}).then(() => location.reload()));
+  });
+
+  const table = document.getElementById('intl-table');
+  if (!table) return;
+  const DIV = {{ divisor }}, UNIT = "{{ unit|lower }}";
+  const fmt = v => '$' + (v / DIV).toFixed(1) + UNIT;
+  const rows = () => Array.from(table.querySelectorAll('tbody tr'));
+  const $ = id => document.getElementById(id);
+
+  // ── settings ──
+  $('intl-save').addEventListener('click', () => {
+    post('/api/international/settings', {
+      cash: parseFloat($('intl-cash').value) * DIV,
+      tiers: {low: $('intl-t-low').value / 100, avg: $('intl-t-avg').value / 100, high: $('intl-t-high').value / 100}
+    }).then(r => r.ok ? location.reload() : alert(r.error || 'Could not save'));
+  });
+
+  // ── filtering ──
+  function applyFilters() {
+    const kind = $('intl-kind').value, posOnly = $('intl-pos-only').checked;
+    const minConf = parseInt($('intl-minconf').value, 10), q = $('intl-find').value.trim().toLowerCase();
+    let shown = 0;
+    rows().forEach(tr => {
+      let ok = true;
+      if (kind !== 'all' && tr.dataset.kind !== kind) ok = false;
+      if (posOnly && Number(tr.dataset.surplus) <= 0) ok = false;
+      if (Number(tr.dataset.conf) < minConf) ok = false;
+      if (q && !tr.dataset.name.includes(q)) ok = false;
+      tr.classList.toggle('intl-hidden', !ok);
+      if (ok) shown++;
+    });
+    $('intl-shown').textContent = shown;
+    recompute();
+  }
+
+  // ── planner ──
+  function tier() { return $('intl-tier').value; }
+  function cash() { return parseFloat($('intl-cash').value) * DIV || 0; }
+  function recompute() {
+    const t = tier(); let cum = 0, sel = 0, selN = 0, selS = 0;
+    rows().forEach(tr => {
+      const cell = tr.querySelector('.intl-cum');
+      tr.classList.remove('intl-in');
+      if (tr.classList.contains('intl-hidden')) { cell.textContent = '–'; return; }
+      cum += Number(tr.dataset[t]);
+      cell.textContent = fmt(cum); cell.dataset.sortValue = cum;
+      if (cum <= cash()) tr.classList.add('intl-in');
+      const picked = tr.querySelector('.intl-pick').checked;
+      tr.classList.toggle('intl-picked', picked);
+      if (picked) { sel += Number(tr.dataset[t]); selN++; selS += Number(tr.dataset.surplus); }
+    });
+    $('intl-sel-total').textContent = fmt(sel);
+    $('intl-cash-show').textContent = fmt(cash());
+    $('intl-remaining').textContent = fmt(cash() - sel);
+    $('intl-remaining').style.color = (cash() - sel) < 0 ? 'var(--red)' : '';
+    $('intl-sel-count').textContent = selN;
+    $('intl-sel-surplus').textContent = fmt(selS);
+  }
+  ['intl-kind','intl-pos-only','intl-minconf'].forEach(id => $(id).addEventListener('change', applyFilters));
+  $('intl-find').addEventListener('input', applyFilters);
+  $('intl-tier').addEventListener('change', recompute);
+  $('intl-cash').addEventListener('input', recompute);
+  table.addEventListener('change', e => { if (e.target.classList.contains('intl-pick')) recompute(); });
+  $('intl-unselect').addEventListener('click', () => { rows().forEach(tr => tr.querySelector('.intl-pick').checked = false); recompute(); });
+  $('intl-autofill').addEventListener('click', () => {
+    const t = tier(); let used = 0;
+    const order = rows().filter(tr => !tr.classList.contains('intl-hidden'))
+      .sort((a, b) => Number(b.dataset.surplus) - Number(a.dataset.surplus));
+    rows().forEach(tr => tr.querySelector('.intl-pick').checked = false);
+    order.forEach(tr => {
+      const c = Number(tr.dataset[t]);
+      if (c > 0 && used + c <= cash()) { tr.querySelector('.intl-pick').checked = true; used += c; }
+    });
+    recompute();
+  });
+  table.addEventListener('click', () => setTimeout(recompute, 0));   // re-sum after a header sort
+  applyFilters();
+})();
+</script>
+{% endblock %}

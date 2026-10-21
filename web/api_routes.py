@@ -271,6 +271,66 @@ def api_depth_chart_role():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@api_bp.route("/api/international/upload", methods=["POST"])
+def api_international_upload():
+    """Store one scout's international 'all columns' CSV in slot 0-2."""
+    import datetime
+    import international_queries as iq
+    try:
+        slot = int(request.form.get("slot", "-1"))
+    except ValueError:
+        slot = -1
+    f = request.files.get("file")
+    if slot not in (0, 1, 2) or f is None:
+        return jsonify({"ok": False, "error": "Choose a slot (0-2) and a CSV file"}), 400
+    raw = f.read()
+    if len(raw) > 8_000_000:
+        return jsonify({"ok": False, "error": "File too large (8 MB max)"}), 400
+    text = raw.decode("utf-8-sig", errors="replace")
+    parsed = iq.parse_scout_csv(text)
+    if not parsed:
+        return jsonify({"ok": False, "error": "No players found - expected the OOTP 'all columns' view with an ID column"}), 400
+    label = (request.form.get("label") or "").strip()[:12] or iq.scout_label_from_filename(f.filename)
+    store = iq.load_store(g.league_dir)
+    store["slots"][slot] = {"label": label, "filename": f.filename, "csv": text,
+                            "uploaded_at": datetime.datetime.now().isoformat(timespec="seconds")}
+    iq.save_store(g.league_dir, store)
+    return jsonify({"ok": True, "label": label, "players": len(parsed)})
+
+
+@api_bp.route("/api/international/settings", methods=["POST"])
+def api_international_settings():
+    import international_queries as iq
+    data = request.get_json(silent=True) or {}
+    store = iq.load_store(g.league_dir)
+    try:
+        if "cash" in data:
+            store["cash"] = max(0, int(float(data["cash"])))
+        if "tiers" in data:
+            t = {k: float(data["tiers"][k]) for k in ("low", "avg", "high")}
+            if not all(0 < v <= 1 for v in t.values()):
+                raise ValueError("bid shares must be between 0 and 1")
+            store["tiers"] = t
+    except (KeyError, TypeError, ValueError) as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    iq.save_store(g.league_dir, store)
+    return jsonify({"ok": True})
+
+
+@api_bp.route("/api/international/clear", methods=["POST"])
+def api_international_clear():
+    import international_queries as iq
+    data = request.get_json(silent=True) or {}
+    store = iq.load_store(g.league_dir)
+    slot = data.get("slot")
+    if slot in (0, 1, 2):
+        store["slots"][slot] = None
+    elif slot == "all":
+        store["slots"] = [None, None, None]
+    iq.save_store(g.league_dir, store)
+    return jsonify({"ok": True})
+
+
 @api_bp.route("/api/retained-salary", methods=["GET", "POST"])
 def api_retained_salary():
     """List, set or clear salary another team keeps paying for a player we hold.

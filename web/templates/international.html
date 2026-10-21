@@ -71,6 +71,8 @@
     <label>Min confidence
       <select id="intl-minconf"><option value="1">Any</option><option value="2">Low+</option><option value="3">Average+</option><option value="4">High+</option><option value="5">Very High</option></select>
     </label>
+    <label title="Dims rows whose personality type is (or is inferred to be) Selfish, Outspoken, Unmotivated or Disruptive."><input type="checkbox" id="intl-negpers"> Dim bad personalities</label>
+    <label title="Bolds rows whose personality type is (or is inferred to be) Fan Fav, Sparkplug, Captain, Humble or Prankster."><input type="checkbox" id="intl-pospers"> Highlight good personalities</label>
     <input type="text" id="intl-find" placeholder="Filter name…" autocomplete="off">
     <span class="intl-count"><span id="intl-shown">0</span> shown</span>
   </div>
@@ -118,7 +120,7 @@
       {% set is_p = r.pos in ('SP','RP','CL','P') %}
       <tr data-kind="{{ 'P' if is_p else 'H' }}" data-conf="{{ r.conf }}" data-surplus="{{ r.blend.surplus }}"
           data-low="{{ r.bids.low }}" data-avg="{{ r.bids.avg }}" data-high="{{ r.bids.high }}"
-          data-name="{{ r.name|lower }}">
+          data-name="{{ r.name|lower }}" data-ptype="{{ r.personality.type_class }}">
         <td><input type="checkbox" class="intl-pick"></td>
         <td><a href="/player/{{ r.pid }}">{{ r.name }}</a></td>
         <td data-sort-value="0">{{ r.pos }}</td>
@@ -285,6 +287,11 @@
   }
   ['intl-kind','intl-pos-only','intl-minconf'].forEach(id => $(id).addEventListener('change', applyFilters));
   $('intl-find').addEventListener('input', applyFilters);
+  function persStyle() {
+    if (typeof applyPersDevFilters === 'function')
+      applyPersDevFilters('#intl-table tbody tr', {negId: 'intl-negpers', posId: 'intl-pospers'});
+  }
+  ['intl-negpers', 'intl-pospers'].forEach(id => $(id).addEventListener('change', persStyle));
   $('intl-tier').addEventListener('change', recompute);
   $('intl-cash').addEventListener('input', recompute);
   table.addEventListener('change', e => { if (e.target.classList.contains('intl-pick')) recompute(); });
@@ -302,6 +309,7 @@
   });
   table.addEventListener('click', () => setTimeout(recompute, 0));   // re-sum after a header sort
   applyFilters();
+  persStyle();
 })();
 </script>
 {% endblock %}

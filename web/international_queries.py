@@ -98,6 +98,45 @@ def _num(v):
         return None
 
 
+def _trait(v):
+    v = (v or "").strip().upper()
+    return v if v in ("H", "N", "L") else None
+
+
+def combine_traits(reports: list[dict]) -> dict:
+    """One value per makeup trait across scouts: the accuracy-weighted majority
+    of the scouts that actually know it (None if none do; ties resolve to N)."""
+    out = {}
+    for k in ("lead", "loy", "adaptability", "greed", "wrk_ethic", "int_"):
+        score: dict[str, float] = {}
+        for r in reports:
+            v = (r.get("traits") or {}).get(k)
+            if v:
+                score[v] = score.get(v, 0.0) + ACC_WEIGHT.get(r["acc"], 1.0)
+        if not score:
+            out[k] = None
+            continue
+        best = max(score.values())
+        winners = [v for v, sc in score.items() if abs(sc - best) < 1e-9]
+        out[k] = winners[0] if len(winners) == 1 else "N"
+    return out
+
+
+def personality_summary(reports: list[dict]) -> dict:
+    """The two display fields: makeup traits (buffs / concerns) and personality
+    type. The game hides the real Type for amateurs, so when it is Unknown the
+    app's existing trait-combination inference supplies a 'Likely ...' guess."""
+    from team_queries import _personality_fields
+    t = combine_traits(reports)
+    raw = next((r["raw_type"] for r in reports if r.get("raw_type") and r["raw_type"] != "Unknown"), "Unknown")
+    f = _personality_fields(t["int_"], t["wrk_ethic"], t["lead"], t["loy"], t["greed"],
+                            t["adaptability"], raw)
+    known = sum(1 for v in t.values() if v)
+    return {"buffs": f["buffs"], "concerns": f["concerns"],
+            "type": f["personality_type"], "type_class": f["personality_type_class"],
+            "known": known, "traits": t}
+
+
 def parse_money(text):
     """'$850' -> 850, '$2k' -> 2000, '$1.2M' -> 1_200_000; None if not a figure."""
     m = re.match(r"^\$?\s*([\d.,]+)\s*([kKmM]?)$", (text or "").strip())
@@ -152,6 +191,13 @@ def parse_scout_csv(text: str) -> dict:
             "acc_label": acc_label.strip() or "Average",
             "wrk_ethic": (cell(r, "WE") or "N").strip() or "N",
             "int_": (cell(r, "INT") or "N").strip() or "N",
+            # Makeup traits as the scout sees them: H / N / L, or U = not yet known.
+            "traits": {
+                "lead": _trait(cell(r, "LEA")), "loy": _trait(cell(r, "LOY")),
+                "adaptability": _trait(cell(r, "AD")), "greed": _trait(cell(r, "FIN")),
+                "wrk_ethic": _trait(cell(r, "WE")), "int_": _trait(cell(r, "INT")),
+            },
+            "raw_type": (cell(r, "Type") or "").strip(),
             "demand": parse_money(cell(r, "DEM") or ""),
             "difficulty": (cell(r, "Sign") or "").strip(),
             "ratings": ratings,
@@ -411,9 +457,10 @@ def build_report(league_dir) -> dict:
             for k, rep in enumerate(reports):
                 variants.append({**rep, "vid": pid * 10 + k})
             if len(reports) >= 2:
+                ct = combine_traits(reports)
                 for tag, ratings in (("blend", blend_ratings(reports)), ("median", median_ratings(reports))):
                     variants.append({**base, "vid": pid * 10 + _SCOUT_OFFSET[tag], "ratings": ratings,
-                                     "acc": "A"})
+                                     "acc": "A", "wrk_ethic": ct["wrk_ethic"] or "N", "int_": ct["int_"] or "N"})
             else:
                 variants.append({**base, "vid": pid * 10 + 3})
                 variants.append({**base, "vid": pid * 10 + 4})
@@ -446,6 +493,7 @@ def build_report(league_dir) -> dict:
             "conf": conf, "conf_label": CONF_LABEL[conf],
             "demand": max(demands) if demands else None,
             "difficulty": base.get("difficulty"),
+            "personality": personality_summary(reports),
             "bids": bids_for(bl["surplus"], store["tiers"]),
         })
     rows.sort(key=lambda r: (-r["blend"]["surplus"], -r["blend"]["fv"], r["name"]))

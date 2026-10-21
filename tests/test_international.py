@@ -53,3 +53,20 @@ def test_bids_are_shares_of_surplus():
     b = iq.bids_for(600_000)
     assert b == {"low": 100_000, "avg": 150_000, "high": 200_000}
     assert iq.bids_for(0) == {"low": 0, "avg": 0, "high": 0}
+
+
+def test_combine_traits_takes_known_values_and_weights_by_accuracy():
+    reps = [
+        {"acc": "VH", "traits": {"lead": "H", "loy": None, "adaptability": "N", "greed": None, "wrk_ethic": "H", "int_": None}},
+        {"acc": "L", "traits": {"lead": "L", "loy": "N", "adaptability": None, "greed": None, "wrk_ethic": "H", "int_": None}},
+    ]
+    t = iq.combine_traits(reps)
+    assert t["lead"] == "H"                    # the more accurate scout wins the split
+    assert t["loy"] == "N" and t["adaptability"] == "N"
+    assert t["greed"] is None and t["int_"] is None   # nobody knows
+
+
+def test_parse_marks_unknown_trait_as_none():
+    csv_text = "ID,POS,Name,First Name,Last Name,Age,SctAcc,LEA,LOY,AD,FIN,WE,INT,Type\n1,SS,x,A,B,16,High,U,H,N,L,H,U,Unknown\n"
+    p = iq.parse_scout_csv(csv_text)[1]
+    assert p["traits"] == {"lead": None, "loy": "H", "adaptability": "N", "greed": "L", "wrk_ethic": "H", "int_": None}

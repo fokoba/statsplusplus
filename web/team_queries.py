@@ -711,8 +711,11 @@ def get_roster_hitters(team_id=None):
         WHERE p.team_id=? AND p.level='1' AND COALESCE(p.role,0) NOT IN (11,12,13)
     """, (ed, tid)).fetchall()
 
-    # Two-way pitchers with meaningful batting (PA >= 30)
-    twp = conn.execute("""
+    # Two-way pitchers with meaningful batting (PA >= 30). In a No-DH league every
+    # pitcher bats, so batting is not a two-way signal there: skip the detection
+    # entirely (no pitchers in the hitter list, no TW badge).
+    _no_dh = (get_cfg().settings.get("dh_rule") == "No DH")
+    twp = [] if _no_dh else conn.execute("""
         SELECT p.player_id, p.name, p.age, p.pos, p.role,
                ps.ovr, ps.surplus, ps.surplus_yr1,
                r.composite_score,
@@ -910,7 +913,7 @@ def get_roster_pitchers(team_id=None):
     # Detect two-way pitchers
     pitcher_pids = {p["player_id"] for p in players}
     twp_pids = set()
-    if pitcher_pids:
+    if pitcher_pids and get_cfg().settings.get("dh_rule") != "No DH":
         for r in conn.execute(
             "SELECT player_id FROM mlb_batting_stats WHERE year=? AND split_id=1 AND pa>=30 AND player_id IN ({})".format(
                 ",".join("?" * len(pitcher_pids))),

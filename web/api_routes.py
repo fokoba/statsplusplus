@@ -331,6 +331,37 @@ def api_international_clear():
     return jsonify({"ok": True})
 
 
+@api_bp.route("/api/trade-center/settings", methods=["POST"])
+def api_trade_center_settings():
+    import trade_center_queries as tc
+    data = request.get_json(silent=True) or {}
+    st = tc.load_settings(g.league_dir)
+    try:
+        for k in ("pennant_value", "title_value"):
+            if k in data:
+                st[k] = None if data[k] in (None, "") else max(0, float(data[k]))
+        if "untouchables" in data:
+            st["untouchables"] = sorted({int(x) for x in data["untouchables"]})
+    except (TypeError, ValueError) as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    tc.save_settings(g.league_dir, st)
+    return jsonify({"ok": True})
+
+
+@api_bp.route("/api/trade-center/whatif", methods=["POST"])
+def api_trade_center_whatif():
+    import queries
+    import trade_center_queries as tc
+    data = request.get_json(silent=True) or {}
+    try:
+        inc = [int(x) for x in data.get("in", [])]
+        out = [int(x) for x in data.get("out", [])]
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "bad player ids"}), 400
+    res = tc.what_if(queries.get_my_team_id(), g.league_dir, inc, out)
+    return jsonify({"ok": True, **res})
+
+
 @api_bp.route("/api/retained-salary", methods=["GET", "POST"])
 def api_retained_salary():
     """List, set or clear salary another team keeps paying for a player we hold.

@@ -675,6 +675,24 @@ def offseason():
     )
 
 
+@app.route("/trade-center")
+def trade_center():
+    """Pennant race, deadline value of a win, and the trade-partner finder."""
+    import trade_center_queries as tc
+    from web_league_context import money_unit, money_divisor
+    cfg = _get_cfg()
+    ln = cfg.settings.get("league", "League")
+    tid = queries.get_my_team_id()
+    data = tc.build(tid, g.league_dir)
+    return render_template(
+        "trade_center.html",
+        breadcrumbs=[{"label": ln, "url": "/league"},
+                     {"label": "Trade Center", "url": "/trade-center"}],
+        d=data, tid=tid, team_name=cfg.team_names_map.get(tid, "My Team"),
+        unit=money_unit(), divisor=money_divisor(),
+    )
+
+
 @app.route("/international")
 def international():
     """Multi-scout international amateur valuation + bid planner."""

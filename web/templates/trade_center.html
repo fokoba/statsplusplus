@@ -1,0 +1,203 @@
+{% extends "base.html" %}
+{% block content %}
+{% macro money(v) -%}{%- if v is none -%}–{%- else -%}{{ '-' if v < 0 else '' }}${{ '%.1f'|format((v|abs) / divisor) }}{{ unit|lower }}{%- endif -%}{%- endmacro %}
+{% macro pct(v) -%}{{ '%.1f'|format(v * 100) }}%{%- endmacro %}
+
+<h1 class="page-title">🤝 Trade Center — {{ team_name }}</h1>
+<p class="tc-sub">{{ d.games_left }} games left of {{ d.gps }}{% if d.magic %} · magic number <strong>{{ d.magic }}</strong>{% endif %}. Odds come from simulating every remaining game {{ '{:,}'.format(20000) }} times from each club's run-differential strength (regressed toward .500), then a best-of-7 World Series.</p>
+
+{# ── Win value ── #}
+<div class="panel">
+  <h2>What a win is worth right now</h2>
+  <div class="tc-cards">
+    <div class="tc-card"><div class="tc-k">Pennant odds</div><div class="tc-v">{{ pct(d.now.pennant) }}</div></div>
+    <div class="tc-card"><div class="tc-k">Title odds</div><div class="tc-v">{{ pct(d.now.title) }}</div></div>
+    <div class="tc-card"><div class="tc-k">+1 WAR (full-season rate) adds</div><div class="tc-v">{{ '%+.1f'|format(d.marginal.pennant * 100) }} pts pennant · {{ '%+.1f'|format(d.marginal.title * 100) }} pts title</div></div>
+    <div class="tc-card tc-hl"><div class="tc-k">Deadline value of +1 WAR</div><div class="tc-v">{{ money(d.marginal.dollars) }}</div></div>
+  </div>
+  <table class="tc-table">
+    <thead><tr><th>WAR added (full-season rate)</th>{% for c in d.curve %}<th>{{ '%+d'|format(c.war) }}</th>{% endfor %}</tr></thead>
+    <tbody>
+      <tr><td>Pennant</td>{% for c in d.curve %}<td{% if c.war == 0 %} class="tc-now"{% endif %}>{{ pct(c.pennant) }}</td>{% endfor %}</tr>
+      <tr><td>Title</td>{% for c in d.curve %}<td{% if c.war == 0 %} class="tc-now"{% endif %}>{{ pct(c.title) }}</td>{% endfor %}</tr>
+      <tr><td>Value vs today</td>{% for c in d.curve %}<td{% if c.war == 0 %} class="tc-now"{% endif %}>{{ money(c.dollars) }}</td>{% endfor %}</tr>
+    </tbody>
+  </table>
+  <div class="tc-values">
+    <label>Value of a pennant ({{ unit|lower }}) <input type="number" step="any" id="tc-pv" value="{{ '%.1f'|format(d.pennant_value / divisor) }}"></label>
+    <label>Value of a title ({{ unit|lower }}) <input type="number" step="any" id="tc-tv" value="{{ '%.1f'|format(d.title_value / divisor) }}"></label>
+    <button class="tc-btn" id="tc-save-values">Save</button>
+    <button class="tc-btn tc-ghost" id="tc-reset-values" title="Go back to the defaults derived from your gate revenue">Use defaults</button>
+  </div>
+  <p class="tc-note">A player "worth X WAR" means X per full season; only the share for the games left is realised this year. Defaults: {{ d.value_note }}; a title is set to twice that. Compare these dollars with a player's long-term surplus to judge whether a rental is worth what it costs.</p>
+</div>
+
+{# ── What if ── #}
+<div class="panel">
+  <h2>What if I make this deal?</h2>
+  <div class="tc-wi">
+    <div><div class="tc-k">Acquire</div><input type="text" class="tc-search" data-side="in" placeholder="Search any player…" autocomplete="off"><div class="tc-results" data-side="in"></div><div class="tc-chips" id="tc-in"></div></div>
+    <div><div class="tc-k">Send away</div><input type="text" class="tc-search" data-side="out" placeholder="Search your players…" autocomplete="off"><div class="tc-results" data-side="out"></div><div class="tc-chips" id="tc-out"></div></div>
+  </div>
+  <button class="tc-btn" id="tc-run">Simulate</button>
+  <div id="tc-wi-result" class="tc-wi-result"></div>
+  <p class="tc-note">An incoming player is credited with how much better he is than the man he'd replace (your starter at his position, 4th starter, or 5th reliever). An outgoing starter costs the gap to his replacement.</p>
+</div>
+
+{# ── Race ── #}
+<div class="panel">
+  <h2>Pennant race</h2>
+  <div class="tc-race">
+  {% for lg in d.race %}
+    <table class="tc-table">
+      <thead><tr><th>Team</th><th>W</th><th>L</th><th title="Run-differential strength regressed toward .500">True %</th><th>Proj W</th><th>Pennant</th><th>Title</th></tr></thead>
+      <tbody>
+      {% for r in lg.rows %}
+        <tr class="{{ 'tc-mine' if r.mine }}"><td>{{ r.name }}</td><td>{{ r.w }}</td><td>{{ r.l }}</td><td>{{ '%.3f'|format(r.true_pct) }}</td><td>{{ '%.1f'|format(r.exp_w) }}</td><td>{{ pct(r.pennant) }}</td><td>{{ pct(r.title) }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% endfor %}
+  </div>
+</div>
+
+{# ── Partner finder ── #}
+<div class="panel">
+  <h2>Trade partners</h2>
+  <p class="tc-note">Your weakest slots against the league ({% for n in d.my_needs %}<strong>{{ n.slot }}</strong> {{ n.who }} {{ n.comp }} vs avg {{ n.avg }}{{ ', ' if not loop.last }}{% endfor %}). Clubs are ranked by the upgrades they can give you, weighted toward sellers, plus how many of their weak spots your non-untouchable assets fill.</p>
+  <table class="tc-table tc-partners">
+    <thead><tr><th>Club</th><th>Status</th><th>Pennant</th><th>Their needs</th><th>Upgrades they have for you</th><th>Your assets that fit them</th></tr></thead>
+    <tbody>
+    {% for p in d.partners %}
+      <tr>
+        <td><a href="/team/{{ p.tid }}">{{ p.name }}</a></td>
+        <td><span class="tc-status tc-{{ p.status_cls }}">{{ p.status }}</span></td>
+        <td>{{ pct(p.pennant) }}</td>
+        <td>{{ p.needs|join(', ') or '—' }}</td>
+        <td class="tc-list">{% for x in p.targets %}<div><a href="/player/{{ x.pid }}">{{ x.name }}</a> <span class="tc-dim">{{ x.slot }} {{ x.comp }}</span> <strong>+{{ x.gain }}</strong> WAR <span class="tc-dim">· {{ money(x.season_dollars) }} now · surplus {{ money(x.surplus) }}</span></div>{% else %}<span class="tc-dim">—</span>{% endfor %}</td>
+        <td class="tc-list">{% for x in p.fits %}<div><a href="/player/{{ x.pid }}">{{ x.name }}</a> <span class="tc-dim">{{ x.slot }} {{ x.comp }}{% if x.fv %} FV {{ x.fv }}{% endif %}{% if x.starter %} · your starter{% endif %} · surplus {{ money(x.surplus) }}</span></div>{% else %}<span class="tc-dim">—</span>{% endfor %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{# ── Untouchables ── #}
+<div class="panel">
+  <details>
+    <summary><strong>Untouchables</strong> <span class="tc-dim">— players never suggested as trade assets ({{ d.untouch_list|selectattr('untouchable')|list|length }} marked)</span></summary>
+    <div class="tc-untouch">
+      {% for u in d.untouch_list %}
+      <label><input type="checkbox" class="tc-ut" value="{{ u.pid }}" {{ 'checked' if u.untouchable }}> {{ u.name }} <span class="tc-dim">{{ u.slot or '' }} {{ u.comp }} · {{ money(u.surplus) }}</span></label>
+      {% endfor %}
+    </div>
+    <button class="tc-btn" id="tc-save-ut">Save untouchables</button>
+  </details>
+</div>
+
+<style>
+  .tc-sub { color:var(--text-dim); font-size:13px; margin:-4px 0 14px; max-width:900px; }
+  .tc-cards { display:flex; flex-wrap:wrap; gap:12px; margin-bottom:14px; }
+  .tc-card { border:1px solid var(--border); border-radius:8px; padding:10px 14px; min-width:170px; }
+  .tc-card.tc-hl { border-color:var(--green); }
+  .tc-k { font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.4px; margin-bottom:4px; }
+  .tc-v { font-size:18px; font-weight:700; }
+  .tc-table { border-collapse:collapse; font-size:12px; margin:6px 0; }
+  .tc-table th, .tc-table td { padding:4px 9px; border-bottom:1px solid var(--border); text-align:right; vertical-align:top; }
+  .tc-table th:first-child, .tc-table td:first-child { text-align:left; }
+  .tc-now { background:rgba(78,204,163,0.10); font-weight:700; }
+  .tc-mine td { background:rgba(78,204,163,0.10); font-weight:700; }
+  .tc-race { display:flex; flex-wrap:wrap; gap:24px; }
+  .tc-values { display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; margin-top:10px; }
+  .tc-values label { display:flex; flex-direction:column; gap:3px; font-size:11px; color:var(--text-dim); }
+  .tc-values input, .tc-search { background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:4px; padding:5px 8px; font-size:13px; width:160px; }
+  .tc-search { width:240px; }
+  .tc-btn { background:none; border:1px solid var(--green); color:var(--green); border-radius:5px; padding:5px 12px; cursor:pointer; font-size:12px; }
+  .tc-btn:hover { background:rgba(78,204,163,0.15); }
+  .tc-ghost { border-color:var(--border); color:var(--text-dim); }
+  .tc-note { color:var(--text-dim); font-size:12px; max-width:900px; margin:8px 0 0; }
+  .tc-dim { color:var(--text-dim); }
+  .tc-wi { display:flex; flex-wrap:wrap; gap:24px; margin-bottom:10px; }
+  .tc-results { position:absolute; z-index:20; background:var(--surface); border:1px solid var(--border); border-radius:6px; min-width:240px; }
+  .tc-results a { display:block; padding:5px 9px; font-size:12px; color:var(--text); cursor:pointer; }
+  .tc-results a:hover { background:rgba(78,204,163,0.12); }
+  .tc-chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; max-width:360px; }
+  .tc-chip { border:1px solid var(--border); border-radius:12px; padding:2px 9px; font-size:12px; cursor:pointer; }
+  .tc-chip:hover { border-color:var(--red); }
+  .tc-wi-result { margin-top:12px; font-size:13px; }
+  .tc-list div { white-space:nowrap; text-align:left; }
+  .tc-partners td { text-align:left; }
+  .tc-status { font-weight:700; font-size:11px; padding:1px 7px; border-radius:9px; border:1px solid var(--border); }
+  .tc-seller { color:var(--green); border-color:var(--green); }
+  .tc-bubble { color:var(--amber,#d9a441); border-color:var(--amber,#d9a441); }
+  .tc-buyer { color:var(--red); border-color:var(--red); }
+  .tc-untouch { display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:4px 16px; margin:10px 0; font-size:12px; }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const DIV = {{ divisor }}, UNIT = "{{ unit|lower }}";
+  const post = (url, body) => fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)}).then(r => r.json());
+  const fmt = v => (v < 0 ? '-' : '') + '$' + (Math.abs(v) / DIV).toFixed(1) + UNIT;
+  const pct = v => (v * 100).toFixed(1) + '%';
+
+  document.getElementById('tc-save-values').addEventListener('click', () => post('/api/trade-center/settings', {
+    pennant_value: parseFloat(document.getElementById('tc-pv').value) * DIV,
+    title_value: parseFloat(document.getElementById('tc-tv').value) * DIV,
+  }).then(() => location.reload()));
+  document.getElementById('tc-reset-values').addEventListener('click', () =>
+    post('/api/trade-center/settings', {pennant_value: null, title_value: null}).then(() => location.reload()));
+  document.getElementById('tc-save-ut').addEventListener('click', () => post('/api/trade-center/settings', {
+    untouchables: Array.from(document.querySelectorAll('.tc-ut:checked')).map(c => c.value)
+  }).then(() => location.reload()));
+
+  // What-if picker
+  const picked = {in: new Map(), out: new Map()};
+  function renderChips(side) {
+    const box = document.getElementById('tc-' + side);
+    box.innerHTML = '';
+    picked[side].forEach((label, pid) => {
+      const c = document.createElement('span');
+      c.className = 'tc-chip'; c.textContent = label + ' ✕'; c.title = 'Remove';
+      c.addEventListener('click', () => { picked[side].delete(pid); renderChips(side); });
+      box.appendChild(c);
+    });
+  }
+  document.querySelectorAll('.tc-search').forEach(inp => {
+    const side = inp.dataset.side, res = document.querySelector('.tc-results[data-side="' + side + '"]');
+    let t = null;
+    inp.addEventListener('input', () => {
+      clearTimeout(t);
+      const q = inp.value.trim();
+      if (q.length < 2) { res.innerHTML = ''; return; }
+      t = setTimeout(() => fetch('/api/player-search?q=' + encodeURIComponent(q)).then(r => r.json()).then(list => {
+        res.innerHTML = '';
+        (list || []).slice(0, 8).forEach(p => {
+          const a = document.createElement('a');
+          a.textContent = p.name + ' · ' + p.pos + ' · ' + p.team + (p.ovr ? ' · ' + p.ovr : '');
+          a.addEventListener('click', () => { picked[side].set(p.pid, p.name); renderChips(side); res.innerHTML = ''; inp.value = ''; });
+          res.appendChild(a);
+        });
+      }), 200);
+    });
+  });
+  document.getElementById('tc-run').addEventListener('click', () => {
+    const out = document.getElementById('tc-wi-result');
+    out.textContent = 'Simulating…';
+    post('/api/trade-center/whatif', {in: [...picked.in.keys()], out: [...picked.out.keys()]}).then(r => {
+      if (!r.ok) { out.textContent = r.error || 'Failed'; return; }
+      const lines = r.lines.map(l => (l.dir === 'in' ? '+ ' : '− ') + l.name + ' (' + l.slot + ') ' + (l.war >= 0 ? '+' : '') + l.war + ' WAR').join('<br>');
+      out.innerHTML = '<div>' + (lines || 'No MLB players selected') + '</div>' +
+        '<div style="margin-top:6px"><strong>' + (r.delta_war >= 0 ? '+' : '') + r.delta_war + ' WAR</strong> (full-season rate) → ' +
+        'pennant ' + pct(r.pennant_before) + ' → <strong>' + pct(r.pennant_after) + '</strong>, ' +
+        'title ' + pct(r.title_before) + ' → <strong>' + pct(r.title_after) + '</strong>, ' +
+        'worth <strong>' + fmt(r.dollars) + '</strong> this season.</div>' +
+        '<div class="tc-dim" style="margin-top:4px">Long-term surplus in ' + fmt(r.surplus_in) + ' vs out ' + fmt(r.surplus_out) +
+        ' (net ' + fmt(r.surplus_in - r.surplus_out) + ').</div>';
+    }).catch(() => out.textContent = 'Failed');
+  });
+})();
+</script>
+{% endblock %}

@@ -675,6 +675,21 @@ def offseason():
     )
 
 
+@app.route("/season")
+def season_pulse():
+    """Luck vs true talent, and the rest-of-season schedule outlook."""
+    import season_pulse_queries as sp
+    cfg = _get_cfg()
+    ln = cfg.settings.get("league", "League")
+    tid = queries.get_my_team_id()
+    data = sp.build(tid, g.league_dir)
+    return render_template(
+        "season.html",
+        breadcrumbs=[{"label": ln, "url": "/league"}, {"label": "Season Pulse", "url": "/season"}],
+        d=data, tid=tid, team_name=cfg.team_names_map.get(tid, "My Team"),
+    )
+
+
 @app.route("/trade-center")
 def trade_center():
     """Pennant race, deadline value of a win, and the trade-partner finder."""

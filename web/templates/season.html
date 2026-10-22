@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% block content %}
+{% macro wl(s) -%}{{ s.w }}–{{ s.l }}{%- endmacro %}
+{% macro sgn(v, f='%+.1f') -%}{{ f|format(v) }}{%- endmacro %}
+{% set t = d.team %}{% set r = d.ros %}
+
+<h1 class="page-title">📈 Season Pulse — {{ team_name }}</h1>
+<p class="sp-sub">As of {{ d.game_date }}. Is the record real, who is riding luck, and what the rest of the schedule looks like.</p>
+
+{# ── Luck vs true talent ── #}
+<div class="panel">
+  <h2>Record vs true talent</h2>
+  <div class="sp-cards">
+    <div class="sp-card"><div class="sp-k">Record</div><div class="sp-v">{{ wl(t.total) }}</div><div class="sp-d">{{ t.total.rs }} RS · {{ t.total.ra }} RA · {{ sgn(t.total.diff, '%+d') }}</div></div>
+    <div class="sp-card"><div class="sp-k">Pythagorean record</div><div class="sp-v">{{ '%.1f'|format(t.pyth_w) }}–{{ '%.1f'|format(t.total.n - t.pyth_w) }}</div><div class="sp-d">what the run differential earns</div></div>
+    <div class="sp-card {{ 'sp-good' if t.luck >= 2 else 'sp-bad' if t.luck <= -2 else '' }}"><div class="sp-k">Luck</div><div class="sp-v">{{ sgn(t.luck) }} wins</div><div class="sp-d">{% if t.luck >= 2 %}winning more than the runs say{% elif t.luck <= -2 %}unlucky — runs say better{% else %}record matches the runs{% endif %}</div></div>
+    <div class="sp-card"><div class="sp-k">One-run games</div><div class="sp-v">{{ wl(t.one_run) }}</div><div class="sp-d">usually regress toward .500</div></div>
+    <div class="sp-card"><div class="sp-k">Blowouts (5+ runs)</div><div class="sp-v">{{ wl(t.blowout) }}</div><div class="sp-d">the truest talent signal</div></div>
+    <div class="sp-card"><div class="sp-k">Home / road</div><div class="sp-v">{{ wl(t.home) }} / {{ wl(t.road) }}</div><div class="sp-d">diff {{ sgn(t.home.diff, '%+d') }} / {{ sgn(t.road.diff, '%+d') }}</div></div>
+  </div>
+
+  {% if t.trend %}
+  {% set maxd = (t.trend|map(attribute='diff')|map('abs')|max) or 1 %}
+  <div class="sp-k" style="margin-top:12px">Run differential, rolling 15 games</div>
+  <svg class="sp-trend" viewBox="0 0 600 120" preserveAspectRatio="none">
+    <line x1="0" y1="60" x2="600" y2="60" class="sp-axis"/>
+    <polyline class="sp-line" points="{% for p in t.trend %}{{ (loop.index0 * 600 / ([t.trend|length - 1, 1]|max))|round(1) }},{{ (60 - p.diff * 55 / maxd)|round(1) }} {% endfor %}"/>
+  </svg>
+  <div class="sp-trend-lbl"><span>{{ t.trend[0].date }}</span><span>±{{ maxd }} runs</span><span>{{ t.trend[-1].date }}</span></div>
+  {% endif %}
+
+  <div class="sp-two">
+    <table class="sp-table">
+      <thead><tr><th>Month</th><th>W–L</th><th>Diff</th><th>Pyth W</th><th>Luck</th></tr></thead>
+      <tbody>{% for m in t.months %}<tr><td>{{ m.month }}</td><td>{{ wl(m) }}</td><td>{{ sgn(m.diff, '%+d') }}</td><td>{{ '%.1f'|format(m.pyth_w) }}</td><td class="{{ 'sp-pos' if m.w - m.pyth_w >= 1.5 else 'sp-neg' if m.w - m.pyth_w <= -1.5 }}">{{ sgn(m.w - m.pyth_w) }}</td></tr>{% endfor %}</tbody>
+    </table>
+    <table class="sp-table">
+      <thead><tr><th>Opponent</th><th>W–L</th><th>RS</th><th>RA</th><th>Diff</th></tr></thead>
+      <tbody>{% for o in t.by_opp %}<tr><td><a href="/team/{{ o.tid }}">{{ o.name }}</a></td><td>{{ wl(o) }}</td><td>{{ o.rs }}</td><td>{{ o.ra }}</td><td>{{ sgn(o.diff, '%+d') }}</td></tr>{% endfor %}</tbody>
+    </table>
+    <table class="sp-table">
+      <thead><tr><th>League luck</th><th>W–L</th><th>Pyth W</th><th>Luck</th></tr></thead>
+      <tbody>{% for o in d.league %}<tr class="{{ 'sp-mine' if o.tid == tid }}"><td>{{ o.name }}</td><td>{{ wl(o) }}</td><td>{{ '%.1f'|format(o.pyth_w) }}</td><td class="{{ 'sp-pos' if o.luck >= 2 else 'sp-neg' if o.luck <= -2 }}">{{ sgn(o.luck) }}</td></tr>{% endfor %}</tbody>
+    </table>
+  </div>
+</div>
+
+{# ── Player luck ── #}
+<div class="panel">
+  <h2>Who is riding luck</h2>
+  <div class="sp-two">
+    <table class="sp-table">
+      <thead><tr><th>Hitter</th><th>PA</th><th title="Batting average on balls in play this season">BABIP</th><th>Career</th><th>Δ</th><th title="Season WAR per 154 games">WAR pace</th><th title="WAR his ratings imply over a full season">Ratings WAR</th></tr></thead>
+      <tbody>{% for h in d.hitters %}<tr>
+        <td><a href="/player/{{ h.pid }}">{{ h.name }}</a></td><td>{{ h.pa }}</td>
+        <td>{{ '%.3f'|format(h.babip) if h.babip is not none else '–' }}</td>
+        <td>{{ '%.3f'|format(h.career_babip) if h.career_babip else '–' }}</td>
+        <td class="{{ 'sp-pos' if (h.babip_diff or 0) >= 0.030 else 'sp-neg' if (h.babip_diff or 0) <= -0.030 }}">{{ '%+.3f'|format(h.babip_diff) if h.babip_diff is not none else '–' }}</td>
+        <td>{{ '%.1f'|format(h.pace) if h.pace is not none else '–' }}</td>
+        <td>{{ '%.1f'|format(h.exp_war) if h.exp_war is not none else '–' }}</td></tr>{% endfor %}</tbody>
+    </table>
+    <table class="sp-table">
+      <thead><tr><th>Pitcher</th><th>IP</th><th>ERA</th><th>FIP</th><th title="ERA minus FIP: negative = luckier than his peripherals">ERA−FIP</th><th>HR/FB</th><th>BABIP</th></tr></thead>
+      <tbody>{% for p in d.pitchers %}<tr>
+        <td><a href="/player/{{ p.pid }}">{{ p.name }}</a></td><td>{{ '%.1f'|format(p.ip) }}</td>
+        <td>{{ '%.2f'|format(p.era) }}</td><td>{{ '%.2f'|format(p.fip) }}</td>
+        <td class="{{ 'sp-pos' if p.gap <= -0.75 else 'sp-neg' if p.gap >= 0.75 }}">{{ '%+.2f'|format(p.gap) }}</td>
+        <td>{{ '%.1f%%'|format(p.hrfb * 100) if p.hrfb is not none else '–' }}</td>
+        <td>{{ '%.3f'|format(p.babip) if p.babip is not none else '–' }}</td></tr>{% endfor %}</tbody>
+    </table>
+  </div>
+  <p class="sp-note">Green = currently lucky (likely to cool off), red = unlucky (likely to improve). BABIP that sits 30+ points off a hitter's career norm, and an ERA 0.75+ away from FIP, both tend to regress. League HR/FB this year is {{ '%.1f%%'|format((d.pitchers[0].lg_hrfb or 0) * 100) if d.pitchers else '–' }}.</p>
+</div>
+
+{# ── Rest of season ── #}
+<div class="panel">
+  <h2>Rest of the season</h2>
+  <div class="sp-cards">
+    <div class="sp-card"><div class="sp-k">Games left</div><div class="sp-v">{{ r.games|length }}</div><div class="sp-d">{{ r.games|selectattr('home')|list|length if r.dated else '?' }} at home</div></div>
+    <div class="sp-card"><div class="sp-k">Projected final record</div><div class="sp-v">{{ '%.0f'|format(r.exp_final_w) }} wins</div><div class="sp-d">true strength {{ '%.3f'|format(r.my_strength) }}</div></div>
+    {% if r.clinch %}
+    <div class="sp-card sp-good"><div class="sp-k">Clinch (magic {{ r.clinch.magic }} vs {{ r.clinch.rival }})</div>
+      {% if r.clinch.clinched %}<div class="sp-v">Clinched</div>{% elif r.clinch.p50 %}
+      <div class="sp-v">{{ r.clinch.p50.date.strftime('%b %-d') if r.clinch.p50.date else 'game ' ~ r.clinch.p50.n }}</div>
+      <div class="sp-d">likely range {{ r.clinch.p10.date.strftime('%b %-d') if r.clinch.p10.date else r.clinch.p10.n }} – {{ r.clinch.p90.date.strftime('%b %-d') if r.clinch.p90.date else r.clinch.p90.n }} · {{ '%.1f'|format(r.clinch.p_clinch * 100) }}% to clinch</div>{% endif %}
+    </div>
+    {% endif %}
+  </div>
+
+  {% if r.dated %}
+  <table class="sp-table sp-weeks">
+    <thead><tr><th>Week of</th><th>Games</th><th>Opponents</th><th title="Average opponent true strength">Opp. strength</th><th>Exp. wins</th>{% if r.clinch and r.clinch.by_week %}<th>Clinched by end</th>{% endif %}</tr></thead>
+    <tbody>
+    {% for w in r.weeks %}
+      <tr class="{{ 'sp-tough' if w.opp_pct >= 0.52 }}">
+        <td>{{ w.start.strftime('%b %-d') }}</td><td>{{ w.games }}</td>
+        <td>{% for g in w.opps %}<span class="sp-g {{ 'sp-g-hard' if g.opp_pct >= 0.54 }}" title="{{ g.date.strftime('%a %b %-d') }} — {{ g.opp_name }} ({{ '%.3f'|format(g.opp_pct) }}), win {{ '%.0f'|format(g.p_win * 100) }}%">{{ '' if g.home else '@' }}{{ g.abbr }}</span>{% endfor %}</td>
+        <td>{{ '%.3f'|format(w.opp_pct) }}</td><td>{{ '%.1f'|format(w.exp_w) }} of {{ w.games }}</td>
+        {% if r.clinch and r.clinch.by_week %}<td>{{ '%.0f%%'|format((r.clinch.by_week[loop.index0].p) * 100) }}</td>{% endif %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <table class="sp-table">
+    <thead><tr><th>Remaining opponent</th><th>Games</th><th>Home</th><th>Their strength</th><th>Exp. wins</th></tr></thead>
+    <tbody>{% for o in r.by_opp %}<tr class="{{ 'sp-tough' if o.opp_pct >= 0.54 }}"><td>{{ o.name }}</td><td>{{ o.games }}</td><td>{{ o.home if r.dated else '–' }}</td><td>{{ '%.3f'|format(o.opp_pct) }}</td><td>{{ '%.1f'|format(o.exp_w) }}</td></tr>{% endfor %}</tbody>
+  </table>
+
+  <div class="sp-advice">
+    <div class="sp-k">Planning notes</div>
+    <ul>
+      {% if r.tough %}<li><strong>Toughest games:</strong> {% for g in r.tough %}{{ g.date.strftime('%b %-d') if g.date else '' }} {{ '' if g.home else '@' }}{{ g.abbr }}{{ ', ' if not loop.last }}{% endfor %}. Line up {% if d.rotation %}{{ d.rotation[:2]|join(' and ') }}{% else %}your top two starters{% endif %} for these, and skip the {{ 'fourth starter (' ~ d.rotation[3] ~ ')' if d.rotation|length > 3 else 'back of the rotation' }} on off-day weeks.</li>{% endif %}
+      {% if r.clinch and r.clinch.p50 and r.clinch.p50.date %}<li><strong>After about {{ r.clinch.p50.date.strftime('%b %-d') }}</strong> the pennant is very likely settled: rest regulars carrying injuries, cap your top starters' innings, and set the rotation so {{ d.rotation[0] if d.rotation else 'your ace' }} is fully rested for World Series Game 1.</li>{% endif %}
+      <li>Opponent strength here is run differential regressed toward .500 (same as the Trade Center); dates come from {{ r.source }}.</li>
+    </ul>
+  </div>
+</div>
+
+<style>
+  .sp-sub { color:var(--text-dim); font-size:13px; margin:-4px 0 14px; }
+  .sp-cards { display:flex; flex-wrap:wrap; gap:12px; }
+  .sp-card { border:1px solid var(--border); border-radius:8px; padding:10px 14px; min-width:150px; }
+  .sp-card.sp-good { border-color:var(--green); }
+  .sp-card.sp-bad { border-color:var(--red); }
+  .sp-k { font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.4px; margin-bottom:4px; }
+  .sp-v { font-size:18px; font-weight:700; }
+  .sp-d { font-size:11px; color:var(--text-dim); margin-top:2px; }
+  .sp-trend { width:100%; max-width:900px; height:120px; display:block; }
+  .sp-axis { stroke:var(--border); stroke-width:1; }
+  .sp-line { fill:none; stroke:var(--green); stroke-width:2; vector-effect:non-scaling-stroke; }
+  .sp-trend-lbl { display:flex; justify-content:space-between; max-width:900px; font-size:11px; color:var(--text-dim); }
+  .sp-two { display:flex; flex-wrap:wrap; gap:24px; align-items:flex-start; margin-top:14px; }
+  .sp-table { border-collapse:collapse; font-size:12px; margin:8px 0; }
+  .sp-table th, .sp-table td { padding:4px 9px; border-bottom:1px solid var(--border); text-align:right; }
+  .sp-table th:first-child, .sp-table td:first-child { text-align:left; }
+  .sp-weeks td:nth-child(3) { text-align:left; }
+  .sp-pos { color:var(--green); font-weight:700; }
+  .sp-neg { color:var(--red); font-weight:700; }
+  .sp-mine td { background:rgba(78,204,163,0.10); font-weight:700; }
+  .sp-tough td { background:rgba(224,102,102,0.07); }
+  .sp-g { display:inline-block; margin-right:5px; font-size:11px; }
+  .sp-g-hard { color:var(--red); font-weight:700; }
+  .sp-note { color:var(--text-dim); font-size:12px; margin:8px 0 0; max-width:900px; }
+  .sp-advice { margin-top:12px; font-size:13px; }
+  .sp-advice ul { margin:4px 0 0 18px; padding:0; }
+  .sp-advice li { margin-bottom:4px; }
+</style>
+{% endblock %}

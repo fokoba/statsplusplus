@@ -1,10 +1,19 @@
 {% extends "base.html" %}
 {% block content %}
 {% macro money(v) -%}{%- if v is none -%}–{%- else -%}{{ '-' if v < 0 else '' }}${{ '%.1f'|format((v|abs) / divisor) }}{{ unit|lower }}{%- endif -%}{%- endmacro %}
+{# good / bad / neutral colouring: within 10% of the league median is neutral #}
+{% macro tone(v, med, higher=True) -%}
+{%- if v is none or med is none or med == 0 -%}fo-mid
+{%- else -%}{%- set r = (v - med) / (med|abs) -%}
+{%- if (r > 0.10 and higher) or (r < -0.10 and not higher) -%}fo-pos
+{%- elif (r < -0.10 and higher) or (r > 0.10 and not higher) -%}fo-neg
+{%- else -%}fo-mid{%- endif -%}{%- endif -%}
+{%- endmacro %}
 {% set rv = d.revenue %}{% set gm = d.gaps %}{% set wl = d.workload %}{% set pa = d.platoon %}
 
 <h1 class="page-title">🏛 Front Office — {{ team_name }}</h1>
 <p class="fo-sub">The business, the next three years, and two in-season efficiency checks.</p>
+<div class="fo-legend"><span class="fo-pos">■ better than league / healthy</span><span class="fo-mid">■ near the league median (±10%)</span><span class="fo-warn">■ watch</span><span class="fo-neg">■ worse / at risk</span></div>
 
 {# ── Revenue ── #}
 <div class="panel">
@@ -15,24 +24,29 @@
   {% set m = rv.mine %}
   <div class="fo-cards">
     {% if m %}
-    <div class="fo-card"><div class="fo-k">Revenue to date</div><div class="fo-v">{{ money(m.revenue) }}</div><div class="fo-d">gate {{ money(m.gate) }} · tickets {{ money(m.season_tickets) }} · media {{ money(m.media) }}</div></div>
+    <div class="fo-card {{ 'fo-good' if tone(m.revenue, rv.med.revenue) == 'fo-pos' else 'fo-bad' if tone(m.revenue, rv.med.revenue) == 'fo-neg' }}"><div class="fo-k">Revenue to date</div><div class="fo-v {{ tone(m.revenue, rv.med.revenue) }}">{{ money(m.revenue) }}</div><div class="fo-d">gate {{ money(m.gate) }} · tickets {{ money(m.season_tickets) }} · media {{ money(m.media) }}</div></div>
     <div class="fo-card"><div class="fo-k">Payroll</div><div class="fo-v">{{ money(m.payroll) }}</div><div class="fo-d">budget {{ money(m.budget) }}</div></div>
-    <div class="fo-card {{ 'fo-good' if m.margin > 0 }}"><div class="fo-k">Revenue − payroll</div><div class="fo-v">{{ money(m.margin) }}</div><div class="fo-d">cash for trades {{ money(m.cash) }}</div></div>
-    <div class="fo-card"><div class="fo-k">Payroll per win</div><div class="fo-v">{{ money(m.pay_per_win) }}</div><div class="fo-d">#{{ m.eff_rank }} most efficient of {{ rv.teams|length }}</div></div>
+    <div class="fo-card {{ 'fo-good' if m.margin > 0 else 'fo-bad' }}"><div class="fo-k">Revenue − payroll</div><div class="fo-v {{ 'fo-pos' if m.margin > 0 else 'fo-neg' }}">{{ money(m.margin) }}</div><div class="fo-d">cash for trades {{ money(m.cash) }}</div></div>
+    {% set er = 'fo-pos' if m.eff_rank <= rv.n // 3 else 'fo-neg' if m.eff_rank > rv.n - rv.n // 3 else 'fo-mid' %}<div class="fo-card {{ 'fo-good' if er == 'fo-pos' else 'fo-bad' if er == 'fo-neg' }}"><div class="fo-k">Payroll per win</div><div class="fo-v {{ er }}">{{ money(m.pay_per_win) }}</div><div class="fo-d">#{{ m.eff_rank }} most efficient of {{ rv.teams|length }}</div></div>
     {% endif %}
-    {% if rv.fit_rev %}<div class="fo-card fo-hl"><div class="fo-k">Revenue per extra win</div><div class="fo-v">{{ money(rv.fit_rev.slope) }}</div><div class="fo-d">league fit, R² {{ '%.2f'|format(rv.fit_rev.r2) }} · market price of a WAR {{ money(rv.dpw) }}</div></div>{% endif %}
+    {% if rv.fit_rev %}{% set rw = 'fo-pos' if rv.fit_rev.slope >= 0.9 * rv.dpw else 'fo-neg' if rv.fit_rev.slope < 0.5 * rv.dpw else 'fo-mid' %}<div class="fo-card {{ 'fo-good' if rw == 'fo-pos' else 'fo-bad' if rw == 'fo-neg' }}"><div class="fo-k">Revenue per extra win</div><div class="fo-v {{ rw }}">{{ money(rv.fit_rev.slope) }}</div><div class="fo-d">league fit, R² {{ '%.2f'|format(rv.fit_rev.r2) }} · market price of a WAR {{ money(rv.dpw) }}</div></div>{% endif %}
     {% if rv.gate_per_win %}<div class="fo-card"><div class="fo-k">Gate per extra win</div><div class="fo-v">{{ money(rv.gate_per_win) }}</div><div class="fo-d">a season of home games, R² {{ '%.2f'|format(rv.fit_gate.r2) }}</div></div>{% endif %}
   </div>
   <div class="fo-scroll">
   <table class="fo-table">
     <thead><tr><th data-sort="text">Club</th><th data-sort="num">W–L</th><th data-sort="num">WAR</th><th data-sort="num">Payroll</th><th data-sort="num">Revenue</th><th data-sort="num">Gate / game</th><th data-sort="num">Media</th><th data-sort="num">Rev − pay</th><th data-sort="num">Pay / win</th><th data-sort="num">Pay / WAR</th><th data-sort="num">Cash</th></tr></thead>
     <tbody>{% for t in rv.teams %}<tr class="{{ 'fo-mine' if t.mine }}">
-      <td>{{ t.name }}</td><td data-sort-value="{{ t.w }}">{{ t.w }}–{{ t.l }}</td><td>{{ '%.1f'|format(t.war) if t.war is not none else '–' }}</td>
-      <td data-sort-value="{{ t.payroll }}">{{ money(t.payroll) }}</td><td data-sort-value="{{ t.revenue }}">{{ money(t.revenue) }}</td>
-      <td data-sort-value="{{ t.gate_per_game or 0 }}">{{ money(t.gate_per_game) }}</td><td data-sort-value="{{ t.media }}">{{ money(t.media) }}</td>
-      <td data-sort-value="{{ t.margin }}" class="{{ 'fo-pos' if t.margin > 0 else 'fo-neg' }}">{{ money(t.margin) }}</td>
-      <td data-sort-value="{{ t.pay_per_win or 0 }}">{{ money(t.pay_per_win) }}</td><td data-sort-value="{{ t.pay_per_war or 0 }}">{{ money(t.pay_per_war) }}</td>
-      <td data-sort-value="{{ t.cash }}">{{ money(t.cash) }}</td></tr>{% endfor %}</tbody>
+      <td>{{ t.name }}</td>
+      <td data-sort-value="{{ t.w }}" class="{{ tone(t.w, rv.med.w) }}">{{ t.w }}–{{ t.l }}</td>
+      <td class="{{ tone(t.war, rv.med.war) }}">{{ '%.1f'|format(t.war) if t.war is not none else '–' }}</td>
+      <td data-sort-value="{{ t.payroll }}" class="fo-mid">{{ money(t.payroll) }}</td>
+      <td data-sort-value="{{ t.revenue }}" class="{{ tone(t.revenue, rv.med.revenue) }}">{{ money(t.revenue) }}</td>
+      <td data-sort-value="{{ t.gate_per_game or 0 }}" class="{{ tone(t.gate_per_game, rv.med.gate_per_game) }}">{{ money(t.gate_per_game) }}</td>
+      <td data-sort-value="{{ t.media }}" class="{{ tone(t.media, rv.med.media) }}">{{ money(t.media) }}</td>
+      <td data-sort-value="{{ t.margin }}" class="{{ 'fo-neg' if t.margin < 0 else tone(t.margin, rv.med.margin) }}">{{ money(t.margin) }}</td>
+      <td data-sort-value="{{ t.pay_per_win or 0 }}" class="{{ tone(t.pay_per_win, rv.med.pay_per_win, False) }}">{{ money(t.pay_per_win) }}</td>
+      <td data-sort-value="{{ t.pay_per_war or 0 }}" class="{{ tone(t.pay_per_war, rv.med.pay_per_war, False) }}">{{ money(t.pay_per_war) }}</td>
+      <td data-sort-value="{{ t.cash }}" class="{{ tone(t.cash, rv.med.cash) }}">{{ money(t.cash) }}</td></tr>{% endfor %}</tbody>
   </table>
   </div>
   <p class="fo-note">From {{ rv.file }} (season to date). "Revenue per extra win" fits each club's revenue against its wins so far, so it mixes market size with winning; the gate-per-game fit isolates attendance. If a win brings in about as much as the market charges for a WAR, every win you add pays for itself.</p>
@@ -46,7 +60,7 @@
     <thead><tr><th>Pos</th><th title="What an average regular (composite 50) produces here">Avg regular</th>{% for y in gm.years %}<th>{{ y }}</th>{% endfor %}</tr></thead>
     <tbody>{% for r in gm.rows %}<tr>
       <td><strong>{{ r.pos }}</strong></td><td>{{ r.bench }}</td>
-      {% for c in r.cells %}<td class="fo-gap-{{ c.status }}"><strong>{{ '%.1f'|format(c.war) if c.war is not none else '–' }}</strong> WAR<div class="fo-who">{% for w in c.who %}{{ w.name }}{% if w.age %} ({{ w.age }}{% if w.level and w.level != 'MLB' %}, {{ w.level }}{% endif %}){% endif %}{{ ', ' if not loop.last }}{% endfor %}</div></td>{% endfor %}
+      {% for c in r.cells %}<td class="fo-gap-{{ c.status }}"><strong class="{{ 'fo-neg' if c.status == 'hole' else 'fo-warn' if c.status == 'thin' else 'fo-pos' if c.war is not none and c.war >= 1.5 * r.bench else 'fo-mid' }}">{{ '%.1f'|format(c.war) if c.war is not none else '–' }}</strong> WAR<div class="fo-who">{% for w in c.who %}{{ w.name }}{% if w.age %} ({{ w.age }}{% if w.level and w.level != 'MLB' %}, {{ w.level }}{% endif %}){% endif %}{{ ', ' if not loop.last }}{% endfor %}</div></td>{% endfor %}
     </tr>{% endfor %}</tbody>
   </table>
   <p class="fo-note">From the depth chart's three-season projection (aging, contracts, prospects stepping in). Red = under half an average regular, amber = below average, green = covered. SP is the four-man rotation, RP the top five relievers.</p>
@@ -59,8 +73,8 @@
     <thead><tr><th>Pitcher</th><th>Role</th><th>Age</th><th>IP</th><th>GS</th><th>IP/GS</th><th title="Innings pace to the end of the {{ d.gps }}-game schedule">Pace</th><th>Last yr</th><th>Career high</th><th>Stamina</th><th>Risk</th><th>Why</th></tr></thead>
     <tbody>{% for w in wl.rows %}<tr>
       <td><a href="/player/{{ w.pid }}">{{ w.name }}</a></td><td>{{ w.role }}</td><td>{{ w.age }}</td>
-      <td>{{ '%.1f'|format(w.ip) }}</td><td>{{ w.gs }}</td><td>{{ '%.1f'|format(w.ip_per_gs) if w.ip_per_gs and w.gs >= 5 else '–' }}</td>
-      <td><strong>{{ '%.0f'|format(w.pace) if w.pace else '–' }}</strong></td><td>{{ '%.0f'|format(w.last) if w.last else '–' }}</td><td>{{ '%.0f'|format(w.high) if w.high else '–' }}</td>
+      <td>{{ '%.1f'|format(w.ip) }}</td><td>{{ w.gs }}</td><td class="{{ 'fo-warn' if w.ip_per_gs and w.gs >= 5 and w.ip_per_gs >= 7.6 else 'fo-mid' }}">{{ '%.1f'|format(w.ip_per_gs) if w.ip_per_gs and w.gs >= 5 else '–' }}</td>
+      <td><strong class="{{ 'fo-neg' if w.pace and w.high and w.pace > w.high * 1.10 else 'fo-warn' if w.pace and w.high and w.pace > w.high else 'fo-pos' if w.pace and w.high else 'fo-mid' }}">{{ '%.0f'|format(w.pace) if w.pace else '–' }}</strong></td><td>{{ '%.0f'|format(w.last) if w.last else '–' }}</td><td>{{ '%.0f'|format(w.high) if w.high else '–' }}</td>
       <td>{{ w.stm or '–' }}</td><td class="fo-risk-{{ w.risk|lower }}">{{ w.risk }}</td><td class="fo-why">{{ w.flags|join('; ') }}</td></tr>{% endfor %}</tbody>
   </table>
   <p class="fo-note">Arms rarely break on one heavy start; the risk is a season far above what a pitcher has carried before. In a pre-Tommy John league an elbow injury can end a career, so once the pennant is safe the High rows are the first to cap.</p>
@@ -69,13 +83,13 @@
 {# ── Platoon ── #}
 <div class="panel">
   <h2>Platoon audit</h2>
-  <div class="fo-cards"><div class="fo-card {{ 'fo-bad' if pa.total_runs >= 5 }}"><div class="fo-k">Runs left on the table</div><div class="fo-v">{{ '%.1f'|format(pa.total_runs) }}</div><div class="fo-d">about {{ '%.1f'|format(pa.total_runs / 9.5) }} wins this season</div></div></div>
+  <div class="fo-cards"><div class="fo-card {{ 'fo-bad' if pa.total_runs >= 5 else 'fo-good' if pa.total_runs < 2 }}"><div class="fo-k">Runs left on the table</div><div class="fo-v {{ 'fo-neg' if pa.total_runs >= 5 else 'fo-warn' if pa.total_runs >= 2 else 'fo-pos' }}">{{ '%.1f'|format(pa.total_runs) }}</div><div class="fo-d">about {{ '%.1f'|format(pa.total_runs / 9.5) }} wins this season</div></div></div>
   <table class="fo-table">
     <thead><tr><th>Hitter</th><th>Pos</th><th>vR comp</th><th>vL comp</th><th>PA vR</th><th>PA vL</th><th>Better option</th><th>Runs lost</th></tr></thead>
     <tbody>{% for r in pa.rows %}<tr>
-      <td><a href="/player/{{ r.pid }}">{{ r.name }}</a></td><td>{{ r.pos }}</td><td>{{ r.vr or '–' }}</td><td>{{ r.vl or '–' }}</td><td>{{ r.pa_vr }}</td><td>{{ r.pa_vl }}</td>
+      <td><a href="/player/{{ r.pid }}">{{ r.name }}</a></td><td>{{ r.pos }}</td>{% for v in (r.vr, r.vl) %}<td class="{{ 'fo-pos' if v and v >= 55 else 'fo-neg' if v and v <= 45 else 'fo-mid' }}">{{ v or '–' }}</td>{% endfor %}<td>{{ r.pa_vr }}</td><td>{{ r.pa_vl }}</td>
       <td class="fo-why">{% for n in r.notes %}vs {{ n.side }}: <strong>{{ n.alt }}</strong> ({{ n.alt_comp }} vs {{ n.comp }}, {{ n.pa }} PA){{ '; ' if not loop.last }}{% else %}<span class="fo-dim">—</span>{% endfor %}</td>
-      <td class="{{ 'fo-neg' if r.runs >= 2 }}">{{ '%.1f'|format(r.runs) if r.runs else '–' }}</td></tr>{% endfor %}</tbody>
+      <td class="{{ 'fo-neg' if r.runs >= 2 else 'fo-warn' if r.runs >= 0.5 else 'fo-pos' }}">{{ '%.1f'|format(r.runs) if r.runs else '0.0' }}</td></tr>{% endfor %}</tbody>
   </table>
   <p class="fo-note">Each hitter's plate appearances against each hand versus his own split composite, compared with the best bench bat rated 45+ at the same position who isn't already playing regularly against that hand. Runs use the composite scale ({{ '%.1f'|format(pa.runs_per_pt_600) }} runs per composite point per 600 PA). It's an upper bound: it doesn't know about rest days, injuries or defense.</p>
 </div>
@@ -93,7 +107,10 @@
   .fo-table th, .fo-table td { padding:4px 9px; border-bottom:1px solid var(--border); text-align:right; vertical-align:top; }
   .fo-table th:first-child, .fo-table td:first-child { text-align:left; }
   .fo-mine td { background:rgba(78,204,163,0.10); font-weight:700; }
-  .fo-pos { color:var(--green); } .fo-neg { color:var(--red); font-weight:700; } .fo-dim { color:var(--text-dim); }
+  .fo-pos { color:var(--green); font-weight:600; } .fo-neg { color:var(--red); font-weight:700; }
+  .fo-warn { color:var(--amber,#d9a441); font-weight:700; } .fo-mid { color:var(--text); } .fo-dim { color:var(--text-dim); }
+  .fo-legend { font-size:11px; color:var(--text-dim); margin:4px 0 8px; }
+  .fo-legend span { margin-right:12px; }
   .fo-note { color:var(--text-dim); font-size:12px; margin:8px 0 0; max-width:920px; }
   .fo-gaps td { text-align:left; min-width:170px; }
   .fo-who { font-size:11px; color:var(--text-dim); margin-top:2px; white-space:normal; }

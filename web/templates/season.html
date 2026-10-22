@@ -118,7 +118,88 @@
   </div>
 </div>
 
+{# ── Rotation planner ── #}
+{% set pl = d.plan %}
+{% if pl %}
+<div class="panel">
+  <h2>Stretch-run rotation plan</h2>
+  <p class="sp-note" style="margin-top:0">Your depth-chart rotation in order, except: the best rested of {{ d.rotation[:2]|join(' / ') if d.rotation else 'your top two' }} takes games against strong clubs (true strength .540+), a starter past his innings cap (career high + 5%) is skipped against weaker clubs for a rested spot starter, and {{ pl.ace }} gets a tune-up start and is lined up for World Series Game 1 (assumed {{ pl.ws_g1.strftime('%b %-d') }}, {{ pl.ace_rest }} days after his last start). Starters need 3 days' rest.</p>
+  <div class="sp-two">
+    <table class="sp-table">
+      <thead><tr><th>Starter</th><th>T</th><th>IP now</th><th>Starts left</th><th title="Projected season innings under this plan">Planned IP</th><th title="Projected innings if every turn is taken">Every turn</th><th>Cap</th><th>Career high</th></tr></thead>
+      <tbody>{% for s_ in pl.summary %}<tr>
+        <td>{{ s_.name }}</td><td>{{ s_.throws }}</td><td>{{ '%.0f'|format(s_.ip) }}</td><td>{{ s_.starts }}</td>
+        <td class="{{ 'sp-neg' if s_.over else 'sp-pos' }}">{{ '%.0f'|format(s_.proj) }}</td>
+        <td class="{{ 'sp-neg' if s_.naive > s_.cap else '' }}">{{ '%.0f'|format(s_.naive) }}</td>
+        <td>{{ '%.0f'|format(s_.cap) }}</td><td>{{ '%.0f'|format(s_.high) if s_.high else '–' }}</td></tr>{% endfor %}</tbody>
+    </table>
+    <div class="sp-plan">
+      <table class="sp-table">
+        <thead><tr><th>Date</th><th>Opp</th><th>Strength</th><th>Starter</th><th>Why</th></tr></thead>
+        <tbody>{% for g in pl.plan %}<tr class="{{ 'sp-tough' if g.opp_pct >= 0.54 }}">
+          <td>{{ g.date.strftime('%a %b %-d') }}</td><td>{{ '' if g.home else '@' }}{{ g.abbr }}</td><td>{{ '%.3f'|format(g.opp_pct) }}</td>
+          <td class="{{ 'sp-spot' if g.spot else '' }}"><strong>{{ g.starter }}</strong></td><td class="sp-why">{{ g.reason }}</td></tr>{% endfor %}</tbody>
+      </table>
+    </div>
+  </div>
+  <p class="sp-note">It can't see who pitched last before today, so the first few turns assume everyone is rested. Change the depth-chart rotation order or long relievers and the plan follows.</p>
+</div>
+{% endif %}
+
+{# ── World Series prep ── #}
+{% set ws = d.series %}
+{% if ws %}
+<div class="panel">
+  <h2>World Series prep — {{ ws.opp_name }}</h2>
+  <div class="sp-cards">
+    <div class="sp-card"><div class="sp-k">Chance they're the opponent</div><div class="sp-v">{{ '%.1f'|format(ws.p_opp * 100) }}%</div></div>
+    <div class="sp-card"><div class="sp-k">True strength</div><div class="sp-v">{{ '%.3f'|format(ws.my_strength) }} vs {{ '%.3f'|format(ws.opp_strength) }}</div><div class="sp-d">you win {{ '%.1f'|format(ws.p_game * 100) }}% of games with even starters</div></div>
+    {% for o in ws.options %}<div class="sp-card {{ 'sp-good' if loop.first }}"><div class="sp-k">{{ o.label }}</div><div class="sp-v">{{ '%.1f'|format(o.p * 100) }}%</div><div class="sp-d">{{ o.order|join(' · ') }}</div></div>{% endfor %}
+  </div>
+  <div class="sp-two">
+    <table class="sp-table">
+      <thead><tr><th>Their lineup</th><th>PA</th><th>OBP</th><th>SLG</th><th>OPS</th><th>League OPS</th></tr></thead>
+      <tbody>
+        {% for key, lbl in (('vr','vs RHP'),('vl','vs LHP')) %}{% set sp_ = ws.splits[key] %}<tr><td>{{ lbl }}</td><td>{{ sp_.pa }}</td><td>{{ '%.3f'|format(sp_.obp or 0) }}</td><td>{{ '%.3f'|format(sp_.slg or 0) }}</td>
+          <td class="{{ 'sp-neg' if (sp_.ops or 0) > ws.lg[key] + 0.03 else 'sp-pos' if (sp_.ops or 0) < ws.lg[key] - 0.03 }}">{{ '%.3f'|format(sp_.ops or 0) }}</td><td>{{ '%.3f'|format(ws.lg[key]) }}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+    <table class="sp-table">
+      <thead><tr><th>Their rotation</th><th>T</th><th>IP</th><th>ERA</th><th>FIP</th></tr></thead>
+      <tbody>{% for p in ws.their_rot %}<tr><td>{{ p.name }}</td><td>{{ p.throws }}</td><td>{{ '%.0f'|format(p.ip) }}</td><td>{{ '%.2f'|format(p.era or 0) }}</td><td>{{ '%.2f'|format(p.fip or 0) }}</td></tr>{% endfor %}</tbody>
+    </table>
+    <table class="sp-table">
+      <thead><tr><th>Their bullpen</th><th>T</th><th>IP</th><th>FIP</th></tr></thead>
+      <tbody>{% for p in ws.their_pen %}<tr><td>{{ p.name }}</td><td>{{ p.throws }}</td><td>{{ '%.0f'|format(p.ip) }}</td><td>{{ '%.2f'|format(p.fip or 0) }}</td></tr>{% endfor %}</tbody>
+    </table>
+  </div>
+  <div class="sp-two">
+    <table class="sp-table">
+      <thead><tr><th>Your best vs RHP</th><th>Pos</th><th>vR</th></tr></thead>
+      <tbody>{% for h in ws.best_vr %}<tr><td>{{ h.name }}</td><td>{{ h.pos_name }}</td><td>{{ h.vr }}</td></tr>{% endfor %}</tbody>
+    </table>
+    <table class="sp-table">
+      <thead><tr><th>Your best vs LHP</th><th>Pos</th><th>vL</th></tr></thead>
+      <tbody>{% for h in ws.best_vl %}<tr><td>{{ h.name }}</td><td>{{ h.pos_name }}</td><td>{{ h.vl }}</td></tr>{% endfor %}</tbody>
+    </table>
+    <div class="sp-advice">
+      <div class="sp-k">Series notes</div>
+      <ul>
+        <li>{{ ws.options[0].label }} gives the best series odds ({{ '%.1f'|format(ws.options[0].p * 100) }}%){% if ws.options|length > 1 %} vs {{ '%.1f'|format(ws.options[1].p * 100) }}% the other way{% endif %}: in a short series your top three starters matter more than giving the fourth a turn.</li>
+        <li>They start {{ ws.their_lefty_starts }} left-hander{{ '' if ws.their_lefty_starts == 1 else 's' }} out of {{ ws.their_rot|length }}{% if ws.their_lefty_starts == 0 %} — set your vs-RHP lineup for every game{% endif %}.</li>
+        <li>They hit {{ '%.3f'|format(ws.splits.vl.ops or 0) }} OPS against lefties and {{ '%.3f'|format(ws.splits.vr.ops or 0) }} against righties{% if ws.my_lefties %}; your left-handed starter{{ 's' if ws.my_lefties|length > 1 }}: {{ ws.my_lefties|join(', ') }}{% else %}; you have no left-handed starter, so {% if ws.my_lefty_rp %}your lefty relievers ({{ ws.my_lefty_rp|join(', ') }}) are the matchup weapon late{% else %}there's no left-handed matchup option{% endif %}{% endif %}.</li>
+      </ul>
+    </div>
+  </div>
+  <p class="sp-note">Per-game odds start from both clubs' run-differential strength and shift {{ '%.0f'|format(6) }} points per run of starting-pitcher FIP edge. The opponent is the other league's pennant favourite from the same simulation as the Trade Center.</p>
+</div>
+{% endif %}
+
 <style>
+  .sp-plan { max-height:460px; overflow-y:auto; }
+  .sp-spot strong { color:var(--amber,#d9a441); }
+  .sp-why { text-align:left !important; font-size:11px; color:var(--text-dim); white-space:normal; max-width:320px; }
+
   .sp-sub { color:var(--text-dim); font-size:13px; margin:-4px 0 14px; }
   .sp-cards { display:flex; flex-wrap:wrap; gap:12px; }
   .sp-card { border:1px solid var(--border); border-radius:8px; padding:10px 14px; min-width:150px; }

@@ -337,7 +337,17 @@ def build(team_id, league_dir):
         "SELECT p.name FROM depth_chart_roles d JOIN players p ON p.player_id=d.player_id "
         "WHERE d.team_id=? AND d.position='SP' AND d.role='starter' ORDER BY COALESCE(d.slot, 99)",
         (team_id,)).fetchall()]
+    import stretch_queries as sq
+    ros = rest_of_season(conn, team_id, year, gps, Path(league_dir).name, game_date)
+    try:
+        plan = sq.rotation_plan(conn, team_id, year, ros)
+    except Exception:
+        plan = None
+    try:
+        series = sq.series_prep(conn, team_id, year, gps)
+    except Exception:
+        series = None
     return {"year": year, "game_date": game_date, "rotation": rotation,
             "team": team_luck(conn, team_id, year), "league": league_luck(conn, year),
             "hitters": hit, "pitchers": pit,
-            "ros": rest_of_season(conn, team_id, year, gps, Path(league_dir).name, game_date)}
+            "ros": ros, "plan": plan, "series": series}

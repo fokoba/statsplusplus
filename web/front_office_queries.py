@@ -120,7 +120,14 @@ def revenue_efficiency(conn, team_id, year):
         t["eff_rank"] = rank
     dpw = dollars_per_war(cfg.league_dir)
     mine = next((t for t in teams if t["mine"]), None)
+    from statistics import median
+    med = {}
+    for k in ("w", "war", "payroll", "revenue", "gate_per_game", "media", "margin",
+              "pay_per_win", "pay_per_war", "cash"):
+        vals = [t[k] for t in teams if t.get(k) is not None]
+        med[k] = median(vals) if vals else None
     return {"available": True, "file": f.name, "teams": teams, "fit_rev": fit_rev, "fit_gate": fit_gate,
+            "med": med, "n": len(teams),
             "dpw": dpw, "mine": mine,
             # one extra win = +1/154 win%; x gate/game slope x a full season of home games
             "gate_per_win": (fit_gate["slope"] / 154 * 77 if fit_gate else None)}

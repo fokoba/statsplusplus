@@ -10,7 +10,7 @@ import trade_center_queries as tc
 def test_log5_symmetry_and_edges():
     assert tc._log5(0.5, 0.5) == 0.5
     assert abs(tc._log5(0.6, 0.4) + tc._log5(0.4, 0.6) - 1) < 1e-12
-    assert tc._log5(0.6, 0.5) == 0.6
+    assert abs(tc._log5(0.6, 0.5) - 0.6) < 1e-12
 
 
 def test_series_odds():

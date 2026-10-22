@@ -17,7 +17,7 @@ from statsplusplus.config.league_context import get_league_dir, get_active_leagu
 from statsplusplus.config.league_config import games_per_season as _games_per_season_pkg
 from statsplusplus.data.db import get_connection
 from statsplusplus.evaluation.war import (
-    war_pace as _war_pace_pkg, HISTORIC_PACE_WAR, MIN_PACE_SAMPLE_G, MIN_PACE_SAMPLE_IP,
+    war_pace as _war_pace_pkg, injury_adjusted_pace as _injury_pace_pkg, HISTORIC_PACE_WAR, MIN_PACE_SAMPLE_G, MIN_PACE_SAMPLE_IP,
     pace_tier as _pace_tier_pkg, pace_confidence as _pace_confidence_pkg,
 )
 
@@ -52,6 +52,37 @@ def _current_mlb_team(conn, player_id):
         (player_id,),
     ).fetchone()
     return r["tid"] if r else None
+
+
+def _games_available(conn, player_id, team_id, gps):
+    """Regular-season games this player can still play, or None if he is healthy
+    (or the schedule position is unknown) so the plain pace applies.
+
+    Injured players: remaining team games minus the days left on the injury
+    (about one game per day). An unknown length (the game reports 1000) is
+    treated as out for the rest of the schedule."""
+    inj = conn.execute(
+        "SELECT injury_is_injured, injury_left FROM players WHERE player_id=?", (player_id,)
+    ).fetchone()
+    if not inj or not inj["injury_is_injured"]:
+        return None
+    return _remaining_available(conn, team_id, gps, inj["injury_left"])
+
+
+def _team_games(conn, team_id):
+    r = conn.execute("SELECT COALESCE(w,0)+COALESCE(l,0)+COALESCE(t,0) AS g FROM standings WHERE team_id=?",
+                     (team_id,)).fetchone()
+    return r["g"] if r and r["g"] else None
+
+
+def _remaining_available(conn, team_id, gps, injury_left):
+    played = _team_games(conn, team_id)
+    if played is None:
+        return None
+    remaining = max(0, gps - played)
+    if injury_left is None or injury_left <= 0 or injury_left >= 1000:
+        return 0.0                      # unknown length: out for the rest of the year
+    return max(0.0, remaining - float(injury_left))
 
 
 def get_war_pace(player_id, league_dir=None, conn=None):
@@ -103,7 +134,13 @@ def get_war_pace(player_id, league_dir=None, conn=None):
         pace = _war_pace_pkg(float(s["war"]), float(sample), bucket, games_per_season=gps)
         if pace is None:
             return None
+        injured_note = None
+        avail = _games_available(conn, player_id, _current_mlb_team(conn, player_id), gps)
+        if avail is not None:
+            pace = _injury_pace_pkg(float(s["war"]), float(sample), bucket, gps, avail)
+            injured_note = "injured - projected from games he can still play"
         return {
+            "pace_note": injured_note,
             "war_to_date": round(float(s["war"]), 2),
             "sample": sample,
             "sample_unit": unit,
@@ -130,6 +167,18 @@ def get_all_war_paces(league_dir=None, conn=None):
     try:
         gps = _games_per_season_pkg(league_dir)
         out = {}
+        injured = {r["player_id"]: r["injury_left"] for r in conn.execute(
+            "SELECT player_id, injury_is_injured, injury_left FROM players WHERE injury_is_injured=1").fetchall()}
+        team_of = {r["player_id"]: r["tid"] for r in conn.execute(
+            "SELECT player_id, COALESCE(NULLIF(parent_team_id,0), team_id) AS tid FROM players").fetchall()} if injured else {}
+
+        def _adj(pid, war, sample, bucket, pace):
+            if pid not in injured:
+                return pace, None
+            avail = _remaining_available(conn, team_of.get(pid), gps, injured[pid])
+            if avail is None:
+                return pace, None
+            return (_injury_pace_pkg(war, sample, bucket, gps, avail) or pace), "injured - projected from games he can still play"
 
         cy_h = conn.execute("SELECT MAX(year) FROM mlb_batting_stats").fetchone()[0]
         if cy_h is not None:
@@ -145,7 +194,9 @@ def get_all_war_paces(league_dir=None, conn=None):
                 pace = _war_pace_pkg(float(r["war"]), float(r["g"]), "HIT", games_per_season=gps)
                 if pace is None:
                     continue
+                pace, _note = _adj(r["player_id"], float(r["war"]), float(r["g"]), "HIT", pace)
                 out[r["player_id"]] = {
+                    "pace_note": _note,
                     "war_to_date": round(float(r["war"]), 2), "sample": r["g"], "sample_unit": "G",
                     "pace_war": pace, "is_historic": pace >= HISTORIC_PACE_WAR,
                     "games_per_season": gps, "year": cy_h,
@@ -169,7 +220,9 @@ def get_all_war_paces(league_dir=None, conn=None):
                 pace = _war_pace_pkg(float(r["war"]), float(r["ip"]), bucket, games_per_season=gps)
                 if pace is None:
                     continue
+                pace, _note = _adj(r["player_id"], float(r["war"]), float(r["ip"]), bucket, pace)
                 out[r["player_id"]] = {
+                    "pace_note": _note,
                     "war_to_date": round(float(r["war"]), 2), "sample": r["ip"], "sample_unit": "IP",
                     "pace_war": pace, "is_historic": pace >= HISTORIC_PACE_WAR,
                     "games_per_season": gps, "year": cy_p,

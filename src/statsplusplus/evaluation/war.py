@@ -185,6 +185,32 @@ def war_pace(
     return round((war_to_date / sample_to_date) * games_per_season, 2)
 
 
+def injury_adjusted_pace(
+    war_to_date: float,
+    sample_to_date: float,
+    bucket: str,
+    games_per_season: int,
+    games_available: float,
+) -> Optional[float]:
+    """Season-total WAR for a player who will miss some or all of the rest of the
+    schedule: WAR already banked plus his per-game (hitters) or per-IP (pitchers)
+    rate times only the games he can still play.
+
+    The plain ``war_pace`` prorates his rate over a whole season, which treats a
+    long-term injured player as if he'd play every remaining day (a 3.3-WAR player
+    out for the rest of the year read as an 8.4-WAR pace). Pure function.
+    """
+    if sample_to_date is None or sample_to_date <= 0:
+        return None
+    games_available = max(0.0, float(games_available))
+    if bucket in ("SP", "RP"):
+        scale = games_per_season / 162.0
+        full_target = (FULL_SEASON_RP_IP_162 if bucket == "RP" else FULL_SEASON_SP_IP_162) * scale
+        ip_left = full_target * games_available / max(1, games_per_season)
+        return round(war_to_date + (war_to_date / sample_to_date) * ip_left, 2)
+    return round(war_to_date + (war_to_date / sample_to_date) * games_available, 2)
+
+
 def aging_mult(age: int | float, bucket: str, weights: Optional[Any] = None) -> float:
     """Aging curve multiplier on peak WAR.
 

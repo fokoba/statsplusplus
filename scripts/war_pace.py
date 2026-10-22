@@ -10,7 +10,7 @@ Usage:
   python3 scripts/war_pace.py <player_id>
 """
 
-import os, sys
+import os, sqlite3, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from statsplusplus.config.league_context import get_league_dir, get_active_league_slug
@@ -61,17 +61,23 @@ def _games_available(conn, player_id, team_id, gps):
     Injured players: remaining team games minus the days left on the injury
     (about one game per day). An unknown length (the game reports 1000) is
     treated as out for the rest of the schedule."""
-    inj = conn.execute(
-        "SELECT injury_is_injured, injury_left FROM players WHERE player_id=?", (player_id,)
-    ).fetchone()
+    try:
+        inj = conn.execute(
+            "SELECT injury_is_injured, injury_left FROM players WHERE player_id=?", (player_id,)
+        ).fetchone()
+    except sqlite3.OperationalError:      # schema without injury columns
+        return None
     if not inj or not inj["injury_is_injured"]:
         return None
     return _remaining_available(conn, team_id, gps, inj["injury_left"])
 
 
 def _team_games(conn, team_id):
-    r = conn.execute("SELECT COALESCE(w,0)+COALESCE(l,0)+COALESCE(t,0) AS g FROM standings WHERE team_id=?",
-                     (team_id,)).fetchone()
+    try:
+        r = conn.execute("SELECT COALESCE(w,0)+COALESCE(l,0)+COALESCE(t,0) AS g FROM standings WHERE team_id=?",
+                         (team_id,)).fetchone()
+    except sqlite3.OperationalError:
+        return None
     return r["g"] if r and r["g"] else None
 
 
@@ -167,8 +173,11 @@ def get_all_war_paces(league_dir=None, conn=None):
     try:
         gps = _games_per_season_pkg(league_dir)
         out = {}
-        injured = {r["player_id"]: r["injury_left"] for r in conn.execute(
-            "SELECT player_id, injury_is_injured, injury_left FROM players WHERE injury_is_injured=1").fetchall()}
+        try:
+            injured = {r["player_id"]: r["injury_left"] for r in conn.execute(
+                "SELECT player_id, injury_is_injured, injury_left FROM players WHERE injury_is_injured=1").fetchall()}
+        except sqlite3.OperationalError:  # schema without injury columns
+            injured = {}
         team_of = {r["player_id"]: r["tid"] for r in conn.execute(
             "SELECT player_id, COALESCE(NULLIF(parent_team_id,0), team_id) AS tid FROM players").fetchall()} if injured else {}
 

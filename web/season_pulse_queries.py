@@ -347,7 +347,11 @@ def build(team_id, league_dir):
         series = sq.series_prep(conn, team_id, year, gps)
     except Exception:
         series = None
+    try:
+        ws_roster = sq.ws_roster(conn, team_id, year, series)
+    except Exception:
+        ws_roster = None
     return {"year": year, "game_date": game_date, "rotation": rotation,
             "team": team_luck(conn, team_id, year), "league": league_luck(conn, year),
             "hitters": hit, "pitchers": pit,
-            "ros": ros, "plan": plan, "series": series}
+            "ros": ros, "plan": plan, "series": series, "ws_roster": ws_roster}

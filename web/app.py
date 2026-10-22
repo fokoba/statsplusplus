@@ -675,6 +675,32 @@ def offseason():
     )
 
 
+@app.route("/alerts")
+def alerts():
+    """Waiver / DFA / free-agent pickups and ratings-change alerts."""
+    import alerts_queries as aq
+    from statsplusplus.evaluation.constants import load_model_weights
+    from web_league_context import money_unit, money_divisor
+    cfg = _get_cfg()
+    ln = cfg.settings.get("league", "League")
+    tid = queries.get_my_team_id()
+    conn = queries.get_db()
+    weights = load_model_weights(Path(g.league_dir))
+    scope = request.args.get("scope", "org")
+    try:
+        min_change = max(5, int(request.args.get("min", 5)))
+    except ValueError:
+        min_change = 5
+    pk = aq.pickups(conn, tid, g.league_dir, weights, mark_seen=True)
+    rc = aq.ratings_changes(conn, tid, baseline=request.args.get("since"), scope=scope, min_change=min_change)
+    return render_template(
+        "alerts.html",
+        breadcrumbs=[{"label": ln, "url": "/league"}, {"label": "Alerts", "url": "/alerts"}],
+        pk=pk, rc=rc, scope=scope, min_change=min_change, tid=tid,
+        team_name=cfg.team_names_map.get(tid, "My Team"), unit=money_unit(), divisor=money_divisor(),
+    )
+
+
 @app.route("/front-office")
 def front_office():
     """Revenue & payroll efficiency, org gap map, pitcher workload, platoon audit."""

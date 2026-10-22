@@ -275,3 +275,110 @@ def series_prep(conn, team_id, year, gps):
         "my_lefties": [mine[p]["name"] for p in rot if mine[p]["throws"] == "L"],
         "my_lefty_rp": [p["name"] for p in mine.values() if p["throws"] == "L" and p["pid"] not in rot],
     }
+
+
+# ── World Series roster builder ──────────────────────────────────────────────
+
+ROSTER_SIZE = 25
+N_PITCHERS = 10
+_POS_COLS = {"C": "c", "1B": "first_b", "2B": "second_b", "3B": "third_b", "SS": "ss",
+             "LF": "lf", "CF": "cf", "RF": "rf"}
+_FILL_ORDER = ["C", "SS", "CF", "2B", "3B", "RF", "LF", "1B"]   # scarce positions first
+
+
+def ws_roster(conn, team_id, year, series):
+    """Best 25 for a short series: the series rotation, the best bullpen (at least
+    one lefty), a lineup for the opponent's dominant starter hand, and a bench
+    built by job (backup C, platoon bat for the other hand, pinch-runner,
+    defensive sub, utility infielder)."""
+    if not series:
+        return None
+    from team_queries import _org_vr_vl_composites
+    fip_c, _ = _fip_const(conn, year)
+    P = _pitchers(conn, team_id, year, fip_c)
+    comps = _org_vr_vl_composites(conn, team_id)
+    vs_right = series["their_lefty_starts"] * 2 <= len(series["their_rot"] or [1])
+    key, other = ("vr", "vl") if vs_right else ("vl", "vr")
+
+    # Pitchers: series rotation first, then the best relievers by FIP, a lefty guaranteed.
+    rot_names = series["options"][0]["order"][:3] if series["options"] else []
+    rot = [p for p in P.values() if p["name"] in rot_names]
+    rest = sorted([p for p in P.values() if p["name"] not in rot_names],
+                  key=lambda p: (p["fip"] if p["fip"] is not None else 9.0))
+    staff = [dict(p, job="Starter") for p in rot]
+    lefty = next((p for p in rest if p["throws"] == "L"), None)
+    if lefty:
+        staff.append(dict(lefty, job="Lefty specialist"))
+    for p in rest:
+        if len(staff) >= N_PITCHERS:
+            break
+        if lefty and p["pid"] == lefty["pid"]:
+            continue
+        job = "Long man / 4th starter" if p["role"] == 11 and not any(s["job"].startswith("Long") for s in staff) else "Reliever"
+        staff.append(dict(p, job=job))
+    staff_ids = {p["pid"] for p in staff}
+
+    # Hitters
+    hit = [dict(r) for r in conn.execute(f"""
+        SELECT p.player_id, p.name, p.age, p.pos, r.speed, {', '.join('r.' + c for c in _POS_COLS.values())},
+               p.injury_is_injured, p.injury_left
+        FROM players p JOIN latest_ratings r ON r.player_id=p.player_id
+        WHERE p.team_id=? AND p.level='1' AND COALESCE(p.role,0) NOT IN (11,12,13)
+    """, (team_id,)).fetchall()]
+    for h in hit:
+        c = comps.get(h["player_id"]) or {}
+        h["vr"], h["vl"] = c.get("vr") or 0, c.get("vl") or 0
+        h["out"] = bool(h["injury_is_injured"] and (h["injury_left"] or 0) > 10)
+    healthy = [h for h in hit if not h["out"]]
+    # Lineup: your own depth-chart choice at each position for this hand (everyday
+    # starter, else the platoon side), skipping anyone hurt; otherwise the best
+    # healthy bat whose listed position (or a 50+ rating) fits.
+    platoon_role = "platoon_vr" if vs_right else "platoon_vl"
+    roles = {}
+    for pos, role, pid, share in conn.execute(
+            "SELECT position, role, player_id, share FROM depth_chart_roles WHERE team_id=? "
+            "AND position NOT IN ('SP','RP')", (team_id,)).fetchall():
+        roles.setdefault(pos, []).append((role, pid, share))
+    by_id = {h["player_id"]: h for h in healthy}
+    _POSNUM = {"C": 2, "1B": 3, "2B": 4, "3B": 5, "SS": 6, "LF": 7, "CF": 8, "RF": 9}
+    lineup, used = [], set()
+    for pos in _FILL_ORDER:
+        pick, why = None, ""
+        rs = roles.get(pos, [])
+        for want in ("starter", platoon_role):
+            opts = sorted([(sh if sh is not None else 1.0, pid) for r, pid, sh in rs
+                           if r == want and pid in by_id and pid not in used], reverse=True)
+            if opts:
+                pick, why = by_id[opts[0][1]], "your depth chart"
+                break
+        if pick is None:
+            col = _POS_COLS[pos]
+            cands = [h for h in healthy if h["player_id"] not in used
+                     and (h["pos"] == _POSNUM[pos] or (h.get(col) or 0) >= 50)]
+            if cands:
+                pick, why = max(cands, key=lambda h: h[key]), "best healthy fit (depth-chart choice unavailable)"
+        if pick:
+            lineup.append(dict(pick, slot=pos, job=f"Starter vs {'RHP' if vs_right else 'LHP'} — {why}"))
+            used.add(pick["player_id"])
+    bench = []
+
+    def add(h, job):
+        if h and h["player_id"] not in used and len(lineup) + len(bench) < ROSTER_SIZE - len(staff):
+            bench.append(dict(h, slot="", job=job))
+            used.add(h["player_id"])
+
+    pool = lambda: [h for h in healthy if h["player_id"] not in used]
+    add(max((h for h in pool() if (h.get("c") or 0) >= 45), key=lambda h: h["c"], default=None), "Backup catcher")
+    add(max(pool(), key=lambda h: h[other], default=None), f"Platoon bat vs {'LHP' if vs_right else 'RHP'}")
+    add(max(pool(), key=lambda h: h.get("speed") or 0, default=None), "Pinch-runner")
+    add(max(pool(), key=lambda h: max((h.get(c) or 0) for c in ("ss", "cf", "second_b")), default=None), "Defensive sub")
+    util = max(pool(), key=lambda h: min((h.get(c) or 0) for c in ("second_b", "third_b", "ss")), default=None)
+    if util and min((util.get(c) or 0) for c in ("second_b", "third_b", "ss")) >= 40:
+        add(util, "Utility infielder")
+    for h in sorted(pool(), key=lambda h: -h[key]):
+        add(h, "Pinch-hitter")
+    left_off = [h for h in hit if h["player_id"] not in used]
+    left_off_p = [p for p in P.values() if p["pid"] not in staff_ids]
+    return {"vs": "RHP" if vs_right else "LHP", "staff": staff, "lineup": lineup, "bench": bench,
+            "left_off": sorted(left_off, key=lambda h: -h[key]), "left_off_p": left_off_p,
+            "size": len(staff) + len(lineup) + len(bench)}

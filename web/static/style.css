@@ -2001,3 +2001,6 @@ td.stat-bad  { color: var(--red); }
 .tm-logo-col { width: 22px; height: 22px; object-fit: contain; vertical-align: middle; }
 .team-cell { text-align: center; }
 .pp-team-logo { float: right; clear: right; margin: 0 0 4px 10px; object-fit: contain; }
+
+.nav-badge { display:inline-block; margin-left:4px; min-width:16px; padding:0 5px; border-radius:8px;
+  background:var(--red); color:#fff; font-size:10px; font-weight:700; line-height:16px; text-align:center; }

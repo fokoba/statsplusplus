@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block content %}
+{% macro money(v) -%}{%- if v is none -%}–{%- else -%}{{ '-' if v < 0 else '' }}${{ '%.1f'|format((v|abs) / divisor) }}{{ unit|lower }}{%- endif -%}{%- endmacro %}
+
+<h1 class="page-title">🔔 Alerts — {{ team_name }}</h1>
+
+<div class="panel">
+  <h2>Pickups: waivers, DFA &amp; free agents <span class="al-dim">— {{ pk.n_new }} new since your last visit</span></h2>
+  <p class="al-note" style="margin-top:0">Your 25th man is <strong>{{ pk.floor_name }}</strong> (composite {{ pk.floor }}). Waiver and DFA players show if they beat him or upgrade your starter at their position; free agents only if they're a clear upgrade (+0.3 WAR at the slot, or 5+ points above your 25th man).</p>
+  {% if pk.rows %}
+  <table class="al-table">
+    <thead><tr><th></th><th data-sort="text">Player</th><th data-sort="text">Status</th><th data-sort="text">Team</th><th data-sort="num">Age</th><th data-sort="text">Slot</th><th data-sort="num">Comp</th><th data-sort="num">Pot</th><th data-sort="num" title="Full-season WAR over your starter at this slot">vs your starter</th><th data-sort="text">Your starter</th><th data-sort="num">Surplus</th></tr></thead>
+    <tbody>{% for x in pk.rows %}<tr class="{{ 'al-new' if x.new }}">
+      <td>{% if x.new %}<span class="al-pill">NEW</span>{% endif %}</td>
+      <td><a href="/player/{{ x.pid }}">{{ x.name }}</a></td>
+      <td class="al-st al-st-{{ x.status|lower|replace(' ', '') }}">{{ x.status }}</td><td>{{ x.team }}</td><td>{{ x.age }}</td><td>{{ x.slot }}</td>
+      <td class="{{ 'al-pos' if x.comp > pk.floor }}">{{ x.comp }}</td><td>{{ x.ceil or '–' }}</td>
+      <td data-sort-value="{{ x.gain }}" class="{{ 'al-pos' if x.gain > 0.3 else 'al-neg' if x.gain < -1 else '' }}">{{ '%+.1f'|format(x.gain) }}</td>
+      <td class="al-dim">{{ x.vs or '—' }}{% if x.vs_comp %} ({{ x.vs_comp }}){% endif %}</td>
+      <td data-sort-value="{{ x.surplus or 0 }}">{{ money(x.surplus) }}</td></tr>{% endfor %}</tbody>
+  </table>
+  {% else %}<p class="empty">Nobody on waivers, DFA or the free-agent list beats your roster right now.</p>{% endif %}
+</div>
+
+<div class="panel">
+  <h2>Ratings changes <span class="al-dim">— {{ rc.rows|length }} players · {{ rc.risers }} up, {{ rc.fallers }} down</span></h2>
+  <form class="al-filters" method="get">
+    <label>Since <select name="since">{% for dt in rc.dates %}<option value="{{ dt }}" {{ 'selected' if dt == rc.baseline }}>{{ dt }}</option>{% endfor %}</select></label>
+    <label>Who <select name="scope">
+      <option value="org" {{ 'selected' if scope == 'org' }}>My organization</option>
+      <option value="mlb" {{ 'selected' if scope == 'mlb' }}>All MLB players</option>
+      <option value="league" {{ 'selected' if scope == 'league' }}>Everyone</option></select></label>
+    <label>Min change <select name="min">{% for m in (5, 10, 15) %}<option value="{{ m }}" {{ 'selected' if m == min_change }}>{{ m }}+</option>{% endfor %}</select></label>
+    <button class="al-btn" type="submit">Apply</button>
+    <span class="al-dim">current ratings {{ rc.current }} vs {{ rc.baseline }}</span>
+  </form>
+  {% if rc.rows %}
+  <table class="al-table">
+    <thead><tr><th data-sort="text">Player</th><th data-sort="text">Team</th><th data-sort="num">Age</th><th data-sort="text">Level</th><th data-sort="num" title="Tool changes weighted by how much each tool drives value (potentials at half weight)">Impact</th><th>Changes</th><th data-sort="num">Comp</th><th data-sort="num">Pot</th><th data-sort="num">FV</th><th data-sort="num">Surplus</th></tr></thead>
+    <tbody>{% for x in rc.rows %}<tr>
+      <td><a href="/player/{{ x.pid }}">{{ x.name }}</a></td><td>{{ x.team }}</td><td>{{ x.age }}</td><td>{{ {'1':'MLB','2':'AAA','3':'AA','4':'A','5':'A-','6':'R','8':'Intl'}.get(x.level|string, x.level) }}</td>
+      <td data-sort-value="{{ x.score }}" class="{{ 'al-pos' if x.score > 0 else 'al-neg' }}"><strong>{{ '%+.1f'|format(x.score) }}</strong></td>
+      <td class="al-changes">{% for c in x.changes %}<span class="{{ 'al-pos' if c.d > 0 else 'al-neg' }}{{ ' al-potc' if c.pot }}">{{ c.tool }} {{ c.from }}→{{ c.to }}</span>{% endfor %}</td>
+      <td>{{ x.comp }}</td><td>{{ x.ceil or '–' }}</td><td>{{ x.fv or '–' }}</td><td data-sort-value="{{ x.surplus or 0 }}">{{ money(x.surplus) }}</td></tr>{% endfor %}</tbody>
+  </table>
+  {% else %}<p class="empty">No tool moved {{ min_change }}+ points since {{ rc.baseline }}.</p>{% endif %}
+  <p class="al-note">Compares raw tool ratings with the monthly ratings history (older composites were written by earlier model versions, so they aren't compared directly). Composite, FV and surplus are today's values.</p>
+</div>
+
+<style>
+  .al-table { border-collapse:collapse; font-size:12px; margin:6px 0; }
+  .al-table th, .al-table td { padding:4px 9px; border-bottom:1px solid var(--border); text-align:right; vertical-align:top; }
+  .al-table th:nth-child(-n+3), .al-table td:nth-child(-n+3) { text-align:left; }
+  .al-new td { background:rgba(78,204,163,0.07); }
+  .al-pill { background:var(--green); color:#000; font-size:9px; font-weight:800; padding:1px 6px; border-radius:8px; }
+  .al-pos { color:var(--green); font-weight:600; } .al-neg { color:var(--red); font-weight:600; }
+  .al-dim { color:var(--text-dim); font-weight:400; font-size:13px; }
+  .al-st { font-weight:700; } .al-st-waivers { color:var(--red); } .al-st-dfa { color:var(--amber,#d9a441); } .al-st-freeagent { color:var(--text-dim); }
+  .al-changes { text-align:left !important; white-space:normal; max-width:460px; }
+  .al-changes span { display:inline-block; margin-right:8px; font-size:11px; }
+  .al-potc { font-style:italic; opacity:.85; }
+  .al-filters { display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; margin-bottom:10px; }
+  .al-filters label { display:flex; flex-direction:column; gap:3px; font-size:11px; color:var(--text-dim); }
+  .al-filters select { background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:4px; padding:4px 8px; font-size:12px; }
+  .al-btn { background:none; border:1px solid var(--green); color:var(--green); border-radius:5px; padding:5px 12px; cursor:pointer; font-size:12px; }
+  .al-note { color:var(--text-dim); font-size:12px; margin:8px 0 0; max-width:900px; }
+</style>
+{% endblock %}

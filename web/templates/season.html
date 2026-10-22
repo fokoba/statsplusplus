@@ -191,12 +191,33 @@
       </ul>
     </div>
   </div>
+  {% set wr = d.ws_roster %}
+  {% if wr %}
+  <h3 class="sp-h3">Suggested World Series roster ({{ wr.size }}) — lineup set for {{ wr.vs }} starters</h3>
+  <div class="sp-two">
+    <table class="sp-table">
+      <thead><tr><th>Pitchers ({{ wr.staff|length }})</th><th>T</th><th>Job</th><th>FIP</th></tr></thead>
+      <tbody>{% for p in wr.staff %}<tr><td>{{ p.name }}</td><td>{{ p.throws }}</td><td class="sp-why">{{ p.job }}</td><td>{{ '%.2f'|format(p.fip) if p.fip else '–' }}</td></tr>{% endfor %}</tbody>
+    </table>
+    <table class="sp-table">
+      <thead><tr><th>Lineup ({{ wr.lineup|length }})</th><th>Pos</th><th>v{{ wr.vs[0] }}</th><th>Why</th></tr></thead>
+      <tbody>{% for h in wr.lineup %}<tr><td>{{ h.name }}</td><td>{{ h.slot }}</td><td>{{ h.vr if wr.vs == 'RHP' else h.vl }}</td><td class="sp-why">{{ h.job.split(' — ')[1] if ' — ' in h.job else '' }}</td></tr>{% endfor %}</tbody>
+    </table>
+    <table class="sp-table">
+      <thead><tr><th>Bench ({{ wr.bench|length }})</th><th>Job</th><th>vR</th><th>vL</th></tr></thead>
+      <tbody>{% for h in wr.bench %}<tr><td>{{ h.name }}</td><td class="sp-why">{{ h.job }}</td><td>{{ h.vr }}</td><td>{{ h.vl }}</td></tr>{% endfor %}</tbody>
+    </table>
+  </div>
+  {% if wr.left_off or wr.left_off_p %}<p class="sp-note"><strong>Left off:</strong> {% for h in wr.left_off %}{{ h.name }}{% if h.out %} (injured){% endif %}{{ ', ' if not loop.last or wr.left_off_p }}{% endfor %}{% for p in wr.left_off_p %}{{ p.name }}{{ ', ' if not loop.last }}{% endfor %}.</p>{% endif %}
+  {% endif %}
+
   <p class="sp-note">Per-game odds start from both clubs' run-differential strength and shift {{ '%.0f'|format(6) }} points per run of starting-pitcher FIP edge. The opponent is the other league's pennant favourite from the same simulation as the Trade Center.</p>
 </div>
 {% endif %}
 
 <style>
   .sp-plan { max-height:460px; overflow-y:auto; }
+  .sp-h3 { font-size:14px; margin:18px 0 4px; }
   .sp-spot strong { color:var(--amber,#d9a441); }
   .sp-why { text-align:left !important; font-size:11px; color:var(--text-dim); white-space:normal; max-width:320px; }
 

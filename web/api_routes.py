@@ -362,6 +362,18 @@ def api_trade_center_whatif():
     return jsonify({"ok": True, **res})
 
 
+@api_bp.route("/api/alerts/count")
+def api_alerts_count():
+    """New waiver/DFA/free-agent pickups since the alerts page was last opened."""
+    import queries
+    import alerts_queries as aq
+    try:
+        return jsonify({"new": aq.alert_count(queries.get_my_team_id(), g.league_dir)})
+    except Exception as e:
+        log.warning("alerts count failed: %s", e)
+        return jsonify({"new": 0})
+
+
 @api_bp.route("/api/retained-salary", methods=["GET", "POST"])
 def api_retained_salary():
     """List, set or clear salary another team keeps paying for a player we hold.

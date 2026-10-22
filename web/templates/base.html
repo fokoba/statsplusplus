@@ -42,6 +42,7 @@
           </div>
         </div>
         {% if offseason_mode %}<a href="/offseason" class="nav-offseason">❄ Offseason</a>{% endif %}
+        <a href="/alerts" id="nav-alerts">Alerts<span id="nav-alerts-badge" class="nav-badge" hidden></span></a>
         <a href="/season">Season</a>
         <a href="/front-office">Front Office</a>
         <a href="/trade-center">Trade Center</a>
@@ -592,5 +593,14 @@
     document.querySelectorAll('.nav-dropdown-menu').forEach(function(m) { m.classList.remove('open'); });
   });
   </script>
+<script>
+(function () {
+  var b = document.getElementById('nav-alerts-badge');
+  if (!b || location.pathname === '/alerts') return;
+  fetch('/api/alerts/count').then(function (r) { return r.json(); }).then(function (d) {
+    if (d && d.new > 0) { b.textContent = d.new > 99 ? '99+' : d.new; b.hidden = false; }
+  }).catch(function () {});
+})();
+</script>
 </body>
 </html>

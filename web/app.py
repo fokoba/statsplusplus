@@ -675,6 +675,23 @@ def offseason():
     )
 
 
+@app.route("/front-office")
+def front_office():
+    """Revenue & payroll efficiency, org gap map, pitcher workload, platoon audit."""
+    import front_office_queries as fo
+    from web_league_context import money_unit, money_divisor
+    cfg = _get_cfg()
+    ln = cfg.settings.get("league", "League")
+    tid = queries.get_my_team_id()
+    data = fo.build(tid, g.league_dir)
+    return render_template(
+        "front_office.html",
+        breadcrumbs=[{"label": ln, "url": "/league"}, {"label": "Front Office", "url": "/front-office"}],
+        d=data, tid=tid, team_name=cfg.team_names_map.get(tid, "My Team"),
+        unit=money_unit(), divisor=money_divisor(),
+    )
+
+
 @app.route("/season")
 def season_pulse():
     """Luck vs true talent, and the rest-of-season schedule outlook."""

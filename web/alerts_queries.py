@@ -31,6 +31,13 @@ POT_HIT = [("pot_cntct", "Pot Contact"), ("pot_gap", "Pot Gap"), ("pot_pow", "Po
 POT_PIT = [("pot_stf", "Pot Stuff"), ("pot_mov", "Pot Movement"), ("pot_ctrl", "Pot Control")]
 
 
+def _int(v):
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
 def _state_path(league_dir):
     return Path(league_dir) / "config" / "alerts_state.json"
 
@@ -129,6 +136,9 @@ def ratings_changes(conn, team_id, baseline=None, scope="org", min_change=5):
         f"SELECT DISTINCT player_league_id FROM players WHERE team_id IN ({qs}) AND player_league_id IS NOT NULL",
         _NIPPON_TEAM_IDS).fetchall()]
     where += f" AND COALESCE(p.team_id,0) NOT IN ({qs})"
+    # ...and the unsignable Japanese free-agent pool seeded from NPB (same rule
+    # the free-agent pages use); Japanese players in an MLB org stay in.
+    where += " AND NOT (COALESCE(p.nation_id,0)=98 AND COALESCE(p.team_id,0)=0)"
     params = params + tuple(_NIPPON_TEAM_IDS)
     if npb_leagues:
         where += f" AND COALESCE(p.player_league_id,-999) NOT IN ({','.join('?' * len(npb_leagues))})"
@@ -157,12 +167,12 @@ def ratings_changes(conn, team_id, baseline=None, scope="org", min_change=5):
         pots = POT_PIT if pitcher else POT_HIT
         changes, score = [], 0.0
         for c, label, w in tools:
-            a, b = d.get(f"o_{c}"), d.get(f"n_{c}")
+            a, b = _int(d.get(f"o_{c}")), _int(d.get(f"n_{c}"))
             if a is not None and b is not None and abs(b - a) >= min_change:
                 changes.append({"tool": label, "from": a, "to": b, "d": b - a, "pot": False})
                 score += w * (b - a)
         for c, label in pots:
-            a, b = d.get(f"o_{c}"), d.get(f"n_{c}")
+            a, b = _int(d.get(f"o_{c}")), _int(d.get(f"n_{c}"))
             if a is not None and b is not None and abs(b - a) >= min_change:
                 changes.append({"tool": label, "from": a, "to": b, "d": b - a, "pot": True})
                 score += 0.5 * (b - a)

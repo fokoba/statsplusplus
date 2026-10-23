@@ -86,3 +86,12 @@ def test_mixed_plan_excludes_types_and_fits_budget():
     assert picked == {1, 3, 4}                       # selfish and over-ask players are out
     assert plan["total"] <= 200_000
     assert all(r["plan_bid"] >= r["demand"] for r in rows if r["plan_tier"])
+
+
+def test_mixed_plan_pins_and_depth_tier():
+    rows = [_row(1, 400_000, conf=4), _row(2, 150_000), _row(3, 40_000, demand=3_000)]
+    plan = iq.mixed_plan(rows, cash=400_000, buffer=25_000, exclude_types=[], pins={1: 200_000}, depth_below=60_000)
+    r1, r2, r3 = rows
+    assert r1["plan_tier"] == "pinned" and r1["plan_bid"] == 200_000
+    assert r3["plan_tier"] == "depth" and r3["plan_bid"] == max(r3["bids"]["low"], 3_000)
+    assert plan["total"] <= 375_000

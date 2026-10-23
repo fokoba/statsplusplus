@@ -410,6 +410,8 @@ def load_store(league_dir) -> dict:
     d.setdefault("cash", 1_000_000)
     d.setdefault("tiers", dict(DEFAULT_TIERS))
     d.setdefault("buffer", 75_000)
+    d.setdefault("pins", {})            # {pid: fixed bid} for must-win targets
+    d.setdefault("depth_below", 60_000) # surplus under this: bid at the Low tier, never stepped up
     d.setdefault("exclude_types", ["Selfish", "Disruptive"])
     return d
 
@@ -502,7 +504,11 @@ def build_report(league_dir) -> dict:
     result["rows"] = rows
     result["buffer"] = store["buffer"]
     result["exclude_types"] = store["exclude_types"]
-    result["plan"] = mixed_plan(rows, store["cash"], store["buffer"], store["exclude_types"])
+    result["pins"] = store["pins"]
+    result["plan"] = mixed_plan(rows, store["cash"], store["buffer"], store["exclude_types"],
+                                pins={int(k): v for k, v in (store["pins"] or {}).items()},
+                                depth_below=store["depth_below"])
+    result["rivals"] = _rival_cash(league_dir)
     return result
 
 
@@ -517,7 +523,22 @@ def _excluded_type(r, exclude_types):
     return next((x for x in exclude_types if x.lower() in t.lower()), None)
 
 
-def mixed_plan(rows, cash, buffer, exclude_types):
+def _rival_cash(league_dir):
+    """Clubs' cash for trades from the newest StatsPlus finances export (unspent
+    cash is the best predictor of who bids big on international amateurs)."""
+    try:
+        from front_office_queries import _finance_table, _num
+        rows, f = _finance_table()
+    except Exception:
+        return None
+    if not rows:
+        return None
+    out = sorted(({"team": r.get("Team"), "cash": _num(r.get("Cash(for Trades)")) or 0} for r in rows),
+                  key=lambda x: -x["cash"])
+    return {"file": f.name, "rows": out}
+
+
+def mixed_plan(rows, cash, buffer, exclude_types, pins=None, depth_below=0):
     """Bid on everyone worth signing, at a tier that fits the budget.
 
     Pool: positive blended surplus, ask no more than a third of that surplus,
@@ -544,16 +565,25 @@ def mixed_plan(rows, cash, buffer, exclude_types):
             r["plan_note"] = "Excluded: ask above a third of his value"
             continue
         c = r["conf"]
-        r["plan_tier"] = ("high" if (s >= 140_000 or (c >= 4 and s >= 100_000))
-                          else "low" if (c <= 2 or s < 30_000) else "avg")
+        if pins and r["pid"] in pins:
+            r["plan_tier"] = "pinned"
+        elif depth_below and s < depth_below:
+            r["plan_tier"] = "depth"
+        else:
+            r["plan_tier"] = ("high" if (s >= 140_000 or (c >= 4 and s >= 100_000))
+                              else "low" if (c <= 2 or s < 30_000) else "avg")
         pool.append(r)
 
     def bid(r):
+        if r["plan_tier"] == "pinned":
+            return max(int(pins[r["pid"]]), r.get("demand") or 0)
+        if r["plan_tier"] == "depth":
+            return max(r["bids"]["low"], r.get("demand") or 0)
         return max(r["bids"][r["plan_tier"]], r.get("demand") or 0)
 
     total = sum(bid(r) for r in pool)
     while total > target and pool:          # over budget: step the cheapest-value players down
-        movable = [r for r in reversed(pool) if r["plan_tier"] != "low"]
+        movable = [r for r in reversed(pool) if r["plan_tier"] in ("high", "avg")]
         if not movable:
             break
         r = movable[0]
@@ -584,7 +614,7 @@ def mixed_plan(rows, cash, buffer, exclude_types):
             r["plan_note"] = "Personality risk: " + ", ".join(
                 ([r["personality"]["type"]] if r["personality"].get("type_class") == "neg" else []) + risks)
     return {"n": len(pool), "total": total, "target": target, "left": (cash or 0) - total,
-            "counts": {t: sum(1 for r in pool if r["plan_tier"] == t) for t in ("high", "avg", "low")},
+            "counts": {t: sum(1 for r in pool if r["plan_tier"] == t) for t in ("pinned", "high", "avg", "low", "depth")},
             "surplus": sum(r["blend"]["surplus"] for r in pool),
             "excluded": [r for r in rows if r["plan_note"].startswith("Excluded: ")
                          and _excluded_type(r, exclude_types)],

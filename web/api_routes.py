@@ -306,6 +306,8 @@ def api_international_settings():
     try:
         if "cash" in data:
             store["cash"] = max(0, int(float(data["cash"])))
+        if "buffer" in data:
+            store["buffer"] = max(0, int(float(data["buffer"])))
         if "tiers" in data:
             t = {k: float(data["tiers"][k]) for k in ("low", "avg", "high")}
             if not all(0 < v <= 1 for v in t.values()):

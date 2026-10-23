@@ -39,6 +39,9 @@
     <label>Cash to spend ({{ unit|lower }})
       <input type="number" id="intl-cash" step="any" value="{{ (report.cash / divisor)|round(1) }}">
     </label>
+    <label>Buffer to keep ({{ unit|lower }})
+      <input type="number" id="intl-buffer" step="any" value="{{ (report.buffer / divisor)|round(1) }}">
+    </label>
     <label>Low bid share (%)
       <input type="number" id="intl-t-low" step="0.1" value="{{ (report.tiers.low * 100)|round(1) }}">
     </label>
@@ -52,12 +55,21 @@
   </div>
   <div class="intl-plan-bar">
     <label>Planning tier
-      <select id="intl-tier"><option value="low">Low</option><option value="avg" selected>Average</option><option value="high">High</option></select>
+      <select id="intl-tier"><option value="mixed" selected>Mixed plan</option><option value="low">Low</option><option value="avg">Average</option><option value="high">High</option></select>
     </label>
-    <button type="button" class="intl-btn" id="intl-autofill" title="Tick the best remaining targets by blended surplus until the cash runs out">Auto-fill by surplus</button>
+    <button type="button" class="intl-btn" id="intl-autofill" title="Mixed plan: tick every planned player. Single tier: tick the best remaining targets by blended surplus until the cash runs out">Auto-fill</button>
     <button type="button" class="intl-btn" id="intl-unselect">Clear ticks</button>
     <span class="intl-total">Selected: <strong id="intl-sel-total">$0</strong> of <strong id="intl-cash-show">$0</strong> · remaining <strong id="intl-remaining">$0</strong> · <span id="intl-sel-count">0</span> players · expected surplus <strong id="intl-sel-surplus">$0</strong></span>
   </div>
+  {% set pl = report.plan %}
+  {% if pl %}
+  <div class="intl-mixed">
+    <div class="intl-mixed-head"><strong>Mixed-tier plan</strong> — {{ pl.n }} players · {{ pl.counts.high }} High · {{ pl.counts.avg }} Average · {{ pl.counts.low }} Low · bids {{ money(pl.total) }} of {{ money(pl.target) }} (cash minus buffer) · {{ money(pl.left) }} left · expected surplus {{ money(pl.surplus) }}</div>
+    <div class="intl-note" style="margin:4px 0 0">Everyone with positive blended surplus whose ask is no more than a third of it, minus excluded personalities ({{ report.exclude_types|join(', ') }}). High for the best and most certain, Low for low-confidence or small values, Average otherwise; then the most valuable are stepped up a tier while the total stays inside cash minus buffer. No bid is below the ask.</div>
+    {% if pl.excluded %}<div class="intl-note"><strong>Excluded for personality:</strong> {% for r in pl.excluded %}{{ r.name }} ({{ r.personality.type }}, {{ money(r.blend.surplus) }}){{ ', ' if not loop.last }}{% endfor %}</div>{% endif %}
+    {% if pl.excluded_ask %}<div class="intl-note"><strong>Excluded, ask too high for his value:</strong> {% for r in pl.excluded_ask %}{{ r.name }}{{ ', ' if not loop.last }}{% endfor %}</div>{% endif %}
+  </div>
+  {% endif %}
   <p class="intl-note">Bids are a share of the <strong>blended</strong> report's probability-weighted career surplus (the same figure the add-candidates page uses). Cash does not carry over, so use the High tier for your top targets and Low for depth. Confidence combines each report's scouting accuracy with how closely the scouts agree on potential.</p>
 </div>
 
@@ -85,7 +97,7 @@
         <th colspan="2" class="intl-blendcol">Blended</th>
         <th colspan="2">Median scout</th>
         <th colspan="7">Verdict</th>
-        <th colspan="3" class="intl-bidcol">Proposed bid</th>
+        <th colspan="4" class="intl-bidcol">Proposed bid</th>
         <th colspan="2"></th>
       </tr>
       <tr>
@@ -111,6 +123,7 @@
         <th data-sort="num">Low</th>
         <th data-sort="num">Avg</th>
         <th data-sort="num">High</th>
+        <th data-sort="num" title="The mixed-tier plan: tier and bid, or why he's left out">Plan</th>
         <th data-sort="num" title="Asking demand from the export">Ask</th>
         <th data-sort="num" title="Running total of the planning tier in current sort order">Cum.</th>
       </tr>
@@ -119,7 +132,7 @@
     {% for r in report.rows %}
       {% set is_p = r.pos in ('SP','RP','CL','P') %}
       <tr data-kind="{{ 'P' if is_p else 'H' }}" data-conf="{{ r.conf }}" data-surplus="{{ r.blend.surplus }}"
-          data-low="{{ r.bids.low }}" data-avg="{{ r.bids.avg }}" data-high="{{ r.bids.high }}"
+          data-low="{{ r.bids.low }}" data-avg="{{ r.bids.avg }}" data-high="{{ r.bids.high }}" data-mixed="{{ r.plan_bid or 0 }}"
           data-name="{{ r.name|lower }}" data-ptype="{{ r.personality.type_class }}">
         <td><input type="checkbox" class="intl-pick"></td>
         <td><a href="/player/{{ r.pid }}">{{ r.name }}</a></td>
@@ -145,6 +158,7 @@
         <td data-sort-value="{{ r.bids.low }}">{{ money(r.bids.low) }}</td>
         <td data-sort-value="{{ r.bids.avg }}">{{ money(r.bids.avg) }}</td>
         <td data-sort-value="{{ r.bids.high }}">{{ money(r.bids.high) }}</td>
+        <td data-sort-value="{{ r.plan_bid or 0 }}" class="intl-plan intl-plan-{{ r.plan_tier or 'none' }}" title="{{ r.plan_note }}">{% if r.plan_tier %}<strong>{{ money(r.plan_bid) }}</strong> <span>{{ {'high':'High','avg':'Avg','low':'Low'}[r.plan_tier] }}</span>{% if r.plan_risk_dev or r.plan_risk_other %} <span class="intl-riskflag" title="{{ r.plan_note }}">⚠</span>{% endif %}{% elif r.plan_note %}<span class="intl-dim">{{ 'personality' if 'Likely' in r.plan_note else 'ask too high' }}</span>{% else %}–{% endif %}</td>
         <td data-sort-value="{{ r.demand or 0 }}" title="{{ r.difficulty }}">{{ money(r.demand) }}</td>
         <td class="intl-cum" data-sort-value="0">–</td>
       </tr>
@@ -197,6 +211,11 @@
   .intl-type-neg { color:var(--red); font-weight:700; }
   .intl-type-unknown, .intl-type-unscouted { color:var(--text-dim); }
   .intl-conf { font-weight:700; }
+  .intl-mixed { margin-top:12px; padding:10px 12px; border:1px solid var(--green); border-radius:8px; }
+  .intl-mixed-head { font-size:13px; }
+  .intl-plan span { font-size:10px; color:var(--text-dim); }
+  .intl-plan-high strong { color:var(--green); } .intl-plan-avg strong { color:var(--text); } .intl-plan-low strong { color:var(--amber,#d9a441); }
+  .intl-riskflag { color:var(--amber,#d9a441) !important; font-size:12px !important; cursor:help; }
   .intl-conf-5, .intl-conf-4 { color:var(--green); }
   .intl-conf-2, .intl-conf-1 { color:var(--red); }
   .intl-table tr.intl-in td { background:rgba(78,204,163,0.10); }
@@ -240,6 +259,7 @@
   $('intl-save').addEventListener('click', () => {
     post('/api/international/settings', {
       cash: parseFloat($('intl-cash').value) * DIV,
+      buffer: parseFloat($('intl-buffer').value) * DIV,
       tiers: {low: $('intl-t-low').value / 100, avg: $('intl-t-avg').value / 100, high: $('intl-t-high').value / 100}
     }).then(r => r.ok ? location.reload() : alert(r.error || 'Could not save'));
   });
@@ -298,6 +318,10 @@
   $('intl-unselect').addEventListener('click', () => { rows().forEach(tr => tr.querySelector('.intl-pick').checked = false); recompute(); });
   $('intl-autofill').addEventListener('click', () => {
     const t = tier(); let used = 0;
+    if (t === 'mixed') {
+      rows().forEach(tr => tr.querySelector('.intl-pick').checked = Number(tr.dataset.mixed) > 0);
+      recompute(); return;
+    }
     const order = rows().filter(tr => !tr.classList.contains('intl-hidden'))
       .sort((a, b) => Number(b.dataset.surplus) - Number(a.dataset.surplus));
     rows().forEach(tr => tr.querySelector('.intl-pick').checked = false);

@@ -409,6 +409,8 @@ def load_store(league_dir) -> dict:
     d["slots"] = (d["slots"] + [None] * 3)[:3]
     d.setdefault("cash", 1_000_000)
     d.setdefault("tiers", dict(DEFAULT_TIERS))
+    d.setdefault("buffer", 75_000)
+    d.setdefault("exclude_types", ["Selfish", "Disruptive"])
     return d
 
 
@@ -498,4 +500,93 @@ def build_report(league_dir) -> dict:
         })
     rows.sort(key=lambda r: (-r["blend"]["surplus"], -r["blend"]["fv"], r["name"]))
     result["rows"] = rows
+    result["buffer"] = store["buffer"]
+    result["exclude_types"] = store["exclude_types"]
+    result["plan"] = mixed_plan(rows, store["cash"], store["buffer"], store["exclude_types"])
     return result
+
+
+# ── mixed-tier bid plan ──────────────────────────────────────────────────────
+
+# Personality-risk notes worth a second look even when a player stays in the pool.
+_RISK_CONCERNS = {"Low Work Ethic", "Low IQ", "Greedy", "Low Loyalty", "Low Leadership", "Low Adaptability"}
+
+
+def _excluded_type(r, exclude_types):
+    t = (r.get("personality") or {}).get("type") or ""
+    return next((x for x in exclude_types if x.lower() in t.lower()), None)
+
+
+def mixed_plan(rows, cash, buffer, exclude_types):
+    """Bid on everyone worth signing, at a tier that fits the budget.
+
+    Pool: positive blended surplus, ask no more than a third of that surplus,
+    and not one of the excluded personality types. Starting tiers: High for the
+    best and most certain (surplus >= 140k, or High+ confidence with >= 100k),
+    Low for low-confidence or small values (confidence Low or below, or surplus
+    < 30k), Average otherwise. Then, most valuable first, players are moved up a
+    tier (Average -> High, then Low -> Average) while the total stays within
+    cash - buffer. No bid is below the player's ask. Mutates each row with
+    plan_tier / plan_bid / plan_note and returns the summary.
+    """
+    target = max(0, (cash or 0) - (buffer or 0))
+    pool, out_rows = [], []
+    for r in rows:
+        r["plan_tier"], r["plan_bid"], r["plan_note"] = None, 0, ""
+        s = r["blend"]["surplus"]
+        ex = _excluded_type(r, exclude_types)
+        if s <= 0:
+            continue
+        if ex:
+            r["plan_note"] = f"Excluded: {r['personality']['type']}"
+            continue
+        if (r.get("demand") or 0) > s / 3:
+            r["plan_note"] = "Excluded: ask above a third of his value"
+            continue
+        c = r["conf"]
+        r["plan_tier"] = ("high" if (s >= 140_000 or (c >= 4 and s >= 100_000))
+                          else "low" if (c <= 2 or s < 30_000) else "avg")
+        pool.append(r)
+
+    def bid(r):
+        return max(r["bids"][r["plan_tier"]], r.get("demand") or 0)
+
+    total = sum(bid(r) for r in pool)
+    while total > target and pool:          # over budget: step the cheapest-value players down
+        movable = [r for r in reversed(pool) if r["plan_tier"] != "low"]
+        if not movable:
+            break
+        r = movable[0]
+        r["plan_tier"] = "avg" if r["plan_tier"] == "high" else "low"
+        total = sum(bid(x) for x in pool)
+    changed = True
+    while changed:                          # under budget: step the most valuable up
+        changed = False
+        for frm, to in (("avg", "high"), ("low", "avg")):
+            for r in pool:
+                if r["plan_tier"] != frm:
+                    continue
+                r["plan_tier"] = to
+                new_total = sum(bid(x) for x in pool)
+                if new_total <= target:
+                    total, changed = new_total, True
+                else:
+                    r["plan_tier"] = frm
+                break
+            if changed:
+                break
+    for r in pool:
+        r["plan_bid"] = bid(r)
+        risks = [c for c in (r["personality"].get("concerns") or []) if c in _RISK_CONCERNS]
+        r["plan_risk_dev"] = [c for c in risks if c in ("Low Work Ethic", "Low IQ", "Low Adaptability")]
+        r["plan_risk_other"] = [c for c in risks if c not in r["plan_risk_dev"]]
+        if (r["personality"].get("type_class") == "neg") or risks:
+            r["plan_note"] = "Personality risk: " + ", ".join(
+                ([r["personality"]["type"]] if r["personality"].get("type_class") == "neg" else []) + risks)
+    return {"n": len(pool), "total": total, "target": target, "left": (cash or 0) - total,
+            "counts": {t: sum(1 for r in pool if r["plan_tier"] == t) for t in ("high", "avg", "low")},
+            "surplus": sum(r["blend"]["surplus"] for r in pool),
+            "excluded": [r for r in rows if r["plan_note"].startswith("Excluded: ")
+                         and _excluded_type(r, exclude_types)],
+            "excluded_ask": [r for r in rows if r["plan_note"].startswith("Excluded: ask")],
+            "risky": [r for r in pool if r["plan_note"].startswith("Personality risk")]}

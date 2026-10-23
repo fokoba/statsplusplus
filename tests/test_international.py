@@ -70,3 +70,19 @@ def test_parse_marks_unknown_trait_as_none():
     csv_text = "ID,POS,Name,First Name,Last Name,Age,SctAcc,LEA,LOY,AD,FIN,WE,INT,Type\n1,SS,x,A,B,16,High,U,H,N,L,H,U,Unknown\n"
     p = iq.parse_scout_csv(csv_text)[1]
     assert p["traits"] == {"lead": None, "loy": "H", "adaptability": "N", "greed": "L", "wrk_ethic": "H", "int_": None}
+
+
+def _row(pid, surplus, conf=3, demand=1000, ptype="Unknown"):
+    return {"pid": pid, "name": f"P{pid}", "blend": {"surplus": surplus}, "conf": conf, "demand": demand,
+            "bids": iq.bids_for(surplus), "personality": {"type": ptype, "type_class": "neg" if "Selfish" in ptype else "unknown",
+                                                           "concerns": [], "buffs": []}}
+
+
+def test_mixed_plan_excludes_types_and_fits_budget():
+    rows = [_row(1, 400_000, conf=4), _row(2, 100_000, ptype="Likely Selfish (Medium confidence)"),
+            _row(3, 60_000), _row(4, 20_000, conf=2), _row(5, 3_000, demand=5_000)]
+    plan = iq.mixed_plan(rows, cash=250_000, buffer=50_000, exclude_types=["Selfish", "Disruptive"])
+    picked = {r["pid"] for r in rows if r["plan_tier"]}
+    assert picked == {1, 3, 4}                       # selfish and over-ask players are out
+    assert plan["total"] <= 200_000
+    assert all(r["plan_bid"] >= r["demand"] for r in rows if r["plan_tier"])

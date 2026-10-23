@@ -756,6 +756,135 @@ def _detect_league_structure(conn, year):
     return divisions_out, leagues_out, team_abbr_out, team_names_out
 
 
+_REFRESH_LOCK_NAME = ".refresh.lock"
+# A refresh that crashes or is killed (exactly what the OHBL silent-hang did)
+# leaves its lock behind. Treat a lock older than this as stale and reclaim it —
+# it must comfortably exceed the longest legitimate full-pipeline run on a large
+# league (OHBL-scale: minutes of paced renders + calibrate/engine/fv_calc).
+_REFRESH_LOCK_MAX_AGE_SECS = 60 * 60  # 1 hour
+
+
+def _pid_alive(pid: int) -> bool:
+    """Best-effort liveness check for a PID. On POSIX, signal 0 probes without
+    sending. If we cannot tell (Windows, permission error), assume ALIVE so we
+    never steal a lock from a running process on age grounds alone unless the
+    age ceiling also says it is stale."""
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # exists but owned by another user — alive
+    except (AttributeError, OSError):
+        # os.kill unavailable (Windows) or other error — can't disprove liveness.
+        return True
+
+
+def _refresh_lock_path(league_dir: Path) -> Path:
+    return league_dir / _REFRESH_LOCK_NAME
+
+
+def acquire_refresh_lock(league_dir: Path, force: bool = False) -> tuple[bool, str]:
+    """Acquire the per-league refresh lock.
+
+    Returns (ok, detail). On success the lock file is written with our PID and
+    start time; the caller MUST pair this with release_refresh_lock() in a
+    finally. On contention returns (False, human-readable reason).
+
+    A lock is reclaimed (overwritten) when:
+      * its holder PID is no longer alive (crashed/killed run), or
+      * it is older than _REFRESH_LOCK_MAX_AGE_SECS (stale), or
+      * force=True (explicit --force override).
+
+    Per-league scope: OHBL and RRL have separate DBs and lock files, so they can
+    refresh concurrently. (The StatsPlus render limit is per-account, so two
+    concurrent leagues each pace independently — correctness is unaffected,
+    they just share the 1/min server budget.)
+    """
+    path = _refresh_lock_path(league_dir)
+    now = datetime.now(timezone.utc)
+    existing = None
+    if path.exists():
+        try:
+            existing = json.loads(path.read_text())
+        except (OSError, ValueError):
+            existing = {}  # unreadable/corrupt lock — treat as reclaimable
+        if not force:
+            pid = int(existing.get("pid", 0) or 0)
+            started = existing.get("started_at", "")
+            age_secs = None
+            try:
+                age_secs = (now - datetime.fromisoformat(started)).total_seconds()
+            except (TypeError, ValueError):
+                age_secs = None
+            alive = _pid_alive(pid)
+            fresh = age_secs is not None and age_secs < _REFRESH_LOCK_MAX_AGE_SECS
+            if alive and fresh:
+                when = started or "unknown time"
+                mins = f"{age_secs/60:.0f} min ago" if age_secs is not None else when
+                return False, (
+                    f"a refresh is already running for this league "
+                    f"(PID {pid}, started {when}, {mins}). Wait for it to finish, "
+                    f"or use --force to override a stuck run.")
+            # else: dead PID or stale age → reclaim below.
+            reason = "dead process" if not alive else "stale (exceeded max age)"
+            log.warning("Reclaiming %s refresh lock held by PID %s (%s)",
+                        "stale" if fresh else "old", pid, reason)
+        else:
+            log.warning("--force: overriding existing refresh lock (PID %s)",
+                        existing.get("pid"))
+    # Write (or overwrite) our lock atomically via a temp file + replace.
+    payload = {
+        "pid": os.getpid(),
+        "started_at": now.isoformat(),
+        "host": os.environ.get("HOSTNAME", ""),
+    }
+    try:
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps(payload))
+        os.replace(tmp, path)
+    except OSError as e:
+        return False, f"could not write refresh lock ({e})"
+    return True, f"acquired refresh lock (PID {os.getpid()})"
+
+
+def release_refresh_lock(league_dir: Path) -> None:
+    """Release the lock, but only if it is ours (PID matches) — never remove a
+    lock a reclaiming process took over from us. Safe to call unconditionally in
+    a finally; a missing or foreign lock is a no-op."""
+    path = _refresh_lock_path(league_dir)
+    if not path.exists():
+        return
+    try:
+        held = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return  # unreadable — leave it for age-based reclaim rather than guess
+    if int(held.get("pid", -1) or -1) == os.getpid():
+        try:
+            path.unlink()
+        except OSError:
+            pass
+
+
+def _should_skip_game_history(conn, year) -> bool:
+    """True when the current-year game-history render can be safely skipped.
+
+    Skip iff the current season is unplayed (no current-year team stats exist,
+    i.e. offseason/preseason) AND we already hold game history to fall back on
+    for league-structure detection. In-season (current-year team stats present)
+    always re-renders so new games are captured. Returns False when the games
+    table is empty (first refresh) so history is never missed.
+    """
+    have_cur_team = conn.execute(
+        "SELECT 1 FROM team_batting_stats WHERE year=? AND split_id=1 LIMIT 1",
+        (year,)).fetchone() is not None
+    have_games = conn.execute("SELECT 1 FROM games LIMIT 1").fetchone() is not None
+    return (not have_cur_team) and have_games
+
+
 def refresh_league(year, game_date=None, full=False):
     """Pull all teams into DB for the active league.
 
@@ -774,6 +903,20 @@ def refresh_league(year, game_date=None, full=False):
     _init_schema(league_dir)
     conn = _get_connection(league_dir)
 
+    # Dedup render-paced payloads for the duration of this refresh: the
+    # current-year team-stats render is wanted by _upsert_team_stats,
+    # _detect_league_structure AND _refresh_league_averages, and each would
+    # otherwise burn its own 62s pacing window for the identical payload. The
+    # offseason year-N→N-1 fallback is likewise fetched once and reused. Cleared
+    # in the finally below so a stale payload never bleeds into a later refresh.
+    client.begin_render_cache()
+    try:
+        _refresh_league_body(conn, year, game_date, full, _time, league_dir)
+    finally:
+        client.clear_render_cache()
+
+
+def _refresh_league_body(conn, year, game_date, full, _time, league_dir):
     # Kick off ratings export first — it takes 30s+ to generate on the server.
     # If RATINGS_POLL_URL is set (from onboarding auth check), reuse it.
     ratings_poll_url = os.environ.get("RATINGS_POLL_URL", "")
@@ -917,14 +1060,33 @@ def refresh_league(year, game_date=None, full=False):
         _upsert_team_stats(conn, prior_year)
 
     log.info("── game history")
-    games = client.get_game_history(year=year)
-    _upsert_games(conn, games)
-    log.info(f"  {len(games)} games")
+    # In the offseason/preseason the current year has no played games yet, so a
+    # current-year game-history render returns nothing new while still burning a
+    # 62s pacing window. Skip it when the current season is unplayed (no
+    # current-year team stats) AND we already hold game history — league
+    # structure detection falls back to the stored prior-year games in that
+    # case. Any year with current-season team stats (in-season) always renders.
+    if _should_skip_game_history(conn, year):
+        log.info("  skipped (offseason: current season unplayed, using stored history)")
+    else:
+        games = client.get_game_history(year=year)
+        _upsert_games(conn, games)
+        log.info(f"  {len(games)} games")
 
     # Minor league stats — fetch from all discovered MiLB leagues (current year only)
     log.info("── minor league stats")
+    # /lgdata carries BOTH the league hierarchy (used here) and standings (used
+    # below). Fetch it once and reuse — two identical round-trips for the same
+    # payload is pure waste. Tolerate a failure (lgdata=None) so each consumer
+    # falls back / logs independently rather than one failure killing the other.
     try:
         lgdata = client.get_lgdata()
+    except Exception as e:
+        log.warning(f"  /lgdata fetch failed (non-fatal): {e}")
+        lgdata = None
+    try:
+        if lgdata is None:
+            raise RuntimeError("lgdata unavailable")
         # Find non-MLB leagues (level > 1) that are active in our league structure
         primary_lid = None
         milb_lids = []
@@ -1031,10 +1193,11 @@ def refresh_league(year, game_date=None, full=False):
     except Exception as e:
         log.warning(f"  trade block failed (non-fatal): {e}")
 
-    # Standings from /lgdata — real W-L-GB
+    # Standings from /lgdata — real W-L-GB (reuse the payload fetched above)
     log.info("── standings")
     try:
-        lgdata = client.get_lgdata()
+        if lgdata is None:
+            raise RuntimeError("lgdata unavailable")
         standings_rows = lgdata.get("standings", [])
         if standings_rows:
             conn.execute("DELETE FROM standings")
@@ -1561,27 +1724,42 @@ def main():
             print(f"Already up to date (game date {game_date}). Use --force to re-pull.")
             return
 
-        log.info("=== Full pipeline: year=%s, game_date=%s ===", year, game_date)
-        refresh_league(year, game_date=game_date, full=full)
-        update_state(game_date, year)
+        # Per-league refresh lock: refuse to start if another refresh for THIS
+        # league is already running (prevents the stacked overlapping-run pattern
+        # that compounded the OHBL hang). A crashed/stale lock is reclaimed. The
+        # lock covers the ENTIRE pipeline — refresh_league + calibrate + engine +
+        # fv_calc all write the same league DB/files.
+        lock_dir = get_league_dir()
+        ok, detail = acquire_refresh_lock(lock_dir, force=force)
+        if not ok:
+            log.warning("=== Refresh refused: %s ===", detail)
+            print(detail)
+            return
+        log.info("── %s", detail)
         try:
-            from statsplusplus.data.exclusions import purge_excluded
-            purge_excluded(get_league_dir())
-        except Exception as e:
-            log.warning("excluded-player purge failed: %s", e)
-        if not skip_fv:
-            # Order matters: calibrate writes the per-league model weights
-            # (tool_weights.json: tool/def curves, run-space anchor, the
-            # runs→composite comp_mapping) that the evaluation engine CONSUMES.
-            # The engine must therefore run AFTER calibrate, or it computes
-            # composites with the PREVIOUS refresh's calibration — a one-refresh
-            # lag that silently delays any calibration/model change by a cycle.
-            _run_calibrate()
-            _run_evaluation_engine()
-            _run_fv_calc()
-            log.info("=== Pipeline complete ===")
-        else:
-            log.info("=== Pipeline complete (--no-fv: skipped eval/calibrate/fv) ===")
+            log.info("=== Full pipeline: year=%s, game_date=%s ===", year, game_date)
+            refresh_league(year, game_date=game_date, full=full)
+            update_state(game_date, year)
+            try:
+                from statsplusplus.data.exclusions import purge_excluded
+                purge_excluded(get_league_dir())
+            except Exception as e:
+                log.warning("excluded-player purge failed: %s", e)
+            if not skip_fv:
+                # Order matters: calibrate writes the per-league model weights
+                # (tool_weights.json: tool/def curves, run-space anchor, the
+                # runs→composite comp_mapping) that the evaluation engine CONSUMES.
+                # The engine must therefore run AFTER calibrate, or it computes
+                # composites with the PREVIOUS refresh's calibration — a one-refresh
+                # lag that silently delays any calibration/model change by a cycle.
+                _run_calibrate()
+                _run_evaluation_engine()
+                _run_fv_calc()
+                log.info("=== Pipeline complete ===")
+            else:
+                log.info("=== Pipeline complete (--no-fv: skipped eval/calibrate/fv) ===")
+        finally:
+            release_refresh_lock(lock_dir)
 
 
 if __name__ == "__main__":

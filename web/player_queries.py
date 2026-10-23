@@ -1570,7 +1570,11 @@ def get_player(pid):
                         dollars_per_war as _dpw_fn, league_minimum as _lm_fn)
                     _pw = _recent_mlb_war(conn, pid, is_pitcher)
                     _ld_rec = get_cfg().league_dir
-                    surplus_detail["recommended"] = _rec_fn(_pw, _dpw_fn(_ld_rec), age, _lm_fn(_ld_rec))
+                    from statsplusplus.config.finance_settings import recommended_contract_from_recent as _rec_fn
+                    from statsplusplus.evaluation.constants import load_model_weights as _lmw_rec
+                    surplus_detail["recommended"] = _rec_fn(
+                        _pw, _dpw_fn(_ld_rec), age, _lm_fn(_ld_rec),
+                        bucket=(valuation or {}).get("bucket"), weights=_lmw_rec(_ld_rec))
 
             # WAR pace + pace-recalculated surplus (2026-09-30) — "if this
             # player's current-season pace holds, what would his surplus be
@@ -2206,7 +2210,10 @@ def get_player(pid):
                 dollars_per_war as _dpw_fa, league_minimum as _lm_fa)
             _ld_fa = get_cfg().league_dir
             _pw_fa = _recent_mlb_war(conn, pid, is_pitcher)
-            _rec = _rec_fa(_pw_fa, _dpw_fa(_ld_fa), age, _lm_fa(_ld_fa))
+            from statsplusplus.config.finance_settings import recommended_contract_from_recent as _rec_fa
+            from statsplusplus.evaluation.constants import load_model_weights as _lmw_fa
+            _bkt_fa = locals().get("_internal_bucket") or ("SP" if is_pitcher else None)
+            _rec = _rec_fa(_pw_fa, _dpw_fa(_ld_fa), age, _lm_fa(_ld_fa), bucket=_bkt_fa, weights=_lmw_fa(_ld_fa))
             if surplus_detail is None:
                 surplus_detail = {"rows": [], "total": {"base": 0}, "flags": []}
             surplus_detail.setdefault("recommended", _rec)

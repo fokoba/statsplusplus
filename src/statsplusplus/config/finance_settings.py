@@ -111,25 +111,44 @@ def recommended_contract(
     dpw: float,
     age: Optional[int] = None,
     min_sal: float = 0.0,
+    bucket: Optional[str] = None,
+    weights: Optional[Any] = None,
 ) -> dict[str, Any]:
-    """A simple recommended free-agent contract: annual value, length, total.
+    """A recommended free-agent contract: annual value, length, total.
 
-    Deliberately minimal for now — ``aav = max(proj_war, 0) × $/WAR`` floored at
-    the league minimum salary (every player costs at least the minimum, so a
-    replacement-level FA is priced at ``min_sal``, not $0), and a coarse
-    age-based length. This is a *value-based estimate used as a cost proxy*, NOT
-    the player's actual demand (the game doesn't expose that). A later pass will
-    refine it (market tax, pipeline-aware length, positional scarcity); the
-    return shape is fixed so callers/UI don't change.
+    The AAV is priced off the player's *average projected WAR across the term*,
+    not his peak. ``proj_war`` is treated as the player's peak WAR; when a
+    ``bucket`` is supplied the aging curve is applied from the player's current
+    ``age`` across the contract length, and the AAV is the term-average aged
+    value × ``$/WAR`` (floored at ``min_sal``). This matters for players already
+    at/past peak — an aging regular should be paid for what he will produce on
+    the deal, not for a peak he will not reach again (e.g. a 32-yo 2.4-WAR 2B
+    averages ~1.6 WAR over 3 years, not 2.4). Without a ``bucket`` it falls back
+    to the flat ``peak × $/WAR`` estimate (pre-aging behavior).
+
+    Still a *value-based estimate used as a cost proxy*, NOT the player's actual
+    demand (the game doesn't expose that). A later pass may add market tax,
+    pipeline-aware length, and positional scarcity; the return shape is fixed so
+    callers/UI don't change.
 
     Returns ``{"aav", "years", "total"}`` in raw league dollars. ``aav`` is the
     figure the FA cart draws down against the single-offseason ``fa_budget``;
     ``total`` is the multi-year commitment for context.
     """
-    war = max(proj_war or 0.0, 0.0)
-    aav = max(war * dpw, min_sal or 0.0)
+    peak = max(proj_war or 0.0, 0.0)
     years = _default_years(age)
-    return {"aav": round(aav), "years": years, "total": round(aav * years)}
+
+    if bucket and age is not None and peak > 0.0:
+        # Average the aged WAR across each contract year (peak × aging curve).
+        from statsplusplus.evaluation.war import aging_mult
+        aged = [peak * aging_mult(age + yr, bucket, weights) for yr in range(years)]
+        avg_war = sum(aged) / len(aged) if aged else peak
+    else:
+        avg_war = peak
+
+    aav = max(avg_war * dpw, min_sal or 0.0)
+    aav = round(aav)
+    return {"aav": aav, "years": years, "total": aav * years}
 
 
 def _default_years(age: Optional[int]) -> int:
@@ -158,3 +177,23 @@ def available_for_fa(settings: dict[str, Any], committed_spent: float = 0.0) -> 
     if fa is None:
         return None
     return float(fa) - (committed_spent or 0.0)
+
+
+def recommended_contract_from_recent(
+    recent_war: float,
+    dpw: float,
+    age: Optional[int] = None,
+    min_sal: float = 0.0,
+    bucket: Optional[str] = None,
+    weights: Optional[Any] = None,
+) -> dict[str, Any]:
+    """recommended_contract() for callers that have a player's RECENT season WAR
+    rather than a peak WAR (this fork doesn't store peak_war). The recent figure
+    already reflects his current age, so it's converted to a peak-equivalent
+    (divide by today's aging multiplier) before the term is aged forward —
+    otherwise an aging player would be aged twice."""
+    peak = recent_war
+    if bucket and age is not None and recent_war:
+        from statsplusplus.evaluation.war import aging_mult
+        peak = recent_war / max(0.3, aging_mult(age, bucket, weights))
+    return recommended_contract(peak, dpw, age, min_sal, bucket=bucket, weights=weights)

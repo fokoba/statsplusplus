@@ -407,8 +407,9 @@ def get_market_board(team_id, limit=60):
                                   1, dpw, min_sal, weights)
         # Recommended contract — a simple value-based cost estimate the FA cart
         # draws down against fa_budget (aav). Not the player's real demand.
-        from statsplusplus.config.finance_settings import recommended_contract
-        rec = recommended_contract(proj_war, dpw, r[2], min_sal)
+        from statsplusplus.config.finance_settings import recommended_contract_from_recent
+        # Priced off average aged WAR across the term (not the year-one figure).
+        rec = recommended_contract_from_recent(proj_war, dpw, r[2], min_sal, bucket=bucket, weights=weights)
         out.append({
             "pid": r[0], "name": r[1], "age": r[2],
             "pos": pos,

@@ -36,6 +36,7 @@ import json
 import logging
 import os
 import re
+import socket
 import time
 import urllib.error
 import urllib.request
@@ -168,6 +169,50 @@ _RENDER_MIN_INTERVAL = 62.0  # seconds (1/min limit + small margin)
 _RENDER_PATHS = ("/teambatstats", "/teampitchstats", "/gamehistory")
 _last_render_ts: float = 0.0
 
+# Within a single refresh the same render-paced payload (e.g. the current-year
+# /teambatstats) is requested from several independent steps — _upsert_team_stats,
+# _detect_league_structure and _refresh_league_averages all want the identical
+# team-stats render. Each distinct request otherwise burns a fresh 62s pacing
+# window even though the server-side payload is unchanged for the duration of
+# one refresh. This memo makes the second+ request of an identical render URL a
+# free in-process lookup rather than another paced round-trip. It is scoped
+# EXPLICITLY to a refresh via begin_render_cache()/clear_render_cache() so it can
+# never leak a stale payload across refreshes (a later refresh is a new game
+# state) — when no scope is active, caching is a no-op and every request hits the
+# network exactly as before. Only render-paced paths are cached; the cheap,
+# already-rendered endpoints are left untouched.
+_render_cache: Optional[dict[str, str]] = None
+
+
+def begin_render_cache() -> None:
+    """Start caching render-paced payloads for the current refresh.
+
+    Call once at the top of a refresh. Subsequent identical render requests
+    (same path + query, token aside) return the first response without a new
+    paced round-trip. Idempotent: starting again simply resets the cache.
+    """
+    global _render_cache
+    _render_cache = {}
+
+
+def clear_render_cache() -> None:
+    """End the render-cache scope so later requests always hit the network.
+
+    Call in a finally at the end of a refresh so a stale team-stats payload can
+    never bleed into a later refresh.
+    """
+    global _render_cache
+    _render_cache = None
+
+# Per-request socket timeout. urlopen() with no timeout blocks on the system
+# default, which for a wedged/half-open connection is effectively forever — a
+# single stalled render request (e.g. a slow server-side team-stats render on a
+# large league) would then freeze the entire refresh pipeline silently, with no
+# log line and no error. Bounding each request means a stall raises TimeoutError
+# instead, which the _fetch retry loop treats as transient. Must exceed the
+# render pacing window (62s) so a legitimately slow render isn't cut off early.
+_FETCH_TIMEOUT = 180.0  # seconds
+
 
 def _render_path(url: str) -> bool:
     return any(p in url for p in _RENDER_PATHS)
@@ -220,7 +265,7 @@ def _fetch(url: str, _retries: int = _RATE_LIMIT_MAX_RETRIES) -> str:
         req = urllib.request.Request(url, headers=headers)
         ctype = ""
         try:
-            with urllib.request.urlopen(req) as r:
+            with urllib.request.urlopen(req, timeout=_FETCH_TIMEOUT) as r:
                 ctype = (r.headers.get("Content-Type") or "").lower()
                 body = r.read().decode()
         except urllib.error.HTTPError as e:
@@ -237,6 +282,22 @@ def _fetch(url: str, _retries: int = _RATE_LIMIT_MAX_RETRIES) -> str:
                 log.info("Rate limited (429) — waiting %ds (attempt %d)", wait, attempt + 1)
                 time.sleep(wait + 2)
                 if is_render:
+                    _last_render_ts = time.monotonic()
+                continue
+            raise
+        except (TimeoutError, socket.timeout, urllib.error.URLError) as e:
+            # A stalled or dropped connection (incl. the socket read timeout).
+            # Treat as transient and retry rather than hanging or aborting the
+            # whole pipeline. socket.timeout is an alias of TimeoutError on
+            # 3.10+; a read/connect timeout can also surface as URLError whose
+            # .reason is the timeout.
+            if attempt < _retries:
+                log.warning(
+                    "Request stalled/failed (%s) — retrying (attempt %d)",
+                    getattr(e, "reason", e), attempt + 1)
+                time.sleep(5)
+                if is_render:
+                    # The failed attempt still consumed its render window.
                     _last_render_ts = time.monotonic()
                 continue
             raise
@@ -268,8 +329,20 @@ def _get(path: str, params: Optional[dict[str, Any]] = None) -> str:
     p = params or {}
     qs = "&".join(f"{k}={v}" for k, v in p.items() if v is not None)
     url = f"{_base_url()}{path}" + (f"?{qs}" if qs else "")
-    result = _fetch(url)
-    return str(result)
+    # Serve an identical render-paced payload from the per-refresh memo rather
+    # than paying another 62s window. Keyed on the token-free URL (the token is
+    # appended inside _fetch and is not part of the payload identity). Only
+    # render paths are eligible, and only while a cache scope is active.
+    cacheable = _render_cache is not None and _render_path(url)
+    if cacheable:
+        hit = _render_cache.get(url)  # type: ignore[union-attr]
+        if hit is not None:
+            log.info("Reusing cached render payload (%s)", path.strip("/"))
+            return hit
+    result = str(_fetch(url))
+    if cacheable:
+        _render_cache[url] = result  # type: ignore[index]
+    return result
 
 
 def _parse_csv(text: str) -> list[dict[str, Any]]:
@@ -383,7 +456,7 @@ def tokencheck(slug: str, token: str) -> tuple[bool, str]:
     req = urllib.request.Request(
         url, headers={"Accept": "text/plain", "User-Agent": _USER_AGENT})
     try:
-        with urllib.request.urlopen(req) as r:
+        with urllib.request.urlopen(req, timeout=_FETCH_TIMEOUT) as r:
             body = r.read().decode().strip()
         # Success is a team ID; guard against HTTP-200 message bodies too.
         decision = _classify_message(body)

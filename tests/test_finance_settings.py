@@ -131,3 +131,36 @@ def test_recommended_contract_none_war():
 ])
 def test_default_years_curve(age, years):
     assert fs._default_years(age) == years
+
+
+# ---------------------------------------------------------------------------
+# recommended_contract — term-average aged pricing (bucket path)
+# ---------------------------------------------------------------------------
+
+def test_recommended_contract_ages_off_peak_for_aging_fa():
+    """With a bucket supplied, the AAV is priced off the average aged WAR across
+    the term, not the peak. An aging regular (past peak) therefore gets a LOWER
+    AAV than the flat peak × $/WAR estimate — he's paid for what he'll produce
+    on the deal, not a peak he won't reach again."""
+    peak = 2.4
+    dpw = 1_000_000
+    flat = fs.recommended_contract(peak, dpw, age=32)  # no bucket → flat peak
+    aged = fs.recommended_contract(peak, dpw, age=32, bucket="2B")  # ages over term
+    assert flat["aav"] == round(peak * dpw)
+    # A 32-yo is past the hitter peak, so the term-average is below peak.
+    assert aged["aav"] < flat["aav"]
+    assert aged["aav"] > 0
+    assert aged["years"] == flat["years"]  # length still age-driven
+
+
+def test_recommended_contract_bucket_matches_manual_aging():
+    """The bucket-path AAV equals the explicit term-average of the aging curve."""
+    from statsplusplus.evaluation.war import aging_mult
+    peak = 3.0
+    dpw = 1_000_000
+    age = 30
+    c = fs.recommended_contract(peak, dpw, age=age, bucket="SS")
+    years = c["years"]
+    aged = [peak * aging_mult(age + yr, "SS", None) for yr in range(years)]
+    expected = round((sum(aged) / len(aged)) * dpw)
+    assert c["aav"] == expected

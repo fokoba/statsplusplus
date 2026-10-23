@@ -121,6 +121,18 @@ def ratings_changes(conn, team_id, baseline=None, scope="org", min_change=5):
              "mlb": "p.level='1'",
              "league": "COALESCE(p.retired,0)=0"}[scope if scope in ("org", "mlb", "league") else "org"]
     params = (team_id, team_id) if scope == "org" else ()
+    # Leave out players currently in Japan (NPB): any player on an NPB club, or in
+    # the league those clubs play in.
+    from team_queries import _NIPPON_TEAM_IDS
+    qs = ",".join("?" * len(_NIPPON_TEAM_IDS))
+    npb_leagues = [r[0] for r in conn.execute(
+        f"SELECT DISTINCT player_league_id FROM players WHERE team_id IN ({qs}) AND player_league_id IS NOT NULL",
+        _NIPPON_TEAM_IDS).fetchall()]
+    where += f" AND COALESCE(p.team_id,0) NOT IN ({qs})"
+    params = params + tuple(_NIPPON_TEAM_IDS)
+    if npb_leagues:
+        where += f" AND COALESCE(p.player_league_id,-999) NOT IN ({','.join('?' * len(npb_leagues))})"
+        params = params + tuple(npb_leagues)
     cols = sorted({c for c, *_ in HIT_TOOLS + PIT_TOOLS} | {c for c, _ in POT_HIT + POT_PIT})
     sel_now = ", ".join(f"r.{c} AS n_{c}" for c in cols)
     sel_old = ", ".join(f"h.{c} AS o_{c}" for c in cols)

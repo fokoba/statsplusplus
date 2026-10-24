@@ -81,6 +81,7 @@
       <select id="intl-kind"><option value="all">Hitters + pitchers</option><option value="H">Hitters</option><option value="P">Pitchers</option></select>
     </label>
     <label><input type="checkbox" id="intl-pos-only" checked> Hide players worth $0</label>
+    <label title="{{ report.n_signed or 0 }} players in this class have signed"><input type="checkbox" id="intl-unsigned"> Available only</label>
     <label>Min confidence
       <select id="intl-minconf"><option value="1">Any</option><option value="2">Low+</option><option value="3">Average+</option><option value="4">High+</option><option value="5">Very High</option></select>
     </label>
@@ -100,6 +101,7 @@
         <th colspan="7">Verdict</th>
         <th colspan="4" class="intl-bidcol">Proposed bid</th>
         <th colspan="2"></th>
+        <th colspan="2">Signed</th>
       </tr>
       <tr>
         <th></th>
@@ -127,6 +129,8 @@
         <th data-sort="num" title="The mixed-tier plan: tier and bid, or why he's left out">Plan</th>
         <th data-sort="num" title="Asking demand from the export">Ask</th>
         <th data-sort="num" title="Running total of the planning tier in current sort order">Cum.</th>
+        <th data-sort="text" title="Club that signed him (from the game's transaction log)">Team</th>
+        <th data-sort="num" title="Actual signing bonus">Cost</th>
       </tr>
     </thead>
     <tbody>
@@ -134,7 +138,7 @@
       {% set is_p = r.pos in ('SP','RP','CL','P') %}
       <tr data-kind="{{ 'P' if is_p else 'H' }}" data-conf="{{ r.conf }}" data-surplus="{{ r.blend.surplus }}"
           data-low="{{ r.bids.low }}" data-avg="{{ r.bids.avg }}" data-high="{{ r.bids.high }}" data-mixed="{{ r.plan_bid or 0 }}"
-          data-name="{{ r.name|lower }}" data-ptype="{{ r.personality.type_class }}">
+          data-name="{{ r.name|lower }}" data-ptype="{{ r.personality.type_class }}" data-signed="{{ 1 if r.signed else 0 }}">
         <td><input type="checkbox" class="intl-pick"></td>
         <td><a href="/player/{{ r.pid }}">{{ r.name }}</a></td>
         <td data-sort-value="0">{{ r.pos }}</td>
@@ -162,6 +166,8 @@
         <td data-sort-value="{{ r.plan_bid or 0 }}" class="intl-plan intl-plan-{{ r.plan_tier or 'none' }}" title="{{ r.plan_note }}">{% if r.plan_tier %}<strong>{{ money(r.plan_bid) }}</strong> <span>{{ {'high':'High','avg':'Avg','low':'Low','pinned':'📌 Fixed','depth':'Depth'}[r.plan_tier] }}</span>{% if r.plan_risk_dev or r.plan_risk_other %} <span class="intl-riskflag" title="{{ r.plan_note }}">⚠</span>{% endif %}{% elif r.plan_note %}<span class="intl-dim">{{ 'personality' if 'Likely' in r.plan_note else 'ask too high' }}</span>{% else %}–{% endif %}</td>
         <td data-sort-value="{{ r.demand or 0 }}" title="{{ r.difficulty }}">{{ money(r.demand) }}</td>
         <td class="intl-cum" data-sort-value="0">–</td>
+        {% if r.signed %}<td class="intl-signed{{ ' intl-ours' if r.signed.team_id == 6 }}">{{ r.signed.team }}</td><td data-sort-value="{{ r.signed.bonus }}">{{ money(r.signed.bonus) }}</td>
+        {% else %}<td class="intl-dim">–</td><td data-sort-value="-1">–</td>{% endif %}
       </tr>
     {% endfor %}
     </tbody>
@@ -225,6 +231,8 @@
   .intl-table tr.intl-in td { background:rgba(78,204,163,0.10); }
   .intl-table tr.intl-picked td { background:rgba(217,164,65,0.14); }
   .intl-table tr.intl-hidden { display:none; }
+  .intl-signed { text-align:left !important; }
+  .intl-ours { color:var(--green); font-weight:700; }
 </style>
 
 {% endblock %}
@@ -270,7 +278,7 @@
 
   // ── filtering ──
   function applyFilters() {
-    const kind = $('intl-kind').value, posOnly = $('intl-pos-only').checked;
+    const kind = $('intl-kind').value, posOnly = $('intl-pos-only').checked, unsignedOnly = $('intl-unsigned').checked;
     const minConf = parseInt($('intl-minconf').value, 10), q = $('intl-find').value.trim().toLowerCase();
     let shown = 0;
     rows().forEach(tr => {
@@ -278,6 +286,7 @@
       if (kind !== 'all' && tr.dataset.kind !== kind) ok = false;
       if (posOnly && Number(tr.dataset.surplus) <= 0) ok = false;
       if (Number(tr.dataset.conf) < minConf) ok = false;
+      if (unsignedOnly && tr.dataset.signed === '1') ok = false;
       if (q && !tr.dataset.name.includes(q)) ok = false;
       tr.classList.toggle('intl-hidden', !ok);
       if (ok) shown++;
@@ -309,7 +318,7 @@
     $('intl-sel-count').textContent = selN;
     $('intl-sel-surplus').textContent = fmt(selS);
   }
-  ['intl-kind','intl-pos-only','intl-minconf'].forEach(id => $(id).addEventListener('change', applyFilters));
+  ['intl-kind','intl-pos-only','intl-minconf','intl-unsigned'].forEach(id => $(id).addEventListener('change', applyFilters));
   $('intl-find').addEventListener('input', applyFilters);
   function persStyle() {
     if (typeof applyPersDevFilters === 'function')

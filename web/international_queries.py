@@ -509,7 +509,49 @@ def build_report(league_dir) -> dict:
                                 pins={int(k): v for k, v in (store["pins"] or {}).items()},
                                 depth_below=store["depth_below"])
     result["rivals"] = _rival_cash(league_dir)
+    signed = international_signings(league_dir)
+    for r in rows:
+        r["signed"] = signed.get(r["pid"])
+    result["n_signed"] = sum(1 for r in rows if r["signed"])
     return result
+
+
+# ── who actually signed ──────────────────────────────────────────────────────
+
+_SIGN_RE = re.compile(
+    r'<a href="[^"]*team_(\d+)\.html">([^<]+)</a>\s*:\s*Signed international amateur \S+\s*'
+    r'<a href="[^"]*player_(\d+)\.html">[^<]*</a>(.*?)(?:</td>|<br|\n\s*\n)', re.S)
+
+
+def _transaction_files(league_dir: Path, year: str) -> list[Path]:
+    """The save's monthly transaction pages for this year, plus any exported to the Desktop."""
+    from statsplusplus.data.photos import local_photo_dir
+    files = []
+    pics = local_photo_dir(league_dir.name)
+    if pics:
+        files += sorted((pics.parent.parent / "leagues").glob(f"league_*_all_transactions_*_{year}.html"))
+    files += sorted((Path.home() / "Desktop").glob(f"All Transactions * {year}*.html"))
+    return files
+
+
+def international_signings(league_dir) -> dict:
+    """pid -> {team, team_id, bonus} for international amateurs signed this year."""
+    league_dir = Path(league_dir)
+    try:
+        year = json.loads((league_dir / "config" / "state.json").read_text())["game_date"][:4]
+    except Exception:
+        return {}
+    out = {}
+    for f in _transaction_files(league_dir, year):
+        try:
+            text = f.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        for tid, team, pid, tail in _SIGN_RE.findall(text):
+            m = re.search(r"\$([\d,]+) signing bonus", tail)
+            out[int(pid)] = {"team": team.strip(), "team_id": int(tid),
+                             "bonus": int(m.group(1).replace(",", "")) if m else 0}
+    return out
 
 
 # ── mixed-tier bid plan ──────────────────────────────────────────────────────

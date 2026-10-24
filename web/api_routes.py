@@ -292,6 +292,9 @@ def api_international_upload():
         return jsonify({"ok": False, "error": "No players found - expected the OOTP 'all columns' view with an ID column"}), 400
     label = (request.form.get("label") or "").strip()[:12] or iq.scout_label_from_filename(f.filename)
     store = iq.load_store(g.league_dir)
+    prev = store["slots"][slot]
+    if prev and prev.get("label") == label:
+        text = iq.merge_scout_csv(prev.get("csv", ""), text)
     store["slots"][slot] = {"label": label, "filename": f.filename, "csv": text,
                             "uploaded_at": datetime.datetime.now().isoformat(timespec="seconds")}
     iq.save_store(g.league_dir, store)

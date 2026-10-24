@@ -205,6 +205,24 @@ def parse_scout_csv(text: str) -> dict:
     return out
 
 
+def merge_scout_csv(old: str, new: str) -> str:
+    """Keep players the new export dropped (OOTP removes them once they sign)."""
+    if not old:
+        return new
+    o = list(csv.reader(io.StringIO(old.lstrip("\ufeff"))))
+    n = list(csv.reader(io.StringIO(new.lstrip("\ufeff"))))
+    if not o or not n or o[0] != n[0] or "ID" not in n[0]:
+        return new
+    j = n[0].index("ID")
+    have = {r[j] for r in n[1:] if len(r) > j}
+    kept = [r for r in o[1:] if len(r) > j and r[j] and r[j] not in have]
+    if not kept:
+        return new
+    buf = io.StringIO()
+    csv.writer(buf, lineterminator="\n").writerows(n + kept)
+    return buf.getvalue()
+
+
 # ── Combining reports ────────────────────────────────────────────────────────
 
 def blend_ratings(reports: list[dict]) -> dict:
@@ -513,14 +531,21 @@ def build_report(league_dir) -> dict:
     for r in rows:
         r["signed"] = signed.get(r["pid"])
     result["n_signed"] = sum(1 for r in rows if r["signed"])
+    seen = {r["pid"] for r in rows}
+    result["signed_extra"] = sorted((v | {"pid": pid} for pid, v in signed.items() if pid not in seen),
+                                    key=lambda v: (v["team_id"] != 6, -v["bonus"]))
     return result
 
 
 # ── who actually signed ──────────────────────────────────────────────────────
 
 _SIGN_RE = re.compile(
-    r'<a href="[^"]*team_(\d+)\.html">([^<]+)</a>\s*:\s*Signed international amateur \S+\s*'
-    r'<a href="[^"]*player_(\d+)\.html">[^<]*</a>(.*?)(?:</td>|<br|\n\s*\n)', re.S)
+    r'<a href="[^"]*team_(\d+)\.html">([^<]+)</a>\s*:\s*Signed international amateur (\S+)\s*'
+    r'<a href="[^"]*player_(\d+)\.html">([^<]*)</a>(.*?)(?:</td>|<br|\n\s*\n)', re.S)
+
+
+# The class opens in August; earlier months are late signings from last year's class.
+_CLASS_OPEN_MONTH = 8
 
 
 def _transaction_files(league_dir: Path, year: str) -> list[Path]:
@@ -529,8 +554,12 @@ def _transaction_files(league_dir: Path, year: str) -> list[Path]:
     files = []
     pics = local_photo_dir(league_dir.name)
     if pics:
-        files += sorted((pics.parent.parent / "leagues").glob(f"league_*_all_transactions_*_{year}.html"))
-    files += sorted((Path.home() / "Desktop").glob(f"All Transactions * {year}*.html"))
+        for f in sorted((pics.parent.parent / "leagues").glob(f"league_*_all_transactions_*_{year}.html")):
+            m = re.search(r"_(\d+)_\d{4}\.html$", f.name)
+            if m and int(m.group(1)) >= _CLASS_OPEN_MONTH:
+                files.append(f)
+    for d in ("Desktop", "Downloads"):
+        files += sorted((Path.home() / d).glob(f"All Transactions * {year}*.html"))
     return files
 
 
@@ -547,9 +576,9 @@ def international_signings(league_dir) -> dict:
             text = f.read_text(encoding="utf-8", errors="ignore")
         except OSError:
             continue
-        for tid, team, pid, tail in _SIGN_RE.findall(text):
+        for tid, team, pos, pid, name, tail in _SIGN_RE.findall(text):
             m = re.search(r"\$([\d,]+) signing bonus", tail)
-            out[int(pid)] = {"team": team.strip(), "team_id": int(tid),
+            out[int(pid)] = {"team": team.strip(), "team_id": int(tid), "name": name.strip(), "pos": pos,
                              "bonus": int(m.group(1).replace(",", "")) if m else 0}
     return out
 

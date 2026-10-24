@@ -173,6 +173,20 @@
     </tbody>
   </table>
   </div>
+  {% if report.signed_extra %}
+  <details class="intl-mixed" open>
+    <summary><strong>Signed this year, no longer in the scout exports</strong> ({{ report.signed_extra|length }})</summary>
+    <table class="intl-table" style="margin-top:8px">
+      <thead><tr><th>Player</th><th>Pos</th><th>Team</th><th>Cost</th></tr></thead>
+      <tbody>
+      {% for s in report.signed_extra %}
+        <tr><td style="text-align:left"><a href="/player/{{ s.pid }}">{{ s.name }}</a></td><td style="text-align:left">{{ s.pos }}</td>
+          <td class="intl-signed{{ ' intl-ours' if s.team_id == 6 }}">{{ s.team }}</td><td>{{ money(s.bonus) }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </details>
+  {% endif %}
 </div>
 {% endif %}
 

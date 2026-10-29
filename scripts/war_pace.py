@@ -81,6 +81,23 @@ def _team_games(conn, team_id):
     return r["g"] if r and r["g"] else None
 
 
+# Rainouts at season's end aren't made up, so a club can finish a few short.
+_RAINOUT_SLACK = 3
+
+
+def _season_done(conn, team_id, gps):
+    """True once the team's regular season is over: it is within the rainout
+    slack of a full schedule and the league's leaders have played all of theirs."""
+    played = _team_games(conn, team_id)
+    if played is None or played < gps - _RAINOUT_SLACK:
+        return False
+    try:
+        top = conn.execute("SELECT MAX(COALESCE(w,0)+COALESCE(l,0)+COALESCE(t,0)) FROM standings").fetchone()[0]
+    except sqlite3.OperationalError:
+        top = None
+    return played >= gps or (top or 0) >= gps
+
+
 def _remaining_available(conn, team_id, gps, injury_left):
     played = _team_games(conn, team_id)
     if played is None:
@@ -141,8 +158,11 @@ def get_war_pace(player_id, league_dir=None, conn=None):
         if pace is None:
             return None
         injured_note = None
-        avail = _games_available(conn, player_id, _current_mlb_team(conn, player_id), gps)
-        if avail is not None:
+        tid = _current_mlb_team(conn, player_id)
+        avail = None if _season_done(conn, tid, gps) else _games_available(conn, player_id, tid, gps)
+        if _season_done(conn, tid, gps):
+            pace, injured_note = round(float(s["war"]), 2), "final - regular season complete"
+        elif avail is not None:
             pace = _injury_pace_pkg(float(s["war"]), float(sample), bucket, gps, avail)
             injured_note = "injured - projected from games he can still play"
         return {
@@ -179,9 +199,15 @@ def get_all_war_paces(league_dir=None, conn=None):
         except sqlite3.OperationalError:  # schema without injury columns
             injured = {}
         team_of = {r["player_id"]: r["tid"] for r in conn.execute(
-            "SELECT player_id, COALESCE(NULLIF(parent_team_id,0), team_id) AS tid FROM players").fetchall()} if injured else {}
+            "SELECT player_id, COALESCE(NULLIF(parent_team_id,0), team_id) AS tid FROM players").fetchall()}
+        done = {}
 
         def _adj(pid, war, sample, bucket, pace):
+            tid = team_of.get(pid)
+            if tid not in done:
+                done[tid] = _season_done(conn, tid, gps)
+            if done[tid]:
+                return round(war, 2), "final - regular season complete"
             if pid not in injured:
                 return pace, None
             avail = _remaining_available(conn, team_of.get(pid), gps, injured[pid])

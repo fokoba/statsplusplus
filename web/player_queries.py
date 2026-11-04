@@ -21,6 +21,7 @@ from statsplusplus.utils.positions import display_pos as _display_pos
 from statsplusplus.evaluation.surplus import calc_pap
 from statsplusplus.config.league_config import dollars_per_war as _dpw_pkg, games_per_season as _gps_pkg
 from statsplusplus.utils.positions import ROLE_MAP
+from statsplusplus.utils.sabermetrics import siera as _siera
 from percentiles import get_hitter_percentiles, get_pitcher_percentiles, get_fielding_percentiles, available_pctile_years, available_pctile_levels, get_percentile_history, get_percentile_history_all_levels, get_fielding_percentile_history
 from web_league_context import (get_db, get_cfg, team_abbr_map, team_names_map, level_map, pos_map,
                                  milb_league_map, money_divisor as _money_divisor)
@@ -1103,11 +1104,7 @@ def get_player(pid):
         k_bb_pct = k_pct - bb_pct_p
         gb_pct = gb / (gb + fb) * 100 if (gb + fb) else 0
         hr_fb_pct = hra / fb * 100 if fb else 0
-        siera_k = k / bf if bf else 0
-        siera_bb = bb / bf if bf else 0
-        siera = (6.145 - 16.986 * siera_k + 11.434 * siera_bb
-                 + 7.653 * siera_k**2 + 6.664 * siera_bb**2
-                 + 0.9) if bf else 0
+        siera = _siera(k, bb, gb, fb, bf)
         return {
             "year": yr, "ip": ip, "era": era, "w": w, "l": l, "sv": sv,
             "k": k, "bb": bb, "war": round(war, 1) if war else 0,
@@ -1166,10 +1163,7 @@ def get_player(pid):
             k_bb_pct = k_pct - bb_pct_p
             gb_pct = gb / (gb + fb) * 100 if (gb + fb) else 0
             hr_fb_pct = hra / fb * 100 if fb else 0
-            siera_k = k / bf if bf else 0
-            siera_bb = bb / bf if bf else 0
-            siera = (6.145 - 16.986*siera_k + 11.434*siera_bb
-                     + 7.653*siera_k**2 + 6.664*siera_bb**2 + 0.9) if bf else 0
+            siera = _siera(k, bb, gb, fb, bf)
             agg = {
                 "year": yr, "ip": ip, "era": era, "w": w, "l": l, "sv": sv,
                 "k": k, "bb": bb, "war": round(war, 1),
@@ -2160,10 +2154,7 @@ def get_player(pid):
         _c_k_bb = _c_k_pct - _c_bb_pct
         _c_gb_pct = _c_gb / (_c_gb + _c_fb) * 100 if (_c_gb + _c_fb) else 0
         _c_hr_fb_pct = _c_hra / _c_fb * 100 if _c_fb else 0
-        _c_siera_k = _c_k / _c_bf if _c_bf else 0
-        _c_siera_bb = _c_bb / _c_bf if _c_bf else 0
-        _c_siera = (6.145 - 16.986 * _c_siera_k + 11.434 * _c_siera_bb
-                    + 7.653 * _c_siera_k**2 + 6.664 * _c_siera_bb**2 + 0.9) if _c_bf else 0
+        _c_siera = _siera(_c_k, _c_bb, _c_gb, _c_fb, _c_bf)
         pit_career = {
             "g": _c_g, "gs": _c_gs, "ip": _c_ip, "era": _c_era, "era_plus": _c_era_plus,
             "fip": _c_fip, "siera": _c_siera, "k_pct": _c_k_pct, "bb_pct": _c_bb_pct,

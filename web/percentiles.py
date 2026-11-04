@@ -5,6 +5,7 @@ import os, sys, json
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, "scripts"))
 from web_league_context import get_db, get_cfg, has_extended_ratings
+from statsplusplus.utils.sabermetrics import siera as _siera
 
 
 # ── Level labels and league→level mapping ────────────────────────────────
@@ -640,8 +641,7 @@ def get_pitcher_percentiles(pid, split_id=1, year=None, level=None):
         hr_fb_pct = 100.0 * hra / _fb if _fb > 0 else 0
         k_pct = k / bf if bf else 0
         bb_pct = bb / bf if bf else 0
-        siera = (6.145 - 16.986 * k_pct + 11.434 * bb_pct
-                 + 7.653 * k_pct**2 + 6.664 * bb_pct**2 + 0.9) if bf else 0
+        siera = _siera(k, bb, _gb, _fb, bf)
         stats = {
             "era": era or 99, "fip": fip, "siera": siera, "era_plus": era_plus,
             "k9": k9, "bb9": bb9, "hr9": hr9, "gb_pct": gb_pct, "babip": babip,
@@ -704,7 +704,17 @@ def get_pitcher_percentiles(pid, split_id=1, year=None, level=None):
         if key == "hr_fb_pct" and not _has_gb_data:
             continue  # HR/FB% needs fb data, same source as GB%
         val = player[key]
-        pctile = _pctile(val, [pool[p][key] for p in pool])
+        if key == "siera":
+            # SIERA is None when a pitcher has no batted-ball data (no netGB);
+            # skip the stat for this player and exclude None peers from the pool.
+            if val is None:
+                continue
+            siera_pool = [pool[p][key] for p in pool if pool[p][key] is not None]
+            if not siera_pool:
+                continue
+            pctile = _pctile(val, siera_pool)
+        else:
+            pctile = _pctile(val, [pool[p][key] for p in pool])
         if inverted:
             pctile = 100 - pctile
 

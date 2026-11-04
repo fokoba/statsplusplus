@@ -1610,7 +1610,7 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
       <td><strong>{{ "%.2f"|format(p.pit_career.era) }}</strong></td>
       <td>{{ p.pit_career.era_plus }}</td>
       <td><strong>{{ "%.2f"|format(p.pit_career.fip) }}</strong></td>
-      <td>{{ "%.2f"|format(p.pit_career.siera) }}</td>
+      <td>{% if p.pit_career.siera is not none %}{{ "%.2f"|format(p.pit_career.siera) }}{% else %}-{% endif %}</td>
       <td>{{ "%.1f"|format(p.pit_career.k_pct) }}</td><td>{{ "%.1f"|format(p.pit_career.bb_pct) }}</td><td>{{ "%.1f"|format(p.pit_career.k_bb_pct) }}</td>
       <td>{{ "%.1f"|format(p.pit_career.gb_pct) }}</td><td>{% if p.pit_career.hr_fb_pct is not none %}{{ "%.1f"|format(p.pit_career.hr_fb_pct) }}{% else %}-{% endif %}</td><td>{{ "%.3f"|format(p.pit_career.babip) }}</td>
       <td>{{ p.pit_career.w }}</td><td>{{ p.pit_career.l }}</td><td>{{ p.pit_career.sv }}</td><td>{{ p.pit_career.hld }}</td>

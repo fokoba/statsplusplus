@@ -279,6 +279,19 @@ STAT_CONFIDENCE_PA_MIN: int = 50
 STAT_CONFIDENCE_IP_MIN: float = 15.0
 STAT_CONFIDENCE_EXPONENT: float = 1.4
 
+# Stat-WAR BLEND weight (ported from upstream 6ac3cc2/de2bbfb) — how much an MLB
+# WAR sample overrides the tool projection in compute_player_value Step 2.
+# DISTINCT from STAT_CONFIDENCE (which still fades prospect discounts 0->1).
+# Upstream hold-out: tools beat the WAR sample at every sample size; optimal
+# stat weight plateaus ~0.25-0.30 (RPs far lower). Next-season R2 0.31 -> 0.53.
+STAT_WAR_WEIGHT_PA_FULL: float = 700.0
+STAT_WAR_WEIGHT_IP_FULL: float = 210.0   # ~1.2 full SP seasons
+STAT_WAR_WEIGHT_EXPONENT: float = 1.2
+STAT_WAR_WEIGHT_CAP: float = 0.30        # hitters + starting pitchers
+STAT_WAR_WEIGHT_CAP_RP: float = 0.15     # RP IP samples barely predict next season
+STAT_WAR_WEIGHT_PA_MIN: int = 50
+STAT_WAR_WEIGHT_IP_MIN: float = 15.0
+
 # ---------------------------------------------------------------------------
 # Player value model parameters
 # ---------------------------------------------------------------------------

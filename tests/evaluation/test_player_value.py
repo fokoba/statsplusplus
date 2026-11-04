@@ -202,10 +202,15 @@ class TestUnifiedSurplusEstablishedMLB:
         result = compute_player_value(**self._base_args())
         assert result["stat_confidence"] == 1.0
 
-    def test_peak_war_equals_stat_war(self):
-        """With full stat confidence, peak_war should equal stat_war."""
+    def test_peak_war_blends_capped_toward_stat_war(self):
+        """peak_war blends tool_war toward stat_war by the CAPPED stat-WAR
+        weight (0.30 for hitters) — a WAR sample never dominates the tools."""
+        from statsplusplus.evaluation.player_value import stat_war_weight
         result = compute_player_value(**self._base_args())
-        assert result["peak_war"] == result["stat_war"]
+        sw = stat_war_weight(1500, 0.0)
+        assert sw == 0.30
+        expected = (1 - sw) * result["tool_war"] + sw * result["stat_war"]
+        assert abs(result["peak_war"] - expected) < 0.01
 
     def test_dev_discount_fully_faded(self):
         """Dev discount should be ~1.0 for established player."""
@@ -228,6 +233,7 @@ class TestUnifiedSurplusEstablishedMLB:
     def test_overpaid_player_low_surplus(self):
         """A 1.0 WAR player on $15M/yr should have near-zero surplus."""
         result = compute_player_value(**self._base_args(
+            fv_continuous=40.0, composite=42, ceiling=44,
             stat_war=1.0,
             salaries=[15_000_000, 15_000_000, 15_000_000]))
         assert result["surplus"] < 5_000_000
@@ -304,7 +310,7 @@ class TestUnifiedSurplusCrossover:
     def test_gradient_smooth(self):
         """Surplus should change smoothly as PA increases (no cliffs)."""
         surpluses = []
-        for pa in [0, 50, 100, 150, 200, 300, 400, 500]:
+        for pa in range(0, 550, 50):
             result = compute_player_value(**self._base_args(
                 career_pa=pa, stat_war=3.0))
             surpluses.append(result["surplus"])

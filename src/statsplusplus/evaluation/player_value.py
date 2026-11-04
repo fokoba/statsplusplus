@@ -23,6 +23,13 @@ from statsplusplus.evaluation.constants import (
     STAT_CONFIDENCE_PA_MIN,
     STAT_CONFIDENCE_IP_MIN,
     STAT_CONFIDENCE_EXPONENT,
+    STAT_WAR_WEIGHT_PA_FULL,
+    STAT_WAR_WEIGHT_IP_FULL,
+    STAT_WAR_WEIGHT_EXPONENT,
+    STAT_WAR_WEIGHT_CAP,
+    STAT_WAR_WEIGHT_CAP_RP,
+    STAT_WAR_WEIGHT_PA_MIN,
+    STAT_WAR_WEIGHT_IP_MIN,
     NEAR_MAXED_REALIZATION_THRESHOLD,
     NEAR_MAXED_DENOMINATOR,
     OPTION_VALUE_FV_FLOOR,
@@ -104,6 +111,20 @@ def stat_confidence(career_pa: int, career_ip: float) -> float:
         ip_conf = 0.0
 
     return max(pa_conf, ip_conf)
+
+
+def stat_war_weight(career_pa: int, career_ip: float, cap: float = STAT_WAR_WEIGHT_CAP) -> float:
+    """Weight given to the MLB stat-WAR sample when blending with the tool-based
+    WAR projection (Step 2). Distinct from ``stat_confidence``: a slow ramp to a
+    cap (~0.12 at 333 PA / 100 IP, ~0.25 at 600 PA / ~210 IP), because tools
+    predict next-season WAR better than the sample at every size. Relievers pass
+    ``STAT_WAR_WEIGHT_CAP_RP``. Uses the larger of the PA- and IP-based weights.
+    """
+    pa_w = cap * min(1.0, (career_pa / STAT_WAR_WEIGHT_PA_FULL) ** STAT_WAR_WEIGHT_EXPONENT) \
+        if career_pa >= STAT_WAR_WEIGHT_PA_MIN else 0.0
+    ip_w = cap * min(1.0, (career_ip / STAT_WAR_WEIGHT_IP_FULL) ** STAT_WAR_WEIGHT_EXPONENT) \
+        if career_ip >= STAT_WAR_WEIGHT_IP_MIN else 0.0
+    return float(max(pa_w, ip_w))
 
 
 # ---------------------------------------------------------------------------
@@ -227,16 +248,19 @@ def compute_player_value(
             blend_w = max(0.0, (realization - _nm_threshold) / _nm_denom) ** 2
             tool_war = tool_war * (1 - blend_w) + composite_war * blend_w
 
-    # RP cap: for prospect RPs (low stat_confidence), cap tool_war at the
-    # FV-based maximum. This prevents the composite blend from inflating
-    # RP projections beyond what the FV grade system intends.
-    # Established RPs (high sc) are driven by stat_war, so no cap needed.
-    if bucket == "RP" and sc < 0.75 and fv_continuous > 0:
+    # RP cap: cap RP tool_war at the FV-based maximum so the composite blend
+    # can't inflate RP projections. Applies at all stat_confidence now that the
+    # capped stat-WAR blend leaves even established RPs ~85% on tool_war.
+    if bucket == "RP" and fv_continuous > 0:
         tool_war = min(tool_war, peak_war_from_fv(min(fv_continuous, 50.0), bucket, weights))
 
     # --- Step 2: Blend WAR projections ---
+    # The noisy MLB WAR sample only modestly overrides the tool projection
+    # (capped ramp, see stat_war_weight): 0.30 hitters/SP, 0.15 RP.
     if stat_war is not None and sc > 0.0:
-        peak_war = (1.0 - sc) * tool_war + sc * stat_war
+        cap = STAT_WAR_WEIGHT_CAP_RP if bucket == "RP" else STAT_WAR_WEIGHT_CAP
+        sw = stat_war_weight(career_pa, career_ip, cap=cap)
+        peak_war = (1.0 - sw) * tool_war + sw * stat_war
     else:
         peak_war = tool_war
 

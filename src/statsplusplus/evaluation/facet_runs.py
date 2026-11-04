@@ -52,6 +52,18 @@ DEFAULT_REPLACEMENT_RUNS: float = 20.0
 BASERUNNING_PRIOR_SLOPE: float = 0.20   # runs per grade point above 50
 FIELDING_PRIOR_SLOPE: float = 0.50      # runs per grade point above 50 (range)
 
+# Fielding-curve clamp half-width in GRADE points from the population center.
+# The clamp is only an extrapolation guard: it must bound the curve beyond the
+# real population's grade spread (which tops out ~±12-13 pts from center across
+# leagues), not bite inside it. Expressed in grade space so it lives in the SAME
+# centered frame as the curve (clamp_hi/lo = ±slope*GRADE_BAND). The former
+# raw-observed-run 5th/95th clamp lived in the calibration sample's own frame,
+# which for an error-dominated target (3B: every 3B commits 13-21 errors ×
+# -0.5 runs) sat near 0 and clamped league-average defenders. GRADE_BAND=15
+# leaves 0-3% of each position's population clamped (outliers only) while elite
+# 80-grade gloves cap at a realistic ~+20 runs (~+2 WAR).
+FIELDING_CLAMP_GRADE_BAND: float = 15.0
+
 
 # ---------------------------------------------------------------------------
 # Per-facet aging curves (literature-based priors; multipliers on peak runs).
@@ -629,22 +641,43 @@ def calibrate_grade_runs_curve(
     slope *= shrink
     sample_mean = sum(grades) / len(grades)
     center = center_grade if center_grade is not None else sample_mean
-    # Clamp to ROBUST percentiles of observed runs (5th/95th), not min/max — a
-    # single noisy extreme season otherwise sets the ceiling and lets the linear
-    # slope over-extrapolate at the high end (observed fielding runs plateau,
-    # e.g. corner-OF ZR tops out ~+6-7, but a steep slope reached +10.8).
-    sr = sorted(observed_runs)
-    lo_i = max(0, int(0.05 * (len(sr) - 1)))
-    hi_i = min(len(sr) - 1, int(round(0.95 * (len(sr) - 1))))
+    if center_grade is not None:
+        # Centered-frame clamp: bound extrapolation ±GRADE_BAND grade points from
+        # the (population) center. Lives in the same frame as the curve, so it
+        # only catches true outliers regardless of the calibration sample's own
+        # (possibly error-shifted) observed-run distribution. See FIELDING_CLAMP_
+        # GRADE_BAND. NOTE: when the center is overridden AFTER this call (the
+        # calibrate.py bucket-center path), the clamp must be re-derived there too
+        # — centered_clamp() does this.
+        clamp_lo, clamp_hi = centered_clamp(slope, FIELDING_CLAMP_GRADE_BAND)
+    else:
+        # Legacy frame (no population center): clamp to ROBUST percentiles of
+        # observed runs (5th/95th), not min/max — a single noisy extreme season
+        # otherwise sets the ceiling and lets the linear slope over-extrapolate.
+        sr = sorted(observed_runs)
+        lo_i = max(0, int(0.05 * (len(sr) - 1)))
+        hi_i = min(len(sr) - 1, int(round(0.95 * (len(sr) - 1))))
+        clamp_lo, clamp_hi = round(sr[lo_i], 1), round(sr[hi_i], 1)
     return {
         "intercept": -slope * center,
         "slope": slope,
         "r": round(r, 3),
         "n": len(grades),
         "mean_grade": round(center, 1),
-        "clamp_lo": round(sr[lo_i], 1),
-        "clamp_hi": round(sr[hi_i], 1),
+        "clamp_lo": clamp_lo,
+        "clamp_hi": clamp_hi,
     }
+
+
+def centered_clamp(slope: float, grade_band: float = FIELDING_CLAMP_GRADE_BAND) -> tuple[float, float]:
+    """Symmetric run-space clamp bounds ±slope*grade_band around a curve center.
+
+    Used wherever a fielding curve is (re)centered on the population: the clamp
+    must bound extrapolation in the SAME centered frame as the curve, not inherit
+    the calibration sample's raw observed-run percentiles. Returns (lo, hi).
+    """
+    hi = round(abs(slope) * grade_band, 1)
+    return -hi, hi
 
 
 # Multi-tool defensive curves: positions whose defensive VALUE is not captured

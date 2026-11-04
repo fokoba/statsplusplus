@@ -502,6 +502,40 @@ def _calibrate_run_space(conn, game_year, role_map, woba_wts, off_norm, result_h
     def_curve = {}
     ERROR_RUN = -0.5  # literature-anchored run value per fielding error
 
+    # Bucket-population def grades for curve CENTERING. The curve is applied to
+    # whatever the evaluation engine buckets to each position (assign_bucket,
+    # use_pot=False) — NOT to whatever the game LISTS at that position (players.pos).
+    # Those populations differ (e.g. only ~half of eval-SS are listed-SS), and the
+    # center must match the SCORED population so a league-average fielder maps to
+    # ~0 runs (see calibrate_grade_runs_curve's center_grade contract). Centering
+    # on players.pos — a more selective, lower-grade subset — shifted the whole
+    # scored population positive (100% of SS/CF credited above-average). Build the
+    # bucket→players map once and reuse it for the IF/OF/C centers below.
+    _bpop_rows = conn.execute("""SELECT r.ifr, r.ife, r.ifa, r.tdp,
+            r.ofr, r.ofe, r.ofa, r.c_frm, r.c_blk, r.c_arm,
+            r.ss, r.second_b, r.third_b, r.first_b, r.c, r.lf, r.cf, r.rf,
+            r.pot_ss, r.pot_second_b, r.pot_third_b, r.pot_first_b,
+            r.pot_c, r.pot_lf, r.pot_cf, r.pot_rf, r.height,
+            p.pos, p.role, p.age
+        FROM latest_ratings r JOIN players p ON r.player_id=p.player_id
+        WHERE p.role NOT IN (11,12,13) AND p.level IN ('1','2','3','4','5','6')""").fetchall()
+    _bucket_pop: dict[str, list] = {}
+    for _r in _bpop_rows:
+        try:
+            _bk = _bucket_player(_r, role_map)
+        except Exception:
+            _bk = None
+        if _bk:
+            _bucket_pop.setdefault(_bk, []).append(_r)
+
+    def _bucket_center(bucket, tools, w):
+        """Mean blended def grade over the players the engine buckets here."""
+        gs = [_fr._blended_def_grade(
+                  {t: norm(_r[t]) for t in tools if t in _r.keys()}, w)
+              for _r in _bucket_pop.get(bucket, [])]
+        gs = [g for g in gs if g is not None]
+        return (sum(gs) / len(gs)) if gs else None
+
     # --- outfield: multi-tool blend (range + error + arm) ---
     # Target = observed OF defensive runs = ZR + (-0.5*errors) + arm runs (OOTP's
     # `arm` column quantifies OF throwing value — base-advancement prevention —
@@ -535,16 +569,13 @@ def _calibrate_run_space(conn, game_year, role_map, woba_wts, off_norm, result_h
                                             prior_strength=40.0)
         if cur:
             w = cur.get("weights", {})
-            prows = conn.execute(f"""SELECT r.ofr, r.ofe, r.ofa FROM latest_ratings r
-                JOIN players p ON r.player_id=p.player_id
-                WHERE p.pos IN {codes} AND p.role NOT IN (11,12,13) AND r.ofr IS NOT NULL""").fetchall()
-            pgb = [_fr._blended_def_grade({"ofr": norm(x["ofr"]), "ofe": norm(x["ofe"]),
-                                           "ofa": norm(x["ofa"])}, w) for x in prows]
-            pgb = [v for v in pgb if v is not None]
-            if pgb:
-                center = sum(pgb) / len(pgb)
+            # Center on the BUCKET population (engine assign_bucket), not listed pos.
+            center = _bucket_center(bk, _fr.OUTFIELD_DEF_TOOLS, w)
+            if center is not None:
                 cur["intercept"] = round(-cur["slope"] * center, 4)
                 cur["mean_grade"] = round(center, 1)
+                # Re-derive the clamp in the re-centered frame (grade-band guard).
+                cur["clamp_lo"], cur["clamp_hi"] = _fr.centered_clamp(cur["slope"])
             def_curve[bk] = cur
 
     # --- infield: per-position multi-tool blend (range + error + arm + DP) ---
@@ -580,19 +611,14 @@ def _calibrate_run_space(conn, game_year, role_map, woba_wts, off_norm, result_h
                                             shrink=0.55, weight_prior=_IF_PRIORS[bk],
                                             prior_strength=40.0)
         if cur:
-            # Population-center the blended grade (all players who man the position).
+            # Center on the BUCKET population (engine assign_bucket), not listed pos.
             w = cur.get("weights", {})
-            prows = conn.execute("""SELECT r.ifr, r.ife, r.ifa, r.tdp FROM latest_ratings r
-                JOIN players p ON r.player_id=p.player_id
-                WHERE p.pos=? AND p.role NOT IN (11,12,13) AND r.ifr IS NOT NULL""", (code,)).fetchall()
-            pgb = [_fr._blended_def_grade({"ifr": norm(x["ifr"]), "ife": norm(x["ife"]),
-                                           "ifa": norm(x["ifa"]), "tdp": norm(x["tdp"])}, w)
-                   for x in prows]
-            pgb = [v for v in pgb if v is not None]
-            if pgb:
-                center = sum(pgb) / len(pgb)
+            center = _bucket_center(bk, _fr.INFIELD_DEF_TOOLS, w)
+            if center is not None:
                 cur["intercept"] = round(-cur["slope"] * center, 4)
                 cur["mean_grade"] = round(center, 1)
+                # Re-derive the clamp in the re-centered frame (grade-band guard).
+                cur["clamp_lo"], cur["clamp_hi"] = _fr.centered_clamp(cur["slope"])
             def_curve[bk] = cur
 
     # --- positional ZR difficulty (data-driven bonus for real +ZR at hard
@@ -651,23 +677,18 @@ def _calibrate_run_space(conn, game_year, role_map, woba_wts, off_norm, result_h
                            "c_arm": norm(x["c_arm"])})
         cobs.append(obs)
     # Population-mean blended catcher grade (center so an average catcher ~0 runs).
-    cpop = conn.execute("""SELECT r.c_frm, r.c_blk, r.c_arm FROM latest_ratings r
-        JOIN players p ON r.player_id=p.player_id
-        WHERE p.pos=2 AND r.c_frm IS NOT NULL""").fetchall()
     ccur = _fr.calibrate_multitool_curve(_fr.CATCHER_DEF_TOOLS, ctool_rows, cobs,
                                          shrink=0.6,
                                          weight_prior={"c_frm": 0.5, "c_blk": 0.35, "c_arm": 0.15})
     if ccur:
-        # Re-center on the population mean of the blended grade (not the qualified
-        # starter sample), mirroring the IF/OF population-centering.
+        # Center on the BUCKET population (engine assign_bucket), not listed pos=2.
         w = ccur.get("weights", {})
-        pg = [_fr._blended_def_grade({"c_frm": norm(x["c_frm"]), "c_blk": norm(x["c_blk"]),
-                                      "c_arm": norm(x["c_arm"])}, w) for x in cpop]
-        pg = [v for v in pg if v is not None]
-        if pg:
-            center = sum(pg) / len(pg)
+        center = _bucket_center("C", _fr.CATCHER_DEF_TOOLS, w)
+        if center is not None:
             ccur["intercept"] = round(-ccur["slope"] * center, 4)
             ccur["mean_grade"] = round(center, 1)
+            # Re-derive the clamp in the re-centered frame (grade-band guard).
+            ccur["clamp_lo"], ccur["clamp_hi"] = _fr.centered_clamp(ccur["slope"])
         def_curve["C"] = ccur
 
     # --- tool->wOBA fit (for prospect/tool projection) ---

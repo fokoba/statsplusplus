@@ -10,11 +10,11 @@ from war_projection_queries import (
 
 
 def test_suggested_25_has_complete_workload():
-    assert len(SEED) == 25
+    assert len(SEED) == 26
     assert len(PITCHER_IDS) == 9
     assert sum(v[2] for pid,v in SEED.items() if pid in PITCHER_IDS) == DEFAULT_TEAM_IP
     assert sum(v[2] for pid,v in SEED.items() if pid not in PITCHER_IDS) == DEFAULT_POSITION_AB + DEFAULT_PH_AB
-    assert {24366, 21573, 25323, 22403, 25258} <= set(SEED)  # Ayala/Cano/Thorne/Mines/Thrift
+    assert {24366, 22403, 24700, 26113, 23796} <= set(SEED)  # Ayala/Mines/N. Miller/Hartman/Shipley
     # Departed or optioned: Yariv, Davis, McGaha, Rivera, Austin
     assert not ({24800, 22312, 24233, 24723, 25350} & set(SEED))
 
@@ -67,10 +67,10 @@ def test_in_season_outlook_blends_pace_and_narrows_with_games_played():
 
 
 def test_settings_roundtrip_and_validation(tmp_path):
-    plan = {"24747": {"ip": 252.5}, "25323": {"ab": 82, "vr_share": 97}}
+    plan = {"24747": {"ip": 252.5}, "24366": {"ab": 82, "vr_share": 97}}
     assert save_overrides(tmp_path, plan) == plan
     assert load_overrides(tmp_path) == plan
-    for bad in ({"999": {"ab": 5}}, {"25323": {"ab": -1}},
-                {"24747": {"ip": float("nan")}}, {"25323": {"vr_share": 101}}):
+    for bad in ({"999": {"ab": 5}}, {"24366": {"ab": -1}},
+                {"24747": {"ip": float("nan")}}, {"24366": {"vr_share": 101}}):
         with pytest.raises(ValueError):
             validate_overrides(bad)

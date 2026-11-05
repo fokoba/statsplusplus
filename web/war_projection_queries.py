@@ -26,50 +26,49 @@ TEAM_ID = 6
 YEAR = 1955
 DEFAULT_TEAM_AB = 5279          # PHA, 1954; includes pitcher batting
 DEFAULT_POSITION_AB = 4848     # 8 positions at 606 AB; rest are pitcher/PH AB
-DEFAULT_PH_AB = 64             # dedicated Thorne pinch-hit work
+DEFAULT_PH_AB = 64             # pinch-hit work, now inside Ayala's AB
 DEFAULT_TEAM_IP = 1393        # PHA, 1954
 PITCHER_BATTING_AB = DEFAULT_TEAM_AB - DEFAULT_POSITION_AB - DEFAULT_PH_AB
 BASE_RHP_SHARE = 3986 / 6028  # PHA, 1954 plate appearances vs RHP
 
-# The 25-player plan. Roster/workload defaults live here; the *role label*
+# The 26-player plan. Roster/workload defaults live here; the *role label*
 # shown on the page is derived at build time from the Depth Chart tab's manual
 # roles (see _role_labels) and only falls back to the text below when a player
-# has no manual role. Synced to the active 25 on 2026-10-06 (Austin optioned,
-# Thrift up for Lacefield's injury, Mines/Cano added, Davis/Yariv/McGaha/Rivera
-# gone). AB sum = 4,912; IP sum = 1,393. The vR fraction is *this player's
+# has no manual role. Synced to Forrest's roles on 2026-11-05. AB sum = 4,912; IP sum = 1,393. The vR fraction is *this player's
 # expected AB mix*, not the team-wide schedule mix.
 SEED = {
     24747: ("SP1", "SP", 250, None),
-    26188: ("SP2", "SP", 235, None),
-    25181: ("SP3", "SP", 235, None),
-    23856: ("SP4", "SP", 250, None),
-    23718: ("Closer", "RP", 70, None),
-    25360: ("Closer", "RP", 70, None),
-    23663: ("Setup", "RP", 70, None),
-    23601: ("Setup", "RP", 70, None),
-    24627: ("Long relief", "RP", 143, None),
+    25181: ("SP2", "SP", 240, None),
+    26188: ("SP3", "SP", 235, None),
+    23856: ("SP4", "SP", 220, None),
+    23601: ("Middle relief", "RP", 85, None),
+    23718: ("Middle relief", "RP", 85, None),
+    25360: ("Middle relief", "RP", 60, None),
+    23663: ("Middle relief", "RP", 60, None),
+    23796: ("Long relief", "RP", 65, None),
+    24627: ("Long relief", "RP", 65, None),
+    25350: ("Long relief", "RP", 28, None),
     23752: ("C vs R", "C", 375, .88),
     22403: ("C vs L", "C", 231, .31),
-    25260: ("1B vs R", "1B", 360, .96),
-    21573: ("1B vs L", "1B", 241, .10),
-    23770: ("Everyday 3B", "3B", 575, BASE_RHP_SHARE),
-    24790: ("Everyday 2B", "2B", 517, BASE_RHP_SHARE),
-    25258: ("2B bench", "2B", 28, BASE_RHP_SHARE),
+    24700: ("Everyday 1B", "1B", 550, BASE_RHP_SHARE),
+    25260: ("1B/LF/RF bench", "1B", 100, BASE_RHP_SHARE),
+    24790: ("Everyday 2B", "2B", 530, BASE_RHP_SHARE),
+    26113: ("2B/3B bench", "2B", 90, BASE_RHP_SHARE),
+    23770: ("Everyday 3B", "3B", 550, BASE_RHP_SHARE),
     25253: ("Everyday SS", "SS", 530, BASE_RHP_SHARE),
     24460: ("SS bench", "SS", 30, BASE_RHP_SHARE),
-    25180: ("Everyday LF", "LF", 535, BASE_RHP_SHARE),
-    24366: ("LF bench", "LF", 170, .30),
-    24661: ("RF bench", "RF", 100, BASE_RHP_SHARE),
+    25180: ("LF vs L", "LF", 206, .10),
+    23672: ("LF vs R", "LF", 400, .95),
+    24366: ("LF bench / core PH", "LF", 164, BASE_RHP_SHARE),
     25625: ("CF vs R", "CF", 400, .95),
-    24216: ("CF vs L", "CF", 206, .10),
+    26097: ("CF vs L", "CF", 206, .10),
     27407: ("Everyday RF", "RF", 550, BASE_RHP_SHARE),
-    25323: ("PH vs R", "PH", 64, .95),
 }
 
 # Expected defensive-position shares across each player's fielding work.
 FIELD_MIX = {
-    24366: {"LF": .56, "RF": .44},
-    24661: {"RF": .55, "LF": .45},
+    25260: {"1B": .40, "LF": .30, "RF": .30},
+    26113: {"2B": .50, "3B": .50},
 }
 
 POSITION_CODE = {"C": 2, "1B": 3, "2B": 4, "3B": 5, "SS": 6,

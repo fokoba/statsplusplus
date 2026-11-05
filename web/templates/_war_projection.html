@@ -2,7 +2,7 @@
   <div class="panel war-proj-intro">
     <div class="war-proj-heading">
       <div>
-        <h2>1955 WAR projections · Philadelphia</h2>
+        <h2>{{ war_projection.year }} WAR projections · Philadelphia</h2>
         <p>Full-season plan for the agreed 25. AB, IP, and each hitter's vR share are editable; vL is the balance. Adjustments recalculate immediately. Save when the workload looks right.</p>
       </div>
       <div class="war-proj-actions">
@@ -49,7 +49,7 @@
 
   <div class="panel">
     <h2>Outside the projected 25</h2>
-    <p class="war-proj-note">Current Philadelphia 40-man players outside this workload plan. Their projected 1955 AB/IP is zero in the team total; this list is for promotion and replacement decisions.</p>
+    <p class="war-proj-note">Current Philadelphia 40-man players outside this workload plan. Their projected {{ war_projection.year }} AB/IP is zero in the team total; this list is for promotion and replacement decisions.</p>
     <div class="war-proj-scroll">
       <table class="war-proj-table war-proj-outside">
         <thead><tr><th class="left">Player</th><th>Level</th><th>Active</th><th>Comp</th><th>Ovr</th><th>Pot</th></tr></thead>

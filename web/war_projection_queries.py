@@ -1,4 +1,4 @@
-"""Editable, role-aware 1955 PHA WAR planning projections.
+"""Editable, role-aware PHA WAR planning projections.
 
 All component estimates are in wins; historical total WAR is used only to
 anchor pitcher rates. Hitter components are estimated independently so that
@@ -23,7 +23,7 @@ from web_league_context import get_cfg, get_db
 
 
 TEAM_ID = 6
-YEAR = 1955
+YEAR = 1956
 DEFAULT_TEAM_AB = 5279          # PHA, 1954; includes pitcher batting
 DEFAULT_POSITION_AB = 4848     # 8 positions at 606 AB; rest are pitcher/PH AB
 DEFAULT_PH_AB = 64             # pinch-hit work, now inside Ayala's AB
@@ -458,5 +458,5 @@ def build_projection(team_id: int, overrides: dict | None = None) -> dict:
                      "pitcher_ip": round(pitcher_ip, 1), "pitcher_ip_target": DEFAULT_TEAM_IP,
                      "pitcher_batting_ab_assumption": PITCHER_BATTING_AB,
                      "team_ab_est": hitter_ab+PITCHER_BATTING_AB, "team_ab_target": DEFAULT_TEAM_AB},
-        "source": "1952–54 MLB results blended with current tool ratings; 1954 PHA workload baseline",
+        "source": f"{YEAR-3}–{str(YEAR-1)[2:]} MLB results blended with current tool ratings; 1954 PHA workload baseline",
     }

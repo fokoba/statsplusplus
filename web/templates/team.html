@@ -7,14 +7,14 @@
 {% macro rank_sub(r) %}
 {% if r %}
 <span class="summary-rank" title="League rank out of {{ r.n }} teams, and this value vs. the league median (average of the middle two if {{ r.n }} is even)">
-  {{ r.rank }}/{{ r.n }} &middot; <span class="{{ 'pos' if r.vs_median > 0 else ('neg' if r.vs_median < 0 else '') }}">{{ '+' if r.vs_median > 0 else '' }}{{ r.vs_median }}{{ money_unit }}</span> vs med
+  {{ r.rank }}/{{ r.n }} &middot; {{ '+' if r.vs_median > 0 else '' }}{{ r.vs_median }}{{ money_unit }} vs med
 </span>
 {% endif %}
 {% endmacro %}
 {% macro rank_sub_war(r) %}
 {% if r %}
 <span class="summary-rank" title="League rank out of {{ r.n }} teams, and this value vs. the league median (average of the middle two if {{ r.n }} is even)">
-  {{ r.rank }}/{{ r.n }} &middot; <span class="{{ 'pos' if r.vs_median > 0 else ('neg' if r.vs_median < 0 else '') }}">{{ '+' if r.vs_median > 0 else '' }}{{ r.vs_median }} WAR</span> vs med
+  {{ r.rank }}/{{ r.n }} &middot; {{ '+' if r.vs_median > 0 else '' }}{{ r.vs_median }} WAR vs med
 </span>
 {% endif %}
 {% endmacro %}

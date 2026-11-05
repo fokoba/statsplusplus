@@ -9,18 +9,6 @@
   </div>
   {% endif %}
 
-  {# ── Appearance ── #}
-  <div class="panel settings-section">
-    <h2>Appearance</h2>
-    <label>Color theme
-      <select id="theme-pick" class="theme-pick" onchange="document.documentElement.dataset.theme=this.value;try{localStorage.setItem('dom-theme',this.value)}catch(e){}">
-        <option value="gold">Green &amp; Gold</option><option value="navy">Midnight Navy</option>
-        <option value="frost">Violet Frost</option><option value="classic">Classic Orange</option>
-      </select>
-    </label>
-    <script>try{document.getElementById('theme-pick').value=localStorage.getItem('dom-theme')||'gold'}catch(e){}</script>
-  </div>
-
   {# ── My Team ── #}
   <div class="panel settings-section">
     <h2>My Team</h2>

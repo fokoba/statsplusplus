@@ -6,55 +6,12 @@
   --border: #2a2a2e;
   --text: #f2f2f0;
   --text-dim: #9a9a9f;
-  --accent: #f2c230;
-  --accent-soft: rgba(242, 194, 48, 0.14);
-  --highlight: #24200b;
+  --accent: #ff7a1a;
+  --highlight: #2a1608;
   --green: #2ecc71;
   --red: #ff3b5c;
   --yellow: #e8c547;
 }
-
-/* Themes — default above is "Green & Gold" (Athletics). Picked from the nav
-   switcher, stored in localStorage, applied as <html data-theme>. */
-:root, :root[data-theme="gold"] {
-  --bg: #0d0d0c;
-  --surface: #1a1a17;
-  --border: #2e2d27;
-  --text: #f3f2ec;
-  --text-dim: #9e9c92;
-}
-:root[data-theme="navy"] {
-  --bg: #0a0f1c;
-  --surface: #121a2c;
-  --border: #22304a;
-  --text: #eef2f8;
-  --text-dim: #8e9ab0;
-  --accent: #5cb8ff;
-  --accent-soft: rgba(92, 184, 255, 0.14);
-  --highlight: #0e2240;
-}
-:root[data-theme="frost"] {
-  --bg: #0e0d14;
-  --surface: #18161f;
-  --border: #2b2738;
-  --text: #f3f1f8;
-  --text-dim: #9d98ad;
-  --accent: #a98bff;
-  --accent-soft: rgba(169, 139, 255, 0.15);
-  --highlight: #221a3c;
-}
-:root[data-theme="classic"] {
-  --bg: #0d0d0f;
-  --surface: #1a1a1d;
-  --border: #2a2a2e;
-  --text: #f2f2f0;
-  --text-dim: #9a9a9f;
-  --accent: #ff7a1a;
-  --accent-soft: rgba(255, 122, 26, 0.14);
-  --highlight: #2a1608;
-}
-.theme-pick { background: var(--bg); color: var(--text-dim); border: 1px solid var(--border);
-  border-radius: 4px; font: inherit; font-size: 12px; padding: 2px 4px; margin-left: 6px; }
 
 /* Personality Type column — OOTP's archetype (Fan Fav, Selfish, etc.),
    distinct from the Personality Notes column (WE/INT/Lead/Loy/Greed/

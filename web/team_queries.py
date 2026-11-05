@@ -4133,7 +4133,8 @@ def get_depth_chart(team_id):
                 "pid": p["player_id"], "name": p["name"], "age": p["age"] + off,
                 "level": p.get("_level", "MLB"),
                 "pt_pct": p.get("pt_pct", 0), "ip": ip,
-                "war": round(w * min(ip / full_ip, 1.0), 1),
+                # Starters earn credit for every inning; a heavy workload is real value.
+                "war": round(w * (ip / full_ip if is_sp else min(ip / full_ip, 1.0)), 1),
                 "full_war": w,
                 "era": round(p.get("_era", 5.0), 2),
                 "fip": round(p.get("_fip", 5.0), 2),

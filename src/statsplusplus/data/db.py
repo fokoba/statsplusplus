@@ -552,6 +552,35 @@ CREATE TABLE IF NOT EXISTS retained_salary (
 -- stuck in AAA). Rows here are filtered out of that prospect pool only: once a
 -- player is actually on the MLB roster he shows up regardless, so a later
 -- call-up needs no cleanup.
+CREATE TABLE IF NOT EXISTS personnel (
+    coach_key    TEXT PRIMARY KEY,
+    name         TEXT, dob TEXT, age INTEGER,
+    nat          TEXT, city TEXT,
+    team_id      INTEGER, level TEXT,
+    normal_pos   TEXT,
+    job          TEXT, job_abbr TEXT,
+    exp_years    INTEGER,
+    reputation   TEXT,
+    salary       INTEGER, contract_years INTEGER,
+    scout_major TEXT, scout_minor TEXT, scout_intl TEXT, scout_amateur TEXT,
+    amateur_pref TEXT,
+    personality_type TEXT, personality_pos TEXT, personality_neg TEXT,
+    manager_style TEXT,
+    hit_focus TEXT, pit_focus TEXT,
+    teach_hitting TEXT, teach_pitching TEXT, teach_catching TEXT,
+    teach_infield TEXT, teach_outfield TEXT, teach_running TEXT,
+    handle_running TEXT, development TEXT, mechanics TEXT, veteran_handling TEXT,
+    recover_legs TEXT, recover_arms TEXT, recover_back TEXT, recover_other TEXT,
+    prevent_legs TEXT, prevent_arms TEXT, prevent_back TEXT, prevent_other TEXT,
+    fatigue_recovery TEXT,
+    vet_prospect TEXT, pitching_hitting TEXT, speed_power TEXT,
+    defense_offense TEXT, avg_obp TEXT,
+    trade_freq TEXT, trade_agg TEXT, player_loyalty TEXT, trade_pref TEXT,
+    draft_pref TEXT, intl_fa_pref TEXT, dev_pref TEXT, scout_pref TEXT,
+    owner_patience TEXT, owner_spending TEXT, owner_involvement TEXT, owner_priority TEXT,
+    uploaded_at  TEXT
+);
+
 CREATE TABLE IF NOT EXISTS depth_chart_exclusions (
     team_id    INTEGER NOT NULL,
     player_id  INTEGER NOT NULL,

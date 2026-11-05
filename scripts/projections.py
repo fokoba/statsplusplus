@@ -386,8 +386,9 @@ def _manual_position_entries(players, roles, pos, shares=None):
     shares: optional dict of player_id -> explicit fraction (0-1) of the
     position's playing time, honoured for BENCH entries (e.g. 7/154 for
     "seven games at 2B while the starter is hurt") and for STARTER entries
-    (1.0 = every game). Explicit-share bench players are carved out first and
-    the starters/platoon keep their usual baseline.
+    (1.0 = every game). Explicit-share bench players are carved out of the
+    starters/platoon, and with no unpinned bench to take the rest the
+    starters/platoon absorb it, so the position always sums to 100%.
     Players at this position with no role entry are dropped — a manual
     designation is a full override, not a bias on top of the auto-ranking.
     """
@@ -397,11 +398,15 @@ def _manual_position_entries(players, roles, pos, shares=None):
     vl_ids = [pid for pid in roles if roles[pid] == ROLE_PLATOON_VL and pid in by_pid]
     bench_ids = [pid for pid in roles if roles[pid] == ROLE_BENCH and pid in by_pid]
 
+    shares = shares or {}
     baseline = _MANUAL_BASELINE_SHARE.get(pos, _MANUAL_BASELINE_DEFAULT)
+    pinned_bench = sum(float(shares[pid]) for pid in bench_ids if shares.get(pid))
+    if all(shares.get(pid) for pid in bench_ids):
+        baseline = 1.0 - pinned_bench
+    baseline = max(min(baseline, 1.0 - pinned_bench), 0.0)
     entries = []
     top_bucket = 0.0
 
-    shares = shares or {}
     if starter_ids:
         # An explicit share on a starter (e.g. 1.0 for "plays every day while
         # the incumbent is injured") replaces the baseline; starters without

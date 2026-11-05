@@ -6,7 +6,7 @@
 {% set my = data.my_team %}
 {% set mtd = data.money_divisor %}
 {% macro fmt_money(v) %}${{ (v / mtd) | round(1) }}{{ money_unit }}{% endmacro %}
-{% macro fmt_dpw(v) %}{% if v is none %}—{% else %}${{ (v / 1000) | round(0, 'floor') | int }}K{% endif %}{% endmacro %}
+{% macro fmt_dpw(v) %}{% if v is none %}—{% else %}${{ '%.1f' | format(v / 1000) }}K{% endif %}{% endmacro %}
 
 {% if not my %}
 <div class="panel"><p>No MLB roster data available for this team.</p></div>

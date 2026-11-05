@@ -20,10 +20,10 @@ def test_starter_share_replaces_the_baseline():
     assert entries[1] == pytest.approx(1.0)
 
 
-def test_starter_without_a_share_keeps_the_baseline():
+def test_starter_with_no_bench_fills_the_position():
     entries = dict((p["player_id"], s) for p, s in
                    _manual_position_entries([_p(1)], {1: "starter"}, "2B"))
-    assert entries[1] == pytest.approx(0.90)
+    assert entries[1] == pytest.approx(1.0)
 
 
 def test_pinned_starter_is_not_shaved_by_the_rest_day_cap():
@@ -31,7 +31,7 @@ def test_pinned_starter_is_not_shaved_by_the_rest_day_cap():
                                 manual_shares={"2B": {1: 1.0}})
     assert out["2B"][0]["pt_pct"] == pytest.approx(100.0)
     unpinned = allocate_playing_time({"2B": [_p(1)]}, manual_roles={"2B": {1: "starter"}})
-    assert unpinned["2B"][0]["pt_pct"] == pytest.approx(90.0)
+    assert unpinned["2B"][0]["pt_pct"] < 100.0
 
 
 def test_tagged_reliever_makes_the_pen_ahead_of_better_untagged_arms():

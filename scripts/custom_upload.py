@@ -1317,18 +1317,31 @@ def import_personnel_sync(file_bytes: bytes, league_dir=None) -> int:
 
     conn = get_conn(league_dir)
     team_by_name = {r[1]: r[0] for r in conn.execute("SELECT team_id, name FROM teams")}
+    # City names collide for two-team cities (PPL: New York = NYY/NYG,
+    # Chicago = CWS/CHC), so for MLB clubs the second TM column (abbr)
+    # wins; affiliates still fall back to the full-name match above.
+    try:
+        from statsplusplus.config.league_config import LeagueConfig
+        team_by_abbr = {v: k for k, v in LeagueConfig(base_dir=league_dir).team_abbr_map.items()}
+    except Exception:
+        team_by_abbr = {}
 
     rows = parse_rows(file_bytes)
     now = datetime.datetime.now().isoformat()
     count = 0
+    seen_keys = set()
     for d in rows:
         name = d.get("Name")
         dob = d.get("DOB")
         if not name or not dob:
             continue
         coach_key = f"{name}|{dob}"
+        seen_keys.add(coach_key)
         team_name = d.get("TM")
-        team_id = team_by_name.get(team_name) if team_name else None
+        team_abbr = _dup(d, "TM")
+        team_id = team_by_abbr.get(team_abbr) if team_abbr else None
+        if team_id is None:
+            team_id = team_by_name.get(team_name) if team_name else None
         level = _dup(d, "Lev")
 
         fields = {"coach_key": coach_key, "name": name, "dob": dob,
@@ -1352,6 +1365,16 @@ def import_personnel_sync(file_bytes: bytes, league_dir=None) -> int:
             [fields[c] for c in cols],
         )
         count += 1
+    # The export is the full league personnel list, so anyone missing from
+    # it has left the game (retired/removed) — unassign rather than leave
+    # them holding a staff slot they no longer have.
+    if seen_keys:
+        stale = [r[0] for r in conn.execute(
+            "SELECT coach_key FROM personnel WHERE team_id IS NOT NULL")
+            if r[0] not in seen_keys]
+        conn.executemany(
+            "UPDATE personnel SET team_id=NULL, level=NULL WHERE coach_key=?",
+            [(k,) for k in stale])
     conn.commit()
     conn.close()
     return count

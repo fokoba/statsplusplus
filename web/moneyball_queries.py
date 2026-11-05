@@ -23,6 +23,27 @@ from web_league_context import (get_db, get_cfg, team_abbr_map, team_names_map,
                                  mlb_team_ids, my_team_id, money_divisor as _money_divisor)
 
 
+# A roster holds more players than it can play. contract_value() rates each one
+# as if he gets a full role, so a team's WAR counts only its likely regulars in
+# full. With the PHA roster this lands within ~2 WAR of the hand-built role plan.
+_REGULAR_HITTERS = 8
+_ROTATION_SIZE = 4
+_BENCH_WEIGHT = 0.20
+_SWINGMAN_WEIGHT = 0.25
+
+
+def _usage_weights(players):
+    """{pid: weight} from [(pid, bucket, war), ...] for one team's MLB roster."""
+    weights = {}
+    hitters = sorted((p for p in players if p[1] not in ("SP", "RP")), key=lambda p: -p[2])
+    starters = sorted((p for p in players if p[1] == "SP"), key=lambda p: -p[2])
+    for i, p in enumerate(hitters):
+        weights[p[0]] = 1.0 if i < _REGULAR_HITTERS else _BENCH_WEIGHT
+    for i, p in enumerate(starters):
+        weights[p[0]] = 1.0 if i < _ROTATION_SIZE else _SWINGMAN_WEIGHT
+    return weights
+
+
 def get_moneyball(team_id=None):
     """League-wide $/WAR + contract-efficiency comparison, from one team's
     point of view (defaults to the user's own team).
@@ -80,7 +101,8 @@ def get_moneyball(team_id=None):
     # ratings/stats and can drift from the actual synced contract, and NOT
     # limited to the active MLB roster (a rehabbing/optioned player on a
     # real major-league deal still counts against payroll).
-    game_year = get_cfg().year
+    from team_queries import _contract_year
+    game_year = _contract_year(conn, get_cfg().year)
     uploaded_by_pid = {}
     try:
         for r in conn.execute("SELECT player_id, year, amount FROM salary_estimates"):
@@ -91,8 +113,9 @@ def get_moneyball(team_id=None):
     from statsplusplus.config.league_config import league_minimum as _lm
     minor_pay = _minor_min_pay_map(conn, _lm(get_cfg().league_dir))
     real_payroll = defaultdict(float)
+    paid_by_pid = {}
     _org_rows = conn.execute("""
-        SELECT c.player_id, c.salary_0, COALESCE(NULLIF(p.organization_id,0), NULLIF(p.parent_team_id,0), p.team_id) AS org_id
+        SELECT c.*, COALESCE(NULLIF(p.organization_id,0), NULLIF(p.parent_team_id,0), p.team_id) AS org_id
         FROM contracts c JOIN players p ON c.player_id = p.player_id
         WHERE c.is_major=1
     """).fetchall()
@@ -100,8 +123,18 @@ def get_moneyball(team_id=None):
         if r["org_id"] not in tids:
             continue
         _up = uploaded_by_pid.get(r["player_id"], {}).get(game_year)
-        sal = minor_pay.get(r["player_id"], _exact_current_salary(r["salary_0"] or 0, _up) if _up is not None else (r["salary_0"] or 0))
-        real_payroll[r["org_id"]] += (sal or 0) * (1 - retained_by_pid.get(r["player_id"], 0.0))
+        _raw = r[f"salary_{min(r['current_year'] or 0, 14)}"] or 0
+        sal = minor_pay.get(r["player_id"], _exact_current_salary(_raw, _up) if _up is not None else _raw)
+        paid = (sal or 0) * (1 - retained_by_pid.get(r["player_id"], 0.0))
+        paid_by_pid[r["player_id"]] = paid
+        real_payroll[r["org_id"]] += paid
+
+    # The Athletics' hand-built plan knows each player's real workload.
+    plan_war = {}
+    if league_dir.name.lower() == "ppl" and tid == 6:
+        from war_projection_queries import build_projection, load_overrides
+        plan = build_projection(tid, load_overrides(league_dir))
+        plan_war = {r["pid"]: r["total"] for r in plan.get("rows", [])}
 
     team_stats = {}
     my_contracts = []
@@ -112,14 +145,23 @@ def get_moneyball(team_id=None):
         players = by_team.get(t, [])
         payroll = war = surplus_yr1 = pos_dollars = neg_dollars = 0.0
         pos_count = neg_count = 0
+        rated = []
         for pid, name in players:
             cv = _cv(pid, _conn=conn, _hist=hist, league_dir=league_dir)
-            if not cv or not cv.get("breakdown"):
-                continue
+            if cv and cv.get("breakdown"):
+                rated.append((pid, name, cv))
+        weights = _usage_weights([(pid, cv.get("bucket"), cv["breakdown"][0]["war_base"] or 0.0)
+                                  for pid, _, cv in rated])
+        use_plan = t == tid and plan_war
+        for pid, name, cv in rated:
             bd0 = cv["breakdown"][0]
-            sal = bd0.get("salary_net", bd0["salary_full"]) or 0  # net of retained salary
-            w = bd0["war_base"] or 0.0
-            s = bd0["surplus"] or 0
+            sal = paid_by_pid.get(pid, bd0.get("salary_net", bd0["salary_full"]) or 0)
+            full_war = bd0["war_base"] or 0.0
+            w = (plan_war.get(pid, 0.0) if use_plan else full_war * weights.get(pid, 1.0))
+            market = bd0.get("market_value", 0) or 0
+            if full_war > 0:
+                market *= w / full_war
+            s = market - sal
             payroll += sal
             war += w
             surplus_yr1 += s
@@ -133,7 +175,7 @@ def get_moneyball(team_id=None):
                 my_contracts.append({
                     "pid": pid, "name": name, "bucket": cv.get("bucket"),
                     "age": cv.get("age"), "salary": sal, "war": round(w, 1),
-                    "surplus": s, "market_value": bd0.get("market_value", 0),
+                    "surplus": s, "market_value": market,
                 })
 
         n = pos_count + neg_count

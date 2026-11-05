@@ -49,11 +49,6 @@
         <a href="/trade-center">Trade Center</a>
         <a href="/international">International</a>
         <a href="/settings">Settings</a>
-        <select class="theme-pick" title="Color theme" onchange="document.documentElement.dataset.theme=this.value;try{localStorage.setItem('dom-theme',this.value)}catch(e){}">
-          <option value="gold">Green &amp; Gold</option><option value="navy">Midnight Navy</option>
-          <option value="frost">Violet Frost</option><option value="classic">Classic Orange</option>
-        </select>
-        <script>try{document.currentScript.previousElementSibling.value=localStorage.getItem('dom-theme')||'gold'}catch(e){}</script>
         <div class="nav-search">
           <input id="player-search" type="text" placeholder="Search players…" autocomplete="off" aria-label="Search players">
           <div id="search-results" class="search-dropdown"></div>

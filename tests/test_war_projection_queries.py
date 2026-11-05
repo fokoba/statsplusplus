@@ -11,12 +11,12 @@ from war_projection_queries import (
 
 def test_suggested_25_has_complete_workload():
     assert len(SEED) == 26
-    assert len(PITCHER_IDS) == 9
+    assert len(PITCHER_IDS) == 11
     assert sum(v[2] for pid,v in SEED.items() if pid in PITCHER_IDS) == DEFAULT_TEAM_IP
     assert sum(v[2] for pid,v in SEED.items() if pid not in PITCHER_IDS) == DEFAULT_POSITION_AB + DEFAULT_PH_AB
     assert {24366, 22403, 24700, 26113, 23796} <= set(SEED)  # Ayala/Mines/N. Miller/Hartman/Shipley
-    # Departed or optioned: Yariv, Davis, McGaha, Rivera, Austin
-    assert not ({24800, 22312, 24233, 24723, 25350} & set(SEED))
+    # Departed or off the plan: Yariv, Davis, McGaha, Rivera, Cano, Thorne
+    assert not ({24800, 22312, 24233, 24723, 21573, 25323} & set(SEED))
 
 
 def test_split_override_changes_batting_only_for_ph():

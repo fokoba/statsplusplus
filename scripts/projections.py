@@ -722,7 +722,7 @@ def _manual_sp_entries(sp_list, roles):
 
 
 def allocate_pitcher_time(sp_list, rp_list, team_ip=None,
-                           manual_sp_roles=None, manual_rp_roles=None):
+                           manual_sp_roles=None, manual_rp_roles=None, sp_ip_frac=None):
     """Allocate innings to SP and RP lists.
 
     Each pitcher dict needs: 'player_id', 'name', 'war_proj', 'level_discount'
@@ -745,7 +745,7 @@ def allocate_pitcher_time(sp_list, rp_list, team_ip=None,
     Returns (sp_result, rp_result) with 'pt_pct' and 'ip' added.
     """
     team_ip = team_ip or DEFAULT_TEAM_IP
-    sp_ip_total = team_ip * 0.62  # ~62% of innings to starters
+    sp_ip_total = team_ip * (sp_ip_frac or 0.62)  # ~62% of innings to starters by default
     rp_ip_total = team_ip - sp_ip_total
 
     # ── SP ──────────────────────────────────────────────────────────────

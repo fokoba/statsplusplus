@@ -3613,8 +3613,13 @@ def get_depth_chart(team_id):
     from prospect_value import prospect_surplus as _pv
 
     state = _get_state()
-    year = state.get("stats_year", state["year"])
+    stats_year = state.get("stats_year", state["year"])
     conn = get_db()
+    # After contracts roll over, the chart plans the new season: the first year
+    # shown (where manual roles apply) is that season, and last season's stats
+    # are only history.
+    year = _contract_year(conn, stats_year)
+    season_rolled = year > stats_year
 
     # Cumulative real-stats career WAR — only needed for perpetual-arb
     # leagues (PPL), where future arb salary is projected from career
@@ -3673,13 +3678,13 @@ def get_depth_chart(team_id):
     fielding = {}
     for r in conn.execute(
         'SELECT player_id, position, g FROM mlb_fielding_stats '
-        'WHERE team_id=? AND year=? AND position!=1', (team_id, year)
+        'WHERE team_id=? AND year=? AND position!=1', (team_id, stats_year)
     ).fetchall():
         fielding.setdefault(r["player_id"], {})[r["position"]] = r["g"]
 
     bat_games = {r["player_id"]: r["g"] for r in conn.execute(
         'SELECT player_id, g FROM mlb_batting_stats '
-        'WHERE team_id=? AND year=? AND split_id=1', (team_id, year)
+        'WHERE team_id=? AND year=? AND split_id=1', (team_id, stats_year)
     ).fetchall()}
 
     # ── Build MLB player dicts ──────────────────────────────────────────
@@ -3794,7 +3799,7 @@ def get_depth_chart(team_id):
     ''', (team_id,)).fetchall()
 
     # League-wide position rankings (lightweight, ~0.02s)
-    lg_rankings = _league_pos_rankings(conn, year)
+    lg_rankings = _league_pos_rankings(conn, stats_year)
     num_teams = max(len(v) for v in lg_rankings.values()) if lg_rankings else 34
     pos_rank = {}
     for pos, tw in lg_rankings.items():
@@ -3886,7 +3891,7 @@ def get_depth_chart(team_id):
             (team_id,)).fetchone()
     except Exception:  # no standings synced yet: treat as a fresh season
         _wl = None
-    games_played = (_wl["w"] + _wl["l"]) if _wl else 0
+    games_played = (_wl["w"] + _wl["l"]) if _wl and not season_rolled else 0
     games_played = min(max(games_played, 0), _gps_n)
     ros_frac = max(_gps_n - games_played, 0) / _gps_n if _gps_n else 1.0
     ros_frac = max(ros_frac, 0.01)
@@ -4073,8 +4078,18 @@ def get_depth_chart(team_id):
             else:
                 # MLB SP who didn't make top 5 stays as 6th starter / swingman
                 sp_keep.append(p)
+        # A pinned rotation that carried more than the usual share of innings
+        # last season keeps that share in the plan.
+        sp_ip_frac = None
+        if off == 0 and season_rolled and manual_pitcher_roles and manual_pitcher_roles["SP"]:
+            _ip = {r["player_id"]: r["ip"] or 0.0 for r in conn.execute(
+                "SELECT player_id, SUM(ip) AS ip FROM mlb_pitching_stats "
+                "WHERE team_id=? AND year=? AND split_id=1 GROUP BY player_id", (team_id, stats_year))}
+            if sum(_ip.values()) > 0:
+                sp_ip_frac = sum(_ip.get(pid, 0.0) for pid in manual_pitcher_roles["SP"]) / sum(_ip.values())
         sp_result, rp_result = allocate_pitcher_time(
             sp_keep, rp_pool, team_ip=DEFAULT_TEAM_IP * (ros_frac if off == 0 else 1.0),
+            sp_ip_frac=sp_ip_frac,
             manual_sp_roles=manual_pitcher_roles["SP"] if manual_pitcher_roles else None,
             manual_rp_roles=manual_pitcher_roles["RP"] if manual_pitcher_roles else None,
         )
@@ -4161,7 +4176,8 @@ def get_depth_chart(team_id):
             # Hard rotation order (SP1..SP5): pinned pitchers first, in slot
             # order; everyone else keeps their automatic order after them.
             sp_fmt.sort(key=lambda p: sp_slots.get(p["pid"], 10_000))
-        rp_fmt = [_fmt_pitcher(p) for p in rp_result if round(p.get("pt_pct", 0)) >= 2]
+        rp_fmt = [_fmt_pitcher(p) for p in rp_result
+                  if round(p.get("pt_pct", 0)) >= 2 or p["player_id"] in manual_rp_pids]
         if off == 0 and rp_slots:
             rp_fmt.sort(key=lambda p: rp_slots.get(p["pid"], 10_000))
         pos_war_map["SP"] = round(sum(p["war"] for p in sp_fmt), 1)

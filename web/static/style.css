@@ -17,11 +17,11 @@
 /* Themes — default above is "Green & Gold" (Athletics). Picked from the nav
    switcher, stored in localStorage, applied as <html data-theme>. */
 :root, :root[data-theme="gold"] {
-  --bg: #0a110d;
-  --surface: #121d17;
-  --border: #223529;
-  --text: #f1f4ef;
-  --text-dim: #93a397;
+  --bg: #0d0d0c;
+  --surface: #1a1a17;
+  --border: #2e2d27;
+  --text: #f3f2ec;
+  --text-dim: #9e9c92;
 }
 :root[data-theme="navy"] {
   --bg: #0a0f1c;

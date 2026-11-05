@@ -2471,6 +2471,15 @@ def get_team_stats(team_id):
     return {"batting": bat, "pitching": pit}
 
 
+def _contract_year(conn, fallback):
+    """Calendar year contracts are currently paying. Contracts roll over in the
+    offseason, before the game year does, so salary_N[current_year] can already
+    be next season's money while the state year still says this season."""
+    row = conn.execute("""SELECT MAX(season_year + current_year) FROM contracts
+                          WHERE is_major = 1 AND season_year > 0""").fetchone()
+    return max(fallback, row[0]) if row and row[0] else fallback
+
+
 def get_contracts(team_id):
     conn = get_db()
     ed = _get_eval_date()
@@ -2496,7 +2505,7 @@ def get_contracts(team_id):
     # applies. Without this here too, the Contracts tab's Salary column and
     # the top-bar Payroll tile silently drift out of sync with Finances
     # for any player whose uploaded figure differs from the raw sync.
-    game_year = get_cfg().year
+    game_year = _contract_year(conn, get_cfg().year)
     uploaded_by_pid = {}
     try:
         for r in conn.execute("SELECT player_id, year, amount FROM salary_estimates"):
@@ -2573,6 +2582,7 @@ def get_payroll_summary(team_id):
     state = _get_state()
     year = state.get("stats_year", state["year"])
     conn = get_db()
+    year = _contract_year(conn, year)
     rows = conn.execute("""
         SELECT c.player_id, p.name, c.years, c.current_year,
                c.salary_0, c.salary_1, c.salary_2, c.salary_3, c.salary_4,

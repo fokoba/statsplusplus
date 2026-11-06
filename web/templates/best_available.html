@@ -102,7 +102,7 @@
       {% for p in players %}
       <tr{% if p.is_mine and p.is_protected %} class="scout-mine-protected-row" title="Already on your 40-man — protected"{% elif p.is_mine %} class="scout-mine-row"{% endif %} data-ptype="{{ p.personality_type_class }}" data-dev-good="{{ '1' if p.dev_good else '' }}" data-dev-bad="{{ '1' if p.dev_bad else '' }}" data-milc="{{ 'yes' if (p.is_milc and not p.is_mine) else 'no' }}">
         <td><input type="checkbox" class="scout-checkbox" data-pid="{{ p.pid }}" data-page="{{ page_key }}"></td>
-        <td class="left">{% if p.is_mine %}<span class="{{ 'scout-mine-tag-protected' if p.is_protected else 'scout-mine-tag' }}">{{ p.roster_tag }}</span>{% endif %}{% if p.good_pick %}<span title="Both a good Park Fit (20+) and a positive Long-Term Surplus — a high-confidence add">⭐</span>{% endif %}<a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
+        <td class="left">{% if p.is_mine %}<span class="{{ 'scout-mine-tag-protected' if p.is_protected else 'scout-mine-tag' }}">{{ p.roster_tag }}</span>{% endif %}{% if p.on_waivers %}<span class="scout-mine-tag" title="On waivers right now — may be claimed or clear before the Rule 5 draft">WVR</span>{% endif %}{% if p.good_pick %}<span title="Both a good Park Fit (20+) and a positive Long-Term Surplus — a high-confidence add">⭐</span>{% endif %}<a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
         <td>{{ p.age if p.age is not none else '-' }}</td>
         <td><span class="ovr-color" data-g="{{ p.composite_score }}">{{ p.composite_score if p.composite_score is not none else '-' }}</span></td>
         {% if value_key %}

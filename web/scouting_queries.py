@@ -513,10 +513,16 @@ def _rule5_has_data(conn):
 def _protected_pids(conn):
     """Every player_id currently on ANY team's 40-man roster, leaguewide —
     "protected" in the Rule 5 sense. Same is_major signal as the 40-man
-    badge shown elsewhere in the app, just not scoped to one org here."""
+    badge shown elsewhere in the app, just not scoped to one org here.
+
+    Players on waivers are not protected: their contract row still says
+    is_major while they're being removed from the 40-man, and the game's
+    own export marks them R5 eligible."""
     try:
         return {r[0] for r in conn.execute(
-            "SELECT player_id FROM contracts WHERE is_major=1"
+            "SELECT c.player_id FROM contracts c "
+            "LEFT JOIN players p ON p.player_id = c.player_id "
+            "WHERE c.is_major=1 AND COALESCE(p.is_on_waivers, 0) = 0"
         ).fetchall()}
     except Exception:
         return set()
@@ -544,7 +550,8 @@ def _rule5_all_players(conn):
         rows = conn.execute("""
             SELECT p.player_id, p.name, p.age, p.pos, p.role, r.acc,
                    r.composite_score, r.ceiling_score, r.true_ceiling,
-                   r.int_, r.wrk_ethic, r.lead, r.loy, r.greed, r.adaptability, r.personality_type
+                   r.int_, r.wrk_ethic, r.lead, r.loy, r.greed, r.adaptability, r.personality_type,
+                   COALESCE(p.is_on_waivers, 0)
             FROM rule5_eligible re
             JOIN players p ON p.player_id = re.player_id
             LEFT JOIN latest_ratings r ON p.player_id = r.player_id
@@ -557,7 +564,7 @@ def _rule5_all_players(conn):
 
     players = []
     for (pid, name, age, pos, role, acc, comp, ceil_score, true_ceil,
-         intel, wrk_ethic, lead, loy, greed, adaptability, ptype) in rows:
+         intel, wrk_ethic, lead, loy, greed, adaptability, ptype, on_waivers) in rows:
         group, is_pitcher = _pos_group(pos, role)
         if group is None:
             continue
@@ -567,7 +574,7 @@ def _rule5_all_players(conn):
         _pers = _personality_fields(intel, wrk_ethic, lead, loy, greed, adaptability, ptype)
         players.append({"pid": pid, "name": name, "age": age, "group": group,
                          "composite_score": comp, "potential": potential, "acc": acc,
-                         "is_protected": False,
+                         "is_protected": False, "on_waivers": bool(on_waivers),
                          "surplus": None, "good_pick": False, "newly_confirmed": False,
                          "is_mine": False, "roster_tag": None,
                          **_pers})

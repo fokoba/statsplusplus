@@ -1917,23 +1917,12 @@ function toggleFarmRows() {
       (of {{ fa_candidates.total_fa }} total free agents — {{ fa_candidates.nippon_excluded }} excluded as Nippon/international, {{ fa_candidates.draft_pool_excluded }} excluded as current/future draft-pool amateurs; some players fall into both).
     </div>
     <div style="font-size:12px; color:var(--text-dim); margin-bottom:12px; padding:8px; border:1px solid var(--border); border-radius:6px">
-      <strong>Ask</strong> comes from a manually uploaded OOTP "All Free Agents" export (the live sync has no salary-demand field) — upload the export to refresh it:
-      <form method="post" action="/team/{{ tid }}/upload-fa-asks" enctype="multipart/form-data" style="display:inline-flex; align-items:center; gap:6px; margin-top:6px">
-        <input type="file" name="fa_csv_file" accept=".csv" required>
-        <button type="submit" class="btn btn-sm">Upload</button>
-      </form>
-      {% if request.args.get('fa_ask_count') %}
-      <span style="color:#4caf50">
-        Checked {{ request.args.get('fa_ask_count') }} asking prices —
-        {% if request.args.get('fa_ask_changed') and request.args.get('fa_ask_changed')|int > 0 %}{{ request.args.get('fa_ask_changed') }} changed.{% else %}no change from last upload.{% endif %}
-      </span>
-      {% endif %}
-      {% if request.args.get('fa_ask_error') %}<span style="color:#f44336">Upload failed — check the file and try again.</span>{% endif %}
+      <strong>Ask</strong> comes from the "All Free Agents" export, auto-imported when OOTP writes it.
       <div style="margin-top:6px">
         {% if last_fa_ask_upload and last_fa_ask_upload.date %}
-          <span>Asks last actually moved <strong>{{ last_fa_ask_upload.date[:10] }}</strong> ({{ last_fa_ask_upload.count }} player{{ 's' if last_fa_ask_upload.count != 1 else '' }} tracked). Asks typically start high and decay through the offseason — re-upload periodically to catch that, not every sim advance.</span>
+          <span>Asks last actually moved <strong>{{ last_fa_ask_upload.date[:10] }}</strong> ({{ last_fa_ask_upload.count }} player{{ 's' if last_fa_ask_upload.count != 1 else '' }} tracked). Asks typically start high and decay through the offseason — re-export periodically to catch that.</span>
         {% else %}
-          <span>No asking prices tracked yet for this league — upload the export above to start.</span>
+          <span>No asking prices tracked yet for this league — export "All Free Agents" from OOTP to start.</span>
         {% endif %}
       </div>
     </div>

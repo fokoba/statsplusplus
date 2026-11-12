@@ -448,8 +448,14 @@ def build_projection(team_id: int, overrides: dict | None = None) -> dict:
                          "ceiling": round(_med + _band, 1)}
     for r in rows:
         r.pop("_half_rem", None)
+    try:
+        from role_surplus import roster as _role_surplus_roster
+        role_surplus = _role_surplus_roster(team_id)
+    except Exception:
+        role_surplus = None
     return {
         "year": YEAR, "team_id": team_id, "rows": rows, "outside": outside,
+        "role_surplus": role_surplus,
         "season": {"games_played": gp, "games_per_season": gps, "pct": round(season_pct * 100, 1)},
         "missing": [pid for pid in SEED if pid not in roster],
         "totals": totals,

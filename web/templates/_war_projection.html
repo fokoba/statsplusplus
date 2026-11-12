@@ -47,6 +47,56 @@
     <p class="war-proj-note">Method: current split ratings and 1952–54 MLB batting results are blended by split sample size; baserunning and fielding use the league's calibrated tool curves with historical UBR/ZR where available. Pitcher rates blend recent MLB WAR with ratings and discount old starter results when projecting a relief role. Workload follows the roles agreed with Forrest. The ranges are planning bands, not confidence intervals or OOTP forecasts.</p>
   </div>
 
+  {% if war_projection.role_surplus %}{% set rsr = war_projection.role_surplus %}
+  <div class="panel" id="role-surplus-roster">
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px">
+      <h2 style="margin:0">Projected-Role Surplus</h2>
+      <div style="font-size:13px">Horizon:
+        <label><input type="radio" name="rs-horizon" value="y1" checked> {{ rsr.meta.years[0] }}</label>
+        <label><input type="radio" name="rs-horizon" value="y2"> {{ rsr.meta.years[1] }} if role holds</label>
+        <label><input type="radio" name="rs-horizon" value="y3"> {{ rsr.meta.years[0] }}–{{ (rsr.meta.years[-1]|string)[2:] }} if role holds</label>
+      </div>
+    </div>
+    <p class="war-proj-note">{{ rsr.meta.snapshot }}. Standard and Projected-Role use different WAR projections with identical salaries (including retention), so the gap reflects both workload and model. Open a player's Valuation tab for the WAR and salary inputs.</p>
+    <div class="war-proj-scroll">
+      <table class="war-proj-table" id="rs-table">
+        <thead><tr>
+          <th class="left" data-sort="str">Player</th><th class="left" data-sort="str">Role</th><th class="left">Workload</th>
+          <th data-sort="num">Standard</th><th data-sort="num" class="sort-desc">Projected Role</th><th data-sort="num">Gap</th>
+        </tr></thead>
+        <tbody>
+          {% for r in rsr.rows %}
+          <tr data-h='{{ r.horizons|tojson }}'>
+            <td class="left"><a class="player-link" href="/player/{{ r.pid }}">{{ r.name }}</a>{% if r.scenario_note %} <span title="{{ r.scenario_note }}" style="font-size:10px; color:var(--text-dim)">pre-cutdown</span>{% endif %}</td>
+            <td class="left">{{ r.role }}</td><td class="left">{{ r.workload }}</td>
+            <td class="rs-std"></td><td class="rs-role" style="font-weight:600"></td><td class="rs-gap"></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot><tr><td class="left" colspan="3"><strong>Total</strong></td><td id="rs-tot-std"></td><td id="rs-tot-role" style="font-weight:600"></td><td id="rs-tot-gap"></td></tr></tfoot>
+      </table>
+    </div>
+  </div>
+  <script>
+  (function () {
+    const fmt = v => (v < 0 ? "−" : "") + "$" + (Math.abs(v) / 1000).toFixed(1) + "k";
+    const paint = (td, v) => { td.textContent = fmt(v); td.dataset.sortValue = v; td.className = td.className.replace(/\b(pos|neg)\b/g, "").trim() + (v > 0 ? " pos" : v < 0 ? " neg" : ""); };
+    function render(h) {
+      let ts = 0, tr = 0;
+      document.querySelectorAll("#rs-table tbody tr").forEach(row => {
+        const x = JSON.parse(row.dataset.h)[h];
+        const std = x ? x.std : 0, role = x ? x.role : 0;
+        ts += std; tr += role;
+        paint(row.querySelector(".rs-std"), std); paint(row.querySelector(".rs-role"), role); paint(row.querySelector(".rs-gap"), role - std);
+      });
+      paint(document.getElementById("rs-tot-std"), ts); paint(document.getElementById("rs-tot-role"), tr); paint(document.getElementById("rs-tot-gap"), tr - ts);
+    }
+    document.querySelectorAll('input[name="rs-horizon"]').forEach(i => i.addEventListener("change", () => render(i.value)));
+    render("y1");
+  })();
+  </script>
+  {% endif %}
+
   <div class="panel">
     <h2>Outside the projected 25</h2>
     <p class="war-proj-note">Current Philadelphia 40-man players outside this workload plan. Their projected {{ war_projection.year }} AB/IP is zero in the team total; this list is for promotion and replacement decisions.</p>

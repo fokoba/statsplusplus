@@ -588,6 +588,51 @@
 {% endif %}
 {% endmacro %}
 
+{# Projected-Role Surplus (1956 spot check): Standard vs. role-based
+   surplus at this player's planned Philadelphia workload. Data:
+   web/role_surplus.py. #}
+{% macro kfmt(v) %}{% if v < 0 %}−{% endif %}${{ '%.1f'|format((v|abs) / 1000) }}k{% endmacro %}
+{% macro role_surplus_panel() %}
+{% if p.role_surplus %}{% set rs = p.role_surplus %}
+<div class="panel role-surplus-panel">
+  <h2>Projected-Role Surplus</h2>
+  <div style="font-size:12px; color:var(--text-dim); margin-bottom:8px">Philadelphia · {{ rs.role }} · {{ rs.workload }}</div>
+  {% if rs.scenario_note %}<div style="font-size:11px; color:var(--warn, #ffb74d); margin-bottom:8px">{{ rs.scenario_note }}</div>{% endif %}
+  <table>
+    <thead><tr><th class="left">Season</th><th>Standard Surplus</th><th>Projected-Role Surplus</th></tr></thead>
+    <tbody>
+      {% set rows = [(rs.years[0].year ~ '', rs.horizons.y1)] %}
+      {% if rs.horizons.y2 %}{% set _ = rows.append((rs.years[1].year ~ ' · if role holds', rs.horizons.y2)) %}{% endif %}
+      {% set _ = rows.append((rs.years[0].year ~ '–' ~ (rs.years[-1].year|string)[2:] ~ ' · if role holds', rs.horizons.y3)) %}
+      {% for label, h in rows %}
+      <tr><td class="left">{{ label }}</td>
+        <td class="{{ 'pos' if h.std > 0 else 'neg' if h.std < 0 else '' }}">{{ kfmt(h.std) }}</td>
+        <td class="{{ 'pos' if h.role > 0 else 'neg' if h.role < 0 else '' }}" style="font-weight:600">{{ kfmt(h.role) }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <details style="margin-top:8px; font-size:12px">
+    <summary style="cursor:pointer">Calculation details</summary>
+    <table style="margin-top:6px">
+      <thead><tr><th class="left">Year</th><th class="left">Salary</th><th>Gross</th><th>Retained</th><th>PHA pays</th><th>Std WAR</th><th>Role WAR</th></tr></thead>
+      <tbody>
+        {% for y in rs.years %}
+        <tr><td class="left">{{ y.year }}</td>
+          <td class="left">{{ 'signed' if y.basis == 'contract' else y.basis }}</td>
+          <td>${{ '{:,.0f}'.format(y.gross) }}</td>
+          <td>{{ y.retained_pct|int }}%</td>
+          <td>${{ '{:,.0f}'.format(y.net) }}</td>
+          <td>{{ '%.2f'|format(y.std_war) }}</td>
+          <td>{{ '%.2f'|format(y.role_war) }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p style="color:var(--text-dim); margin:6px 0 0">The two columns use different WAR projections, so the gap reflects both playing time and how the models estimate performance. Salary, including retention, is identical in both.</p>
+  </details>
+</div>
+{% endif %}
+{% endmacro %}
+
 {% block content %}
 
 {# ── Player Header ── #}
@@ -1694,6 +1739,7 @@ document.querySelectorAll('.dev-chart-dot').forEach(function(dot) {
 <div class="tab-content" id="tab-valuation">
   <div class="columns">
     <div class="panel-stack">
+      {{ role_surplus_panel() }}
       {{ war_pace_panel() }}
       {{ surplus_panel() }}
     </div>

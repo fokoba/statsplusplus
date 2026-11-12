@@ -2211,8 +2211,15 @@ def get_player(pid):
         except Exception:
             pass
 
+    try:
+        from role_surplus import for_player as _role_surplus_for
+        role_surplus = _role_surplus_for(pid, parent_team_id or team_id)
+    except Exception:
+        role_surplus = None
+
     return {
         "pid": pid, "player_id": pid, "name": name, "age": age, "pos": pos_str,
+        "role_surplus": role_surplus,
         "year": get_cfg().year,
         "team": team_names_map().get(org_id, "?"), "team_abbr": team_abbr_map().get(org_id, "?"), "tid": org_id,
         "actual_team_id": team_id if team_id != org_id else None,

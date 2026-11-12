@@ -1,0 +1,1121 @@
+{
+ "meta": {
+  "snapshot": "In-game roster December 25, 1955",
+  "team_id": 6,
+  "years": [
+   1956,
+   1957,
+   1958
+  ],
+  "notes": "Standard uses Dominator’s WAR and positional valuation model aligned to the 1956 contract year. Projected Role uses the 1955-anchored roster review, aging each WAR rate with the PPL curves while holding workload and handedness constant. Both use the same salary per season, including retention. The gap between them can reflect both playing time and how the two models estimate WAR. 1956 salaries are exact; later arbitration salaries are OOTP estimates assuming Philadelphia tenders each player; Ayala’s 1957 team option and Mines’s 1957 player option are assumed exercised."
+ },
+ "players": {
+  "24747": {
+   "name": "Melvin Valdes",
+   "role": "SP1",
+   "workload": "340 IP",
+   "years": [
+    {
+     "year": 1956,
+     "basis": "contract",
+     "gross": 86000.0,
+     "retained_pct": 0.0,
+     "net": 86000.0,
+     "std_war": 6.22,
+     "role_war": 9.28,
+     "std_surplus": 56612.0,
+     "role_surplus": 126761.0
+    },
+    {
+     "year": 1957,
+     "basis": "contract",
+     "gross": 86000.0,
+     "retained_pct": 0.0,
+     "net": 86000.0,
+     "std_war": 5.96,
+     "role_war": 8.9,
+     "std_surplus": 50731.0,
+     "role_surplus": 117987.0
+    },
+    {
+     "year": 1958,
+     "basis": "contract",
+     "gross": 86000.0,
+     "retained_pct": 0.0,
+     "net": 86000.0,
+     "std_war": 5.45,
+     "role_war": 8.13,
+     "std_surplus": 38969.0,
+     "role_surplus": 100440.0
+    }
+   ],
+   "scenario_note": null
+  },
+  "25181": {
+   "name": "John Rickson",
+   "role": "SP2",
+   "workload": "275 IP",
+   "years": [
+    {
+     "year": 1956,
+     "basis": "contract",
+     "gross": 27788.0,
+     "retained_pct": 0.0,
+     "net": 27788.0,
+     "std_war": 4.14,
+     "role_war": 5.47,
+     "std_surplus": 67111.0,
+     "role_surplus": 97609.0
+    },
+    {
+     "year": 1957,
+     "basis": "arb estimate",
+     "gross": 37000.0,
+     "retained_pct": 0.0,
+     "net": 37000.0,
+     "std_war": 3.97,
+     "role_war": 5.24,
+     "std_surplus": 53986.0,
+     "role_surplus": 83226.0
+    },
+    {
+     "year": 1958,
+     "basis": "arb estimate",
+     "gross": 46000.0,
+     "retained_pct": 0.0,
+     "net": 46000.0,
+     "std_war": 3.63,
+     "role_war": 4.79,
+     "std_surplus": 37159.0,
+     "role_surplus": 63884.0
+    }
+   ],
+   "scenario_note": null
+  },
+  "26188": {
+   "name": "Chris DiGiovanni",
+   "role": "SP3",
+   "workload": "300 IP",
+   "years": [
+    {
+     "year": 1956,
+     "basis": "contract",
+     "gross": 20000.0,
+     "retained_pct": 0.0,
+     "net": 20000.0,
+     "std_war": 5.53,
+     "role_war": 5.06,
+     "std_surplus": 106710.0,
+     "role_surplus": 95924.0
+    },
+    {
+     "year": 1957,
+     "basis": "contract",
+     "gross": 20000.0,
+     "retained_pct": 0.0,
+     "net": 20000.0,
+     "std_war": 5.53,
+     "role_war": 5.06,
+     "std_surplus": 106710.0,
+     "role_surplus": 95924.0
+    },
+    {
+     "year": 1958,
+     "basis": "contract",
+     "gross": 20000.0,
+     "retained_pct": 0.0,
+     "net": 20000.0,
+     "std_war": 5.53,
+     "role_war": 5.06,
+     "std_surplus": 106710.0,
+     "role_surplus": 95924.0
+    }
+   ],
+   "scenario_note": null
+  },
+  "23856": {
+   "name": "Scott Yeager",
+   "role": "SP4",
+   "workload": "135 IP",
+   "years": [
+    {
+     "year": 1956,
+     "basis": "contract",
+     "gross": 7000.0,
+     "retained_pct": 0.0,
+     "net": 7000.0,
+     "std_war": 2.73,
+     "role_war": 1.63,
+     "std_surplus": 55484.0,
+     "role_surplus": 30430.0
+    },
+    {
+     "year": 1957,
+     "basis": "arb estimate",
+     "gross": 8000.0,
+     "retained_pct": 0.0,
+     "net": 8000.0,
+     "std_war": 2.64,
+     "role_war": 1.58,
+     "std_surplus": 52609.0,
+     "role_surplus": 28307.0
+    },
+    {
+     "year": 1958,
+     "basis": "arb estimate",
+     "gross": 10000.0,
+     "retained_pct": 0.0,
+     "net": 10000.0,
+     "std_war": 2.53,
+     "role_war": 1.52,
+     "std_surplus": 48110.0,
+     "role_surplus": 24810.0
+    }
+   ],
+   "scenario_note": null
+  },
+  "23601": {
+   "name": "Mike Reitz",
+   "role": "Middle relief",
+   "workload": "62 IP",
+   "years": [
+    {
+     "year": 1956,
+     "basis": "contract",
+     "gross": 14245.0,
+     "retained_pct": 0.0,
+     "net": 14245.0,
+     "std_war": 1.03,
+     "role_war": 1.41,
+     "std_surplus": 6684.0,
+     "role_surplus": 14521.0
+    },
+    {
+     "year": 1957,
+     "basis": "arb estimate",
+     "gross": 14000.0,
+     "retained_pct": 0.0,
+     "net": 14000.0,
+     "std_war": 1.03,
+     "role_war": 1.41,
+     "std_surplus": 6929.0,
+     "role_surplus": 14766.0
+    },
+    {
+     "year": 1958,
+     "basis": "arb estimate",
+     "gross": 13000.0,
+     "retained_pct": 0.0,
+     "net": 13000.0,
+     "std_war": 1.0,
+     "role_war": 1.37,
+     "std_surplus": 7301.0,
+     "role_surplus": 14903.0
+    }
+   ],
+   "scenario_note": null
+  },
+  "23718": {
+   "name": "Svend Tyllesen",
+   "role": "Middle relief",
+   "workload": "65 IP",
+   "years": [
+    {
+     "year": 1956,
+     "basis": "contract",
+     "gross": 25058.0,
+     "retained_pct": 0.0,
+     "net": 25058.0,
+     "std_war": 1.24,
+     "role_war": 1.22,
+     "std_surplus": 70.0,
+     "role_surplus": -288.0
+    },
+    {
+     "year": 1957,
+     "basis": "arb estimate",
+     "gross": 24000.0,
+     "retained_pct": 0.0,
+     "net": 24000.0,
+     "std_war": 1.13,
+     "role_war": 1.11,
+     "std_surplus": -1034.0,
+     "role_surplus": -1360.0
+    },
+    {
+     "year": 1958,
+     "basis": "arb estimate",
+     "gross": 21000.0,
+     "retained_pct": 0.0,
+     "net": 21000.0,
+     "std_war": 1.01,
+     "role_war": 1.0,
+     "std_surplus": -466.0,
+     "role_surplus": -758.0
+    }
+   ],
+   "scenario_note": null
+  },
+  "25360": {
+   "name": "Justin Roost",
+   "role": "Middle relief, LHP",
+   "workload": "54 IP",
+   "years": [
+    {
+     "year": 1956,
+     "basis": "contract",
+     "gross": 7000.0,
+     "retained_pct": 0.0,
+     "net": 7000.0,
+     "std_war": 0.47,
+     "role_war": 0.57,
+     "std_surplus": 2618.0,
+     "role_surplus": 4587.0
+    },
+    {
+     "year": 1957,
+     "basis": "arb estimate",
+     "gross": 9000.0,
+     "retained_pct": 0.0,
+     "net": 9000.0,
+     "std_war": 0.46,
+     "role_war": 0.55,
+     "std_surplus": 329.0,
+     "role_surplus": 2240.0
+    },
+    {
+     "year": 1958,
+     "basis": "arb estimate",
+     "gross": 10000.0,
+     "retained_pct": 0.0,
+     "net": 10000.0,
+     "std_war": 0.44,
+     "role_war": 0.53,
+     "std_surplus": -1056.0,
+     "role_surplus": 776.0
+    }
+   ],
+   "scenario_note": null
+  },
+  "23663": {
+   "name": "Nolan Harrison",
+   "role": "Middle relief",
+   "workload": "48 IP",
+   "years": [
+    {
+     "year": 1956,
+     "basis": "contract",
+     "gross": 14588.0,
+     "retained_pct": 0.0,
+     "net": 14588.0,
+     "std_war": 0.91,
+     "role_war": 0.8,
+     "std_surplus": 3916.0,
+     "role_surplus": 1632.0
+    },
+    {
+     "year": 1957,
+     "basis": "arb estimate",
+     "gross": 13000.0,
+     "retained_pct": 0.0,
+     "net": 13000.0,
+     "std_war": 0.87,
+     "role_war": 0.76,
+     "std_surplus": 4741.0,
+     "role_surplus": 2551.0
+    },
+    {
+     "year": 1958,
+     "basis": "arb estimate",
+     "gross": 12000.0,
+     "retained_pct": 0.0,
+     "net": 12000.0,
+     "std_war": 0.8,
+     "role_war": 0.7,
+     "std_surplus": 4215.0,
+     "role_surplus": 2213.0
+    }
+   ],
+   "scenario_note": null
+  },
+  "24627": {
+   "name": "Nelson Madden",
+   "role": "Long relief, LHP",
+   "workload": "52 IP",
+   "years": [
+    {
+     "year": 1956,
+     "basis": "contract",
+     "gross": 20064.0,
+     "retained_pct": 0.0,
+     "net": 20064.0,
+     "std_war": 2.55,
+     "role_war": 0.56,
+     "std_surplus": 38495.0,
+     "role_surplus": -8650.0
+    },
+    {
+     "year": 1957,
+     "basis": "arb estimate",
+     "gross": 20000.0,
+     "retained_pct": 0.0,
+     "net": 20000.0,
+     "std_war": 2.55,
+     "role_war": 0.56,
+     "std_surplus": 38559.0,
+     "role_surplus": -8586.0
+    },
+    {
+     "year": 1958,
+     "basis": "arb estimate",
+     "gross": 17000.0,
+     "retained_pct": 0.0,
+     "net": 17000.0,
+     "std_war": 2.48,
+     "role_war": 0.54,
+     "std_surplus": 39802.0,
+     "role_surplus": -5928.0
+    }
+   ],
+   "scenario_note": null
+  },
+  "25350": {
+   "name": "Ethan Austin",
+   "role": "Long relief, RHP",
+   "workload": "40 IP",
+   "years": [
+    {
+     "year": 1956,
+     "basis": "contract",
+     "gross": 7000.0,
+     "retained_pct": 0.0,
+     "net": 7000.0,
+     "std_war": 0.85,
+     "role_war": 0.36,
+     "std_surplus": 12566.0,
+     "role_surplus": 303.0
+    },
+    {
+     "year": 1957,
+     "basis": "arb estimate",
+     "gross": 8000.0,
+     "retained_pct": 0.0,
+     "net": 8000.0,
+     "std_war": 0.85,
+     "role_war": 0.36,
+     "std_surplus": 11566.0,
+     "role_surplus": -697.0
+    },
+    {
+     "year": 1958,
+     "basis": "arb estimate",
+     "gross": 10000.0,
+     "retained_pct": 0.0,
+     "net": 10000.0,
+     "std_war": 0.85,
+     "role_war": 0.36,
+     "std_surplus": 9566.0,
+     "role_surplus": -2697.0
+    }
+   ],
+   "scenario_note": null
+  },
+  "21187": {
+   "name": "Jason Stancliff",
+   "role": "Expanded roster, long relief",
+   "workload": "18 IP",
+   "years": [
+    {
+     "year": 1956,
+     "basis": "contract",
+     "gross": 15680.0,
+     "retained_pct": 0.0,
+     "net": 15680.0,
+     "std_war": 0.28,
+     "role_war": 0.16,
+     "std_surplus": -9983.0,
+     "role_surplus": -12398.0
+    },
+    {
+     "year": 1957,
+     "basis": "arb estimate",
+     "gross": 17000.0,
+     "retained_pct": 0.0,
+     "net": 17000.0,
+     "std_war": 0.22,
+     "role_war": 0.13,
+     "std_surplus": -12463.0,
+     "role_surplus": -14387.0
+    },
+    {
+     "year": 1958,
+     "basis": "arb estimate",
+     "gross": 18000.0,
+     "retained_pct": 0.0,
+     "net": 18000.0,
+     "std_war": 0.17,
+     "role_war": 0.1,
+     "std_surplus": -14518.0,
+     "role_surplus": -15995.0
+    }
+   ],
+   "scenario_note": "Pre-cutdown scenario: three-year figures are the cost of keeping this role, not a roster forecast."
+  },
+  "23752": {
+   "name": "Ryan Key",
+   "role": "C vs RHP",
+   "workload": "355 AB · 88% vR",
+   "years": [
+    {
+     "year": 1956,
+     "basis": "contract",
+     "gross": 31050.0,
+     "retained_pct": 0.0,
+     "net": 31050.0,
+     "std_war": 2.28,
+     "role_war": 1.82,
+     "std_surplus": 19644.0,
+     "role_surplus": 9402.0
+    },
+    {
+     "year": 1957,
+     "basis": "arb estimate",
+     "gross": 34000.0,
+     "retained_pct": 0.0,
+     "net": 34000.0,
+     "std_war": 2.08,
+     "role_war": 1.66,
+     "std_surplus": 12286.0,
+     "role_surplus": 2934.0
+    },
+    {
+     "year": 1958,
+     "basis": "arb estimate",
+     "gross": 33000.0,
+     "retained_pct": 0.0,
+     "net": 33000.0,
+     "std_war": 1.88,
+     "role_war": 1.5,
+     "std_surplus": 8878.0,
+     "role_surplus": 416.0
+    }
+   ],
+   "scenario_note": null
+  },
+  "22403": {
+   "name": "Tommy Mines",
+   "role": "C vs LHP",
+   "workload": "195 AB · 31% vR",
+   "years": [
+    {
+     "year": 1956,
+     "basis": "contract",
+     "gross": 92000.0,
+     "retained_pct": 100.0,
+     "net": 0.0,
+     "std_war": 1.56,
+     "role_war": 1.24,
+     "std_surplus": 34777.0,
+     "role_surplus": 27718.0
+    },
+    {
+     "year": 1957,
+     "basis": "player option",
+     "gross": 82000.0,
+     "retained_pct": 100.0,
+     "net": 0.0,
+     "std_war": 1.38,
+     "role_war": 1.1,
+     "std_surplus": 30685.0,
+     "role_surplus": 24457.0
+    },
+    {
+     "year": 1958,
+     "basis": "arb estimate",
+     "gross": 44000.0,
+     "retained_pct": 0.0,
+     "net": 44000.0,
+     "std_war": 1.17,
+     "role_war": 0.93,
+     "std_surplus": -17917.0,
+     "role_surplus": -23212.0
+    }
+   ],
+   "scenario_note": null
+  },
+  "24700": {
+   "name": "Nate Miller",
+   "role": "Everyday 1B",
+   "workload": "530 AB · 66% vR",
+   "years": [
+    {
+     "year": 1956,
+     "basis": "contract",
+     "gross": 30000.0,
+     "retained_pct": 100.0,
+     "net": 0.0,
+     "std_war": 2.73,
+     "role_war": 2.91,
+     "std_surplus": 60794.0,
+     "role_surplus": 57357.0
+    },
+    {
+     "year": 1957,
+     "basis": "contract",
+     "gross": 30000.0,
+     "retained_pct": 100.0,
+     "net": 0.0,
+     "std_war": 2.73,
+     "role_war": 2.91,
+     "std_surplus": 60794.0,
+     "role_surplus": 57357.0
+    },
+    {
+     "year": 1958,
+     "basis": "contract",
+     "gross": 30000.0,
+     "retained_pct": 100.0,
+     "net": 0.0,
+     "std_war": 2.65,
+     "role_war": 2.83,
+     "std_surplus": 58970.0,
+     "role_surplus": 55637.0
+    }
+   ],
+   "scenario_note": null
+  },
+  "25260": {
+   "name": "Matt McKenzie",
+   "role": "1B/LF/RF reserve",
+   "workload": "120 AB · 68% vR",
+   "years": [
+    {
+     "year": 1956,
+     "basis": "contract",
+     "gross": 10600.0,
+     "retained_pct": 0.0,
+     "net": 10600.0,
+     "std_war": 2.43,
+     "role_war": 0.37,
+     "std_surplus": 38851.0,
+     "role_surplus": -3398.0
+    },
+    {
+     "year": 1957,
+     "basis": "contract",
+     "gross": 10600.0,
+     "retained_pct": 0.0,
+     "net": 10600.0,
+     "std_war": 2.43,
+     "role_war": 0.37,
+     "std_surplus": 38851.0,
+     "role_surplus": -3398.0
+    },
+    {
+     "year": 1958,
+     "basis": "arb estimate",
+     "gross": 15000.0,
+     "retained_pct": 0.0,
+     "net": 15000.0,
+     "std_war": 2.43,
+     "role_war": 0.37,
+     "std_surplus": 34451.0,
+     "role_surplus": -7798.0
+    }
+   ],
+   "scenario_note": null
+  },
+  "24790": {
+   "name": "Danny Lacefield",
+   "role": "Everyday 2B",
+   "workload": "525 AB · 66% vR",
+   "years": [
+    {
+     "year": 1956,
+     "basis": "contract",
+     "gross": 27850.0,
+     "retained_pct": 0.0,
+     "net": 27850.0,
+     "std_war": 3.38,
+     "role_war": 4.51,
+     "std_surplus": 47514.0,
+     "role_surplus": 72718.0
+    },
+    {
+     "year": 1957,
+     "basis": "arb estimate",
+     "gross": 30000.0,
+     "retained_pct": 0.0,
+     "net": 30000.0,
+     "std_war": 3.28,
+     "role_war": 4.38,
+     "std_surplus": 43103.0,
+     "role_surplus": 67551.0
+    },
+    {
+     "year": 1958,
+     "basis": "arb estimate",
+     "gross": 31000.0,
+     "retained_pct": 0.0,
+     "net": 31000.0,
+     "std_war": 3.11,
+     "role_war": 4.15,
+     "std_surplus": 38335.0,
+     "role_surplus": 61522.0
+    }
+   ],
+   "scenario_note": null
+  },
+  "26113": {
+   "name": "Jack Hartman",
+   "role": "2B/3B reserve",
+   "workload": "95 AB · 66% vR",
+   "years": [
+    {
+     "year": 1956,
+     "basis": "contract",
+     "gross": 7000.0,
+     "retained_pct": 0.0,
+     "net": 7000.0,
+     "std_war": 3.41,
+     "role_war": 0.43,
+     "std_surplus": 68893.0,
+     "role_surplus": 2577.0
+    },
+    {
+     "year": 1957,
+     "basis": "arb estimate",
+     "gross": 8000.0,
+     "retained_pct": 0.0,
+     "net": 8000.0,
+     "std_war": 3.3,
+     "role_war": 0.42,
+     "std_surplus": 65616.0,
+     "role_surplus": 1290.0
+    },
+    {
+     "year": 1958,
+     "basis": "arb estimate",
+     "gross": 10000.0,
+     "retained_pct": 0.0,
+     "net": 10000.0,
+     "std_war": 3.13,
+     "role_war": 0.4,
+     "std_surplus": 59822.0,
+     "role_surplus": -1189.0
+    }
+   ],
+   "scenario_note": null
+  },
+  "23770": {
+   "name": "Jason Reib",
+   "role": "Everyday 3B",
+   "workload": "556 AB · 66% vR",
+   "years": [
+    {
+     "year": 1956,
+     "basis": "contract",
+     "gross": 16100.0,
+     "retained_pct": 0.0,
+     "net": 16100.0,
+     "std_war": 4.19,
+     "role_war": 3.71,
+     "std_surplus": 77296.0,
+     "role_surplus": 66442.0
+    },
+    {
+     "year": 1957,
+     "basis": "arb estimate",
+     "gross": 26000.0,
+     "retained_pct": 0.0,
+     "net": 26000.0,
+     "std_war": 4.19,
+     "role_war": 3.71,
+     "std_surplus": 67396.0,
+     "role_surplus": 56542.0
+    },
+    {
+     "year": 1958,
+     "basis": "arb estimate",
+     "gross": 37000.0,
+     "retained_pct": 0.0,
+     "net": 37000.0,
+     "std_war": 4.07,
+     "role_war": 3.59,
+     "std_surplus": 53595.0,
+     "role_surplus": 43066.0
+    }
+   ],
+   "scenario_note": null
+  },
+  "25253": {
+   "name": "Terry Jessup",
+   "role": "Everyday SS",
+   "workload": "540 AB · 66% vR",
+   "years": [
+    {
+     "year": 1956,
+     "basis": "contract",
+     "gross": 28750.0,
+     "retained_pct": 0.0,
+     "net": 28750.0,
+     "std_war": 4.37,
+     "role_war": 4.05,
+     "std_surplus": 75276.0,
+     "role_surplus": 67687.0
+    },
+    {
+     "year": 1957,
+     "basis": "arb estimate",
+     "gross": 42000.0,
+     "retained_pct": 0.0,
+     "net": 42000.0,
+     "std_war": 4.24,
+     "role_war": 3.93,
+     "std_surplus": 58906.0,
+     "role_surplus": 51544.0
+    },
+    {
+     "year": 1958,
+     "basis": "arb estimate",
+     "gross": 47000.0,
+     "retained_pct": 0.0,
+     "net": 47000.0,
+     "std_war": 4.02,
+     "role_war": 3.73,
+     "std_surplus": 48704.0,
+     "role_surplus": 41722.0
+    }
+   ],
+   "scenario_note": null
+  },
+  "24460": {
+   "name": "John Mitchell",
+   "role": "Defensive SS",
+   "workload": "22 AB · 66% vR",
+   "years": [
+    {
+     "year": 1956,
+     "basis": "contract",
+     "gross": 15442.0,
+     "retained_pct": 0.0,
+     "net": 15442.0,
+     "std_war": 1.43,
+     "role_war": 0.07,
+     "std_surplus": 18649.0,
+     "role_surplus": -13704.0
+    },
+    {
+     "year": 1957,
+     "basis": "arb estimate",
+     "gross": 15000.0,
+     "retained_pct": 0.0,
+     "net": 15000.0,
+     "std_war": 1.28,
+     "role_war": 0.07,
+     "std_surplus": 15502.0,
+     "role_surplus": -13445.0
+    },
+    {
+     "year": 1958,
+     "basis": "arb estimate",
+     "gross": 15000.0,
+     "retained_pct": 0.0,
+     "net": 15000.0,
+     "std_war": 1.13,
+     "role_war": 0.06,
+     "std_surplus": 11914.0,
+     "role_surplus": -13628.0
+    }
+   ],
+   "scenario_note": null
+  },
+  "23672": {
+   "name": "Ryan Gipson",
+   "role": "LF vs RHP",
+   "workload": "380 AB · 93% vR",
+   "years": [
+    {
+     "year": 1956,
+     "basis": "contract",
+     "gross": 21261.0,
+     "retained_pct": 0.0,
+     "net": 21261.0,
+     "std_war": 2.41,
+     "role_war": 1.78,
+     "std_surplus": 27712.0,
+     "role_surplus": 14996.0
+    },
+    {
+     "year": 1957,
+     "basis": "arb estimate",
+     "gross": 24000.0,
+     "retained_pct": 0.0,
+     "net": 24000.0,
+     "std_war": 2.34,
+     "role_war": 1.73,
+     "std_surplus": 23504.0,
+     "role_surplus": 11170.0
+    },
+    {
+     "year": 1958,
+     "basis": "arb estimate",
+     "gross": 25000.0,
+     "retained_pct": 0.0,
+     "net": 25000.0,
+     "std_war": 2.22,
+     "role_war": 1.64,
+     "std_surplus": 20056.0,
+     "role_surplus": 8357.0
+    }
+   ],
+   "scenario_note": null
+  },
+  "25180": {
+   "name": "Jim Bright",
+   "role": "LF vs LHP",
+   "workload": "157 AB · 13% vR",
+   "years": [
+    {
+     "year": 1956,
+     "basis": "contract",
+     "gross": 24150.0,
+     "retained_pct": 0.0,
+     "net": 24150.0,
+     "std_war": 2.93,
+     "role_war": 0.7,
+     "std_surplus": 35334.0,
+     "role_surplus": -9967.0
+    },
+    {
+     "year": 1957,
+     "basis": "arb estimate",
+     "gross": 26000.0,
+     "retained_pct": 0.0,
+     "net": 26000.0,
+     "std_war": 2.78,
+     "role_war": 0.66,
+     "std_surplus": 30418.0,
+     "role_surplus": -12548.0
+    },
+    {
+     "year": 1958,
+     "basis": "arb estimate",
+     "gross": 25000.0,
+     "retained_pct": 0.0,
+     "net": 25000.0,
+     "std_war": 2.53,
+     "role_war": 0.6,
+     "std_surplus": 26512.0,
+     "role_surplus": -12718.0
+    }
+   ],
+   "scenario_note": null
+  },
+  "24366": {
+   "name": "Daniel Ayala",
+   "role": "LF reserve / PH",
+   "workload": "108 AB · 55% vR",
+   "years": [
+    {
+     "year": 1956,
+     "basis": "contract",
+     "gross": 21000.0,
+     "retained_pct": 0.0,
+     "net": 21000.0,
+     "std_war": 3.33,
+     "role_war": 0.46,
+     "std_surplus": 46622.0,
+     "role_surplus": -11704.0
+    },
+    {
+     "year": 1957,
+     "basis": "team option",
+     "gross": 20000.0,
+     "retained_pct": 0.0,
+     "net": 20000.0,
+     "std_war": 3.04,
+     "role_war": 0.42,
+     "std_surplus": 41742.0,
+     "role_surplus": -11512.0
+    },
+    {
+     "year": 1958,
+     "basis": "arb estimate",
+     "gross": 22000.0,
+     "retained_pct": 0.0,
+     "net": 22000.0,
+     "std_war": 2.75,
+     "role_war": 0.38,
+     "std_surplus": 33862.0,
+     "role_surplus": -14321.0
+    }
+   ],
+   "scenario_note": null
+  },
+  "25625": {
+   "name": "Zack Miller",
+   "role": "CF vs RHP",
+   "workload": "377 AB · 92% vR",
+   "years": [
+    {
+     "year": 1956,
+     "basis": "contract",
+     "gross": 24150.0,
+     "retained_pct": 0.0,
+     "net": 24150.0,
+     "std_war": 1.73,
+     "role_war": 0.89,
+     "std_surplus": 15613.0,
+     "role_surplus": -3772.0
+    },
+    {
+     "year": 1957,
+     "basis": "arb estimate",
+     "gross": 22000.0,
+     "retained_pct": 0.0,
+     "net": 22000.0,
+     "std_war": 1.57,
+     "role_war": 0.8,
+     "std_surplus": 13976.0,
+     "role_surplus": -3563.0
+    },
+    {
+     "year": 1958,
+     "basis": "arb estimate",
+     "gross": 22000.0,
+     "retained_pct": 0.0,
+     "net": 22000.0,
+     "std_war": 1.4,
+     "role_war": 0.72,
+     "std_surplus": 10189.0,
+     "role_surplus": -5504.0
+    }
+   ],
+   "scenario_note": null
+  },
+  "26097": {
+   "name": "Jonathan Mendez",
+   "role": "CF vs LHP",
+   "workload": "157 AB · 18% vR",
+   "years": [
+    {
+     "year": 1956,
+     "basis": "contract",
+     "gross": 14735.0,
+     "retained_pct": 0.0,
+     "net": 14735.0,
+     "std_war": 0.6,
+     "role_war": 0.37,
+     "std_surplus": -2596.0,
+     "role_surplus": -6355.0
+    },
+    {
+     "year": 1957,
+     "basis": "arb estimate",
+     "gross": 15000.0,
+     "retained_pct": 0.0,
+     "net": 15000.0,
+     "std_war": 0.57,
+     "role_war": 0.35,
+     "std_surplus": -3486.0,
+     "role_surplus": -7052.0
+    },
+    {
+     "year": 1958,
+     "basis": "arb estimate",
+     "gross": 15000.0,
+     "retained_pct": 0.0,
+     "net": 15000.0,
+     "std_war": 0.52,
+     "role_war": 0.32,
+     "std_surplus": -4488.0,
+     "role_surplus": -7743.0
+    }
+   ],
+   "scenario_note": null
+  },
+  "27407": {
+   "name": "Mark Joseph",
+   "role": "Everyday RF",
+   "workload": "540 AB · 66% vR",
+   "years": [
+    {
+     "year": 1956,
+     "basis": "contract",
+     "gross": 16100.0,
+     "retained_pct": 0.0,
+     "net": 16100.0,
+     "std_war": 5.41,
+     "role_war": 3.92,
+     "std_surplus": 93813.0,
+     "role_surplus": 63683.0
+    },
+    {
+     "year": 1957,
+     "basis": "arb estimate",
+     "gross": 23000.0,
+     "retained_pct": 0.0,
+     "net": 23000.0,
+     "std_war": 5.41,
+     "role_war": 3.92,
+     "std_surplus": 86913.0,
+     "role_surplus": 56783.0
+    },
+    {
+     "year": 1958,
+     "basis": "arb estimate",
+     "gross": 31000.0,
+     "retained_pct": 0.0,
+     "net": 31000.0,
+     "std_war": 5.41,
+     "role_war": 3.92,
+     "std_surplus": 78913.0,
+     "role_surplus": 48783.0
+    }
+   ],
+   "scenario_note": null
+  },
+  "26801": {
+   "name": "Jayden Emanuel",
+   "role": "Expanded roster, LF/3B glove",
+   "workload": "20 AB · 70% vR",
+   "years": [
+    {
+     "year": 1956,
+     "basis": "contract",
+     "gross": 7700.0,
+     "retained_pct": 0.0,
+     "net": 7700.0,
+     "std_war": 0.1,
+     "role_war": -0.02,
+     "std_surplus": -5472.0,
+     "role_surplus": -8121.0
+    },
+    {
+     "year": 1957,
+     "basis": "arb estimate",
+     "gross": 9000.0,
+     "retained_pct": 0.0,
+     "net": 9000.0,
+     "std_war": 0.1,
+     "role_war": -0.02,
+     "std_surplus": -6772.0,
+     "role_surplus": -9421.0
+    },
+    {
+     "year": 1958,
+     "basis": "arb estimate",
+     "gross": 10000.0,
+     "retained_pct": 0.0,
+     "net": 10000.0,
+     "std_war": 0.1,
+     "role_war": -0.02,
+     "std_surplus": -7772.0,
+     "role_surplus": -10421.0
+    }
+   ],
+   "scenario_note": "Pre-cutdown scenario: three-year figures are the cost of keeping this role, not a roster forecast."
+  }
+ }
+}

@@ -57,22 +57,14 @@
         <label><input type="radio" name="rs-horizon" value="y3"> {{ rsr.meta.years[0] }}–{{ (rsr.meta.years[-1]|string)[2:] }} if role holds</label>
       </div>
     </div>
-    <p class="war-proj-note">{{ rsr.meta.snapshot }}. Standard and Projected-Role use different WAR projections with identical salaries (including retention), so the gap reflects both workload and model. Open a player's Valuation tab for the WAR and salary inputs.</p>
+    <p class="war-proj-note">Projected Role follows the plan above and updates with each preview or save; salaries and retention come from the spot check ({{ rsr.meta.snapshot }}). Standard and Projected-Role use different WAR projections with identical salaries (including retention), so the gap reflects both workload and model. Open a player's Valuation tab for the WAR and salary inputs.</p>
     <div class="war-proj-scroll">
       <table class="war-proj-table" id="rs-table">
         <thead><tr>
           <th class="left" data-sort="str">Player</th><th class="left" data-sort="str">Role</th><th class="left">Workload</th>
           <th data-sort="num">Standard</th><th data-sort="num" class="sort-desc">Projected Role</th><th data-sort="num">Gap</th>
         </tr></thead>
-        <tbody>
-          {% for r in rsr.rows %}
-          <tr data-h='{{ r.horizons|tojson }}'>
-            <td class="left"><a class="player-link" href="/player/{{ r.pid }}">{{ r.name }}</a>{% if r.scenario_note %} <span title="{{ r.scenario_note }}" style="font-size:10px; color:var(--text-dim)">pre-cutdown</span>{% endif %}</td>
-            <td class="left">{{ r.role }}</td><td class="left">{{ r.workload }}</td>
-            <td class="rs-std"></td><td class="rs-role" style="font-weight:600"></td><td class="rs-gap"></td>
-          </tr>
-          {% endfor %}
-        </tbody>
+        <tbody id="rs-body"></tbody>
         <tfoot><tr><td class="left" colspan="3"><strong>Total</strong></td><td id="rs-tot-std"></td><td id="rs-tot-role" style="font-weight:600"></td><td id="rs-tot-gap"></td></tr></tfoot>
       </table>
     </div>
@@ -80,19 +72,30 @@
   <script>
   (function () {
     const fmt = v => (v < 0 ? "−" : "") + "$" + (Math.abs(v) / 1000).toFixed(1) + "k";
-    const paint = (td, v) => { td.textContent = fmt(v); td.dataset.sortValue = v; td.className = td.className.replace(/\b(pos|neg)\b/g, "").trim() + (v > 0 ? " pos" : v < 0 ? " neg" : ""); };
-    function render(h) {
+    const cls = v => v > 0 ? "pos" : v < 0 ? "neg" : "";
+    const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+    let rows = {{ rsr.rows|tojson }};
+    const horizon = () => (document.querySelector('input[name="rs-horizon"]:checked') || {}).value || "y1";
+    const td = (v, bold) => `<td class="${cls(v)}" data-sort-value="${v}"${bold ? ' style="font-weight:600"' : ""}>${fmt(v)}</td>`;
+    function draw() {
+      const h = horizon();
       let ts = 0, tr = 0;
-      document.querySelectorAll("#rs-table tbody tr").forEach(row => {
-        const x = JSON.parse(row.dataset.h)[h];
-        const std = x ? x.std : 0, role = x ? x.role : 0;
-        ts += std; tr += role;
-        paint(row.querySelector(".rs-std"), std); paint(row.querySelector(".rs-role"), role); paint(row.querySelector(".rs-gap"), role - std);
-      });
-      paint(document.getElementById("rs-tot-std"), ts); paint(document.getElementById("rs-tot-role"), tr); paint(document.getElementById("rs-tot-gap"), tr - ts);
+      const sorted = rows.slice().sort((a, b) => ((b.horizons[h] || {}).role || 0) - ((a.horizons[h] || {}).role || 0));
+      document.getElementById("rs-body").innerHTML = sorted.map(r => {
+        const x = r.horizons[h] || {std: 0, role: 0};
+        ts += x.std; tr += x.role;
+        const tag = r.scenario_note ? ` <span title="${esc(r.scenario_note)}" style="font-size:10px; color:var(--text-dim)">pre-cutdown</span>` : "";
+        return `<tr><td class="left"><a class="player-link" href="/player/${r.pid}">${esc(r.name)}</a>${tag}</td>
+          <td class="left">${esc(r.role)}</td><td class="left">${esc(r.workload)}</td>
+          ${td(x.std)}${td(x.role, true)}${td(x.role - x.std)}</tr>`;
+      }).join("");
+      document.getElementById("rs-tot-std").textContent = fmt(ts);
+      document.getElementById("rs-tot-role").textContent = fmt(tr);
+      document.getElementById("rs-tot-gap").textContent = fmt(tr - ts);
     }
-    document.querySelectorAll('input[name="rs-horizon"]').forEach(i => i.addEventListener("change", () => render(i.value)));
-    render("y1");
+    window.warProjRoleSurplus = data => { if (data && data.rows) { rows = data.rows; draw(); } };
+    document.querySelectorAll('input[name="rs-horizon"]').forEach(i => i.addEventListener("change", draw));
+    draw();
   })();
   </script>
   {% endif %}
@@ -136,6 +139,7 @@
   };
   function render(data) {
     projection = data;
+    if (window.warProjRoleSurplus) window.warProjRoleSurplus(data.role_surplus);
     const summary = document.getElementById('war-proj-summary');
     const t = data.totals, w = data.workload;
     summary.innerHTML = `
@@ -173,7 +177,7 @@
           <td>${r.ab === null ? '—' : input('ab',r.ab,0,750,1)}</td>
           <td>${r.ab === null ? '—' : input('vr_share',r.vr_share,0,100,.1)}</td>
           <td>${r.ab === null ? '—' : r.vl_share.toFixed(1)+'%'}</td>
-          <td>${r.ip === null ? '—' : input('ip',r.ip,0,350,.1)}</td>
+          <td>${r.ip === null ? '—' : input('ip',r.ip,0,450,.1)}</td>
           <td>${cell(c.hitting)}</td><td>${cell(c.pitching)}</td>
           <td>${cell(c.fielding)}</td><td>${cell(c.baserunning)}</td>
           <td>${cell(c.positional)}</td><td>${cell(c.replacement)}</td>

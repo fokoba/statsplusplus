@@ -113,8 +113,8 @@ def validate_overrides(payload: object) -> dict:
             out["ab"] = v
         if "ip" in value:
             v = value["ip"]
-            if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or not 0 <= v <= 350:
-                raise ValueError("IP must be 0–350")
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or not 0 <= v <= 450:
+                raise ValueError("IP must be 0–450")
             out["ip"] = round(v, 1)
         if "vr_share" in value:
             v = value["vr_share"]
@@ -449,8 +449,8 @@ def build_projection(team_id: int, overrides: dict | None = None) -> dict:
     for r in rows:
         r.pop("_half_rem", None)
     try:
-        from role_surplus import roster as _role_surplus_roster
-        role_surplus = _role_surplus_roster(team_id)
+        from role_surplus import build as _role_surplus_build
+        role_surplus = _role_surplus_build(team_id, rows, get_cfg().league_dir)
     except Exception:
         role_surplus = None
     return {

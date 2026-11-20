@@ -1542,6 +1542,7 @@ function intlFilterPers() {
 </div>
 
 {# ══════ Player Development ══════ #}
+{% set acc_rank = {'VH': 5, 'H': 4, 'A': 3, 'L': 2, 'VL': 1} %}
 <div class="tab-content" id="tab-dev">
   <div class="columns">
     <div class="panel">
@@ -1555,6 +1556,11 @@ function intlFilterPers() {
           <input type="checkbox" id="farm-sub40-box" onchange="toggleFarmSub40()"> Include FV under 40 ({{ farm_sub40|length }})
         </label>
         {% endif %}
+        <span style="font-size:12px; color:var(--text-dim)" title="High = VH or H accuracy. Low = A, L, VL, or no report yet: candidates to scout for a better read. A filter shows all matching rows, not just the top 15.">Accuracy:
+          <label><input type="radio" name="farm-acc" value="all" checked onchange="applyFarmRows()"> All</label>
+          <label><input type="radio" name="farm-acc" value="high" onchange="applyFarmRows()"> High Confidence</label>
+          <label><input type="radio" name="farm-acc" value="low" onchange="applyFarmRows()"> Low Confidence</label>
+        </span>
         <button type="button" class="btn btn-sm" onclick="exportTableCSV('farm-system-table', 'farm_system.csv')" title="Export every currently-shown row as CSV">⬇ CSV</button>
       </div>
       <table id="farm-system-table">
@@ -1563,12 +1569,13 @@ function intlFilterPers() {
             <th data-sort="num">#</th><th data-sort="pos">Pos</th><th data-sort="str" class="left">Name</th><th data-sort="num" data-sort-best="low">Age</th>
             <th data-sort="str" data-sort-best="high" class="left">FV</th><th data-sort="num" title="Development pace vs same-position/age peers (⚡ rising · ⚠ stalled · ↗ on pace), dimmed = low confidence, PLUS an independent Ahead/Behind/At Risk badge: is he actually closing his own gap to ceiling across tools before his runway to peak age runs out (a player can be both 'Rising' and 'Behind Schedule' at once — narrow, one-tool progress).">Dev</th>
             <th data-sort="str" title="Combined confidence grade — rolls bust-risk, scouting-Accuracy, dev-horizon, and makeup concerns into one A-F letter">Conf</th>
+            <th data-sort="num" title="Your scouting accuracy on this player (VH, H, A, L, VL)">Acc</th>
             <th data-sort="str" class="left">Level</th><th data-sort="num">Surplus</th>
           </tr>
         </thead>
         <tbody>
           {% for p in farm %}
-          <tr{% if p.rank > 15 %} class="farm-row-extra" style="display:none"{% endif %}>
+          <tr data-acc="{{ p.acc or '' }}"{% if p.rank > 15 %} class="farm-row-extra" style="display:none"{% endif %}>
             <td>{{ p.rank }}</td>
             <td data-sort-value="{{ p.pos_order }}">{{ p.bucket }}</td>
             <td><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
@@ -1576,12 +1583,13 @@ function intlFilterPers() {
             <td class="left">{{ p.fv_str }}{% if p.risk %} <span style="font-size:10px;color:{% if p.risk == 'Low' %}#4caf50{% elif p.risk == 'Medium' %}#ffc107{% elif p.risk == 'High' %}#ff9800{% else %}#f44336{% endif %}">{{ p.risk[0] }}</span>{% endif %}</td>
             <td{% if p.dev %} data-sort-value="{{ p.dev.z }}"{% endif %}>{% if p.dev %}<span class="dev-{{ p.dev.css_class }}"{% if p.dev.dim %} style="opacity:0.5"{% endif %} title="{{ p.dev.label }} ({{ p.dev.z }} SD · {{ p.dev.confidence }} conf)">{{ p.dev.icon }}</span>{% if p.dev.schedule_badge_text %} <span class="sched-badge {{ p.dev.schedule_badge_css }}" title="{{ p.dev.schedule_label }}: {{ p.dev.schedule_note }}">{{ p.dev.schedule_badge_text }}</span>{% endif %}{% endif %}</td>
             <td data-sort-value="{{ p.confidence.score }}"><span class="gr-pill gr-pill-{% if p.confidence.tier == 'A' %}elite{% elif p.confidence.tier == 'B' %}good{% elif p.confidence.tier == 'C' %}mid{% elif p.confidence.tier == 'D' %}poor{% else %}bad{% endif %}" title="Confidence {{ p.confidence.tier }} ({{ p.confidence.score }}/100){% if p.confidence.reasons %}: {{ p.confidence.reasons|join(', ') }}{% else %} — no flagged concerns{% endif %}">{{ p.confidence.tier }}</span></td>
+            <td data-sort-value="{{ acc_rank.get(p.acc, 0) }}">{{ p.acc or '–' }}</td>
             <td class="left">{{ p.level }}{% if p.long_horizon %} <span title="Real level puts this player at fv_calc's longest development-horizon tier (3.5+ years to MLB) — treat Surplus as more speculative than a near-ready prospect's">⏳</span>{% endif %}</td>
             <td>${{ p.surplus }}{{ money_unit }}</td>
           </tr>
           {% endfor %}
           {% for p in farm_sub40 %}
-          <tr class="farm-row-sub40" style="display:none">
+          <tr class="farm-row-sub40" data-acc="{{ p.acc or '' }}" style="display:none">
             <td data-sort-value="9999">–</td>
             <td data-sort-value="{{ p.pos_order }}">{{ p.bucket }}</td>
             <td><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
@@ -1589,6 +1597,7 @@ function intlFilterPers() {
             <td class="left">{{ p.fv_str }}{% if p.risk %} <span style="font-size:10px;color:{% if p.risk == 'Low' %}#4caf50{% elif p.risk == 'Medium' %}#ffc107{% elif p.risk == 'High' %}#ff9800{% else %}#f44336{% endif %}">{{ p.risk[0] }}</span>{% endif %}</td>
             <td{% if p.dev %} data-sort-value="{{ p.dev.z }}"{% endif %}>{% if p.dev %}<span class="dev-{{ p.dev.css_class }}"{% if p.dev.dim %} style="opacity:0.5"{% endif %} title="{{ p.dev.label }} ({{ p.dev.z }} SD · {{ p.dev.confidence }} conf)">{{ p.dev.icon }}</span>{% endif %}</td>
             <td data-sort-value="{{ p.confidence.score }}"><span class="gr-pill gr-pill-{% if p.confidence.tier == 'A' %}elite{% elif p.confidence.tier == 'B' %}good{% elif p.confidence.tier == 'C' %}mid{% elif p.confidence.tier == 'D' %}poor{% else %}bad{% endif %}" title="Confidence {{ p.confidence.tier }} ({{ p.confidence.score }}/100)">{{ p.confidence.tier }}</span></td>
+            <td data-sort-value="{{ acc_rank.get(p.acc, 0) }}">{{ p.acc or '–' }}</td>
             <td class="left">{{ p.level }}{% if p.long_horizon %} <span title="Real level puts this player at fv_calc's longest development-horizon tier (3.5+ years to MLB) — treat Surplus as more speculative than a near-ready prospect's">⏳</span>{% endif %}</td>
             <td>${{ p.surplus }}{{ money_unit }}</td>
           </tr>
@@ -1672,19 +1681,30 @@ function intlFilterPers() {
 </div>
 
 <script>
-function toggleFarmSub40() {
-  var on = document.getElementById('farm-sub40-box').checked;
-  document.querySelectorAll('#farm-system-table .farm-row-sub40').forEach(function(tr) {
-    tr.style.display = on ? '' : 'none';
+function applyFarmRows() {
+  var btn = document.getElementById('farm-toggle-btn');
+  var expanded = btn ? btn.dataset.expanded === '1' : true;
+  var sub40Box = document.getElementById('farm-sub40-box');
+  var sub40 = sub40Box ? sub40Box.checked : false;
+  var accSel = document.querySelector('input[name="farm-acc"]:checked');
+  var acc = accSel ? accSel.value : 'all';
+  document.querySelectorAll('#farm-system-table tbody tr').forEach(function(tr) {
+    var a = tr.dataset.acc || '';
+    var high = a === 'VH' || a === 'H';
+    var accOk = acc === 'all' || (acc === 'high' ? high : !high);
+    var base = tr.classList.contains('farm-row-sub40') ? sub40
+             : (!tr.classList.contains('farm-row-extra') || expanded || acc !== 'all');
+    tr.style.display = (base && accOk) ? '' : 'none';
   });
 }
+function toggleFarmSub40() { applyFarmRows(); }
 function toggleFarmRows() {
   var btn = document.getElementById('farm-toggle-btn');
-  var extra = document.querySelectorAll('#farm-system-table .farm-row-extra');
   var showing = btn.dataset.expanded === '1';
-  extra.forEach(function(tr) { tr.style.display = showing ? 'none' : ''; });
+  var n = document.querySelectorAll('#farm-system-table .farm-row-extra').length;
   btn.dataset.expanded = showing ? '0' : '1';
-  btn.textContent = showing ? 'Show all ' + (extra.length + 15) : 'Show top 15';
+  btn.textContent = showing ? 'Show all ' + (n + 15) : 'Show top 15';
+  applyFarmRows();
 }
 </script>
 

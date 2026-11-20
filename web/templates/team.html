@@ -1549,7 +1549,13 @@ function intlFilterPers() {
       <h2>Farm System <span style="color:var(--text-dim); font-weight:400; font-size:13px">({{ farm|length }} contributing — FV 40+, age 25 or younger)</span></h2>
       <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px">
         {% if farm|length > 15 %}
-        <button type="button" class="btn btn-sm" id="farm-toggle-btn" onclick="toggleFarmRows()">Show all {{ farm|length }}</button>
+        <button type="button" class="btn btn-sm" id="farm-toggle-btn" onclick="toggleFarmRows()">Show all</button>
+        {% endif %}
+        {% set farm_low = farm|selectattr('surplus', 'lt', 10)|list|length %}
+        {% if farm_low %}
+        <label style="font-size:12px; color:var(--text-dim); cursor:pointer" title="FV 40+ prospects worth under $10k in surplus. Hidden to cut clutter; still counted in Farm Depth totals and rankings.">
+          <input type="checkbox" id="farm-low-box" onchange="applyFarmRows()"> Include under $10k ({{ farm_low }})
+        </label>
         {% endif %}
         {% if farm_sub40 %}
         <label style="font-size:12px; color:var(--text-dim); cursor:pointer" title="Prospects aged 25 or younger below FV 40 who still carry positive surplus (mostly young international signees). They aren't counted in the farm totals or rankings.">
@@ -1575,7 +1581,7 @@ function intlFilterPers() {
         </thead>
         <tbody>
           {% for p in farm %}
-          <tr data-acc="{{ p.acc or '' }}"{% if p.rank > 15 %} class="farm-row-extra" style="display:none"{% endif %}>
+          <tr data-acc="{{ p.acc or '' }}"{% if p.surplus < 10 %} data-low-surplus="1"{% endif %}{% if p.rank > 15 %} class="farm-row-extra" style="display:none"{% endif %}>
             <td>{{ p.rank }}</td>
             <td data-sort-value="{{ p.pos_order }}">{{ p.bucket }}</td>
             <td><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a></td>
@@ -1692,18 +1698,21 @@ function applyFarmRows() {
     var a = tr.dataset.acc || '';
     var high = a === 'VH' || a === 'H';
     var accOk = acc === 'all' || (acc === 'high' ? high : !high);
+    var lowBox = document.getElementById('farm-low-box');
+    if (tr.dataset.lowSurplus === '1' && !(lowBox && lowBox.checked)) accOk = false;
     var base = tr.classList.contains('farm-row-sub40') ? sub40
              : (!tr.classList.contains('farm-row-extra') || expanded || acc !== 'all');
     tr.style.display = (base && accOk) ? '' : 'none';
   });
 }
 function toggleFarmSub40() { applyFarmRows(); }
+document.addEventListener('DOMContentLoaded', applyFarmRows);
 function toggleFarmRows() {
   var btn = document.getElementById('farm-toggle-btn');
   var showing = btn.dataset.expanded === '1';
   var n = document.querySelectorAll('#farm-system-table .farm-row-extra').length;
   btn.dataset.expanded = showing ? '0' : '1';
-  btn.textContent = showing ? 'Show all ' + (n + 15) : 'Show top 15';
+  btn.textContent = showing ? 'Show all' : 'Show top 15';
   applyFarmRows();
 }
 </script>

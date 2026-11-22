@@ -1745,6 +1745,11 @@ def main():
                 purge_excluded(get_league_dir())
             except Exception as e:
                 log.warning("excluded-player purge failed: %s", e)
+            try:
+                from statsplusplus.data.roster_sync import apply_on40_from_latest_export
+                log.info("ON40 overlay: %s", apply_on40_from_latest_export(get_league_dir()))
+            except Exception as e:
+                log.warning("ON40 overlay failed: %s", e)
             if not skip_fv:
                 # Order matters: calibrate writes the per-league model weights
                 # (tool_weights.json: tool/def curves, run-space anchor, the

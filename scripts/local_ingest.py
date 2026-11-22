@@ -308,6 +308,8 @@ def ingest_once(league_slug: str, league_dir) -> dict[str, str]:
                 _c = _sq.connect(str(Path(league_dir) / "league.db"), timeout=30)
                 try:
                     res = sync_roster_status(_c, _pl.read_bytes(), _fa.read_bytes() if _fa else None)
+                    from statsplusplus.data.roster_sync import apply_on40
+                    res = {**res, **apply_on40(_c, _pl.read_bytes())}
                 finally:
                     _c.close()
                 state["roster_sync"] = _key

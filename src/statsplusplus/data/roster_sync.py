@@ -75,3 +75,48 @@ def sync_roster_status(conn: sqlite3.Connection, player_list: bytes,
         conn.execute("UPDATE players SET team_id=0, parent_team_id=0, retired=1 WHERE player_id=?", (pid,))
     conn.commit()
     return {"orgs": len(covered), "released": len(released), "retired": len(retired)}
+
+
+def apply_on40(conn: sqlite3.Connection, player_list: bytes) -> dict:
+    """Set contracts.is_major=1 for every player OOTP's player-list export
+    marks ON40 = Yes. The StatsPlus contracts feed sometimes has an empty
+    contract (no salary, is_major=0) for players just added to a 40-man
+    (e.g. Rule 5 picks or protection adds), so the export is the better
+    signal. Additive only: it never clears a flag StatsPlus has set."""
+    text = player_list.decode("utf-8-sig", errors="ignore")
+    rows = list(csv.reader(io.StringIO(text)))
+    if not rows or "ON40" not in rows[0]:
+        return {"skipped": "no ON40 column"}
+    on = rows[0].index("ON40")
+    ids = [int(r[0]) for r in rows[1:]
+           if r and r[0].strip().isdigit() and on < len(r) and r[on].strip().lower() in ("yes", "y", "1")]
+    added = []
+    for pid in ids:
+        cur = conn.execute(
+            "UPDATE contracts SET is_major=1 WHERE player_id=? AND COALESCE(is_major,0)=0 "
+            "AND player_id IN (SELECT player_id FROM players WHERE COALESCE(retired,0)=0 "
+            "AND COALESCE(NULLIF(parent_team_id,0), team_id) > 0)", (pid,))
+        if cur.rowcount:
+            added.append(pid)
+    conn.commit()
+    return {"on40": len(ids), "flag_added": len(added)}
+
+
+def apply_on40_from_latest_export(league_dir) -> dict:
+    """Find the league's newest OOTP player-list export (same folders the
+    auto-ingest polls) and apply its ON40 flags. Used after a StatsPlus
+    refresh, which rewrites the contracts table."""
+    from pathlib import Path
+    try:
+        import local_ingest as li
+    except ImportError:
+        return {"skipped": "local_ingest unavailable"}
+    folders = li.LEAGUE_FOLDERS.get(Path(league_dir).name.lower(), [])
+    f = li._find_latest(folders, ["player_list", "allcolumns"])
+    if f is None:
+        return {"skipped": "no player list export"}
+    conn = sqlite3.connect(str(Path(league_dir) / "league.db"), timeout=30)
+    try:
+        return apply_on40(conn, f.read_bytes())
+    finally:
+        conn.close()

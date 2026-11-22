@@ -54,7 +54,7 @@ def _current_mlb_team(conn, player_id):
     return r["tid"] if r else None
 
 
-def _games_available(conn, player_id, team_id, gps):
+def _games_available(conn, player_id, team_id, gps, year=None):
     """Regular-season games this player can still play, or None if he is healthy
     (or the schedule position is unknown) so the plain pace applies.
 
@@ -69,10 +69,23 @@ def _games_available(conn, player_id, team_id, gps):
         return None
     if not inj or not inj["injury_is_injured"]:
         return None
-    return _remaining_available(conn, team_id, gps, inj["injury_left"])
+    return _remaining_available(conn, team_id, gps, inj["injury_left"], year)
 
 
-def _team_games(conn, team_id):
+def _team_games(conn, team_id, year=None):
+    """Regular-season games the team has played in `year` (the stats
+    season). Counted from the game log, because the standings table resets
+    to 0-0 once the league rolls over to the next season, which would make a
+    finished season look unstarted. Falls back to standings without a year."""
+    if year is not None:
+        try:
+            r = conn.execute(
+                "SELECT COUNT(*) FROM games WHERE played=1 AND game_type=0 AND date LIKE ? "
+                "AND (home_team=? OR away_team=?)", (f"{year}%", team_id, team_id)).fetchone()
+            if r and r[0]:
+                return r[0]
+        except sqlite3.OperationalError:
+            pass
     try:
         r = conn.execute("SELECT COALESCE(w,0)+COALESCE(l,0)+COALESCE(t,0) AS g FROM standings WHERE team_id=?",
                          (team_id,)).fetchone()
@@ -85,21 +98,41 @@ def _team_games(conn, team_id):
 _RAINOUT_SLACK = 3
 
 
-def _season_done(conn, team_id, gps):
+def _season_done(conn, team_id, gps, year=None):
     """True once the team's regular season is over: it is within the rainout
-    slack of a full schedule and the league's leaders have played all of theirs."""
-    played = _team_games(conn, team_id)
+    slack of a full schedule and the league's leaders have played all of theirs.
+    Also true when the stats season is older than the league's current game
+    year (the league has already rolled over)."""
+    if year is not None:
+        try:
+            cur = conn.execute("SELECT MAX(substr(date,1,4)) FROM games WHERE played=1").fetchone()[0]
+            if cur and int(cur) > int(year):
+                return True
+        except (sqlite3.OperationalError, ValueError):
+            pass
+    played = _team_games(conn, team_id, year)
     if played is None or played < gps - _RAINOUT_SLACK:
         return False
-    try:
-        top = conn.execute("SELECT MAX(COALESCE(w,0)+COALESCE(l,0)+COALESCE(t,0)) FROM standings").fetchone()[0]
-    except sqlite3.OperationalError:
-        top = None
+    top = None
+    if year is not None:
+        try:
+            top = conn.execute(
+                "SELECT MAX(c) FROM (SELECT t, COUNT(*) c FROM ("
+                "SELECT home_team t FROM games WHERE played=1 AND game_type=0 AND date LIKE ? "
+                "UNION ALL SELECT away_team FROM games WHERE played=1 AND game_type=0 AND date LIKE ?"
+                ") GROUP BY t)", (f"{year}%", f"{year}%")).fetchone()[0]
+        except sqlite3.OperationalError:
+            top = None
+    if top is None:
+        try:
+            top = conn.execute("SELECT MAX(COALESCE(w,0)+COALESCE(l,0)+COALESCE(t,0)) FROM standings").fetchone()[0]
+        except sqlite3.OperationalError:
+            top = None
     return played >= gps or (top or 0) >= gps
 
 
-def _remaining_available(conn, team_id, gps, injury_left):
-    played = _team_games(conn, team_id)
+def _remaining_available(conn, team_id, gps, injury_left, year=None):
+    played = _team_games(conn, team_id, year)
     if played is None:
         return None
     remaining = max(0, gps - played)
@@ -159,8 +192,9 @@ def get_war_pace(player_id, league_dir=None, conn=None):
             return None
         injured_note = None
         tid = _current_mlb_team(conn, player_id)
-        avail = None if _season_done(conn, tid, gps) else _games_available(conn, player_id, tid, gps)
-        if _season_done(conn, tid, gps):
+        done = _season_done(conn, tid, gps, cy)
+        avail = None if done else _games_available(conn, player_id, tid, gps, cy)
+        if done:
             pace, injured_note = round(float(s["war"]), 2), "final - regular season complete"
         elif avail is not None:
             pace = _injury_pace_pkg(float(s["war"]), float(sample), bucket, gps, avail)
@@ -202,15 +236,15 @@ def get_all_war_paces(league_dir=None, conn=None):
             "SELECT player_id, COALESCE(NULLIF(parent_team_id,0), team_id) AS tid FROM players").fetchall()}
         done = {}
 
-        def _adj(pid, war, sample, bucket, pace):
+        def _adj(pid, war, sample, bucket, pace, year=None):
             tid = team_of.get(pid)
-            if tid not in done:
-                done[tid] = _season_done(conn, tid, gps)
-            if done[tid]:
+            if (tid, year) not in done:
+                done[(tid, year)] = _season_done(conn, tid, gps, year)
+            if done[(tid, year)]:
                 return round(war, 2), "final - regular season complete"
             if pid not in injured:
                 return pace, None
-            avail = _remaining_available(conn, team_of.get(pid), gps, injured[pid])
+            avail = _remaining_available(conn, team_of.get(pid), gps, injured[pid], year)
             if avail is None:
                 return pace, None
             return (_injury_pace_pkg(war, sample, bucket, gps, avail) or pace), "injured - projected from games he can still play"
@@ -229,7 +263,7 @@ def get_all_war_paces(league_dir=None, conn=None):
                 pace = _war_pace_pkg(float(r["war"]), float(r["g"]), "HIT", games_per_season=gps)
                 if pace is None:
                     continue
-                pace, _note = _adj(r["player_id"], float(r["war"]), float(r["g"]), "HIT", pace)
+                pace, _note = _adj(r["player_id"], float(r["war"]), float(r["g"]), "HIT", pace, cy_h)
                 out[r["player_id"]] = {
                     "pace_note": _note,
                     "war_to_date": round(float(r["war"]), 2), "sample": r["g"], "sample_unit": "G",
@@ -255,7 +289,7 @@ def get_all_war_paces(league_dir=None, conn=None):
                 pace = _war_pace_pkg(float(r["war"]), float(r["ip"]), bucket, games_per_season=gps)
                 if pace is None:
                     continue
-                pace, _note = _adj(r["player_id"], float(r["war"]), float(r["ip"]), bucket, pace)
+                pace, _note = _adj(r["player_id"], float(r["war"]), float(r["ip"]), bucket, pace, cy_p)
                 out[r["player_id"]] = {
                     "pace_note": _note,
                     "war_to_date": round(float(r["war"]), 2), "sample": r["ip"], "sample_unit": "IP",

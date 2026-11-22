@@ -182,6 +182,9 @@ def league_luck(conn, year):
 
 def player_luck(conn, team_id, year, weights):
     from statsplusplus.evaluation.war import peak_war_from_score
+    from statsplusplus.config.league_config import games_per_season
+    gps_ = games_per_season(get_cfg().league_dir)
+    _season_over = len(_team_games(conn, team_id, year)) >= gps_ - 3
     out_h, out_p = [], []
     # Hitters: season BABIP vs career BABIP; WAR pace vs ratings-implied WAR.
     for r in conn.execute("""
@@ -199,7 +202,9 @@ def player_luck(conn, team_id, year, weights):
         car = r["c_hbip"] / r["c_bip"] if r["c_bip"] else None
         slot = tc.POS_TO_SLOT.get(r["pos"])
         exp = peak_war_from_score(r["comp"], tc.SLOT_BUCKET.get(slot, "COF"), weights) if slot else None
-        pace = (r["war"] or 0) / r["g"] * 154 if r["g"] else None
+        # Season over: the pace is simply the final WAR.
+        pace = ((r["war"] or 0) if _season_over else
+                (r["war"] or 0) / r["g"] * gps_ if r["g"] else None)
         out_h.append({"pid": r["player_id"], "name": r["name"], "pa": r["pa"], "babip": babip,
                       "career_babip": car, "babip_diff": (babip - car) if babip is not None and car else None,
                       "war": r["war"], "pace": pace, "exp_war": exp,

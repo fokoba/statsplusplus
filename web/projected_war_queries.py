@@ -194,10 +194,12 @@ def _season_pct(conn, game_date, games_per_season=162):
         return 1.0
     row = conn.execute(
         """SELECT MAX(cnt) FROM (
-            SELECT COUNT(*) as cnt FROM games
-            WHERE date LIKE ? AND played=1 AND game_type=0
-            GROUP BY home_team)""",
-        (f"{game_year}%",),
+            SELECT t, COUNT(*) as cnt FROM (
+                SELECT home_team AS t FROM games WHERE date LIKE ? AND played=1 AND game_type=0
+                UNION ALL
+                SELECT away_team FROM games WHERE date LIKE ? AND played=1 AND game_type=0)
+            GROUP BY t)""",
+        (f"{game_year}%", f"{game_year}%"),
     ).fetchone()
     return min((row[0] or 0) / float(games_per_season), 1.0) if row and row[0] else 0.0
 

@@ -50,7 +50,7 @@
   <h2>Who is riding luck</h2>
   <div class="sp-two">
     <table class="sp-table">
-      <thead><tr><th>Hitter</th><th>PA</th><th title="Batting average on balls in play this season">BABIP</th><th>Career</th><th>Δ</th><th title="Season WAR per 154 games">WAR pace</th><th title="WAR his ratings imply over a full season">Ratings WAR</th></tr></thead>
+      <thead><tr><th>Hitter</th><th>PA</th><th title="Batting average on balls in play this season">BABIP</th><th>Career</th><th>Δ</th><th title="Season WAR prorated to a full schedule; once the season is over, the final WAR">WAR pace</th><th title="WAR his ratings imply over a full season">Ratings WAR</th></tr></thead>
       <tbody>{% for h in d.hitters %}<tr>
         <td><a href="/player/{{ h.pid }}">{{ h.name }}</a></td><td>{{ h.pa }}</td>
         <td>{{ '%.3f'|format(h.babip) if h.babip is not none else '–' }}</td>

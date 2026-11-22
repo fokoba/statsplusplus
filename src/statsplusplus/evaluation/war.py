@@ -401,10 +401,12 @@ def load_stat_history(
     else:
         max_g = conn.execute(
             """SELECT MAX(cnt) FROM (
-                SELECT COUNT(*) as cnt FROM games
-                WHERE date LIKE ? AND played=1 AND game_type=0
-                GROUP BY home_team)""",
-            (f"{game_year}%",)
+                SELECT t, COUNT(*) as cnt FROM (
+                    SELECT home_team AS t FROM games WHERE date LIKE ? AND played=1 AND game_type=0
+                    UNION ALL
+                    SELECT away_team FROM games WHERE date LIKE ? AND played=1 AND game_type=0)
+                GROUP BY t)""",
+            (f"{game_year}%", f"{game_year}%")
         ).fetchone()
         season_pct = min((max_g[0] or 0) / float(games_per_season), 1.0) if max_g and max_g[0] else 0.0
 

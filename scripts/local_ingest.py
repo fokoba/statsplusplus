@@ -292,6 +292,29 @@ def ingest_once(league_slug: str, league_dir) -> dict[str, str]:
     _maybe("draft_ratings", ["draft_pool", "allcolumns"],
            lambda data: import_ratings_sync(data, league_dir=league_dir))
 
+    # Roster status (retired / released) from the player list + free-agent
+    # exports, so departed players drop off org pages even while the
+    # StatsPlus refresh is down. See statsplusplus.data.roster_sync.
+    _pl = _find_latest(folders, ["player_list", "allcolumns"])
+    if _pl is not None:
+        _fa = _find_latest(folders, ["free_agents", "allcolumns"])
+        _key = f"{_pl.stat().st_mtime}|{_fa.stat().st_mtime if _fa else ''}"
+        if state.get("roster_sync") == _key:
+            summary["roster_sync"] = "unchanged"
+        else:
+            try:
+                import sqlite3 as _sq
+                from statsplusplus.data.roster_sync import sync_roster_status
+                _c = _sq.connect(str(Path(league_dir) / "league.db"), timeout=30)
+                try:
+                    res = sync_roster_status(_c, _pl.read_bytes(), _fa.read_bytes() if _fa else None)
+                finally:
+                    _c.close()
+                state["roster_sync"] = _key
+                summary["roster_sync"] = str(res)
+            except Exception as e:
+                summary["roster_sync"] = f"error: {e}"
+
     # Rule 5 reuses the same ratings file, filtered to R5 == Yes.
     ratings_file = _find_latest(folders, ["player_list", "allcolumns"])
     if ratings_file is None:

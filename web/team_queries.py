@@ -24,6 +24,7 @@ from web_league_context import (get_db, get_cfg, team_abbr_map, team_names_map,
                                  dev_cell as _dev_cell)
 
 from statsplusplus.data.retained_salary import get_retention_map as _get_retention_map
+from statsplusplus.data.retained_salary import get_retained_by_team as _get_retained_by_team
 from statsplusplus.data.minor_pay import minor_min_pay_map as _minor_min_pay_map, exact_current_salary as _exact_current_salary
 
 # Local wrappers using request-scoped league_dir
@@ -2498,6 +2499,20 @@ def get_contracts(team_id):
           {_CONTRACT_ORG_SQL}
         ORDER BY c.salary_0 DESC
     """.format(_CONTRACT_ORG_SQL=_CONTRACT_ORG_SQL), (ed, *_contract_org_params(team_id))).fetchall()
+    # Salary we kept on players traded away: still ours to pay.
+    carried = _get_retained_by_team(conn, team_id)
+    if carried:
+        _ph = ",".join("?" * len(carried))
+        rows = list(rows) + conn.execute(f"""
+            SELECT c.player_id, p.name, c.years, c.current_year,
+                   c.salary_0, c.salary_1, c.salary_2, c.salary_3, c.salary_4,
+                   c.salary_5, c.salary_6, c.salary_7, c.salary_8, c.salary_9,
+                   c.salary_10, c.salary_11, c.salary_12, c.salary_13, c.salary_14,
+                   c.no_trade, c.last_year_team_option, c.last_year_player_option,
+                   NULL, c.is_major, NULL, NULL, NULL
+            FROM contracts c JOIN players p ON c.player_id = p.player_id
+            WHERE c.player_id IN ({_ph})
+        """, list(carried)).fetchall()
 
     # Real per-year figures from an uploaded "Team Salary" export override
     # the raw synced contract value wherever they cover a given calendar
@@ -2534,7 +2549,10 @@ def get_contracts(team_id):
             salaries[cur_yr] = minor_pay[pid]
         # Salary another team still pays (OOTP "Retained Salary") isn't ours.
         retained_pct = retained_by_pid.get(pid, 0.0)
-        if retained_pct:
+        if pid in carried:
+            salaries = [(s_ or 0) * carried[pid] for s_ in salaries]
+            retained_pct = 0.0
+        elif retained_pct:
             salaries = [(s_ or 0) * (1 - retained_pct) for s_ in salaries]
         ntc, to, po = r[19], r[20], r[21]
         surplus, is_major = r[22], r[23]
@@ -2546,6 +2564,7 @@ def get_contracts(team_id):
             "pid": pid, "name": name,
             "salary": cur_sal, "years_left": yrs_left, "total_left": total_left,
             "retained_pct": retained_pct,
+            "carried_pct": carried.get(pid, 0.0),
             "minors_pay": pid in minor_pay,
             "ntc": ntc, "to": to, "po": po,
             "surplus": round(surplus / _money_divisor(), 1) if surplus else 0,
@@ -2558,7 +2577,8 @@ def get_contracts(team_id):
             "peak_surplus": _peak_surplus(ps_fv, ps_age, "MLB", ps_bucket, ovr=ps_fv),
         })
 
-    display = [c for c in out if c["is_major"] and (c["salary"] > DEFAULT_MINIMUM_SALARY or c["years_left"] > 1)]
+    display = [c for c in out if c["is_major"] and (c["salary"] > DEFAULT_MINIMUM_SALARY or c["years_left"] > 1
+                                                    or c["carried_pct"])]
     display.sort(key=lambda x: -x["salary"])
     total_payroll = sum(c["salary"] for c in out if c["is_major"])
 
@@ -2566,6 +2586,11 @@ def get_contracts(team_id):
     _game_year = get_cfg().year
     _league_dir = get_cfg().league_dir
     for c in display:
+        if c["carried_pct"]:
+            # Dead money: no player value comes back to us.
+            c["current_year_surplus"] = c["next_year_surplus"] = c["three_year_surplus"] = None
+            c["peak_surplus"] = None
+            continue
         try:
             cur_s, next_s, three_s = _csh(c["pid"], _game_year, league_dir=_league_dir)
         except Exception:
@@ -2594,6 +2619,18 @@ def get_payroll_summary(team_id):
         WHERE c.is_major = 1
           {_CONTRACT_ORG_SQL}
     """.format(_CONTRACT_ORG_SQL=_CONTRACT_ORG_SQL), (*_contract_org_params(team_id),)).fetchall()
+    carried = _get_retained_by_team(conn, team_id)
+    if carried:
+        _ph = ",".join("?" * len(carried))
+        rows = list(rows) + conn.execute(f"""
+            SELECT c.player_id, p.name, c.years, c.current_year,
+                   c.salary_0, c.salary_1, c.salary_2, c.salary_3, c.salary_4,
+                   c.salary_5, c.salary_6, c.salary_7, c.salary_8, c.salary_9,
+                   c.salary_10, c.salary_11, c.salary_12, c.salary_13, c.salary_14,
+                   c.last_year_team_option, c.last_year_player_option, c.no_trade
+            FROM contracts c JOIN players p ON c.player_id = p.player_id
+            WHERE c.player_id IN ({_ph})
+        """, list(carried)).fetchall()
 
     # Project salaries for 1yr contract players using arb model (no non-tender gate)
     from contract_value import _resolve
@@ -2609,7 +2646,7 @@ def get_payroll_summary(team_id):
     lmin = league_minimum()
     projections = {}  # pid -> [(year_offset, salary), ...]
     for r in rows:
-        if r[2] != 1:  # multi-year contract, skip
+        if r[2] != 1 or r[0] in carried:  # multi-year, or retention ends with the deal
             continue
         pid, sal = r[0], r[4]
         try:
@@ -2669,7 +2706,7 @@ def get_payroll_summary(team_id):
     totals = [0] * horizon
     for r in rows:
         pid, name = r[0], r[1]
-        keep = 1 - retained_by_pid.get(pid, 0.0)  # share of salary we actually pay
+        keep = carried.get(pid, 1 - retained_by_pid.get(pid, 0.0))  # share we actually pay
         yrs_total, cur_yr = r[2], r[3]
         sals = [r[4 + i] for i in range(15)]
         to, po, ntc = r[19], r[20], r[21]
@@ -2681,7 +2718,13 @@ def get_payroll_summary(team_id):
         for i in range(horizon):
             contract_yr = cur_yr + i
             abs_year = year + i
-            if i == 0 and pid in minor_pay:
+            # Retention covers the current contract only; arb years after it
+            # fall back entirely on the team that holds the player.
+            keep = (carried.get(pid, 1 - retained_by_pid.get(pid, 0.0))
+                    if contract_yr < yrs_total else 1.0)
+            if pid in carried and contract_yr >= yrs_total:
+                by_year.append(None)
+            elif i == 0 and pid in minor_pay:
                 # League-minimum player in the minors: paid 16.5% right now.
                 sal = minor_pay[pid]
                 by_year.append({"sal": sal, "option": None, "projected": False})
@@ -2707,7 +2750,8 @@ def get_payroll_summary(team_id):
         if not any(s for s in by_year if s):
             continue
         players.append({"pid": pid, "name": name, "by_year": by_year, "ntc": ntc,
-                        "retained_pct": retained_by_pid.get(pid, 0.0),
+                        "retained_pct": 0.0 if pid in carried else retained_by_pid.get(pid, 0.0),
+                        "carried_pct": carried.get(pid, 0.0),
                         "minors_pay": pid in minor_pay})
     players.sort(key=lambda p: -(p["by_year"][0]["sal"] if p["by_year"][0] else 0))
     return {"years": future_years, "players": players, "totals": totals}
@@ -2941,18 +2985,21 @@ def get_record_breakdown(team_id):
 
 
 def get_recent_games(team_id, n=10):
-    """Last n games for a team with W/L, score, opponent."""
+    """Last n games for a team with W/L, score, opponent — regular season
+    and postseason (game_type 3) together, newest first. Pitcher W-L/SV
+    tallies are kept separately per game type, so a postseason game shows
+    the pitcher's postseason record."""
     state = _get_state()
     year = state.get("stats_year", state["year"])
     conn = get_db()
     rows = conn.execute("""
         SELECT g.date, g.home_team, g.away_team, g.runs0, g.runs1,
                g.winning_pitcher, g.losing_pitcher, g.save_pitcher,
-               th.name as home_name, ta.name as away_name
+               th.name as home_name, ta.name as away_name, g.game_type
         FROM games g
         JOIN teams th ON g.home_team = th.team_id
         JOIN teams ta ON g.away_team = ta.team_id
-        WHERE (g.home_team=? OR g.away_team=?) AND g.played=1 AND g.game_type=0
+        WHERE (g.home_team=? OR g.away_team=?) AND g.played=1 AND g.game_type IN (0, 3)
           AND g.date LIKE ?
         ORDER BY g.date DESC, g.game_id DESC LIMIT ?
     """, (team_id, team_id, f"{year}%", n)).fetchall()
@@ -2974,8 +3021,8 @@ def get_recent_games(team_id, n=10):
         ph2 = ",".join("?" * len(pids))
         pid_list = list(pids)
         all_games = conn.execute(f"""
-            SELECT date, winning_pitcher, losing_pitcher, save_pitcher
-            FROM games WHERE date LIKE ? AND played=1 AND game_type=0
+            SELECT date, winning_pitcher, losing_pitcher, save_pitcher, game_type
+            FROM games WHERE date LIKE ? AND played=1 AND game_type IN (0, 3)
               AND (winning_pitcher IN ({ph2}) OR losing_pitcher IN ({ph2}) OR save_pitcher IN ({ph2}))
             ORDER BY date, game_id
         """, [f"{year}%"] + pid_list * 3).fetchall()
@@ -2987,29 +3034,29 @@ def get_recent_games(team_id, n=10):
     pw, pl, ps = defaultdict(int), defaultdict(int), defaultdict(int)
     pw_at, pl_at, ps_at = {}, {}, {}  # (pid, date) -> running total
     for g in all_games:
-        d = g[0]
+        d, gt = g[0], g[4]
         if g[1] in pids:
-            pw[g[1]] += 1
+            pw[(g[1], gt)] += 1
         if g[2] in pids:
-            pl[g[2]] += 1
+            pl[(g[2], gt)] += 1
         if g[3] and g[3] in pids:
-            ps[g[3]] += 1
+            ps[(g[3], gt)] += 1
         # Update running totals for any pitcher who appeared in this game
         for slot in (g[1], g[2], g[3]):
             if slot and slot in pids:
-                pw_at[(slot, d)] = pw[slot]
-                pl_at[(slot, d)] = pl[slot]
-                ps_at[(slot, d)] = ps[slot]
+                pw_at[(slot, d, gt)] = pw[(slot, gt)]
+                pl_at[(slot, d, gt)] = pl[(slot, gt)]
+                ps_at[(slot, d, gt)] = ps[(slot, gt)]
 
-    def _pfmt(pid, date, mode):
+    def _pfmt(pid, date, mode, gt=0):
         if not pid or pid not in pname:
             return None
         name = pname[pid]
         if mode == "sv":
-            stat = f"({ps_at.get((pid, date), 0)})"
+            stat = f"({ps_at.get((pid, date, gt), 0)})"
         else:
-            w = pw_at.get((pid, date), 0)
-            l = pl_at.get((pid, date), 0)
+            w = pw_at.get((pid, date, gt), 0)
+            l = pl_at.get((pid, date, gt), 0)
             stat = f"({w}-{l})"
         return {"pid": pid, "name": name, "stat": stat}
 
@@ -3026,10 +3073,10 @@ def get_recent_games(team_id, n=10):
             "date": r[0], "home": home,
             "opp": opp_name, "opp_tid": opp_tid,
             "team_runs": team_runs, "opp_runs": opp_runs,
-            "wl": wl,
-            "wp": _pfmt(r[5], r[0], "wl"),
-            "lp": _pfmt(r[6], r[0], "wl"),
-            "sv": _pfmt(r[7], r[0], "sv") if r[7] else "",
+            "wl": wl, "postseason": r[10] == 3,
+            "wp": _pfmt(r[5], r[0], "wl", r[10]),
+            "lp": _pfmt(r[6], r[0], "wl", r[10]),
+            "sv": _pfmt(r[7], r[0], "sv", r[10]) if r[7] else "",
         })
     return out
 

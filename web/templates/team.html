@@ -201,7 +201,7 @@
             {% for g in recent_games %}
             <tr>
               <td><span class="{{ 'streak-w' if g.wl == 'W' else 'streak-l' }}">{{ g.wl }}</span></td>
-              <td>{{ g.date[5:] }}</td>
+              <td>{{ g.date[5:] }}{% if g.postseason %} <span class="sched-badge" title="Postseason game; pitcher records shown are postseason records">PS</span>{% endif %}</td>
               <td class="game-loc">{{ "vs" if g.home else "@" }}</td>
               <td class="left"><a class="team-link" href="/team/{{ g.opp_tid }}">{{ g.opp }}</a></td>
               <td><strong>{{ g.team_runs }}-{{ g.opp_runs }}</strong></td>
@@ -1462,7 +1462,7 @@ function intlFilterPers() {
               {%- if c.ntc %}<span class="opt-badge opt-ntc">NTC</span>{% endif %}
               {%- if c.to %}<span class="opt-badge opt-to">TO</span>{% endif %}
               {%- if c.po %}<span class="opt-badge opt-po">PO</span>{% endif %}
-              {%- if c.retained_pct %}<span class="opt-badge opt-ret" title="Another team keeps paying this share of his salary — excluded from your payroll">RET {{ (c.retained_pct * 100)|round|int }}%</span>{% endif %}{%- if c.minors_pay %}<span class="opt-badge opt-ret" title="League-minimum player in the minors — the game pays only 16.5% of his salary until he's called up">MiL 16.5%</span>{% endif %}
+              {%- if c.carried_pct %}<span class="opt-badge opt-ret" title="Traded away, but you kept this share of his salary — counted in your payroll">KEPT {{ (c.carried_pct * 100)|round|int }}%</span>{% endif %}{%- if c.retained_pct %}<span class="opt-badge opt-ret" title="Another team keeps paying this share of his salary — excluded from your payroll">RET {{ (c.retained_pct * 100)|round|int }}%</span>{% endif %}{%- if c.minors_pay %}<span class="opt-badge opt-ret" title="League-minimum player in the minors — the game pays only 16.5% of his salary until he's called up">MiL 16.5%</span>{% endif %}
             </td>
           </tr>
           {% endfor %}
@@ -1518,7 +1518,7 @@ function intlFilterPers() {
           <tr>
             <td class="left"><a class="player-link" href="/player/{{ p.pid }}">{{ p.name }}</a>
               {%- if p.ntc %} <span class="opt-badge opt-ntc">NTC</span>{% endif %}
-              {%- if p.retained_pct %} <span class="opt-badge opt-ret" title="Another team keeps paying this share of his salary — excluded from your payroll">RET {{ (p.retained_pct * 100)|round|int }}%</span>{% endif %}{%- if p.minors_pay %} <span class="opt-badge opt-ret" title="League-minimum player in the minors — the game pays only 16.5% of his salary until he's called up">MiL 16.5%</span>{% endif %}</td>
+              {%- if p.carried_pct %} <span class="opt-badge opt-ret" title="Traded away, but you kept this share of his salary — counted in your payroll">KEPT {{ (p.carried_pct * 100)|round|int }}%</span>{% endif %}{%- if p.retained_pct %} <span class="opt-badge opt-ret" title="Another team keeps paying this share of his salary — excluded from your payroll">RET {{ (p.retained_pct * 100)|round|int }}%</span>{% endif %}{%- if p.minors_pay %} <span class="opt-badge opt-ret" title="League-minimum player in the minors — the game pays only 16.5% of his salary until he's called up">MiL 16.5%</span>{% endif %}</td>
             {% for s in p.by_year %}
             <td{% if s and s.option %} class="opt-year"{% elif s and s.projected %} class="proj-year"{% endif %}>
               {%- if s %}{{ s.sal|money }}{% if s.option %}<sup>{{ s.option }}</sup>{% elif s.projected %}<sup>est</sup>{% endif %}{% else %}-{% endif -%}

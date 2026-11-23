@@ -1,0 +1,50 @@
+<link rel="stylesheet" href="{{ url_for('static', filename='coaching_signings.css') }}">
+{% set promotion_count = signing_checklist.entries | selectattr('action', 'equalto', 'promotion') | list | length %}
+{% set offer_count = signing_checklist.entries | selectattr('action', 'equalto', 'offer') | list | length %}
+<section class="panel coaching-signings" id="coaching-signings"
+         data-plan-id="{{ signing_checklist.id }}"
+         data-endpoint="{{ url_for('api.coaching_signings', tid=tid) }}">
+  <div class="coaching-signings-heading">
+    <h2>{{ signing_checklist.season }} Coaching Signing Plan — Exact Order</h2>
+    <span id="coaching-signings-progress"></span>
+  </div>
+  <p class="coaching-signings-help">Revised {{ signing_checklist.review_date }} · {% if promotion_count %}{{ promotion_count }} promotions, then {{ offer_count }} external offers. Restore your original staff first. Complete the promotion steps before sending offers; replacing a coach too early can fire someone needed for a later promotion.{% else %}{{ offer_count }} external offers. Restore your current saved staff first. No new promotions are recommended.{% endif %}</p>
+  {% if signing_checklist.update_note %}<p class="coaching-signings-retain">{{ signing_checklist.update_note }}</p>{% endif %}
+  <p class="coaching-signings-help">{% if promotion_count %}Check a promotion only after the move completes, and an offer after sending it in OOTP.{% else %}Check an offer after sending it in OOTP.{% endif %} An offer is not a confirmed signing. Earlier-plan checks remain preserved separately. Replacement names refer to the restored staff.</p>
+  <p class="coaching-signings-retain">{{ signing_checklist.retain_note }}</p>
+  <p id="coaching-signings-next" role="status" aria-live="polite"></p>
+  <div class="coaching-signings-toolbar">
+    <label><input type="checkbox" id="coaching-signings-pending"> Show pending only</label>
+    <span id="coaching-signings-save-status" role="status" aria-live="polite">Changes save across refreshes and browsers.</span>
+  </div>
+  <div class="coaching-signings-scroll">
+    <table id="coaching-signing-steps">
+      <thead><tr>
+        <th>Step</th><th>Moved / Offered</th><th class="left">Coach</th>
+        <th class="left">Destination</th><th class="left">Replacing</th>
+        <th class="left">From / Current organization</th>
+        <th>Listed annual ask</th><th class="left">Sequence / priority</th>
+      </tr></thead>
+      <tbody>
+        {% for entry in signing_checklist.entries %}
+        <tr class="{{ 'coaching-offer-checked' if entry.checked else '' }}" data-action="{{ entry.action }}" data-step="{{ entry.order }}" data-depends-on="{{ entry.depends_on | join(',') }}">
+          <td class="coaching-step">{{ entry.order }}</td>
+          <td><input type="checkbox" data-entry-id="{{ entry.id }}" aria-label="Step {{ entry.order }}: {{ 'Promotion completed for' if entry.action == 'promotion' else 'Offer sent to' }} {{ entry.name }} as {{ entry.role }} for {{ entry.team }}" {% if entry.checked %}checked{% endif %}></td>
+          <td class="left coaching-coach-name">{{ entry.name }}<span class="coaching-replacement-note">{{ 'Promote' if entry.action == 'promotion' else 'Offer' }}</span></td>
+          <td class="left">{{ entry.team }}<span class="coaching-replacement-note">{{ entry.role }}</span></td>
+          <td class="left">{{ entry.replaces }}{% if entry.replacement_note %}<span class="coaching-replacement-note">{{ entry.replacement_note }}</span>{% endif %}</td>
+          <td class="left">{{ entry.current_organization }}</td>
+          <td>{% if entry.annual_demand is not none %}${{ '{:,}'.format(entry.annual_demand) }}{% else %}{{ 'Negotiate promotion' if entry.action == 'promotion' else 'Not quoted' }}{% endif %}</td>
+          <td class="left"><span class="coaching-prerequisite"></span>{{ entry.sequence_note }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="coaching-signings-help">Quoted external asks total ${{ '{:,}'.format(signing_checklist.known_external_demands_total) }} annually. This excludes unquoted negotiations, promotion pay changes, retained salaries and dismissal costs. Employed targets come first in the offer phase; subsequent offer order is a preference, not a game requirement.</p>
+  <details class="coaching-retained-staff">
+    <summary>Keep these {{ signing_checklist.retained_staff | length }} minor league coaches in their current jobs</summary>
+    <ul>{% for coach in signing_checklist.retained_staff %}<li>{{ coach.team }} · {{ coach.role }}: {{ coach.name }}</li>{% endfor %}</ul>
+  </details>
+  <p id="coaching-signings-empty" hidden>All offers and promotions are tracked. Uncheck “Show pending only” to review them.</p>
+</section>

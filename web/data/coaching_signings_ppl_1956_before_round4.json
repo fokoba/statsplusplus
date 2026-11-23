@@ -1,0 +1,262 @@
+{
+  "id": "ppl-pha-coaching-1956-round3-20261104",
+  "progress_revision": "round3-20261104",
+  "season": 1956,
+  "league": "ppl",
+  "team_id": 6,
+  "review_date": "2026-11-04",
+  "retain_note": "Restore the saved staff before executing. Keep the entire MLB staff. Restore Bowman, Phillips, Lee, Higbee, Kubo, Padilla, Kaercher and Oroark in place; restore Hayes and promote him to Asheville. Retain all other listed incumbents. Do not re-offer the nine coaches already signed.",
+  "known_external_demands_total": 5925,
+  "entries": [
+    {
+      "id": "ryan-hayes-09-23-1920-asheville-pitching-coach",
+      "order": 1,
+      "name": "Ryan Hayes",
+      "dob": "09/23/1920",
+      "role": "Pitching coach",
+      "team": "Asheville (A)",
+      "action": "promotion",
+      "current_organization": "Philadelphia: St. George (R), Pitching coach",
+      "replaces": "Julio Mejia",
+      "replacement_note": "",
+      "annual_demand": 685,
+      "depends_on": [],
+      "sequence_note": "Restore Hayes at St. George first, then promote to Asheville before replacing him at St. George. Replaces Julio Mejia."
+    },
+    {
+      "id": "andy-johnson-04-21-1912-dallas-manager",
+      "order": 2,
+      "name": "Andy Johnson",
+      "dob": "04/21/1912",
+      "role": "Manager",
+      "team": "Dallas (AA)",
+      "action": "offer",
+      "current_organization": "Brooklyn: Poughkeepsie (Class B), Manager",
+      "replaces": "Alex Pastrana",
+      "replacement_note": "",
+      "annual_demand": null,
+      "depends_on": [],
+      "sequence_note": "Priority external target: employed by Brooklyn at Poughkeepsie. Average development/Good mechanics; improves Dallas compatibility."
+    },
+    {
+      "id": "eduardo-morales-05-24-1902-seattle-hitting-coach",
+      "order": 3,
+      "name": "Eduardo Morales",
+      "dob": "05/24/1902",
+      "role": "Hitting coach",
+      "team": "Seattle (AAA)",
+      "action": "offer",
+      "current_organization": "Unemployed",
+      "replaces": "Ben Gardner",
+      "replacement_note": "",
+      "annual_demand": 1895,
+      "depends_on": [],
+      "sequence_note": "Same OK development/Good mechanics/Average hitting as Gardner. Adds two favorable preferences; veteran handling falls Good to Average."
+    },
+    {
+      "id": "tim-lovig-02-10-1910-everett-pitching-coach",
+      "order": 4,
+      "name": "Tim Lovig",
+      "dob": "02/10/1910",
+      "role": "Pitching coach",
+      "team": "Everett (C)",
+      "action": "offer",
+      "current_organization": "Unemployed",
+      "replaces": "Vacant",
+      "replacement_note": "",
+      "annual_demand": 655,
+      "depends_on": [],
+      "sequence_note": "Fills Everett pitching. OK development/Fair mechanics/Fair instruction; two favorable preferences with Oroark and Books."
+    },
+    {
+      "id": "corey-wells-11-03-1907-st-petersburg-manager",
+      "order": 5,
+      "name": "Corey Wells",
+      "dob": "11/03/1907",
+      "role": "Manager",
+      "team": "St. Petersburg (C)",
+      "action": "offer",
+      "current_organization": "Unemployed",
+      "replaces": "Vacant",
+      "replacement_note": "",
+      "annual_demand": 790,
+      "depends_on": [],
+      "sequence_note": "Good development but Poor mechanics. Explicit development-first choice; pair with Personable Phillips and Easygoing Van Vleck."
+    },
+    {
+      "id": "bryan-van-vleck-11-10-1901-st-petersburg-hitting-coach",
+      "order": 6,
+      "name": "Bryan Van Vleck",
+      "dob": "11/10/1901",
+      "role": "Hitting coach",
+      "team": "St. Petersburg (C)",
+      "action": "offer",
+      "current_organization": "Unemployed",
+      "replaces": "Vacant",
+      "replacement_note": "",
+      "annual_demand": 715,
+      "depends_on": [],
+      "sequence_note": "Fills St. Petersburg hitting. OK development/OK mechanics/Fair hitting; compatible with Wells and Phillips."
+    },
+    {
+      "id": "bryan-benson-09-01-1896-modesto-manager",
+      "order": 7,
+      "name": "Bryan Benson",
+      "dob": "09/01/1896",
+      "role": "Manager",
+      "team": "Modesto (A)",
+      "action": "offer",
+      "current_organization": "Unemployed",
+      "replaces": "Ben Ruthledge",
+      "replacement_note": "",
+      "annual_demand": 1530,
+      "depends_on": [],
+      "sequence_note": "Average development/Fair mechanics versus Ruthledge OK/Average. Same personality preferences; accepts a mechanics downgrade for development."
+    },
+    {
+      "id": "brian-pedraza-07-02-1899-st-george-pitching-coach",
+      "order": 8,
+      "name": "Brian Pedraza",
+      "dob": "07/02/1899",
+      "role": "Pitching coach",
+      "team": "St. George (R)",
+      "action": "offer",
+      "current_organization": "Unemployed",
+      "replaces": "Ryan Hayes",
+      "replacement_note": "Hayes promoted to Asheville; restore him before promotion.",
+      "annual_demand": 340,
+      "depends_on": [
+        "ryan-hayes-09-23-1920-asheville-pitching-coach"
+      ],
+      "sequence_note": "Replace Hayes only after his Asheville promotion. Rookie pitching development falls Average to OK; retains two favorable preferences."
+    }
+  ],
+  "retained_staff": [
+    {
+      "name": "Robbie Biden",
+      "team": "Atlanta (AAA)",
+      "role": "Manager"
+    },
+    {
+      "name": "Brandon Greene",
+      "team": "Atlanta (AAA)",
+      "role": "Pitching coach"
+    },
+    {
+      "name": "Colin Greenberg",
+      "team": "Atlanta (AAA)",
+      "role": "Hitting coach"
+    },
+    {
+      "name": "Matt Lewis",
+      "team": "Seattle (AAA)",
+      "role": "Manager"
+    },
+    {
+      "name": "Steve Eddy",
+      "team": "Seattle (AAA)",
+      "role": "Pitching coach"
+    },
+    {
+      "name": "Josh Rudd",
+      "team": "Dallas (AA)",
+      "role": "Pitching coach"
+    },
+    {
+      "name": "Chris Hein",
+      "team": "Dallas (AA)",
+      "role": "Hitting coach"
+    },
+    {
+      "name": "Micah Wind",
+      "team": "Trenton (AA)",
+      "role": "Manager"
+    },
+    {
+      "name": "Matt Jacobs",
+      "team": "Trenton (AA)",
+      "role": "Pitching coach"
+    },
+    {
+      "name": "Joe Bryant",
+      "team": "Trenton (AA)",
+      "role": "Hitting coach"
+    },
+    {
+      "name": "Dylan Webb",
+      "team": "Asheville (A)",
+      "role": "Manager"
+    },
+    {
+      "name": "Jeremy Rosen",
+      "team": "Asheville (A)",
+      "role": "Hitting coach"
+    },
+    {
+      "name": "Haruhiko Kubo",
+      "team": "Modesto (A)",
+      "role": "Pitching coach"
+    },
+    {
+      "name": "Tatsuji Murakami",
+      "team": "Modesto (A)",
+      "role": "Hitting coach"
+    },
+    {
+      "name": "Jonathan Kemp",
+      "team": "Binghamton (B)",
+      "role": "Manager"
+    },
+    {
+      "name": "Omar Padilla",
+      "team": "Binghamton (B)",
+      "role": "Pitching coach"
+    },
+    {
+      "name": "Angel Jimenez",
+      "team": "Binghamton (B)",
+      "role": "Hitting coach"
+    },
+    {
+      "name": "Ryan Harrower",
+      "team": "Lincoln (B)",
+      "role": "Manager"
+    },
+    {
+      "name": "Steve Kaercher",
+      "team": "Lincoln (B)",
+      "role": "Pitching coach"
+    },
+    {
+      "name": "Bruce Bowman",
+      "team": "Lincoln (B)",
+      "role": "Hitting coach"
+    },
+    {
+      "name": "Matt Oroark",
+      "team": "Everett (C)",
+      "role": "Manager"
+    },
+    {
+      "name": "Kyle Books",
+      "team": "Everett (C)",
+      "role": "Hitting coach"
+    },
+    {
+      "name": "Matt Phillips",
+      "team": "St. Petersburg (C)",
+      "role": "Pitching coach"
+    },
+    {
+      "name": "Jason Lee",
+      "team": "St. George (R)",
+      "role": "Manager"
+    },
+    {
+      "name": "Ernie Higbee",
+      "team": "St. George (R)",
+      "role": "Hitting coach"
+    }
+  ],
+  "update_note": "Round 3: seven external offers, one promotion, 25 same-job retentions. All eleven proposed minor-league trios have zero listed negative preferences. Prior offers/checks are archived separately; this does not mean the new offers are signed."
+}

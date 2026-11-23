@@ -54,3 +54,11 @@ def test_effective_retention_compounds_on_what_is_left():
     assert effective_retention(1.0, 0.0) == 1.0
     assert effective_retention(0.5, 0.5) == pytest.approx(0.75)
     assert effective_retention(1.0, 0.3) == 1.0
+
+
+def test_retained_by_team_lists_only_that_payers_players(conn):
+    from statsplusplus.data.retained_salary import get_retained_by_team, get_retainer_map
+    set_retention(conn, 21187, 1.0, retained_by_team_id=6)
+    set_retention(conn, 22403, 0.5, retained_by_team_id=13)
+    assert get_retained_by_team(conn, 6) == {21187: 1.0}
+    assert get_retainer_map(conn) == {21187: 6, 22403: 13}

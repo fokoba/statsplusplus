@@ -142,7 +142,7 @@ def fv_from_peak_war(
 _LEVEL_ALIAS: dict[str, str] = {
     "aaa": "AAA", "aa": "AA", "a": "A", "a-short": "A-Short",
     "usl": "USL", "dsl": "DSL", "intl": "Intl", "mlb": "MLB",
-    "draft": "DSL", "rookie": "USL",
+    "draft": "DSL", "rookie": "USL", "fa": "MLB",
 }
 
 _LEVEL_AGE_DISCOUNT_RATE: float = 0.04
@@ -166,8 +166,9 @@ def age_adjusted_discount(
     Returns:
         Float discount in [0.15, 0.95].
     """
-    effective_level = level
-    if level.lower() in ("draft", "dsl", "intl", "college", "hs") and ovr is not None:
+    level_key = "intl" if level.lower() == "international" else level.lower()
+    effective_level = level_key
+    if level_key in ("draft", "dsl", "intl", "college", "hs") and ovr is not None:
         if ovr >= 50:
             effective_level = "AAA"
         elif ovr >= 42:
@@ -179,7 +180,7 @@ def age_adjusted_discount(
 
     lookup_level = _LEVEL_ALIAS.get(effective_level.lower(), effective_level)
     base = DEVELOPMENT_DISCOUNT.get(lookup_level.lower(), 0.45)
-    norm_key = effective_level.lower().replace(" ", "-")
+    norm_key = lookup_level.lower().replace(" ", "-")
     if norm_key == "rookie":
         norm_key = "usl"
     norm_age = LEVEL_NORM_AGE.get(norm_key)
@@ -302,8 +303,9 @@ def prospect_surplus(
         Dict with total_surplus, breakdown, and component multipliers.
     """
     # Determine years to MLB
-    effective_level = level
-    if level.lower() in ("draft", "dsl", "intl", "college", "hs") and ovr is not None:
+    level_key = "intl" if level.lower() == "international" else level.lower()
+    effective_level = level_key
+    if level_key in ("draft", "dsl", "intl", "college", "hs") and ovr is not None:
         if ovr >= 50:
             effective_level = "AAA"
         elif ovr >= 42:
@@ -314,7 +316,8 @@ def prospect_surplus(
             effective_level = "A-Short"
 
     ytm_key = _LEVEL_ALIAS.get(effective_level.lower(), effective_level)
-    years_out = YEARS_TO_MLB.get(ytm_key.lower(), 3.5)
+    eta_table = weights.years_to_mlb if weights is not None else YEARS_TO_MLB
+    years_out = eta_table.get(ytm_key.lower(), 3.5)
     debut_age = age + years_out
 
     pw = peak_war_from_fv(fv, bucket, weights)

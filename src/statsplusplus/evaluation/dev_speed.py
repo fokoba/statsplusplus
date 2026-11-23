@@ -1,10 +1,10 @@
 """Prospect development-speed metric — pure computation.
 
-Measures how fast the developmentally-relevant component (offensive grade for
-hitters, composite for pitchers) is moving over a trailing window, relative to
-same-bucket / same-age-band / same-league peers, as a z-score. Qualified by the
-POT gap and its ΔOVR-vs-ΔPOT decomposition, and gated / graded by a confidence
-tier (history length, scouting accuracy, playing time).
+Describes observed raw-tool movement over a trailing window, relative to
+same-role / same-age peers. This is not a validated failure forecast. Raw
+batting/pitching tool means keep both pace and potential-gap arithmetic on one
+fixed scale, independent of positional changes or evaluation-model revisions.
+Legacy output column names are retained for database compatibility.
 
 Design + validation: `.kiro/specs/development-speed-metric/design.md`.
 
@@ -30,7 +30,7 @@ from typing import Any, Optional
 
 from statsplusplus.evaluation.constants import PEAK_AGE_HITTER, PEAK_AGE_PITCHER
 
-# --- Tunable parameters (validated defaults; may move to model_weights later) ---
+# --- Descriptive reporting choices; not calibrated failure thresholds ---
 WINDOW_MONTHS = 12          # trailing window for "current" dev pace
 MIN_SNAPSHOTS = 3           # minimum points in the window to compute
 MIN_WINDOW_DAYS = 150       # ~5 months minimum span (also the reporting gate)
@@ -39,45 +39,24 @@ AGE_BAND_WIDTH = 2
 MAX_BASELINE_AGE = 25       # prospect age ceiling for the baseline population
 WIDE_GAP = 12               # POT-gap threshold for the "upside" qualifier
 
-# Reporting floor (below this the signal is too noisy to show a verdict).
-# MIN_COMPOSITE_REPORT is on the run-space composite scale (Session 97
-# decompression + per-position centering). The runs→composite map display-clamps
-# the bottom at 20, so a composite at/near 20 is floored and its movement is
-# noise. 25 sits just above that clamp: it excludes the clamped mass while
-# admitting essentially the full FV-45+ prospect population (whose trajectory is
-# meaningful) across all leagues. Recalibrated from 38 (an old-compressed-scale
-# value that, post-decompression, suppressed ~85-90% of prospects).
+# Young players can show tool changes, but not a firm pace assessment.
 MIN_AGE_REPORT = 18
-MIN_COMPOSITE_REPORT = 25
-
-# Confidence-tier thresholds.
-_CONF_PA_FULL = 250         # PA (hitter) for full playing-time credit in the window
-_CONF_IP_FULL = 60          # IP (pitcher)
-
-# --- Schedule/risk tag (2026-09-29) — SECOND, independent signal from the
-# z-score label above. Built from a real case (Ethan Wilson, PPL): the
-# z-score correctly showed him out-developing a DECLINING peer baseline, but
-# that alone doesn't say whether he's actually closing his own gap to
-# ceiling, across all his tools, before his runway to peak age runs out. See
-# schedule_tag() below for how these combine; each threshold here is
-# independently tunable. ---
 HITTER_TOOLS = ("cntct", "gap", "pow", "eye")
 PITCHER_TOOLS = ("stf", "mov", "ctrl")
-STAGNANT_EPS = 1.0          # abs(annual tool movement) below this = stagnant
-GAP_SMOOTH_POINTS = 3       # trailing snapshots averaged for gap_smoothed
-NEAR_PEAK_YEARS = 1.5       # "near/past peak" runway threshold
-SHORT_RUNWAY_YEARS = 3.0    # "limited runway" threshold (softer than near-peak)
-GAP_NOT_CLOSING = -0.5      # annualized gap_trend at/above this = "not closing"
-AHEAD_GAP_CLOSED_PCT = 0.15 # >15%/yr of the start-of-window gap closed
-BEHIND_GAP_CLOSED_PCT = 0.05
-AT_RISK_SCORE = 4           # composite risk-score threshold for "at_risk"
+STAGNANT_EPS = 1.0
+GAP_SMOOTH_POINTS = 3
+# Compatibility constants used only by the retired legacy peer-cut helper.
+BEHIND_GAP_CLOSED_PCT = .05
+GAP_NOT_CLOSING = -.5
 
 
 DRIFT_MIN_N = 15
 
 
 def neutralize_scale_drift(by_player: dict, group_of: dict, keys=("composite_score", "ceiling_score", "offensive_grade")) -> None:
-    """Put every snapshot of every player's history on the LATEST model scale, in place.
+    """Legacy compatibility helper; no longer used by DEV.
+
+    Put composite history on the latest model scale, in place.
 
     ratings_history is not on one scale: when the evaluation model changes, or
     the engine re-scores only a player's newest row, composites step by several
@@ -127,7 +106,9 @@ def neutralize_scale_drift(by_player: dict, group_of: dict, keys=("composite_sco
 
 
 def peer_gap_cuts(results: list[dict]) -> dict:
-    """{(dev_group, age_band): {behind_closed_cut, not_closing_cut}} from the
+    """Retired legacy peer cuts, retained for old analysis clients only.
+
+    {(dev_group, age_band): {behind_closed_cut, not_closing_cut}} from the
     population itself. The absolute gap-closure thresholds (5%/yr, trend >= -0.5)
     were calibrated on a scale-contaminated history and flagged ~half of ALL
     prospects; "behind" should mean slower than same-group, same-age peers:
@@ -234,8 +215,7 @@ def build_baseline(records: list[dict]) -> dict[str, dict[tuple, tuple]]:
 
 
 def primary_signal(bucket: str, has_off: bool) -> str:
-    """Which dev signal headlines this player: offensive for hitters (defense is
-    experience-inflated and often maxed), composite for pitchers."""
+    """Legacy signal names: off = batting tools, comp = pitching tools."""
     is_hitter = bucket not in ("SP", "RP")
     return "off" if (is_hitter and has_off) else "comp"
 
@@ -256,57 +236,60 @@ def dev_speed_z(annual_move: Optional[float], bucket: str, band: str,
     return None, None
 
 
-def classify(z: Optional[float], gap: int, sig: str) -> tuple[str, str, str]:
-    """(label, css_class, note) from z (pace vs peers) qualified by POT gap.
-
-    css_class in {rising, onpace, watch, stalled, regressing, none}.
-    Labels are descriptive (observation, not verdict).
-    """
+def classify(z: Optional[float], gap: float, sig: str) -> tuple[str, str, str]:
+    """Relative pace only; below-peer growth does not imply failure."""
     if z is None:
-        return "—", "none", ""
-    what = "bat" if sig == "off" else "overall"
-    wide = (gap or 0) >= WIDE_GAP
-    if z >= 1.0:
-        if wide:
-            return "Rising (room)", "rising", f"{what} developing, ceiling room remains"
-        return "Rising (realizing)", "rising", f"{what} developing, near ceiling"
-    if z <= -1.0:
-        if wide:
-            return "Stalled — upside at risk", "stalled", f"{what} not tracking a wide ceiling gap"
-        return "Regressing/plateaued", "regressing", f"{what} flat/declining, near his level"
-    if z <= -0.5 and wide:
-        return "Watch — slow vs upside", "watch", f"{what} slow vs a wide ceiling gap"
-    return "On pace", "onpace", f"{what} developing about as expected"
+        return "Limited evidence", "none", "Not enough comparable peers."
+    if z >= 1:
+        return "Faster pace", "rising", "Observed tool growth exceeds the peer mean."
+    if z <= -0.5:
+        return "Slower pace", "onpace", "Observed tool growth is below the peer mean; future outcome is unknown."
+    return "Similar pace", "onpace", "Observed tool growth is near the peer mean."
 
 
 def confidence_tier(window_years: float, n_snaps: int, acc: Optional[str],
                     playing_time: float, is_pitcher: bool) -> str:
-    """High / Medium / Low confidence in the reading, from the factors validation
-    showed matter: window length + snapshot count, scouting accuracy, playing time.
+    """Confidence in observed ratings, not certainty about future outcomes.
+
+    Playing time is deliberately unused: a two-season PA sum is not evidence
+    about the reliability of a dated raw-rating change.
     """
-    score = 0
-    # window length / density
-    if window_years >= 1.0 and n_snaps >= 6:
-        score += 2
-    elif window_years >= 0.6 and n_snaps >= 4:
-        score += 1
-    # scouting accuracy
     a = (acc or "").upper()
-    if a in ("VH", "H"):
-        score += 1
-    elif a in ("L", "VL"):
-        score -= 1
-    # playing time in the window
-    full = _CONF_IP_FULL if is_pitcher else _CONF_PA_FULL
-    if playing_time >= full:
-        score += 1
-    elif playing_time < full * 0.4:
-        score -= 1
-    if score >= 3:
+    if window_years >= .9 and n_snaps >= 6 and a in ("VH", "H"):
         return "High"
-    if score >= 1:
+    if window_years >= .6 and n_snaps >= 4 and a in ("VH", "H", "A", "M"):
         return "Medium"
     return "Low"
+
+
+def prepare_tool_window(window: list[dict], bucket: str, ratings_scale="20-80") -> list[dict]:
+    """One fixed tool basis for current ability, potential, and both endpoints.
+
+    Movement is the aggregate Movement grade; HRA/PBABIP are not double-counted.
+    Missing tools never become zeros or phantom gains.
+    """
+    from statsplusplus.config.ratings import norm_continuous
+    keys = PITCHER_TOOLS if bucket in ("SP", "RP") else HITTER_TOOLS
+    result = []
+    for original in sorted(window, key=lambda r: r["snapshot_date"]):
+        r = dict(original)
+        if "_dev_current" in r:
+            result.append(r)
+            continue
+        vals = [norm_continuous(r.get(k), ratings_scale) for k in keys]
+        pots = [norm_continuous(r.get("pot_" + k), ratings_scale) for k in keys]
+        if any(v is None for v in vals):
+            continue
+        for k, v in zip(keys, vals):
+            r[k] = v
+        for k, v in zip(keys, pots):
+            r["pot_" + k] = v
+        r["_dev_current"] = _st.mean(vals)
+        r["_dev_potential"] = _st.mean(pots) if all(v is not None for v in pots) else None
+        r["_dev_gap"] = (max(0, r["_dev_potential"] - r["_dev_current"])
+                         if r["_dev_potential"] is not None else None)
+        result.append(r)
+    return result
 
 
 def stagnant_tools(window: list[dict], bucket: str) -> list[str]:
@@ -329,236 +312,113 @@ def stagnant_tools(window: list[dict], bucket: str) -> list[str]:
 
 
 def _gap_series(window: list[dict]) -> list[tuple[str, float]]:
-    """[(snapshot_date, ceiling_score - composite_score), ...] for snapshots
-    where both are populated. Uses ceiling_score (not true_ceiling) even
-    though true_ceiling is the app's preferred *current* ceiling estimate
-    (see compute_dev_speed's headline `gap`) — true_ceiling only exists
-    going forward from the migration that added it to ratings_history, so
-    mixing it into a historical series would silently jump-discontinuity
-    the trend the day that column started populating. ceiling_score has
-    been tracked the whole time and is internally consistent across it.
-    """
     out = []
-    for s in window:
-        c, g = s.get("composite_score"), s.get("ceiling_score")
-        if c is not None and g is not None and c > 0:
-            out.append((s["snapshot_date"], max(0, g - c)))
+    for r in window:
+        if "_dev_gap" in r:
+            gap = r["_dev_gap"]
+        else:
+            cur, ceiling = r.get("composite_score"), r.get("ceiling_score")
+            gap = max(0, ceiling-cur) if cur is not None and ceiling is not None else None
+        if gap is not None:
+            out.append((r["snapshot_date"], gap))
     return out
 
 
 def gap_smoothed_and_trend(window: list[dict]) -> tuple[Optional[float], Optional[float]]:
-    """(gap_smoothed, gap_trend) — trailing-average gap (last
-    GAP_SMOOTH_POINTS snapshots) and its annualized change across the window
-    (first GAP_SMOOTH_POINTS avg -> last GAP_SMOOTH_POINTS avg). Negative
-    trend = gap closing (good); positive = widening.
-
-    Smoothing matters because ceiling_score itself is noisy month to month
-    (a scouting-report wobble, not real ceiling movement) — a point-in-time
-    gap reading can flip the WIDE_GAP qualifier on pure noise.
-    """
+    """Non-overlapping endpoint averages timed at their mean dates."""
     series = _gap_series(window)
     if len(series) < 2:
         return None, None
-    vals = [v for _, v in series]
-    smoothed = _st.mean(vals[-GAP_SMOOTH_POINTS:])
-    first_avg = _st.mean(vals[:GAP_SMOOTH_POINTS])
-    last_avg = _st.mean(vals[-GAP_SMOOTH_POINTS:])
-    yrs = _years_between(series[0][0], series[-1][0])
-    if yrs <= 0:
-        return round(smoothed, 2), None
-    return round(smoothed, 2), round((last_avg - first_avg) / yrs, 2)
+    n = min(GAP_SMOOTH_POINTS, len(series)//2)
+    first, last = series[:n], series[-n:]
+    first_date = _st.mean(date.fromisoformat(d).toordinal() for d, _ in first)
+    last_date = _st.mean(date.fromisoformat(d).toordinal() for d, _ in last)
+    years = (last_date-first_date)/365.25
+    last_mean = _st.mean(v for _, v in last)
+    trend = (last_mean-_st.mean(v for _, v in first))/years if years > 0 else None
+    return round(last_mean, 2), round(trend, 2) if trend is not None else None
 
 
 def schedule_tag(
-    *, z: Optional[float], gap: int, gap_first: Optional[float], gap_closed_pct_yr: Optional[float],
-    gap_trend: Optional[float], stagnant: list[str], age: int, bucket: str,
-    peak_age_hitter: int = PEAK_AGE_HITTER, peak_age_pitcher: int = PEAK_AGE_PITCHER,
-    behind_closed_cut: float = BEHIND_GAP_CLOSED_PCT, not_closing_cut: float = GAP_NOT_CLOSING,
-) -> tuple[Optional[str], Optional[str], Optional[str]]:
-    """(status, label, note) — the schedule/risk tag. Independent of
-    classify()'s peer-relative label; combines age runway to typical peak,
-    whether the gap to ceiling is actually closing (not just out-relative-
-    to-a-declining-peer-baseline), and tool-breadth.
-
-    status in {"ahead", "behind", "at_risk", "on_track", None}. None means
-    not enough signal to tag at all (no gap history, etc.) — callers should
-    treat that the same as not reportable, not as "on_track".
-    """
-    if z is None:
-        return None, None, None
-    peak = peak_age_pitcher if bucket in ("SP", "RP") else peak_age_hitter
-    years_to_peak = peak - age
-    near_peak = years_to_peak <= NEAR_PEAK_YEARS
-    short_runway = years_to_peak <= SHORT_RUNWAY_YEARS
-    wide_gap = gap >= WIDE_GAP
-    not_closing = gap_trend is not None and gap_trend >= not_closing_cut
-    n_stagnant = len(stagnant)
-    is_pitcher = bucket in ("SP", "RP")
-    # Pitchers have only three tools, and grades move in 5-pt steps, so two flat
-    # tools is the NORMAL state of a healthy pitcher (~half of 21-yo SPs were
-    # flat-or-down over a year). Count stagnation for them only when all three
-    # are flat AND the aggregate pace is below peers.
-    if is_pitcher and not (n_stagnant >= 3 and z < 0):
-        n_stagnant = 0
-
-    risk = 0
-    reasons = []
-    if near_peak and wide_gap:
-        risk += 2; reasons.append("near peak age with a wide unclosed gap")
-    elif short_runway and wide_gap:
-        risk += 1; reasons.append("limited runway to peak with a wide gap")
-    if wide_gap and not_closing:
-        risk += 2; reasons.append("gap isn't closing")
-    if n_stagnant >= 3:
-        risk += 2; reasons.append(f"{n_stagnant} tools stagnant")
-    elif n_stagnant == 2:
-        risk += 1; reasons.append("2 tools stagnant")
-
-    if risk >= AT_RISK_SCORE:
-        return "at_risk", "At Risk", "; ".join(reasons) + " — real chance this doesn't come together"
-
-    ahead = (z >= 1.0 and n_stagnant <= 1
-             and gap_closed_pct_yr is not None and gap_closed_pct_yr > AHEAD_GAP_CLOSED_PCT)
-    if ahead:
-        return "ahead", "Ahead of Schedule", "outpacing peers with the gap genuinely closing, broadly across tools"
-
-    # NOTE: tool stagnation alone is NOT a standalone trigger — validated
-    # against real data (2026-09-29): most tools move less than 1 grade
-    # point in any given year even for healthy, normally-developing
-    # prospects, so a blanket "2+ flat tools" rule flagged ~84% of the
-    # reportable pool "behind", which is meaningless as a discriminator.
-    # Stagnant tools only matter here when they CONTRADICT an otherwise
-    # decent z-score — the actual pattern this tag exists to catch (a
-    # player whose aggregate/peer-relative read looks fine because of one
-    # hot tool, while the rest of his profile hasn't moved) — matching the
-    # Ethan Wilson case this whole feature was built from.
-    stagnant_despite_ok_z = (not is_pitcher) and z is not None and z >= 0.5 and n_stagnant >= 2
-    behind = (
-        (z is not None and z <= -0.5)
-        or (wide_gap and (gap_closed_pct_yr is None or gap_closed_pct_yr <= behind_closed_cut))
-        or stagnant_despite_ok_z
-    )
-    if behind:
-        note_bits = []
-        if n_stagnant >= 2:
-            note_bits.append(f"{n_stagnant} tools ({', '.join(stagnant)}) flat over the window")
-        if wide_gap and (gap_closed_pct_yr is None or gap_closed_pct_yr <= behind_closed_cut):
-            note_bits.append("gap to ceiling not meaningfully closing")
-        if z is not None and z <= -0.5:
-            note_bits.append("trailing same-age/bucket peers")
-        return "behind", "Behind Schedule", "; ".join(note_bits) or "not tracking toward ceiling"
-
-    return "on_track", "On Schedule", ""
+    *, z=None, gap=None, gap_first=None, gap_closed_pct_yr=None,
+    gap_trend=None, stagnant=(), age=None, bucket=None, confidence="Low",
+    improving=(), declining=(), early=False, **unused,
+):
+    """Observed changes only. No unvalidated schedule or failure verdicts."""
+    if early:
+        return "early", "Early view", "Too little established history for a development assessment."
+    if confidence == "Low":
+        return "limited", "Limited evidence", "The observed changes are tentative; more reliable history is needed."
+    if declining and improving:
+        return "mixed", "Mixed changes", "Some tools improved and others declined."
+    if declining:
+        return "declining", "Declines observed", "Some recorded tool grades declined over this window; this is not a future-failure forecast."
+    if improving:
+        if z is not None and z >= 1 and confidence == "High":
+            return "ahead", "Faster gains", "Observed tool gains exceed the peer mean; future development is not guaranteed."
+        return "improving", "Gains observed", "One or more tools improved; flat tools do not negate those gains."
+    return "unchanged", "Little change", "No material core-tool movement was recorded in this window; future development remains uncertain."
 
 
 def compute_dev_speed(
-    *,
-    bucket: str,
-    age: int,
-    window: list[dict],
-    baseline: dict,
-    acc: Optional[str] = None,
-    playing_time: float = 0.0,
-    peak_age_hitter: int = PEAK_AGE_HITTER,
-    peak_age_pitcher: int = PEAK_AGE_PITCHER,
-    rookie: bool = False,
-    peer_cuts: Optional[dict] = None,
+    *, bucket, age, window, baseline, acc=None, playing_time=0,
+    peak_age_hitter=PEAK_AGE_HITTER, peak_age_pitcher=PEAK_AGE_PITCHER,
+    rookie=False, peer_cuts=None, ratings_scale="20-80",
 ) -> Optional[dict[str, Any]]:
-    """Top-level per-player dev-speed result, or None if the window is too short.
+    """Describe raw-tool changes, with evidence-gated labels and real dates.
 
-    `window` is the player's trailing-window snapshot rows (each a dict with
-    snapshot_date, composite_score, ovr, pot, offensive_grade, defensive_value),
-    already filtered/selected by the caller. `baseline` is from build_baseline.
-
-    Returns a dict shaped for storage + display (see the spec / query layer):
-        {z, signal, label, css_class, note, gap, d_ovr, d_pot,
-         confidence, available, comp_first, comp_last, off_first, off_last, ...}
-    Returns None when there is not enough history to compute at all.
+    comp_first/last, off_first/last and d_ovr/d_pot are legacy storage names;
+    here they contain mean core-tool values and changes, never model composite.
     """
-    if len(window) < MIN_SNAPSHOTS:
+    window = prepare_tool_window(window, bucket, ratings_scale)
+    if not window:
         return None
     first, last = window[0], window[-1]
     yrs = _years_between(first["snapshot_date"], last["snapshot_date"])
-    if yrs * 365.25 < MIN_WINDOW_DAYS:
-        return None
-
-    d_comp = (last["composite_score"] - first["composite_score"]) / yrs
-    d_off, off_f, off_l = component_delta(window, "offensive_grade")
-    d_def, def_f, def_l = component_delta(window, "defensive_value")
-    # Gap + trajectory use OUR model's composite/ceiling (not the game's OVR/POT),
-    # consistent with the rest of the app. OVR/POT are NULL in OVR-less leagues
-    # (e.g. PPL); composite/ceiling are always populated. d_ovr/d_pot are stored
-    # under legacy names but represent current-composite / ceiling deltas.
-    def _cur(s):
-        return s.get("composite_score") if s.get("composite_score") else (s.get("ovr") or 0)
-    def _ceil(s):
-        return s.get("ceiling_score") if s.get("ceiling_score") else (s.get("pot") or 0)
-    cur_last, cur_first = _cur(last), _cur(first)
-    ceil_last, ceil_first = _ceil(last), _ceil(first)
-    # Headline gap prefers true_ceiling on the latest point when available —
-    # the app's own preferred ceiling estimate elsewhere (contract_value.
-    # _resolve), and less conservative than ceiling_score alone (see the
-    # true_ceiling migration note in db.py). d_pot / gap_first stay on
-    # ceiling_score for both ends since true_ceiling has no history yet.
-    ceil_last_display = last.get("true_ceiling") or ceil_last
-    gap = max(0, ceil_last_display - cur_last)
-    gap_first = max(0, ceil_first - cur_first)
-    d_ovr = cur_last - cur_first       # Δ current ability (composite)
-    d_pot = ceil_last - ceil_first     # Δ ceiling
-    band = age_band(age)
     is_pitcher = bucket in ("SP", "RP")
-
-    sig = primary_signal(bucket, has_off=d_off is not None)
-    annual_move = d_off if sig == "off" else d_comp
-    z, grp = dev_speed_z(annual_move, bucket, band, sig, baseline)
-
-    comp_last = last["composite_score"]
-    reportable = age >= MIN_AGE_REPORT and (comp_last or 0) >= MIN_COMPOSITE_REPORT
-    available = reportable and z is not None
-
-    conf = confidence_tier(yrs, len(window), acc, playing_time, is_pitcher)
-    label, css, note = classify(z, gap, sig) if available else ("—", "none", "")
-
-    stagnant = stagnant_tools(window, bucket) if available else []
-    gap_smoothed, gap_trend = gap_smoothed_and_trend(window)
-    gap_closed_pct_yr = round(d_ovr / gap_first, 3) if gap_first > 0 else None
-    if available and not rookie:
-        sched_status, sched_label, sched_note = schedule_tag(
-            z=z, gap=gap, gap_first=gap_first, gap_closed_pct_yr=gap_closed_pct_yr,
-            gap_trend=gap_trend, stagnant=stagnant, age=age, bucket=bucket,
-            peak_age_hitter=peak_age_hitter, peak_age_pitcher=peak_age_pitcher,
-            **(peer_cuts or {}),
-        )
-    else:
-        sched_status = sched_label = sched_note = None
-
+    tools = PITCHER_TOOLS if is_pitcher else HITTER_TOOLS
+    sig = "comp" if is_pitcher else "off"
+    gain = last["_dev_current"]-first["_dev_current"]
+    annual = gain/yrs if yrs*365.25 >= MIN_WINDOW_DAYS else None
+    z, grp = dev_speed_z(annual, bucket, age_band(age), sig, baseline)
+    # Many daily reports in one month do not substitute for longitudinal coverage.
+    observed_months = len({r["snapshot_date"][:7] for r in window})
+    conf = confidence_tier(yrs, observed_months, acc, playing_time, is_pitcher)
+    early = age < MIN_AGE_REPORT or rookie or yrs < .6 or len(window) < 4
+    changes = {k: last[k]-first[k] for k in tools}
+    stagnant = [k for k,v in changes.items() if abs(v) < STAGNANT_EPS]
+    improving = [k for k,v in changes.items() if v >= STAGNANT_EPS]
+    declining = [k for k,v in changes.items() if v <= -STAGNANT_EPS]
+    status, label, summary = schedule_tag(z=z, confidence=conf, improving=improving,
+                                        declining=declining, early=early)
+    available = (not early and conf != "Low" and z is not None)
+    css = ("rising" if status == "ahead" else "regressing" if status == "declining" else "onpace") if available else "none"
+    gap_first, gap_last = first["_dev_gap"], last["_dev_gap"]
+    closure = gain/gap_first/yrs if gap_first is not None and gap_first > 0 and yrs > 0 else None
+    pot_first, pot_last = first["_dev_potential"], last["_dev_potential"]
+    d_pot = pot_last-pot_first if pot_first is not None and pot_last is not None else None
+    smooth, trend = gap_smoothed_and_trend(window)
+    names = {"cntct":"Contact", "gap":"Gap", "pow":"Power", "eye":"Eye",
+             "stf":"Stuff", "mov":"Movement", "ctrl":"Control"}
+    detail = "; ".join(f"{names[k]} {v:+g}" for k,v in changes.items())
+    basis = "pitching" if is_pitcher else "batting"
+    note = (f"{summary} {basis.title()} tools, {first['snapshot_date']} to {last['snapshot_date']}: "
+            f"{detail}. Changes use normalized 20–80 grades. Historical observation, not a bust probability.")
+    if grp is None:
+        note += " A comparable peer baseline is not available."
+    if d_pot and d_pot > 0:
+        note += " Potential increased too; a wider potential gap is not itself a setback."
     return {
-        "available": available,
-        "z": z,
-        "signal": sig,
-        "label": label,
-        "css_class": css,
-        "note": note,
-        "gap": gap,
-        "d_ovr": d_ovr,
-        "d_pot": d_pot,
-        "confidence": conf,
-        "annual_move": round(annual_move, 2) if annual_move is not None else None,
-        "peer_mean": grp[0] if grp else None,
-        "peer_sd": grp[1] if grp else None,
-        "peer_n": grp[2] if grp else None,
-        "comp_first": first["composite_score"], "comp_last": comp_last,
-        "off_first": off_f, "off_last": off_l,
-        "def_first": def_f, "def_last": def_l,
-        "window_years": round(yrs, 2), "n_snaps": len(window),
-        "band": band,
-        "schedule_status": sched_status,
-        "schedule_label": sched_label,
-        "schedule_note": sched_note,
-        "stagnant_tools": stagnant,
-        "gap_closed_pct_yr": gap_closed_pct_yr,
-        "bucket": bucket, "gap_trend": gap_trend,
-        "years_to_peak": round((peak_age_pitcher if is_pitcher else peak_age_hitter) - age, 1),
-        "gap_smoothed": gap_smoothed,
-        "gap_trend": gap_trend,
+        "available":available,"z":z,"signal":sig,"label":label,"css_class":css,"note":note,
+        "gap":round(gap_last,2) if gap_last is not None else None,
+        "d_ovr":round(gain,2),"d_pot":round(d_pot,2) if d_pot is not None else None,
+        "confidence":conf,"annual_move":round(annual,2) if annual is not None else None,
+        "peer_mean":grp[0] if grp else None,"peer_sd":grp[1] if grp else None,"peer_n":grp[2] if grp else None,
+        "comp_first":round(first['_dev_current'],2),"comp_last":round(last['_dev_current'],2),
+        "off_first":round(first['_dev_current'],2) if not is_pitcher else None,
+        "off_last":round(last['_dev_current'],2) if not is_pitcher else None,
+        "def_first":None,"def_last":None,"window_years":round(yrs,2),"n_snaps":len(window),
+        "band":age_band(age),"schedule_status":status,"schedule_label":label,"schedule_note":note,
+        "stagnant_tools":stagnant,"gap_closed_pct_yr":round(closure,3) if closure is not None else None,
+        "bucket":bucket,"gap_trend":trend,"gap_smoothed":smooth,"years_to_peak":None,
     }

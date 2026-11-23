@@ -58,6 +58,37 @@ def _get_cfg():
 
 # ── Simple data endpoints ──
 
+@api_bp.route("/api/draft-model-comparison", methods=["POST"])
+def draft_model_comparison():
+    """Poll an independent comparison after scouting inputs change."""
+    from web_league_context import get_db
+    from draft_model_comparison import load_comparison
+    body=request.get_json(silent=True) or {}
+    ids=body.get('pids',[])
+    if not isinstance(ids,list) or not ids or len(ids)>5000 or any(type(x) is not int or x<=0 for x in ids):
+        return jsonify({'error':'Invalid draft player IDs'}),400
+    return jsonify(load_comparison(get_db(),_get_cfg().league_dir,sorted(set(ids))))
+
+
+@api_bp.route("/api/team/<int:tid>/coaching-signings", methods=["GET", "POST"])
+def coaching_signings(tid):
+    from coaching_signings import get_checklist, save_check
+    cfg = _get_cfg()
+    if Path(cfg.league_dir).name.lower() != "ppl" or tid != 6:
+        return jsonify({"ok": False, "error": "Coaching checklist unavailable for this team"}), 404
+    try:
+        if request.method == "POST":
+            result = save_check(cfg.league_dir, tid, request.get_json(silent=True))
+            return jsonify({"ok": True, **result})
+        response = jsonify({"ok": True, "checklist": get_checklist(cfg.league_dir, tid)})
+        response.headers["Cache-Control"] = "no-store"
+        return response
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except OSError:
+        log.exception("Unable to save or load coaching checklist")
+        return jsonify({"ok": False, "error": "Unable to save or load the checklist. Please try again."}), 500
+
 
 @api_bp.route("/api/toggle-offseason", methods=["POST"])
 def toggle_offseason():

@@ -367,17 +367,14 @@ CREATE TABLE IF NOT EXISTS dev_speed (
     def_first   INTEGER, def_last INTEGER,
     window_years REAL,
     n_snaps     INTEGER,
-    -- Schedule/risk tag (2026-09-29) — a SECOND, independent signal
-    -- alongside the z-score label above, not a replacement: label/css_class
-    -- answer "is he outpacing peers right now"; schedule_status answers "is
-    -- he actually closing his own gap to ceiling before his runway to peak
-    -- age runs out, across multiple tools, not just one." See dev_speed.py.
-    schedule_status TEXT,   -- ahead|behind|at_risk|on_track|NULL(not reportable)
+    -- Descriptive raw-tool observations only, never lifetime failure forecasts.
+    -- Legacy column names above now hold mean tool values/deltas, not composites.
+    schedule_status TEXT,   -- ahead|improving|mixed|unchanged|declining|early|limited
     schedule_label  TEXT,
     schedule_note   TEXT,
     stagnant_tools  TEXT,   -- comma-joined tool keys with ~0 movement in-window
     gap_closed_pct_yr REAL, -- fraction of the window-start gap closed per year
-    years_to_peak   REAL,
+    years_to_peak   REAL,   -- legacy field; unused by descriptive DEV
     gap_smoothed    REAL,   -- trailing-average gap (vs point-in-time `gap`)
     gap_trend       REAL,   -- annualized change in smoothed gap; negative = closing
     PRIMARY KEY (player_id, eval_date)

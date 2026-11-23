@@ -44,6 +44,13 @@ def _get_dev_speed(conn, pid):
             return None
         d = dict(zip(cols, row))
         d["available"] = bool(d.get("available"))
+        if "Changes use normalized 20–80 grades." not in (d.get("note") or ""):
+            # Old cached model-gap verdicts must not be shown as new observations.
+            return {"available": False, "label": "Limited evidence", "confidence": "Low",
+                    "note": "This older DEV assessment needs recalculation; no failure forecast is supported.",
+                    "signal": d.get("signal"), "comp_first": None, "comp_last": None,
+                    "annual_move": None, "gap": None, "d_pot": None,
+                    "window_years": d.get("window_years"), "n_snaps": d.get("n_snaps")}
         return d
     except Exception:
         return None
@@ -926,6 +933,10 @@ def get_player(pid):
         valuation["pot"] = (rd.get("true_ceiling") or rd.get("ceiling_score") if rd else None) or (ratings["pot"] if ratings else None)
         _def_keys = {'CF':'pot_cf','SS':'pot_ss','C':'pot_c','2B':'pot_second_b','3B':'pot_third_b'}
         valuation["def_rating"] = rd.get(_def_keys.get(prospect_row[0], "")) or 0 if rd else 0
+
+    from statsplusplus.evaluation.development_risk import load_risk_model, RISK_NOTE
+    if valuation.get("type") == "prospect" and 16 <= age <= 25 and load_risk_model(get_cfg().league_dir):
+        valuation["risk_note"] = RISK_NOTE
 
     # Contract
     contract = None

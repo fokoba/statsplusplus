@@ -1652,6 +1652,20 @@ def get_draft_pool():
             return None
         return strong_side
 
+    # Shared descriptive DEV cells, including explicit Early view states.
+    _draft_dev = {r[0]: _dev_cell(r, 1) for r in conn.execute("""
+        SELECT player_id,available,css_class,label,confidence,z,
+               schedule_status,schedule_label,schedule_note
+        FROM dev_speed WHERE eval_date=(SELECT MAX(eval_date) FROM dev_speed)
+    """)}
+
+    def _with_model_comparison(board):
+        from draft_model_comparison import load_comparison, annotate_rounds
+        comparison = load_comparison(conn, get_cfg().league_dir, [r['pid'] for r in board['players']])
+        annotate_rounds(board['players'], len(get_cfg().mlb_team_ids), comparison)
+        board['comparison'] = {k:v for k,v in comparison.items() if k != 'players'}
+        return board
+
     def _build_prospect(rat):
         p = dict(rat)
         ng = _norm_floor
@@ -1689,7 +1703,7 @@ def get_draft_pool():
             "ovr": n(p["Ovr"]) or p.get("composite_score") or 0,
             "pot": n(p["Pot"]) or p.get("true_ceiling") or p.get("ceiling_score") or 0,
             "fv": fv_base, "fv_str": fv_str_display,
-            "risk": pf_risk,
+            "risk": pf_risk, "dev": _draft_dev.get(p["ID"]),
             "bats": p.get("Bats", ""), "throws": p.get("Throws", ""),
             "acc": p.get("Acc", ""), "we": p.get("WrkEthic", ""),
             "lead": p.get("Lead", ""), "int": p.get("Int", ""),
@@ -2069,7 +2083,7 @@ def get_draft_pool():
         for i, r in enumerate(results):
             r['rank'] = i + 1
         _apply_slot_value_estimates(results)
-        return {"state": state, "players": results, "picks": [], "year": draft_year}
+        return _with_model_comparison({"state": state, "players": results, "picks": [], "year": draft_year})
 
     elif state == "active":
         # Use draft API player IDs as the definitive pool
@@ -2089,7 +2103,7 @@ def get_draft_pool():
         for i, r in enumerate(results):
             r['rank'] = i + 1
         _apply_slot_value_estimates(results, {p["pid"]: p["overall"] for p in picks})
-        return {"state": state, "players": results, "picks": picks, "year": draft_year}
+        return _with_model_comparison({"state": state, "players": results, "picks": picks, "year": draft_year})
 
     elif state == "pre_draft" and amateur_levels:
         # Scouting approximation: top 800 amateurs by Pot. Discard API picks — stale from prior draft.
@@ -2107,7 +2121,7 @@ def get_draft_pool():
         for i, r in enumerate(results):
             r['rank'] = i + 1
         _apply_slot_value_estimates(results)
-        return {"state": state, "players": results, "picks": [], "year": draft_year}
+        return _with_model_comparison({"state": state, "players": results, "picks": [], "year": draft_year})
 
     return {"state": "no_data", "players": [], "picks": [], "year": draft_year}
 

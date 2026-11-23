@@ -472,7 +472,10 @@ def team_coaching(tid):
     role_options = [j for g in _cq.ROLE_GROUPS.values() for j in g["jobs"]]
     role_ranking = _cq.get_role_league_ranking(role) if role in role_options else None
     compare_teams = {t: n for t, n in _cq.get_all_team_names().items() if t != tid}
+    from coaching_signings import get_checklist
+    signing_checklist = get_checklist(cfg.league_dir, tid)
     return render_template("coaching.html", tid=tid, team_name=name, data=data,
+                           signing_checklist=signing_checklist,
                            chemistry=_cq.get_staff_chemistry(tid),
                            league_chemistry=_cq.get_league_chemistry(),
                            compare_teams=compare_teams, vs_tid=vs_tid, vs_data=vs_data,

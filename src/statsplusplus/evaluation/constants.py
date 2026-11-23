@@ -438,12 +438,15 @@ class ModelWeights:
 
     @property
     def years_to_mlb(self) -> dict[str, float]:
-        """Years to MLB by level."""
+        """Years to MLB by lowercase level key, for defaults and calibrations."""
         if self._years_to_mlb is None:
             from statsplusplus.utils.positions import YEARS_TO_MLB as _default
             raw = self.raw.get("YEARS_TO_MLB")
             if raw and isinstance(raw, dict):
-                self._years_to_mlb = dict(raw)
+                # calibrate.py writes display labels (AAA/AA/A-Short), while
+                # utils.positions supplies lowercase defaults. Consumers must
+                # see the same keys regardless of which source is available.
+                self._years_to_mlb = {str(k).lower(): v for k, v in raw.items()}
             else:
                 self._years_to_mlb = dict(_default)
         return self._years_to_mlb

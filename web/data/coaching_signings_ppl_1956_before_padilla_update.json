@@ -1,0 +1,473 @@
+{
+  "id": "ppl-pha-coaching-1956-round2-20261103",
+  "progress_revision": "round2-20261103",
+  "season": 1956,
+  "league": "ppl",
+  "team_id": 6,
+  "review_date": "2026-11-03",
+  "retain_note": "Retain the MLB staff, including Mike Vickers, Ryan Wells and Joe Smith. Keep Ryan Harrower and Steve Kaercher at Lincoln, and Jonathan Kemp at Binghamton.",
+  "known_external_demands_total": 11105,
+  "entries": [
+    {
+      "id": "matt-jacobs-05-13-1896-trenton-pitching-coach",
+      "order": 1,
+      "name": "Matt Jacobs",
+      "dob": "05/13/1896",
+      "role": "Pitching coach",
+      "team": "Trenton (AA)",
+      "action": "promotion",
+      "current_organization": "Philadelphia: Modesto, Pitching",
+      "replaces": "Austin Thompson",
+      "replacement_note": "",
+      "annual_demand": null,
+      "depends_on": [],
+      "sequence_note": "Complete this move first; it opens Modesto pitching coach without losing Jacobs."
+    },
+    {
+      "id": "omar-padilla-05-03-1914-modesto-pitching-coach",
+      "order": 2,
+      "name": "Omar Padilla",
+      "dob": "05/03/1914",
+      "role": "Pitching coach",
+      "team": "Modesto (A)",
+      "action": "promotion",
+      "current_organization": "Philadelphia: Binghamton, Pitching",
+      "replaces": "Matt Jacobs",
+      "replacement_note": "Promoted to Trenton: Pitching coach",
+      "annual_demand": null,
+      "depends_on": [
+        "matt-jacobs-05-13-1896-trenton-pitching-coach"
+      ],
+      "sequence_note": "Move only after Jacobs has left Modesto; this opens Binghamton pitching coach."
+    },
+    {
+      "id": "haruhiko-kubo-12-16-1900-binghamton-pitching-coach",
+      "order": 3,
+      "name": "Haruhiko Kubo",
+      "dob": "12/16/1900",
+      "role": "Pitching coach",
+      "team": "Binghamton (B)",
+      "action": "promotion",
+      "current_organization": "Philadelphia: Everett, Pitching",
+      "replaces": "Omar Padilla",
+      "replacement_note": "Promoted to Modesto: Pitching coach",
+      "annual_demand": 710,
+      "depends_on": [
+        "omar-padilla-05-03-1914-modesto-pitching-coach"
+      ],
+      "sequence_note": "Move only after Padilla has left Binghamton; this opens Everett pitching coach."
+    },
+    {
+      "id": "chris-hein-02-14-1907-dallas-hitting-coach",
+      "order": 4,
+      "name": "Chris Hein",
+      "dob": "02/14/1907",
+      "role": "Hitting coach",
+      "team": "Dallas (AA)",
+      "action": "promotion",
+      "current_organization": "Philadelphia: Modesto, Manager",
+      "replaces": "Vacant",
+      "replacement_note": "",
+      "annual_demand": 1950,
+      "depends_on": [],
+      "sequence_note": "Complete this role-changing promotion before replacing him with Kevin Knox."
+    },
+    {
+      "id": "jeremy-rosen-08-05-1912-asheville-hitting-coach",
+      "order": 5,
+      "name": "Jeremy Rosen",
+      "dob": "08/05/1912",
+      "role": "Hitting coach",
+      "team": "Asheville (A)",
+      "action": "promotion",
+      "current_organization": "Philadelphia: St. Petersburg, Manager",
+      "replaces": "Brian Chonko",
+      "replacement_note": "",
+      "annual_demand": 645,
+      "depends_on": [],
+      "sequence_note": "Complete this role-changing promotion before replacing him with Sender Luna."
+    },
+    {
+      "id": "mike-houser-05-17-1904-seattle-hitting-coach",
+      "order": 6,
+      "name": "Mike Houser",
+      "dob": "05/17/1904",
+      "role": "Hitting coach",
+      "team": "Seattle (AAA)",
+      "action": "offer",
+      "current_organization": "St. Louis Cardinals: Houston (Double A), Hitting Coach",
+      "replaces": "Ben Gardner",
+      "replacement_note": "",
+      "annual_demand": null,
+      "depends_on": [
+        "matt-jacobs-05-13-1896-trenton-pitching-coach",
+        "omar-padilla-05-03-1914-modesto-pitching-coach",
+        "haruhiko-kubo-12-16-1900-binghamton-pitching-coach",
+        "chris-hein-02-14-1907-dallas-hitting-coach",
+        "jeremy-rosen-08-05-1912-asheville-hitting-coach"
+      ],
+      "sequence_note": "Priority external target: employed by another organization; Outstanding development."
+    },
+    {
+      "id": "colin-greenberg-09-22-1898-atlanta-hitting-coach",
+      "order": 7,
+      "name": "Colin Greenberg",
+      "dob": "09/22/1898",
+      "role": "Hitting coach",
+      "team": "Atlanta (AAA)",
+      "action": "offer",
+      "current_organization": "Pittsburgh Pirates: Jackson (Double A), Hitting Coach",
+      "replaces": "Jim Brown",
+      "replacement_note": "",
+      "annual_demand": null,
+      "depends_on": [
+        "matt-jacobs-05-13-1896-trenton-pitching-coach",
+        "omar-padilla-05-03-1914-modesto-pitching-coach",
+        "haruhiko-kubo-12-16-1900-binghamton-pitching-coach",
+        "chris-hein-02-14-1907-dallas-hitting-coach",
+        "jeremy-rosen-08-05-1912-asheville-hitting-coach"
+      ],
+      "sequence_note": "Priority external target: employed by another organization; Excellent development."
+    },
+    {
+      "id": "matt-lewis-05-15-1904-seattle-manager",
+      "order": 8,
+      "name": "Matt Lewis",
+      "dob": "05/15/1904",
+      "role": "Manager",
+      "team": "Seattle (AAA)",
+      "action": "offer",
+      "current_organization": "Los Angeles Browns: Montgomery (Double A), Manager",
+      "replaces": "Leo Lopez",
+      "replacement_note": "",
+      "annual_demand": null,
+      "depends_on": [
+        "matt-jacobs-05-13-1896-trenton-pitching-coach",
+        "omar-padilla-05-03-1914-modesto-pitching-coach",
+        "haruhiko-kubo-12-16-1900-binghamton-pitching-coach",
+        "chris-hein-02-14-1907-dallas-hitting-coach",
+        "jeremy-rosen-08-05-1912-asheville-hitting-coach"
+      ],
+      "sequence_note": "Priority external target: employed by another organization; Seattle manager upgrade."
+    },
+    {
+      "id": "josh-rudd-09-10-1908-dallas-pitching-coach",
+      "order": 9,
+      "name": "Josh Rudd",
+      "dob": "09/10/1908",
+      "role": "Pitching coach",
+      "team": "Dallas (AA)",
+      "action": "offer",
+      "current_organization": "Los Angeles Browns: Inland Empire (Class A), Manager",
+      "replaces": "Mike Schwanger",
+      "replacement_note": "",
+      "annual_demand": null,
+      "depends_on": [
+        "matt-jacobs-05-13-1896-trenton-pitching-coach",
+        "omar-padilla-05-03-1914-modesto-pitching-coach",
+        "haruhiko-kubo-12-16-1900-binghamton-pitching-coach",
+        "chris-hein-02-14-1907-dallas-hitting-coach",
+        "jeremy-rosen-08-05-1912-asheville-hitting-coach"
+      ],
+      "sequence_note": "Priority external target: employed elsewhere; moves from manager to pitching coach."
+    },
+    {
+      "id": "micah-wind-12-09-1901-trenton-manager",
+      "order": 10,
+      "name": "Micah Wind",
+      "dob": "12/09/1901",
+      "role": "Manager",
+      "team": "Trenton (AA)",
+      "action": "offer",
+      "current_organization": "Boston Red Sox: Raleigh (Class A), Manager",
+      "replaces": "Eduardo Morales",
+      "replacement_note": "",
+      "annual_demand": null,
+      "depends_on": [
+        "matt-jacobs-05-13-1896-trenton-pitching-coach",
+        "omar-padilla-05-03-1914-modesto-pitching-coach",
+        "haruhiko-kubo-12-16-1900-binghamton-pitching-coach",
+        "chris-hein-02-14-1907-dallas-hitting-coach",
+        "jeremy-rosen-08-05-1912-asheville-hitting-coach"
+      ],
+      "sequence_note": "Priority external target: employed by another organization."
+    },
+    {
+      "id": "robbie-biden-09-15-1908-atlanta-manager",
+      "order": 11,
+      "name": "Robbie Biden",
+      "dob": "09/15/1908",
+      "role": "Manager",
+      "team": "Atlanta (AAA)",
+      "action": "offer",
+      "current_organization": "Unemployed",
+      "replaces": "Shoji Tanaka",
+      "replacement_note": "",
+      "annual_demand": 1580,
+      "depends_on": [
+        "matt-jacobs-05-13-1896-trenton-pitching-coach",
+        "omar-padilla-05-03-1914-modesto-pitching-coach",
+        "haruhiko-kubo-12-16-1900-binghamton-pitching-coach",
+        "chris-hein-02-14-1907-dallas-hitting-coach",
+        "jeremy-rosen-08-05-1912-asheville-hitting-coach"
+      ],
+      "sequence_note": "Offer after the five internal promotions are complete."
+    },
+    {
+      "id": "eishoku-fujiwara-10-22-1897-dallas-manager",
+      "order": 12,
+      "name": "Eishoku Fujiwara",
+      "dob": "10/22/1897",
+      "role": "Manager",
+      "team": "Dallas (AA)",
+      "action": "offer",
+      "current_organization": "Unemployed",
+      "replaces": "Alex Pastrana",
+      "replacement_note": "",
+      "annual_demand": 2215,
+      "depends_on": [
+        "matt-jacobs-05-13-1896-trenton-pitching-coach",
+        "omar-padilla-05-03-1914-modesto-pitching-coach",
+        "haruhiko-kubo-12-16-1900-binghamton-pitching-coach",
+        "chris-hein-02-14-1907-dallas-hitting-coach",
+        "jeremy-rosen-08-05-1912-asheville-hitting-coach"
+      ],
+      "sequence_note": "Offer after the five internal promotions are complete."
+    },
+    {
+      "id": "nathaniel-hendrix-08-31-1898-asheville-pitching-coach",
+      "order": 13,
+      "name": "Nathaniel Hendrix",
+      "dob": "08/31/1898",
+      "role": "Pitching coach",
+      "team": "Asheville (A)",
+      "action": "offer",
+      "current_organization": "Unemployed",
+      "replaces": "Julio Mejia",
+      "replacement_note": "",
+      "annual_demand": 1185,
+      "depends_on": [
+        "matt-jacobs-05-13-1896-trenton-pitching-coach",
+        "omar-padilla-05-03-1914-modesto-pitching-coach",
+        "haruhiko-kubo-12-16-1900-binghamton-pitching-coach",
+        "chris-hein-02-14-1907-dallas-hitting-coach",
+        "jeremy-rosen-08-05-1912-asheville-hitting-coach"
+      ],
+      "sequence_note": "Offer after the five internal promotions are complete."
+    },
+    {
+      "id": "kevin-knox-07-17-1906-modesto-manager",
+      "order": 14,
+      "name": "Kevin Knox",
+      "dob": "07/17/1906",
+      "role": "Manager",
+      "team": "Modesto (A)",
+      "action": "offer",
+      "current_organization": "Unemployed",
+      "replaces": "Chris Hein",
+      "replacement_note": "Promoted to Dallas: Hitting coach",
+      "annual_demand": 1365,
+      "depends_on": [
+        "matt-jacobs-05-13-1896-trenton-pitching-coach",
+        "omar-padilla-05-03-1914-modesto-pitching-coach",
+        "haruhiko-kubo-12-16-1900-binghamton-pitching-coach",
+        "chris-hein-02-14-1907-dallas-hitting-coach",
+        "jeremy-rosen-08-05-1912-asheville-hitting-coach"
+      ],
+      "sequence_note": "Fill the Modesto manager vacancy only after Hein has moved to Dallas."
+    },
+    {
+      "id": "tatsuji-murakami-05-20-1897-modesto-hitting-coach",
+      "order": 15,
+      "name": "Tatsuji Murakami",
+      "dob": "05/20/1897",
+      "role": "Hitting coach",
+      "team": "Modesto (A)",
+      "action": "offer",
+      "current_organization": "Unemployed",
+      "replaces": "Josh Middendorf",
+      "replacement_note": "",
+      "annual_demand": 1315,
+      "depends_on": [
+        "matt-jacobs-05-13-1896-trenton-pitching-coach",
+        "omar-padilla-05-03-1914-modesto-pitching-coach",
+        "haruhiko-kubo-12-16-1900-binghamton-pitching-coach",
+        "chris-hein-02-14-1907-dallas-hitting-coach",
+        "jeremy-rosen-08-05-1912-asheville-hitting-coach"
+      ],
+      "sequence_note": "Offer after the five internal promotions are complete."
+    },
+    {
+      "id": "carlos-hernandez-03-08-1896-everett-pitching-coach",
+      "order": 16,
+      "name": "Carlos Hernandez",
+      "dob": "03/08/1896",
+      "role": "Pitching coach",
+      "team": "Everett (C)",
+      "action": "offer",
+      "current_organization": "Unemployed",
+      "replaces": "Haruhiko Kubo",
+      "replacement_note": "Promoted to Binghamton: Pitching coach",
+      "annual_demand": 535,
+      "depends_on": [
+        "matt-jacobs-05-13-1896-trenton-pitching-coach",
+        "omar-padilla-05-03-1914-modesto-pitching-coach",
+        "haruhiko-kubo-12-16-1900-binghamton-pitching-coach",
+        "chris-hein-02-14-1907-dallas-hitting-coach",
+        "jeremy-rosen-08-05-1912-asheville-hitting-coach"
+      ],
+      "sequence_note": "Fill the Everett pitching vacancy only after Kubo has moved to Binghamton."
+    },
+    {
+      "id": "bruce-bowman-07-14-1902-lincoln-hitting-coach",
+      "order": 17,
+      "name": "Bruce Bowman",
+      "dob": "07/14/1902",
+      "role": "Hitting coach",
+      "team": "Lincoln (B)",
+      "action": "offer",
+      "current_organization": "Unemployed",
+      "replaces": "Forest Shiplack",
+      "replacement_note": "",
+      "annual_demand": 910,
+      "depends_on": [
+        "matt-jacobs-05-13-1896-trenton-pitching-coach",
+        "omar-padilla-05-03-1914-modesto-pitching-coach",
+        "haruhiko-kubo-12-16-1900-binghamton-pitching-coach",
+        "chris-hein-02-14-1907-dallas-hitting-coach",
+        "jeremy-rosen-08-05-1912-asheville-hitting-coach"
+      ],
+      "sequence_note": "Offer after the five internal promotions are complete."
+    },
+    {
+      "id": "sender-luna-09-09-1909-st-petersburg-manager",
+      "order": 18,
+      "name": "Sender Luna",
+      "dob": "09/09/1909",
+      "role": "Manager",
+      "team": "St. Petersburg (C)",
+      "action": "offer",
+      "current_organization": "Unemployed",
+      "replaces": "Jeremy Rosen",
+      "replacement_note": "Promoted to Asheville: Hitting coach",
+      "annual_demand": 805,
+      "depends_on": [
+        "matt-jacobs-05-13-1896-trenton-pitching-coach",
+        "omar-padilla-05-03-1914-modesto-pitching-coach",
+        "haruhiko-kubo-12-16-1900-binghamton-pitching-coach",
+        "chris-hein-02-14-1907-dallas-hitting-coach",
+        "jeremy-rosen-08-05-1912-asheville-hitting-coach"
+      ],
+      "sequence_note": "Fill the St. Petersburg manager vacancy only after Rosen has moved to Asheville."
+    },
+    {
+      "id": "matt-phillips-03-02-1901-st-petersburg-pitching-coach",
+      "order": 19,
+      "name": "Matt Phillips",
+      "dob": "03/02/1901",
+      "role": "Pitching coach",
+      "team": "St. Petersburg (C)",
+      "action": "offer",
+      "current_organization": "Unemployed",
+      "replaces": "Jason Fuks",
+      "replacement_note": "",
+      "annual_demand": 600,
+      "depends_on": [
+        "matt-jacobs-05-13-1896-trenton-pitching-coach",
+        "omar-padilla-05-03-1914-modesto-pitching-coach",
+        "haruhiko-kubo-12-16-1900-binghamton-pitching-coach",
+        "chris-hein-02-14-1907-dallas-hitting-coach",
+        "jeremy-rosen-08-05-1912-asheville-hitting-coach"
+      ],
+      "sequence_note": "Offer after the five internal promotions are complete."
+    },
+    {
+      "id": "nick-johnston-08-05-1909-st-petersburg-hitting-coach",
+      "order": 20,
+      "name": "Nick Johnston",
+      "dob": "08/05/1909",
+      "role": "Hitting coach",
+      "team": "St. Petersburg (C)",
+      "action": "offer",
+      "current_organization": "Unemployed",
+      "replaces": "Vacant",
+      "replacement_note": "",
+      "annual_demand": 595,
+      "depends_on": [
+        "matt-jacobs-05-13-1896-trenton-pitching-coach",
+        "omar-padilla-05-03-1914-modesto-pitching-coach",
+        "haruhiko-kubo-12-16-1900-binghamton-pitching-coach",
+        "chris-hein-02-14-1907-dallas-hitting-coach",
+        "jeremy-rosen-08-05-1912-asheville-hitting-coach"
+      ],
+      "sequence_note": "Fills an existing vacancy; no incumbent to dismiss."
+    }
+  ],
+  "retained_staff": [
+    {
+      "name": "Brandon Greene",
+      "team": "Atlanta (AAA)",
+      "role": "Pitching coach"
+    },
+    {
+      "name": "Steve Eddy",
+      "team": "Seattle (AAA)",
+      "role": "Pitching coach"
+    },
+    {
+      "name": "Joe Bryant",
+      "team": "Trenton (AA)",
+      "role": "Hitting coach"
+    },
+    {
+      "name": "Dylan Webb",
+      "team": "Asheville (A)",
+      "role": "Manager"
+    },
+    {
+      "name": "Jonathan Kemp",
+      "team": "Binghamton (B)",
+      "role": "Manager"
+    },
+    {
+      "name": "Angel Jimenez",
+      "team": "Binghamton (B)",
+      "role": "Hitting coach"
+    },
+    {
+      "name": "Ryan Harrower",
+      "team": "Lincoln (B)",
+      "role": "Manager"
+    },
+    {
+      "name": "Steve Kaercher",
+      "team": "Lincoln (B)",
+      "role": "Pitching coach"
+    },
+    {
+      "name": "Matt Oroark",
+      "team": "Everett (C)",
+      "role": "Manager"
+    },
+    {
+      "name": "Kyle Books",
+      "team": "Everett (C)",
+      "role": "Hitting coach"
+    },
+    {
+      "name": "Jason Lee",
+      "team": "St. George (R)",
+      "role": "Manager"
+    },
+    {
+      "name": "Ryan Hayes",
+      "team": "St. George (R)",
+      "role": "Pitching coach"
+    },
+    {
+      "name": "Ernie Higbee",
+      "team": "St. George (R)",
+      "role": "Hitting coach"
+    }
+  ]
+}

@@ -144,6 +144,8 @@ def run(league_dir: Path | None = None) -> None:
 
     # Load MiLB stat context
     _milb_averages = load_milb_averages(league_dir)
+    from statsplusplus.evaluation.development_risk import load_risk_model
+    _risk_model = load_risk_model(league_dir)
     _milb_discounts: dict = {}
     _milb_norm_ages: dict = {}
     _mw_path = league_dir / "config" / "model_weights.json"
@@ -253,7 +255,8 @@ def run(league_dir: Path | None = None) -> None:
             if age <= 24 and _career_ab.get(pid, 0) < 130 and _career_ip.get(pid, 0) < 50:
                 p["_norm_age"] = LEVEL_NORM_AGE["aaa"]
                 p["_level"] = "aaa"
-                _apply_milb_context(p, conn, pid, _milb_averages, _milb_discounts, _milb_norm_ages, load_milb_stat_seasons)
+                _apply_milb_context(p, conn, pid, _milb_averages, _milb_discounts, _milb_norm_ages, load_milb_stat_seasons,
+                                    risk_model=_risk_model, prediction_year=int(game_date[:4]))
                 fv_base, fv_risk = calc_fv(p, scale=_scale, league_dir=league_dir)
                 fv_str = str(fv_base)
                 if bucket == "RP":
@@ -308,7 +311,8 @@ def run(league_dir: Path | None = None) -> None:
                 continue
             p["_norm_age"] = LEVEL_NORM_AGE[level_key]
             p["_level"] = level_key
-            _apply_milb_context(p, conn, pid, _milb_averages, _milb_discounts, _milb_norm_ages, load_milb_stat_seasons)
+            _apply_milb_context(p, conn, pid, _milb_averages, _milb_discounts, _milb_norm_ages, load_milb_stat_seasons,
+                                risk_model=_risk_model, prediction_year=int(game_date[:4]))
             fv_base, fv_risk = calc_fv(p, scale=_scale, league_dir=league_dir)
             fv_str = str(fv_base)
             # level=0 free agents are already-proven, immediately signable
@@ -376,155 +380,79 @@ def run(league_dir: Path | None = None) -> None:
 
 
 def _compute_dev_speed_pass(conn, game_date: str, bucket_map: dict, league_dir: Path | None = None) -> None:
-    """Compute + store the development-speed metric for all players.
+    """Persist descriptive raw-tool development with a current dated endpoint.
 
-    Ported from upstream tfalsone/statsplusplus (commit 886ee50) and adapted to
-    this fork's schema (ratings_history/players/batting_stats/pitching_stats,
-    which already carry the same column names upstream's version expects).
-
-    Loads longitudinal ratings_history, builds a per (bucket, age-band) baseline
-    from the full population, computes each player's trailing-window dev-speed,
-    and writes the `dev_speed` table. Buckets come from bucket_map (canonical
-    assign_bucket, computed in the main loop above).
+    Historical derived composites can have model/date contamination, so DEV
+    never uses them to measure progress. History and the latest reports supply
+    raw tools only. Existing FV/surplus formulas do not consume these labels.
     """
     from collections import defaultdict
+    from datetime import date
+    import calendar
     from statsplusplus.evaluation import dev_speed as ds
-    from statsplusplus.evaluation.constants import load_model_weights, PEAK_AGE_HITTER, PEAK_AGE_PITCHER
+    from statsplusplus.config.league_config import LeagueConfig
 
-    # Per-league peak age (2026-09-30) — MODEL_PARAMS override in
-    # model_weights.json, empirically derived from real career-WAR
-    # trajectories, falling back to the shared unvalidated defaults.
-    if league_dir is not None:
-        _w = load_model_weights(league_dir)
-        peak_age_hitter = _w.get_param("PEAK_AGE_HITTER", PEAK_AGE_HITTER)
-        peak_age_pitcher = _w.get_param("PEAK_AGE_PITCHER", PEAK_AGE_PITCHER)
-    else:
-        peak_age_hitter, peak_age_pitcher = PEAK_AGE_HITTER, PEAK_AGE_PITCHER
-
-    # trailing-window cutoff (string compare on YYYY-MM-DD)
-    latest = conn.execute(
-        "SELECT MAX(snapshot_date) FROM ratings_history WHERE composite_score IS NOT NULL"
-    ).fetchone()[0]
-    if not latest:
-        logger.info("dev-speed: no ratings_history — skipped")
-        return
-    ly, lm, _ = map(int, latest.split("-"))
-    sy, sm = ly - (ds.WINDOW_MONTHS // 12), lm - (ds.WINDOW_MONTHS % 12)
-    if sm <= 0:
-        sm += 12; sy -= 1
-    cutoff = f"{sy:04d}-{sm:02d}-01"
-
-    rows = conn.execute("""
-        SELECT h.player_id, h.snapshot_date, h.composite_score, h.ceiling_score,
-               h.true_ceiling, h.ovr, h.pot, h.offensive_grade, h.defensive_value,
-               h.cntct, h.gap, h.pow, h.eye, h.stf, h.mov, h.ctrl, p.age
-        FROM ratings_history h JOIN players p ON p.player_id = h.player_id
-        WHERE h.composite_score IS NOT NULL AND h.composite_score > 0
-        ORDER BY h.player_id, h.snapshot_date
-    """).fetchall()
-    by_player: dict[int, list] = defaultdict(list)
-    age_of: dict[int, int] = {}
-    for r in rows:
-        # NOTE: "gap" here is the Gap-Power hit tool (ratings_history.gap,
-        # dev_speed.HITTER_TOOLS) — unrelated to compute_dev_speed()'s own
-        # "gap" (ceiling minus composite), which lives in a different dict.
-        d = {"snapshot_date": r["snapshot_date"], "composite_score": r["composite_score"],
-             "ceiling_score": r["ceiling_score"], "true_ceiling": r["true_ceiling"],
-             "ovr": r["ovr"], "pot": r["pot"],
-             "offensive_grade": r["offensive_grade"], "defensive_value": r["defensive_value"],
-             "cntct": r["cntct"], "gap": r["gap"], "pow": r["pow"], "eye": r["eye"],
-             "stf": r["stf"], "mov": r["mov"], "ctrl": r["ctrl"]}
-        by_player[r["player_id"]].append(d)
-        age_of[r["player_id"]] = r["age"]
-
-    # Express all history on the latest model scale before measuring deltas.
-    # Steps differ for prospects (<=24, whose MiLB-stat blend/age terms moved) and
-    # established players, so measure the drift per (dev group, prospect flag).
-    ds.neutralize_scale_drift(by_player, {
-        pid: (ds.dev_group(bucket_map[pid][0]), age_of[pid] <= ds.MAX_BASELINE_AGE)
-        if pid in bucket_map and bucket_map[pid][0] else None
-        for pid in by_player})
-    draft_yr_of = dict(conn.execute("SELECT player_id, draft_year FROM players").fetchall())
-    cur_year = int(latest[:4])
-
-    # acc + recent playing time (last 2 game-years)
-    acc_of = dict(conn.execute("SELECT player_id, acc FROM latest_ratings").fetchall())
-    yr = conn.execute("SELECT MAX(year) FROM batting_stats").fetchone()[0] or 0
-    pa_of = dict(conn.execute(
-        "SELECT player_id, SUM(pa) FROM batting_stats WHERE split_id=1 AND year>=? GROUP BY player_id",
-        (yr - 1,)).fetchall())
-    ip_of = dict(conn.execute(
-        "SELECT player_id, SUM(outs)/3.0 FROM pitching_stats WHERE split_id=1 AND year>=? GROUP BY player_id",
-        (yr - 1,)).fetchall())
-
-    # Build the window per player + records for the baseline.
-    windows: dict[int, list] = {}
-    records = []
-    for pid, snaps in by_player.items():
-        win = [s for s in snaps if s["snapshot_date"] >= cutoff]
-        if len(win) < ds.MIN_SNAPSHOTS:
-            win = snaps
-        if len(win) < ds.MIN_SNAPSHOTS:
+    scale = LeagueConfig(base_dir=league_dir).ratings_scale if league_dir else "20-80"
+    end = date.fromisoformat(game_date)
+    cutoff = end.replace(year=end.year-1, day=min(end.day, calendar.monthrange(end.year-1,end.month)[1])).isoformat()
+    by_player = defaultdict(dict)
+    for r in conn.execute("SELECT * FROM ratings_history WHERE snapshot_date<=? ORDER BY snapshot_date", (game_date,)):
+        by_player[r["player_id"]][r["snapshot_date"]] = dict(r)
+    current = {}
+    for r in conn.execute("""SELECT r.* FROM ratings r WHERE r.snapshot_date<=?
+            AND r.snapshot_date=(SELECT MAX(r2.snapshot_date) FROM ratings r2
+            WHERE r2.player_id=r.player_id AND r2.snapshot_date<=?)""", (game_date,game_date)):
+        current[r["player_id"]] = dict(r)
+        by_player[r["player_id"]][r["snapshot_date"]] = dict(r)
+    drafts = dict(conn.execute("SELECT player_id,draft_year FROM players"))
+    windows, records = {}, []
+    for pid, dated in by_player.items():
+        if pid not in bucket_map:
             continue
-        bucket = bucket_map.get(pid, (None,))[0]
-        if bucket is None:
+        bucket, age = bucket_map[pid]
+        if not bucket:
             continue
-        age = age_of[pid]
+        all_rows = sorted(dated.values(), key=lambda r:r["snapshot_date"])
+        # Include the nearest pre-cutoff observation to anchor a true year.
+        older = [r for r in all_rows if r["snapshot_date"]<cutoff]
+        win = ([older[-1]] if older else []) + [r for r in all_rows if r["snapshot_date"]>=cutoff]
+        win = ds.prepare_tool_window(win, bucket, scale)
+        if not win:
+            continue
         windows[pid] = win
-        first, last = win[0], win[-1]
-        yrs = ds._years_between(first["snapshot_date"], last["snapshot_date"])
-        if yrs * 365.25 < ds.MIN_WINDOW_DAYS:
+        years = ds._years_between(win[0]["snapshot_date"],win[-1]["snapshot_date"])
+        if len(win)<ds.MIN_SNAPSHOTS or years*365.25<ds.MIN_WINDOW_DAYS or (drafts.get(pid) or 0)>=end.year:
             continue
-        d_comp = (last["composite_score"] - first["composite_score"]) / yrs
-        d_off, _, _ = ds.component_delta(win, "offensive_grade")
-        records.append({"age": age, "bucket": bucket, "band": ds.age_band(age),
-                        "annual_comp": d_comp, "annual_off": d_off})
-
+        annual = (win[-1]["_dev_current"]-win[0]["_dev_current"])/years
+        records.append({"age":age,"bucket":bucket,"band":ds.age_band(age),
+                        "annual_comp":annual if bucket in ("SP","RP") else None,
+                        "annual_off":annual if bucket not in ("SP","RP") else None})
     baseline = ds.build_baseline(records)
-
-    def _run(peer_cuts):
-        outs = []
-        for pid, win in windows.items():
-            bucket, age = bucket_map[pid]
-            is_pit = bucket in ("SP", "RP")
-            pt = (ip_of.get(pid, 0) if is_pit else pa_of.get(pid, 0)) or 0
-            res = ds.compute_dev_speed(
-                bucket=bucket, age=age, window=win, baseline=baseline,
-                acc=acc_of.get(pid), playing_time=pt,
-                peak_age_hitter=peak_age_hitter, peak_age_pitcher=peak_age_pitcher,
-                rookie=(draft_yr_of.get(pid) or 0) >= cur_year,
-                peer_cuts=peer_cuts.get((ds.dev_group(bucket), ds.age_band(age))) if peer_cuts else None)
-            if res is not None:
-                outs.append((pid, res))
-        return outs
-
-    # Pass 1 measures the population's gap-closure distribution; pass 2 tags
-    # players relative to same-group, same-age peers.
-    _first = _run(None)
-    _cuts = ds.peer_gap_cuts([{**r, "band": ds.age_band(bucket_map[pid][1])} for pid, r in _first if r["available"]])
-    out_rows = []
-    for pid, res in _run(_cuts):
-        out_rows.append((
-            pid, game_date, 1 if res["available"] else 0, res["z"], res["signal"],
-            res["label"], res["css_class"], res["note"], res["gap"], res["d_ovr"],
-            res["d_pot"], res["confidence"], res["annual_move"], res["peer_mean"],
-            res["peer_sd"], res["peer_n"], res["comp_first"], res["comp_last"],
-            res["off_first"], res["off_last"], res["def_first"], res["def_last"],
-            res["window_years"], res["n_snaps"],
-            res["schedule_status"], res["schedule_label"], res["schedule_note"],
-            ",".join(res["stagnant_tools"]) if res["stagnant_tools"] else None,
-            res["gap_closed_pct_yr"], res["years_to_peak"],
-            res["gap_smoothed"], res["gap_trend"],
-        ))
-
+    columns = ("player_id","eval_date","available","z","signal","label","css_class","note",
+        "gap","d_ovr","d_pot","confidence","annual_move","peer_mean","peer_sd","peer_n",
+        "comp_first","comp_last","off_first","off_last","def_first","def_last","window_years","n_snaps",
+        "schedule_status","schedule_label","schedule_note","stagnant_tools","gap_closed_pct_yr","years_to_peak",
+        "gap_smoothed","gap_trend")
+    out = []
+    for pid,win in windows.items():
+        bucket,age = bucket_map[pid]
+        r = ds.compute_dev_speed(bucket=bucket,age=age,window=win,baseline=baseline,
+            acc=current.get(pid,{}).get("acc"),rookie=(drafts.get(pid) or 0)>=end.year,
+            ratings_scale="20-80")  # prepared above; do not normalize twice
+        if r is None:
+            continue
+        # The freshest observation must also be recent enough to describe now.
+        if (end-date.fromisoformat(win[-1]["snapshot_date"])).days>60:
+            r.update(available=False,css_class="none",label="Limited evidence",
+                     schedule_status="limited",schedule_label="Limited evidence")
+            r["note"] = r["schedule_note"] = "No recent report. " + r["note"]
+        r.update(player_id=pid,eval_date=game_date,available=int(r["available"]),
+                 stagnant_tools=",".join(r["stagnant_tools"]) or None)
+        out.append(tuple(r[k] for k in columns))
     conn.execute("DELETE FROM dev_speed")
-    if out_rows:
-        conn.executemany(
-            "INSERT OR REPLACE INTO dev_speed VALUES "
-            "(" + ",".join("?" * 32) + ")", out_rows)
-    n_avail = sum(1 for r in out_rows if r[2] == 1)
-    logger.info(f"dev-speed: {len(out_rows)} computed, {n_avail} reportable, "
-                f"{sum(len(v) for v in baseline.values())} baseline cells")
+    if out:
+        conn.executemany("INSERT INTO dev_speed ("+",".join(columns)+") VALUES ("+",".join("?" for _ in columns)+")",out)
+    logger.info("DEV observed-tools: %s players, %s reportable",len(out),sum(r[2] for r in out))
 
 
 def _apply_milb_context(
@@ -535,6 +463,9 @@ def _apply_milb_context(
     milb_discounts: dict,
     milb_norm_ages: dict,
     load_fn,
+    *,
+    risk_model: dict | None = None,
+    prediction_year: int | None = None,
 ) -> None:
     """Apply MiLB stat context (PAC and risk modifier) to a player dict in-place."""
     from statsplusplus.evaluation.fv import (
@@ -546,6 +477,17 @@ def _apply_milb_context(
         return
     milb_s = load_fn(conn, pid, p["_is_pitcher"], milb_averages)
     if not milb_s:
+        return
+
+    if risk_model is not None:
+        # The empirical model uses production as confirming risk evidence,
+        # not as an unvalidated increase to scouting potential. Avoid applying
+        # the legacy probability modifier a second time to the same signal.
+        if risk_model.get("milb", {}).get("enabled") and prediction_year is not None:
+            from statsplusplus.data.milb import completed_season_signal
+            signal = completed_season_signal(milb_s, prediction_year, p["_is_pitcher"], risk_model["milb"])
+            p["_milb_risk_signal"] = signal["signal"]
+            p["_milb_evidence"] = signal
         return
 
     disc_key = "pitcher" if p["_is_pitcher"] else "hitter"

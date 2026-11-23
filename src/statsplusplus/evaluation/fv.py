@@ -689,6 +689,21 @@ def calc_fv_from_dict(
         tool_ovr=tool_ovr,
     )
 
+    # Optional, league-specific empirical risk model. It changes the risk
+    # evidence only, not FV/ceiling or dollar probabilities. Incomplete tools
+    # and ages outside its validated domain retain the legacy label.
+    from statsplusplus.evaluation.development_risk import load_risk_model, predict_development_risk
+    _risk_model = load_risk_model(league_dir)
+    _keys = ("Stf", "Mov", "Ctrl") if is_pitcher else ("Cntct", "Gap", "Pow", "Eye")
+    _risk = predict_development_risk(
+        [_nf(p.get(k), scale) if p.get(k) is not None else None for k in _keys],
+        [_nf(p.get("Pot" + k), scale) if p.get("Pot" + k) is not None else None for k in _keys],
+        age, is_pitcher, _risk_model, p.get("_milb_risk_signal", 0.0),
+    )
+    if _risk is not None:
+        risk = _risk["risk"]
+        p["_risk_evidence"] = _risk
+
     # Mutate player dict (legacy behavior)
     p["_fv_continuous"] = fv_continuous
 

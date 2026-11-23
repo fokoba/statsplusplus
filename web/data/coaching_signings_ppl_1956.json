@@ -1,0 +1,210 @@
+{
+  "id": "ppl-pha-coaching-1956-round4-20261105",
+  "progress_revision": "round4-20261105",
+  "season": 1956,
+  "league": "ppl",
+  "team_id": 6,
+  "review_date": "2026-11-05",
+  "known_external_demands_total": 755,
+  "retain_note": "Restore the current saved staff first. Retain the entire MLB staff and the 30 minor-league incumbents listed below. Keep Hayes at Asheville, Benson at Modesto, Lovig at Everett and Pedraza at St. George. No new promotions. Replace only Alex Pastrana, subject to Reszka signing.",
+  "update_note": "Final broad review: three external offers, no new promotions. All 33 minor-league jobs filled if these offers sign; 14 favorable preferences and zero listed conflicts across the 11 proposed trios. Earlier offers and checks remain archived separately.",
+  "entries": [
+    {
+      "id": "ryan-baran-04-01-1895-st-petersburg-hitting-coach",
+      "order": 1,
+      "name": "Ryan Baran",
+      "dob": "04/01/1895",
+      "role": "Hitting coach",
+      "team": "St. Petersburg (C)",
+      "action": "offer",
+      "current_organization": "Pittsburgh Pirates: Bristol (Rookie League), Hitting Coach",
+      "replaces": "Vacant",
+      "replacement_note": "",
+      "annual_demand": null,
+      "depends_on": [],
+      "sequence_note": "Priority employed target; fills St. Petersburg hitting. Pair with Ben Ruthledge and retain Matt Phillips. No promotion prerequisite."
+    },
+    {
+      "id": "mike-reszka-03-14-1901-dallas-manager",
+      "order": 2,
+      "name": "Mike Reszka",
+      "dob": "03/14/1901",
+      "role": "Manager",
+      "team": "Dallas (AA)",
+      "action": "offer",
+      "current_organization": "Brooklyn Dodgers: Columbia (Class A), Manager",
+      "replaces": "Alex Pastrana",
+      "replacement_note": "",
+      "annual_demand": null,
+      "depends_on": [],
+      "sequence_note": "Priority employed target; replaces Pastrana. Same OK development, mechanics Good to Average; removes Hein\u2019s Easygoing conflict and adds Rudd-to-Reszka affinity."
+    },
+    {
+      "id": "ben-ruthledge-07-26-1912-st-petersburg-manager",
+      "order": 3,
+      "name": "Ben Ruthledge",
+      "dob": "07/26/1912",
+      "role": "Manager",
+      "team": "St. Petersburg (C)",
+      "action": "offer",
+      "current_organization": "Unemployed",
+      "replaces": "Vacant",
+      "replacement_note": "",
+      "annual_demand": 755,
+      "depends_on": [],
+      "sequence_note": "Fills St. Petersburg manager as a new external hire. Retain Bryan Benson at Modesto. Pair with Baran/Phillips: three favorable preferences, no listed conflicts."
+    }
+  ],
+  "retained_staff": [
+    {
+      "name": "Robbie Biden",
+      "team": "Atlanta (AAA)",
+      "role": "Manager"
+    },
+    {
+      "name": "Brandon Greene",
+      "team": "Atlanta (AAA)",
+      "role": "Pitching coach"
+    },
+    {
+      "name": "Colin Greenberg",
+      "team": "Atlanta (AAA)",
+      "role": "Hitting coach"
+    },
+    {
+      "name": "Matt Lewis",
+      "team": "Seattle (AAA)",
+      "role": "Manager"
+    },
+    {
+      "name": "Steve Eddy",
+      "team": "Seattle (AAA)",
+      "role": "Pitching coach"
+    },
+    {
+      "name": "Ben Gardner",
+      "team": "Seattle (AAA)",
+      "role": "Hitting coach"
+    },
+    {
+      "name": "Josh Rudd",
+      "team": "Dallas (AA)",
+      "role": "Pitching coach"
+    },
+    {
+      "name": "Chris Hein",
+      "team": "Dallas (AA)",
+      "role": "Hitting coach"
+    },
+    {
+      "name": "Micah Wind",
+      "team": "Trenton (AA)",
+      "role": "Manager"
+    },
+    {
+      "name": "Matt Jacobs",
+      "team": "Trenton (AA)",
+      "role": "Pitching coach"
+    },
+    {
+      "name": "Joe Bryant",
+      "team": "Trenton (AA)",
+      "role": "Hitting coach"
+    },
+    {
+      "name": "Dylan Webb",
+      "team": "Asheville (A)",
+      "role": "Manager"
+    },
+    {
+      "name": "Ryan Hayes",
+      "team": "Asheville (A)",
+      "role": "Pitching coach"
+    },
+    {
+      "name": "Jeremy Rosen",
+      "team": "Asheville (A)",
+      "role": "Hitting coach"
+    },
+    {
+      "name": "Bryan Benson",
+      "team": "Modesto (A)",
+      "role": "Manager"
+    },
+    {
+      "name": "Haruhiko Kubo",
+      "team": "Modesto (A)",
+      "role": "Pitching coach"
+    },
+    {
+      "name": "Tatsuji Murakami",
+      "team": "Modesto (A)",
+      "role": "Hitting coach"
+    },
+    {
+      "name": "Jonathan Kemp",
+      "team": "Binghamton (B)",
+      "role": "Manager"
+    },
+    {
+      "name": "Omar Padilla",
+      "team": "Binghamton (B)",
+      "role": "Pitching coach"
+    },
+    {
+      "name": "Angel Jimenez",
+      "team": "Binghamton (B)",
+      "role": "Hitting coach"
+    },
+    {
+      "name": "Ryan Harrower",
+      "team": "Lincoln (B)",
+      "role": "Manager"
+    },
+    {
+      "name": "Steve Kaercher",
+      "team": "Lincoln (B)",
+      "role": "Pitching coach"
+    },
+    {
+      "name": "Bruce Bowman",
+      "team": "Lincoln (B)",
+      "role": "Hitting coach"
+    },
+    {
+      "name": "Matt Oroark",
+      "team": "Everett (C)",
+      "role": "Manager"
+    },
+    {
+      "name": "Tim Lovig",
+      "team": "Everett (C)",
+      "role": "Pitching coach"
+    },
+    {
+      "name": "Kyle Books",
+      "team": "Everett (C)",
+      "role": "Hitting coach"
+    },
+    {
+      "name": "Matt Phillips",
+      "team": "St. Petersburg (C)",
+      "role": "Pitching coach"
+    },
+    {
+      "name": "Jason Lee",
+      "team": "St. George (R)",
+      "role": "Manager"
+    },
+    {
+      "name": "Brian Pedraza",
+      "team": "St. George (R)",
+      "role": "Pitching coach"
+    },
+    {
+      "name": "Ernie Higbee",
+      "team": "St. George (R)",
+      "role": "Hitting coach"
+    }
+  ]
+}

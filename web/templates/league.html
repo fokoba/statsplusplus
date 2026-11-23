@@ -888,6 +888,15 @@
             {% if draft_pool_import %}<span class="text-dim" style="font-size:11px" title="Auto-imported from OOTP's import_export folder (Draft Pool → All Columns export). Re-export from OOTP to refresh — no upload needed.">⟳ Auto-imported {{ draft_pool_import }}</span>{% endif %}
           </div>
         </div>
+        <p class="text-dim" id="draft-model-source" style="font-size:12px;margin:6px 0">
+          ExpRd = your custom value-rank round. Pick forecasts still use market POT rank.
+          {% if draft_pool.comparison and draft_pool.comparison.source %}
+          · Falsone v{{ draft_pool.comparison.source.version }}
+          <a href="{{ draft_pool.comparison.source.repository }}/tree/{{ draft_pool.comparison.source.sha }}" target="_blank" rel="noopener">{{ draft_pool.comparison.source.sha[:8] }}</a>
+          · same PPL scouting data and calibration; upstream default scoring.
+          {% if draft_pool.comparison.pending %}<span id="falsone-pending">Comparison refreshing…</span>{% endif %}
+          {% else %}· Falsone comparison unavailable.{% endif %}
+        </p>
         <div class="draft-tool-filters" id="draft-tool-filters" style="display:none">
           <div class="dtf-group" data-group="hit">
             <label>Con ≥</label><input type="number" id="dtf-con" min="20" max="80" step="5" oninput="applyDraftFilters()">
@@ -1163,8 +1172,8 @@ const COLS = {
 };
 const LEFT_COLS = new Set(['Player','Team','Level']);
 const COL_TIPS = {
-  'FV': 'Future Value — ceiling quality vs MLB positional median. Letter = risk (L=Low, M=Medium, H=High, E=Extreme)',
-  'Dev': 'Development pace vs same-position/age peers (⚡ rising · ⚠ stalled · ↗ on pace). Dimmed = low confidence.',
+  'FV': 'Future Value — ceiling quality vs MLB positional median. Letter = estimated development risk (L/M/H/E), not lifetime failure odds.',
+  'Dev': 'Dated batting/pitching tool changes, not a failure forecast. Early view / limited evidence means no firm assessment yet.',
   'Comp': 'Composite — tool-weighted current ability on the 20-80 scale',
   'Acc': 'Scouting accuracy — how far to trust these ratings. VH/H = high confidence; A/L/VL = average or below',
   'Surplus': 'Projected on-field value minus salary over remaining team control',
@@ -1231,7 +1240,7 @@ function levelDots(level) {
 function devCell(dev) {
   if (!dev) return '';
   const dim = dev.dim ? ' style="opacity:0.5"' : '';
-  let html = `<span class="dev-${dev.css_class}"${dim} title="${dev.label} (${dev.z} SD · ${dev.confidence} conf)" data-sort-value="${dev.z}">${dev.icon}</span>`;
+  let html = `<span class="dev-${dev.css_class}"${dim} title="${dev.schedule_note} (${dev.confidence} confidence)" data-sort-value="${dev.z}">${dev.icon}</span>`;
   if (dev.schedule_badge_text) {
     html += ` <span class="sched-badge ${dev.schedule_badge_css}" title="${dev.schedule_label}: ${dev.schedule_note}">${dev.schedule_badge_text}</span>`;
   }
@@ -1746,6 +1755,29 @@ var draftDetailCache = {};
 var currentDraftView = 'all';
 var draftSortState = null;  // {key: 'rank'|'age'|'ovr'|'pot'|'fv'|'surplus'|'exp_round', dir: 1|-1}
 var DRAFT_POOL = {{ draft_pool.players|tojson if draft_pool else '[]' }};
+var DRAFT_MODEL_COMPARISON = {{ draft_pool.comparison|default({})|tojson }};
+// Source ranks remain fixed across filters; only refresh after changed inputs.
+function refreshFalsoneComparison() {
+  if (!DRAFT_MODEL_COMPARISON.pending || !DRAFT_POOL.length) return;
+  fetch('/api/draft-model-comparison', {method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({pids:DRAFT_POOL.map(function(p){return p.pid;})})})
+  .then(function(r){if(!r.ok)throw new Error('Comparison unavailable');return r.json();})
+  .then(function(data){
+    if(data.pending){setTimeout(refreshFalsoneComparison,10000);return;}
+    DRAFT_MODEL_COMPARISON=data;
+    var pending=document.getElementById('falsone-pending');
+    if(pending)pending.textContent=data.unavailable?'Comparison unavailable.':'';
+    if(data.unavailable)return;
+    DRAFT_POOL.forEach(function(p){
+      var other=(data.players||{})[String(p.pid)];
+      p.falsone_rank=other?other.rank:null;p.falsone_round=other?other.round:null;
+      p.round_diff=other?other.round-p.model_round:null;
+    });
+    applyDraftFilters();
+  }).catch(function(){var pending=document.getElementById('falsone-pending');if(pending)pending.textContent='Comparison unavailable.';});
+}
+if(DRAFT_MODEL_COMPARISON.pending)setTimeout(refreshFalsoneComparison,10000);
+
 var DRAFT_PICKS_INIT = {{ draft_pool.picks|tojson if draft_pool else '[]' }};
 
 // This season's round order (by team ID), pick 1 → pick 16. Rounds repeat this
@@ -2482,19 +2514,15 @@ function setDraftPosFilter(btn, pos) {
   renderDraftBoard(view);
 }
 
-// Below this OVR, the surplus model falls back to its longest amateur
-// development horizon (2.5 yrs to MLB — see prospect_surplus()'s
-// draft/hs/college OVR-bucketing) and can't distinguish a raw HS
-// underclassman from a fringy JC arm. $Val for these players is riding
-// on the most speculative end of what the model can express.
+// A low-current-ability indicator, not an exact ETA or failure forecast.
 function _horizonFlag(p) {
   return (p.ovr || 0) < 42
-    ? ' <span class="draft-flag draft-flag-horizon" title="$Val uses the longest development horizon this model applies to any draft prospect (2.5 yrs to MLB) — treat the dollar figure as more speculative than a typical prospect\'s">⏳</span>'
+    ? ' <span class="draft-flag draft-flag-horizon" title="Current tools are still raw. $Val depends on uncertain development and time to MLB; low current ability is not a failure verdict.">⏳</span>'
     : '';
 }
 
 // Combined Confidence tier — rolls the four separate uncertainty signals
-// already on this page (bust-risk letter, scouting-Accuracy grade, the
+// already on this page (development-risk letter, scouting-Accuracy grade, the
 // OVR-horizon flag above, and makeup/personality concerns) into one A-F
 // grade, so a GM doesn't have to mentally combine four columns on the fly.
 // Weights are deliberately simple/transparent (shown in the tooltip) —
@@ -2504,7 +2532,7 @@ function confidenceTier(p) {
   var score = 100;
   var reasons = [];
   var riskPen = _RISK_PENALTY[p.risk];
-  if (riskPen) { score -= riskPen; reasons.push(p.risk + ' bust risk (-' + riskPen + ')'); }
+  if (riskPen) { score -= riskPen; reasons.push(p.risk + ' development risk (-' + riskPen + ')'); }
   var accUnc = (typeof _ACC_UNCERTAINTY !== 'undefined' && _ACC_UNCERTAINTY[p.acc] != null) ? _ACC_UNCERTAINTY[p.acc] : 0;
   var accPen = Math.round(accUnc * 20);
   if (accPen) { score -= accPen; reasons.push('Scouting Acc ' + p.acc + ' (-' + accPen + ')'); }
@@ -2518,7 +2546,7 @@ function confidencePill(p) {
   var c = confidenceTier(p);
   var cls = c.tier === 'A' ? 'elite' : c.tier === 'B' ? 'good' : c.tier === 'C' ? 'mid' : c.tier === 'D' ? 'poor' : 'bad';
   var title = 'Confidence ' + c.tier + ' (' + c.score + '/100)' + (c.reasons.length ? ': ' + c.reasons.join(', ') : ' — no flagged concerns') +
-    '. Combines bust-risk, scouting-Accuracy, dev-horizon, and makeup signals into one grade.';
+    '. Combines development risk, scouting accuracy, current readiness and makeup. A heuristic summary, not a calibrated success probability.';
   return '<span class="gr-pill gr-pill-' + cls + '" title="' + title + '">' + c.tier + '</span>';
 }
 
@@ -2529,9 +2557,12 @@ function renderDraftBoard(view) {
 
   var thead = document.getElementById('draft-thead');
   var base = '<th class="dd-cmp-th" title="Compare">⚖</th><th data-sort="num">Rk</th><th data-sort="str">Pos</th><th data-sort="str" class="left">Name</th>' +
-    '<th data-sort="num">Age</th><th data-sort="num" title="Expected draft round based on POT rank">ExpRd</th>' +
+    '<th data-sort="num">Age</th><th data-sort="num" title="Your custom model round: overall value rank divided into full rounds. Independent of filters and market POT-based forecasts.">ExpRd</th>' +
+    '<th data-sort="num" title="Independent Falsone upstream model round, same PPL scouting data and shared league calibration; default draft_value ranking, no custom sliders.">Falsone Rd</th>' +
+    '<th data-sort="num" title="Falsone Rd minus your ExpRd. Green +2 means your model ranks the player two rounds earlier; red -2 means two rounds later.">Round Diff</th>' +
     '<th data-sort="num" title="Rank on the OSA Top 200 draft pipeline scouting list — manually entered from a pasted report; not every player on that list is draft-eligible this year">OSA Rk</th>' +
     '<th data-sort="str">Lvl</th><th data-sort="num">Ovr</th><th data-sort="num">Pot</th><th data-sort="str">FV</th>' +
+    '<th data-sort="num" title="Observed tool development. Hover for actual report dates and individual gains or declines; not a failure forecast.">DEV</th>' +
     '<th data-sort="num" title="Potential as the board showed it on draft day (frozen — later model/ratings changes do not move it). Reconstructed with the earlier model for drafts that predate the snapshot.">DD Pot</th>' +
     '<th data-sort="num" title="FV as the board showed it on draft day (frozen)">DD FV</th>' +
     '<th data-sort="num" title="Expected draft round on draft day (POT rank in the pool, frozen)">DD ExpRd</th>' +
@@ -2539,8 +2570,8 @@ function renderDraftBoard(view) {
     '<th data-sort="num" title="One-time signing bonus demand from the uploaded draft pool export (DEM column). &#39;Slot&#39; = will sign for the pick&#39;s assigned slot bonus — shown as an estimated $ cost from the slot-value curve, NOT free; &#39;Impos.&#39; = will not sign for any realistic bonus.">Bonus Ask</th>' +
     '<th data-sort="num" title="0-100 bang-for-buck score: 100 * (1 - ask/surplus), using the estimated slot cost for &#39;Slot&#39; asks. A $10 ask against $100K surplus scores ~100 (barely gives up any value); a $75K ask against $100K surplus scores 25 (gives up 3/4 the value). Unsignable = 0. Blank = no ask on file.">Bonus Value</th>' +
     '<th data-sort="str">Acc</th>' +
-    '<th data-sort="str" class="col-sep">Risk</th>' +
-    '<th data-sort="str" title="Combined confidence grade — rolls bust-risk, scouting-Accuracy, dev-horizon, and makeup concerns into one A-F letter">Conf</th>' +
+    '<th data-sort="str" class="col-sep" title="Estimated next-year development risk where calibrated, not lifetime failure odds. Incomplete evidence uses a fallback estimate.">Risk</th>' +
+    '<th data-sort="str" title="Heuristic summary of development risk, scouting accuracy, readiness and makeup; not a calibrated success probability">Conf</th>' +
     '<th data-sort="str">Loy</th><th data-sort="str">Greed</th>' +
     '<th data-sort="str" class="left" title="Real OOTP personality Type where scouted, otherwise this app\'s own trait-combo inference (with a confidence tier) — see Personality Notes column for the raw trait breakdown">Type</th>' +
     '<th data-sort="str" class="left">Notes</th>' +
@@ -2592,7 +2623,7 @@ function renderDraftBoard(view) {
 var DRAFT_SORT_MAP = {
   'Rk': 'rank', 'Pos': 'pos', 'Name': 'name', 'Age': 'age', 'Lvl': 'type',
   'Ovr': 'ovr', 'Pot': 'pot', 'FV': 'fv', '$Val': 'surplus', 'Acc': 'acc',
-  'ExpRd': 'exp_round', 'OSA Rk': 'osa_rank',
+  'ExpRd': 'model_round', 'Falsone Rd': 'falsone_round', 'Round Diff': 'round_diff', 'DEV': 'dev_z', 'OSA Rk': 'osa_rank',
   'DD Pot': 'dd_pot', 'DD FV': 'dd_fv', 'DD ExpRd': 'dd_exp_round',
   'Bonus Ask': 'bonus_ask', 'Bonus Value': 'bonus_score',
   'C%': 'contrib_pct', 'R%': 'regular_pct', 'AS%': 'allstar_pct', 'Bust%': 'bust_pct',
@@ -2611,6 +2642,10 @@ function _draftSortVal(p, key) {
     case 'fv': return p.fv;
     case 'surplus': return p.surplus || 0;
     case 'exp_round': return (p.adp && p.adp.exp_round) || 99;
+    case 'model_round': return p.model_round != null ? p.model_round : Infinity;
+    case 'falsone_round': return p.falsone_round != null ? p.falsone_round : Infinity;
+    case 'round_diff': return p.round_diff != null ? p.round_diff : -Infinity;
+    case 'dev_z': return p.dev && p.dev.z != null ? p.dev.z : -Infinity;
     case 'dd_pot': return p.dd_pot != null ? p.dd_pot : -1;
     case 'dd_fv': return p.dd_fv != null ? p.dd_fv : -1;
     case 'dd_exp_round': return p.dd_exp_round != null ? p.dd_exp_round : 99;
@@ -2642,7 +2677,10 @@ function initDraftSort() {
     // Remove old listeners by cloning
     var newTh = th.cloneNode(true);
     th.parentNode.replaceChild(newTh, th);
-    newTh.addEventListener('click', function() {
+    newTh.addEventListener('click', function(event) {
+      // Generic DOMContentLoaded sorting also sees this dynamic table.
+      // Keep its handler from reversing the model-aware sort a second time.
+      event.stopImmediatePropagation();
       var text = this.textContent.trim();
       var key = DRAFT_SORT_MAP[text];
       if (!key) {
@@ -2761,15 +2799,18 @@ function applyDraftFilters() {
     tr += '<td>' + p.pos + posNote + '</td>';
     var flags = '';
     if (p.acc === 'L') flags += ' <span class="draft-flag draft-flag-acc" title="Low accuracy — development uncertain">⚠</span>';
-    if (p.risk === 'Extreme') flags += ' <span class="draft-flag draft-flag-risk" title="Extreme bust risk">☠</span>';
     flags += _horizonFlag(p);
     if (p.pos_player_flag) flags += ' <span class="draft-flag" style="color:#4caf50" title="Possible position player: ' + p.pos_player_flag + '">⚾ PP</span>';
     tr += '<td class="left"><a class="player-link" href="/player/' + p.pid + '">' + p.name + '</a>' + flags + '</td>';
     var _adp = p.adp || {};
-    tr += '<td>' + p.age + '</td><td data-sort-value="' + (_adp.exp_round || 99) + '">' + (_adp.exp_round ? 'Rd' + _adp.exp_round : '-') + '</td>';
+    tr += '<td>' + p.age + '</td><td data-sort-value="' + (p.model_round || 99) + '" title="Your overall value rank: ' + p.rank + '">' + (p.model_round ? 'Rd' + p.model_round : '—') + '</td>';
+    tr += '<td data-sort-value="' + (p.falsone_round != null ? p.falsone_round : 999) + '" title="Falsone overall rank: ' + (p.falsone_rank || 'not available yet') + '">' + (p.falsone_round != null ? 'Rd' + p.falsone_round : '<span class="text-dim">—</span>') + '</td>';
+    var roundDiff = p.round_diff;
+    tr += '<td class="' + (roundDiff > 0 ? 'pos' : roundDiff < 0 ? 'neg' : 'text-dim') + '" data-sort-value="' + (roundDiff != null ? roundDiff : -999) + '">' + (roundDiff == null ? '—' : roundDiff > 0 ? '+' + roundDiff : roundDiff === 0 ? '0' : String(roundDiff)) + '</td>';
     tr += '<td data-sort-value="' + (p.osa_rank || 9999) + '">' + (p.osa_rank || '<span class="text-dim">—</span>') + '</td>';
     tr += '<td>' + lvlPill(p.type) + '</td>';
     tr += gtd(p.ovr) + gtd(p.pot) + '<td>' + fvPill(p.fv_str) + '</td>';
+    tr += '<td data-sort-value="' + (p.dev && p.dev.z != null ? p.dev.z : -999) + '">' + (devCell(p.dev) || '<span class="text-dim">No history</span>') + '</td>';
     var ddSrc = p.dd_source === 'reconstructed' ? 'Reconstructed with the earlier model on the draft-pool export' : 'Captured before the draft';
     if (p.dd_pot != null || p.dd_fv_str) {
       tr += '<td class="text-dim" title="' + ddSrc + '" data-sort-value="' + (p.dd_pot != null ? p.dd_pot : -1) + '">' + (p.dd_pot != null ? p.dd_pot : '-') + '</td>';

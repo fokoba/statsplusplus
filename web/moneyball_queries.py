@@ -15,6 +15,7 @@ page load rather than needing a cached/precomputed table.
 import os, sys
 from collections import defaultdict
 from statsplusplus.data.retained_salary import get_retention_map as _get_retention_map
+from statsplusplus.data.retained_salary import get_retainer_map as _get_retainer_map
 from statsplusplus.data.minor_pay import minor_min_pay_map as _minor_min_pay_map, exact_current_salary as _exact_current_salary
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -119,6 +120,7 @@ def get_moneyball(team_id=None):
         FROM contracts c JOIN players p ON c.player_id = p.player_id
         WHERE c.is_major=1
     """).fetchall()
+    retainer = _get_retainer_map(conn)
     for r in _org_rows:
         if r["org_id"] not in tids:
             continue
@@ -128,6 +130,9 @@ def get_moneyball(team_id=None):
         paid = (sal or 0) * (1 - retained_by_pid.get(r["player_id"], 0.0))
         paid_by_pid[r["player_id"]] = paid
         real_payroll[r["org_id"]] += paid
+        _payer = retainer.get(r["player_id"])
+        if _payer in tids:
+            real_payroll[_payer] += (sal or 0) - paid
 
     # The Athletics' hand-built plan knows each player's real workload.
     plan_war = {}

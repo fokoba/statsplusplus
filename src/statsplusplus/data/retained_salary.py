@@ -28,6 +28,29 @@ def get_retention_map(conn) -> Dict[int, float]:
     return {int(r[0]): float(r[1]) for r in rows if r[1]}
 
 
+def get_retained_by_team(conn, team_id: int) -> Dict[int, float]:
+    """{player_id: fraction we still pay} for players another team now holds
+    whose salary this team kept — dead money on this team's books."""
+    try:
+        rows = conn.execute(
+            "SELECT player_id, pct FROM retained_salary WHERE retained_by_team_id=?",
+            (int(team_id),)).fetchall()
+    except Exception:
+        return {}
+    return {int(r[0]): float(r[1]) for r in rows if r[1]}
+
+
+def get_retainer_map(conn) -> Dict[int, int]:
+    """{player_id: team_id paying the retained share}."""
+    try:
+        rows = conn.execute(
+            "SELECT player_id, retained_by_team_id FROM retained_salary "
+            "WHERE retained_by_team_id IS NOT NULL AND pct > 0").fetchall()
+    except Exception:
+        return {}
+    return {int(r[0]): int(r[1]) for r in rows}
+
+
 def effective_retention(standing: float, extra: float = 0.0) -> float:
     """Combine retention already on the contract with a hypothetical extra cut.
 

@@ -114,50 +114,40 @@ def mlb_team_ids():
 def level_map():
     return get_cfg().level_map
 
-# Development-speed display helper (shared by queries.py + team_queries.py).
-_DEV_ICON = {"rising": "⚡", "onpace": "↗", "watch": "⚠",
-             "stalled": "⚠", "regressing": "↘"}
-
-# Schedule/risk tag (2026-09-29) — a second, independent badge alongside the
-# peer-relative icon above; see statsplusplus.evaluation.dev_speed.schedule_tag.
-# "on_track" intentionally renders no badge (kept quiet — only the notable
-# cases get flagged) and "ahead"/"ok" aren't warnings, unlike the other two.
+# Observed DEV changes, never unvalidated failure warnings.
+_DEV_ICON = {"rising":"↗", "onpace":"·", "regressing":"↘", "none":"·"}
 _SCHEDULE_BADGE = {
-    "ahead": {"text": "Ahead", "css": "sched-ahead"},
-    "behind": {"text": "Behind", "css": "sched-behind"},
-    "at_risk": {"text": "At Risk", "css": "sched-risk"},
+    "ahead":{"text":"Faster gains","css":"sched-ahead"},
+    "improving":{"text":"Gains","css":"sched-observed"},
+    "mixed":{"text":"Mixed","css":"sched-observed"},
+    "unchanged":{"text":"Little change","css":"sched-observed"},
+    "declining":{"text":"Declines observed","css":"sched-observed"},
+    "early":{"text":"Early view","css":"sched-observed"},
+    "limited":{"text":"Limited evidence","css":"sched-observed"},
 }
 
 
 def dev_cell(row, i):
-    """Build a compact dev-speed cell from a row slice starting at index i:
-    (available, css_class, label, confidence, z, schedule_status,
-    schedule_label, schedule_note). Returns None when unavailable so list
-    templates render an empty cell.
-
-    The trailing three fields carry the schedule/risk tag — a second signal
-    from the SAME dev_speed row, independent of the peer-relative
-    label/icon: that answers "is he outpacing peers right now", this
-    answers "is he actually closing his own gap to ceiling, broadly across
-    tools, before his runway to peak age runs out." A player can be
-    "Rising" (good peer-relative pace) and "Behind Schedule" (narrow,
-    one-tool progress) at the same time — that combination is the whole
-    point, not a contradiction to resolve.
-    """
+    """Shared compact DEV cell, including an explicit insufficient-evidence state."""
     try:
-        available, css, label, conf, z = row[i], row[i + 1], row[i + 2], row[i + 3], row[i + 4]
-        sched_status, sched_label, sched_note = row[i + 5], row[i + 6], row[i + 7]
-    except (IndexError, TypeError):
+        available,css,label,conf,z = row[i:i+5]
+        status,sched_label,note = row[i+5:i+8]
+    except (IndexError,TypeError,ValueError):
         return None
-    if not available:
+    if label is None:
         return None
-    badge = _SCHEDULE_BADGE.get(sched_status)
-    return {"icon": _DEV_ICON.get(css, ""), "css_class": css, "label": label,
-            "confidence": conf, "z": z, "dim": conf == "Low",
-            "schedule_status": sched_status, "schedule_label": sched_label,
-            "schedule_note": sched_note,
-            "schedule_badge_text": badge["text"] if badge else None,
-            "schedule_badge_css": badge["css"] if badge else None}
+    # Legacy cached rows cannot reintroduce warnings while recalculation runs.
+    if label not in {"Faster gains", "Gains observed", "Mixed changes", "Little change",
+                     "Declines observed", "Early view", "Limited evidence"}:
+        status,label,sched_label = "limited","Limited evidence","Limited evidence"
+        note = "This older DEV assessment needs recalculation; no failure forecast is supported."
+        available,css = False,"none"
+    badge = _SCHEDULE_BADGE.get(status)
+    return {"icon":_DEV_ICON.get(css,"·"),"css_class":css,"label":label,
+        "confidence":conf,"z":z,"dim":not available or conf=="Low",
+        "schedule_status":status,"schedule_label":sched_label,"schedule_note":note,
+        "schedule_badge_text":badge["text"] if badge else None,
+        "schedule_badge_css":badge["css"] if badge else None}
 
 
 def milb_league_map():

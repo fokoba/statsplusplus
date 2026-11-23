@@ -108,6 +108,49 @@ The wizard walks you through:
 
 Once complete, the dashboard is fully populated.
 
+### Optional: independent Falsone draft comparison
+
+Cache the tested upstream model once after cloning or installing this fork:
+
+```bash
+python3 scripts/cache_falsone_model.py
+```
+
+This downloads public source from a pinned commit of
+[`tfalsone/statsplusplus`](https://github.com/tfalsone/statsplusplus/tree/feba5fefb65b3505f5ff3d019aaa7d1af9aaa281)
+(v1.25.0). No GitHub token is required. The source stays under the ignored
+`data/upstream/falsone/` directory. Upstream calculations run in an isolated
+interpreter against a temporary copy of the league; they never overwrite the
+custom model or live league database.
+
+On the draft board, **ExpRd** is this fork's full-pool value-rank round.
+**Falsone Rd** uses upstream default `draft_value` scoring on the same scouting
+data and shared league calibration, without custom draft sliders or the custom
+development-risk model. A green positive **Round Diff** means this fork ranks
+the player earlier; a red negative value means later. Filtering does not rebase
+either rank. Market POT-based estimates remain separate for pick forecasts.
+Changed league inputs invalidate cached comparisons and trigger a background
+rebuild; unavailable or stale comparisons are not displayed as current results.
+
+**DEV** describes dated raw-tool changes rather than predicted failure.
+Early or uncertain histories show **Early view** or **Limited evidence**.
+Local raw-rating imports also refresh calculated grades, same-date history and
+dependent valuations. Older history rows retain their original observations.
+
+### Optional: offline development-risk calibration
+
+Runtime prediction needs no additional dependency. Refitting the empirical
+development-risk model requires NumPy:
+
+```bash
+pip install -e ".[calibration]"
+python3 scripts/calibrate_prospect_risk.py --help
+```
+
+Calibration outputs and league-specific model files remain local under `data/`;
+they are not included in a Git push. The short-horizon risk estimate is separate
+from descriptive DEV labels and is not a lifetime bust probability.
+
 ### 4. Add more leagues
 
 Go to **Settings → Add League** and repeat the onboarding process. Switch between leagues via the dropdown in the nav bar.

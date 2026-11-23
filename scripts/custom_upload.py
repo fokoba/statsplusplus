@@ -944,6 +944,10 @@ def import_ratings_sync(file_bytes: bytes, league_dir=None) -> dict:
 
     conn.commit()
     conn.close()
+    # Raw reports, derived scores, coherent history, DEV and valuations must
+    # move together. A failure propagates so local_ingest retries this file.
+    from statsplusplus.data.derived_refresh import refresh_derived_ratings
+    refresh_derived_ratings(league_dir)
     return {
         "total_rows": len(rows), "updated": updated,
         "inserted": inserted, "skipped": skipped,

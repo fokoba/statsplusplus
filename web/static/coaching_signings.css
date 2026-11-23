@@ -1,0 +1,33 @@
+.coaching-signings-heading, .coaching-signings-toolbar {
+  display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center;
+  justify-content: space-between;
+}
+.coaching-signings-heading h2 { margin: 0; }
+.coaching-signings-help { color: var(--text-dim); margin: 8px 0 12px; }
+.coaching-signings-toolbar { margin-bottom: 12px; }
+.coaching-signings-toolbar label { display: flex; align-items: center; gap: 8px; }
+.coaching-signings input[type="checkbox"] {
+  accent-color: var(--green); width: 17px; height: 17px; cursor: pointer;
+}
+.coaching-signings input:disabled { cursor: wait; }
+.coaching-signings-scroll { overflow-x: auto; }
+.coaching-signings table { min-width: 1250px; }
+.coaching-signings th:last-child, .coaching-signings td:last-child { white-space: normal; min-width: 220px; }
+.coaching-replacement-note { display: block; color: var(--text-dim); font-size: 10px; }
+.coaching-signings th, .coaching-signings td { padding: 7px 10px; }
+.coaching-signings tr.coaching-offer-checked { background: rgba(46, 204, 113, .10); }
+.coaching-signings tr.coaching-offer-checked .coaching-coach-name { color: var(--green); }
+.coaching-step { font-weight: 700; }
+.coaching-signings-retain { color: var(--text); margin: 10px 0; }
+#coaching-signings-next { color: var(--green); margin: 10px 0; }
+.coaching-prerequisite { display: block; color: var(--orange, #e9a23b); font-size: 11px; }
+.coaching-retained-staff { margin-top: 12px; color: var(--text-dim); }
+.coaching-retained-staff summary { cursor: pointer; }
+.coaching-retained-staff ul { columns: 2; margin-top: 8px; }
+@media (max-width: 700px) { .coaching-retained-staff ul { columns: 1; } }
+.coaching-signings tr[hidden] { display: none; }
+.coaching-signings h3 { margin: 20px 0 8px; font-size: 13px; }
+#coaching-signings-progress { color: var(--green); font-size: 12px; }
+#coaching-signings-save-status { color: var(--text-dim); font-size: 12px; }
+#coaching-signings-save-status.save-error { color: var(--red); }
+#coaching-signings-empty { margin-top: 12px; color: var(--green); }

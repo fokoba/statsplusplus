@@ -344,6 +344,7 @@ th.sort-desc::after { content: " ▼"; font-size: 9px; }
 /* Development-speed cell icons (prospect lists) */
 .dev-rising { color: var(--green); }
 .dev-onpace { color: var(--text-dim); }
+.dev-none { color: var(--text-dim); }
 .dev-watch { color: #ffc107; }
 .dev-stalled { color: var(--red); }
 .dev-regressing { color: #ff9800; }
@@ -685,6 +686,7 @@ h2.league-header { color: #aaa; font-size: 0.95rem; text-transform: uppercase; l
   border-radius: 3px; white-space: nowrap; vertical-align: middle;
 }
 .sched-ahead { background: rgba(76, 175, 80, 0.2); color: #4caf50; border: 1px solid rgba(76, 175, 80, 0.4); }
+.sched-observed { background: var(--surface); color: var(--text-dim); border: 1px solid var(--border); }
 .sched-behind { background: rgba(255, 152, 0, 0.2); color: #ff9800; border: 1px solid rgba(255, 152, 0, 0.4); }
 .sched-risk { background: rgba(244, 67, 54, 0.2); color: #f44336; border: 1px solid rgba(244, 67, 54, 0.4); }
 .sched-panel {

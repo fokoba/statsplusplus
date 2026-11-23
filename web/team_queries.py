@@ -1475,7 +1475,7 @@ def confidence_tier(risk, acc, has_personality_concern):
     risk_pen = _CONFIDENCE_RISK_PENALTY.get(risk, 0)
     if risk_pen:
         score -= risk_pen
-        reasons.append(f"{risk} bust risk (-{risk_pen})")
+        reasons.append(f"{risk} development risk (-{risk_pen})")
     acc_pen = _CONFIDENCE_ACC_PENALTY.get(acc, 10 if acc else 0)
     if acc_pen:
         score -= acc_pen
@@ -2343,6 +2343,8 @@ def get_farm(team_id=None, limit=None, sub40=False):
     checkbox only; they stay out of every farm total and ranking.
     """
     conn = get_db()
+    from statsplusplus.evaluation.development_risk import load_risk_model, RISK_NOTE
+    risk_note = RISK_NOTE if load_risk_model(get_cfg().league_dir) else None
     tid = team_id or my_team_id()
     ed = conn.execute("SELECT MAX(eval_date) FROM prospect_fv").fetchone()[0]
     fv_clause = "pf.fv < 40 AND pf.prospect_surplus > 0" if sub40 else "pf.fv >= 40"
@@ -2383,7 +2385,7 @@ def get_farm(team_id=None, limit=None, sub40=False):
              "surplus": round(r[6] / _money_divisor(), 1) if r[6] else 0,
              "pid": r[7],
              "composite_score": r[9], "ceiling_score": r[10],
-             "risk": r[11], "dev": _dev_cell(r, 12),
+             "risk": r[11], "risk_note": risk_note, "dev": _dev_cell(r, 12),
              "acc": r[20], "confidence": conf, "long_horizon": horizon_flag(r[2])})
     return out
 

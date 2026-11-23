@@ -2137,8 +2137,8 @@ def run(
         - Reads from ``ratings``, ``players``, ``batting_stats``, ``pitching_stats``
         - Writes ``composite_score``, ``ceiling_score``, ``tool_only_score``,
           ``secondary_composite`` to the ``ratings`` table
-        - Writes ``composite_score``, ``ceiling_score`` to ``ratings_history``
-          at each player's latest snapshot (the current in-game month's row)
+        - Saves raw and calculated ratings together in ``ratings_history``
+          at each player's actual rating date
 
     Error handling:
         - Players with no tool ratings are skipped
@@ -2267,7 +2267,6 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
 
     # -- Pass 1: Compute all scores and collect MLB hitter offensive grades --
     ratings_updates: list[tuple] = []
-    history_updates: list[tuple] = []
 
     # Collect MLB hitter offensive grades by position bucket for median computation
     mlb_offensive_grades: dict[str, list[int]] = {}
@@ -2799,12 +2798,7 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
             positional_percentile, positional_median,
             player_id, player_snapshot_date,
         ))
-        history_updates.append((
-            composite_score, ceiling_score,
-            offensive_grade, baserunning_value, defensive_value,
-            durability_score, offensive_ceiling, true_ceiling,
-            player_id, player_snapshot_date,
-        ))
+
 
         # Store info for Pass 2 divergence enrichment (hitters only)
         if is_hitter and offensive_grade is not None:
@@ -2877,44 +2871,9 @@ def _run_impl(conn: sqlite3.Connection, league_dir: Path) -> None:
         WHERE player_id = ? AND snapshot_date = ?
     """, ratings_updates)
 
-    # -- Write recomputed scores back to each player's latest ratings_history row --
-    # ratings_history snapshots are taken once per in-game MONTH (dated to the
-    # first refresh of the month), while `ratings` advances to the latest game
-    # date. So the current `ratings` snapshot_date almost never matches a history
-    # row. Keying the UPDATE on that date matched zero rows (dead write), leaving
-    # the dev-history timeline frozen on stale (and, after a model change,
-    # off-scale) composites that disagreed with the player-page header.
-    # Fix: target each player's OWN latest history snapshot so the newest point on
-    # the development chart is always recomputed on the current model and equals
-    # the header value. (Within-month tool drift is ~4% of players; writing the
-    # current composite onto the month's row reflects their most-current grade.)
-    try:
-        hist_cols = {r[1] for r in conn.execute("PRAGMA table_info(ratings_history)").fetchall()}
-        if "composite_score" in hist_cols:
-            set_cols = ["composite_score", "ceiling_score", "offensive_grade",
-                        "baserunning_value", "defensive_value", "durability_score",
-                        "offensive_ceiling"]
-            if "true_ceiling" in hist_cols:
-                set_cols.append("true_ceiling")
-            else:
-                # Older DB not yet migrated — drop that value from each tuple
-                # rather than fail the whole batch write.
-                history_updates = [(*t[:7], *t[8:]) for t in history_updates]
-            set_clause = ", ".join(f"{c} = ?" for c in set_cols)
-            latest_hist_date = dict(conn.execute(
-                "SELECT player_id, MAX(snapshot_date) FROM ratings_history GROUP BY player_id"
-            ).fetchall())
-            remapped = [
-                hu[:-1] + (latest_hist_date[hu[-2]],)
-                for hu in history_updates
-                if hu[-2] in latest_hist_date
-            ]
-            conn.executemany(f"""
-                UPDATE ratings_history
-                SET {set_clause}
-                WHERE player_id = ? AND snapshot_date = ?
-            """, remapped)
-    except Exception:
-        pass  # ratings_history may not exist or may not have the columns yet
+    # Preserve a same-date raw+derived snapshot. Never write today's grades
+    # onto an older month's tools: DEV must compare coherent observations.
+    from statsplusplus.data.ratings_history import snapshot_current_ratings
+    snapshot_current_ratings(conn)
 
     conn.commit()

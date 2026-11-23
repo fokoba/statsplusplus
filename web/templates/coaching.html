@@ -3,6 +3,11 @@
 
 <h1 class="page-title">{{ team_name }} — Coaching Staff</h1>
 
+{% if signing_checklist %}<details class="panel coaching-signings-collapse" style="padding:8px 12px">
+  <summary style="cursor:pointer; font-weight:600">{{ signing_checklist.season }} Coaching Signing Plan <span style="color:var(--text-dim); font-weight:400; font-size:13px">(complete — all Athletics slots filled; click to expand)</span></summary>
+  {% include '_coaching_signings.html' %}
+</details>{% endif %}
+
 {% if data.n_total == 0 %}
 <div class="panel">
   <p>No personnel data found. This page reads a manually-exported OOTP "All Personnel" file
@@ -205,4 +210,8 @@
 {% endif %}
 
 {% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if signing_checklist %}<script src="{{ url_for('static', filename='coaching_signings.js') }}" defer></script>{% endif %}
 {% endblock %}

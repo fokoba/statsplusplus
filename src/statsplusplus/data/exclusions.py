@@ -24,16 +24,34 @@ def load_excluded_ids(league_dir) -> list[int]:
         return []
 
 
+def load_retired_ids(league_dir) -> list[int]:
+    """`retired_ids` in the same file: players who retired in-game but whom
+    StatsPlus still lists (e.g. as a free agent). Kept in the DB, marked retired."""
+    path = Path(league_dir) / "config" / "excluded_players.json"
+    try:
+        return [int(x) for x in json.loads(path.read_text()).get("retired_ids", [])]
+    except (json.JSONDecodeError, OSError, ValueError):
+        return []
+
+
 def purge_excluded(league_dir, conn: sqlite3.Connection | None = None) -> int:
-    """Delete every excluded player from all tables with a player_id column.
-    Returns the number of rows deleted (0 when nothing was present)."""
+    """Delete every excluded player from all tables with a player_id column,
+    and mark `retired_ids` retired. Returns the number of rows deleted."""
     ids = load_excluded_ids(league_dir)
-    if not ids:
+    retired = load_retired_ids(league_dir)
+    if not ids and not retired:
         return 0
     own = conn is None
     if own:
         conn = sqlite3.connect(str(Path(league_dir) / "league.db"), timeout=30)
     try:
+        if retired:
+            conn.execute(
+                f"UPDATE players SET retired=1, free_agent=0, team_id=0, parent_team_id=0 "
+                f"WHERE player_id IN ({','.join('?' * len(retired))})", retired)
+            conn.commit()
+        if not ids:
+            return 0
         qs = ",".join("?" * len(ids))
         total = 0
         tables = [r[0] for r in conn.execute(

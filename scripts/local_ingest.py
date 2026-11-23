@@ -185,7 +185,9 @@ def _ingest_draft_pool(file_bytes: bytes, league_dir) -> int:
     if not pids:
         return 0
     pool_path = Path(league_dir) / "config" / "draft_pool.json"
-    pool_path.write_text(json.dumps({"player_ids": pids}, indent=2))
+    pool_path.write_text(json.dumps({
+        "player_ids": pids, "source": "auto",
+        "imported_at": time.strftime("%Y-%m-%d %H:%M")}, indent=2))
     return len(pids)
 
 
@@ -274,13 +276,15 @@ def ingest_once(league_slug: str, league_dir) -> dict[str, str]:
     # exists and works exactly as before; just call it directly when asked.
     _maybe("fa_asks", ["free_agents", "allcolumns"],
            lambda data: import_fa_asking_prices(data, league_dir=league_dir))
-    # Draft pool / draft signing-bonus asks are NOT auto-ingested here on
-    # purpose (2026-09-28, Forrest's request) — PPL's draft is finished and
-    # eMLB has no draft underway, so there's nothing live to track right
-    # now. _ingest_draft_pool and custom_upload.import_draft_bonus_asks
-    # still exist and work exactly as before; re-enable both _maybe calls
-    # (they were here previously, same must_contain args) once a draft is
-    # actually in progress in either league again.
+    # Draft pool + signing-bonus asks (re-enabled 2026-11-23, replaces the
+    # Draft tab's manual "Upload Pool"). Only runs when Forrest exports a new
+    # draft pool, so an idle off-season changes nothing; the board's own
+    # staleness guard still discards a prior draft's pool.
+    from custom_upload import import_draft_bonus_asks
+    _maybe("draft_pool", ["draft_pool", "allcolumns"],
+           lambda data: _ingest_draft_pool(data, league_dir))
+    _maybe("draft_bonus", ["draft_pool", "allcolumns"],
+           lambda data: import_draft_bonus_asks(data, league_dir=league_dir))
     # Draft-eligible amateurs aren't in the roster "player_list" export at
     # all, so import_ratings_sync() above never sees them — their ratings
     # (including position-defense potentials, e.g. "1B Pot") only ever come

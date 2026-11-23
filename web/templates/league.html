@@ -872,7 +872,7 @@
             <span class="draft-status" id="draft-status">
               {% if dp_state == 'uploaded' %}{{ draft_pool.players|length }} prospects
               {% elif dp_state == 'active' %}{{ draft_pool.picks|length }} picks
-              {% elif dp_state == 'pre_draft' %}{{ draft_pool.players|length }} picks · <span style="color:var(--orange)" title="Upload a draft pool export from OOTP for accurate rankings and auto-draft list generation">Approximate</span>{% endif %}
+              {% elif dp_state == 'pre_draft' %}{{ draft_pool.players|length }} picks · <span style="color:var(--orange)" title="Export the Draft Pool (All Columns) from OOTP for accurate rankings — imported automatically">Approximate</span>{% endif %}
             </span>
             {% if dp_state in ('uploaded', 'active') %}
             <button class="btn" onclick="updateDraftPicks(this)">⟳ Update Picks</button>
@@ -881,11 +881,11 @@
             <button class="btn" onclick="openDraftSimModal()" title="Simulate draft based on your pick position">🎲 Sim</button>
             <button class="btn" onclick="openDraftListSettings()" title="Review settings and generate auto-draft list">📋 Auto-Draft List</button>
             {% else %}
-            <button class="btn" style="opacity:0.5" title="Requires uploaded draft pool" onclick="alert('Simulation requires an uploaded draft pool.\n\nUpload an OOTP draft-eligible player export via the 📁 Upload Pool button.')">🎲 Sim</button>
-            <button class="btn" style="opacity:0.5" title="Requires uploaded draft pool" onclick="alert('Auto-draft list requires an uploaded draft pool.\n\nThe current board is an approximation from amateur-level players in the database. Upload an OOTP draft-eligible player export via the 📁 Upload Pool button for accurate list generation.')">📋 Auto-Draft List</button>
+            <button class="btn" style="opacity:0.5" title="Requires uploaded draft pool" onclick="alert('Simulation requires an uploaded draft pool.\n\nExport the Draft Pool (All Columns) from OOTP — it is imported automatically.')">🎲 Sim</button>
+            <button class="btn" style="opacity:0.5" title="Requires uploaded draft pool" onclick="alert('Auto-draft list requires an uploaded draft pool.\n\nThe current board is an approximation from amateur-level players in the database. Export the Draft Pool (All Columns) from OOTP — it is imported automatically for accurate list generation.')">📋 Auto-Draft List</button>
             {% endif %}
             <button class="btn" onclick="exportTableCSV('draft-table', 'draft_board.csv')" title="Export current view as CSV">⬇ CSV</button>
-            <button class="btn" onclick="openUploadPoolModal()">📁 Upload Pool</button>
+            {% if draft_pool_import %}<span class="text-dim" style="font-size:11px" title="Auto-imported from OOTP's import_export folder (Draft Pool → All Columns export). Re-export from OOTP to refresh — no upload needed.">⟳ Auto-imported {{ draft_pool_import }}</span>{% endif %}
           </div>
         </div>
         <div class="draft-tool-filters" id="draft-tool-filters" style="display:none">
@@ -945,8 +945,7 @@
   </div>
 {% else %}
   <div class="panel">
-    <p class="text-dim">No draft pool available. Upload a draft-eligible player export from OOTP to enable rankings, simulation, and auto-draft list generation.</p>
-    <button class="btn" style="margin-top:10px" onclick="openUploadPoolModal()">📁 Upload Draft Pool</button>
+    <p class="text-dim">No draft pool available. In OOTP, export the Draft Pool with the "All Columns" view to the import_export folder — Dominator picks it up automatically within a minute and enables rankings, simulation, and auto-draft list generation.</p>
   </div>
 {% endif %}
 

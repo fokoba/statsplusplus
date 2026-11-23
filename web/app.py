@@ -599,6 +599,16 @@ def league():
 
     draft_pool = queries.get_draft_pool()
     draft_depth = queries.get_draft_org_depth(my_team_id()) if draft_pool else {}
+    # Draft pool is auto-imported from OOTP's import_export folder
+    # (scripts/local_ingest.py); show when the current file came in.
+    draft_pool_import = None
+    try:
+        import datetime as _dt
+        _pp = cfg.league_dir / "config" / "draft_pool.json"
+        if _pp.exists():
+            draft_pool_import = _dt.datetime.fromtimestamp(_pp.stat().st_mtime).strftime("%b %d, %-I:%M %p")
+    except Exception:
+        pass
 
     pos_rankings = queries.get_positional_rankings()
 
@@ -616,6 +626,7 @@ def league():
                            trade_orgs=trade_orgs, my_team_id=my_team_id(),
                            season_remaining=round(season_remaining, 3),
                            draft_pool=draft_pool, draft_depth=draft_depth,
+                           draft_pool_import=draft_pool_import,
                            pos_rankings=pos_rankings,
                            farm_rankings=farm_rankings,
                            standings=standings, h2h=h2h,

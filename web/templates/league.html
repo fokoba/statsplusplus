@@ -878,13 +878,10 @@
             <button class="btn" onclick="updateDraftPicks(this)">⟳ Update Picks</button>
             {% endif %}
             {% if dp_state in ('uploaded', 'active') %}
-            <button class="btn" onclick="openDraftSimModal()" title="Simulate draft based on your pick position">🎲 Sim</button>
             <button class="btn" onclick="openDraftListSettings()" title="Review settings and generate auto-draft list">📋 Auto-Draft List</button>
             {% else %}
-            <button class="btn" style="opacity:0.5" title="Requires uploaded draft pool" onclick="alert('Simulation requires an uploaded draft pool.\n\nExport the Draft Pool (All Columns) from OOTP — it is imported automatically.')">🎲 Sim</button>
             <button class="btn" style="opacity:0.5" title="Requires uploaded draft pool" onclick="alert('Auto-draft list requires an uploaded draft pool.\n\nThe current board is an approximation from amateur-level players in the database. Export the Draft Pool (All Columns) from OOTP — it is imported automatically for accurate list generation.')">📋 Auto-Draft List</button>
             {% endif %}
-            <button class="btn" onclick="exportTableCSV('draft-table', 'draft_board.csv')" title="Export current view as CSV">⬇ CSV</button>
             {% if draft_pool_import %}<span class="text-dim" style="font-size:11px" title="Auto-imported from OOTP's import_export folder (Draft Pool → All Columns export). Re-export from OOTP to refresh — no upload needed.">⟳ Auto-imported {{ draft_pool_import }}</span>{% endif %}
           </div>
         </div>

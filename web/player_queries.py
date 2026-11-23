@@ -2219,7 +2219,7 @@ def get_player(pid):
 
     acquisition = None
     try:
-        if org_id and org_id == get_cfg().my_team_id:
+        if org_id:
             import acquisition as _acq
             _dr = conn.execute(
                 "SELECT draft_year, draft_round, draft_pick, draft_overall_pick, draft_team_id "

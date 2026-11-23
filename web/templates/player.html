@@ -717,6 +717,13 @@
   </div>
   {% endif %}
   {% endif %}
+  {% if p.acquisition %}
+  <div class="summary-item acq-item"{% if p.acquisition.tip %} title="{{ p.acquisition.tip }}"{% endif %}>
+    <span class="label">How Acquired</span>
+    <span class="value" style="font-size:13px">{{ p.acquisition.main }}{% if p.acquisition.tip %} <span class="info-tip">ⓘ</span>{% endif %}</span>
+    {% if p.acquisition.sub %}<span style="font-size:10px; color:var(--text-dim)">{{ p.acquisition.sub }}</span>{% endif %}
+  </div>
+  {% endif %}
   {% if p.pap is not none %}
   <div class="summary-item" title="Payroll Adjusted Performance">
     <span class="label">PAP</span>

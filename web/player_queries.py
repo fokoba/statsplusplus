@@ -2217,7 +2217,20 @@ def get_player(pid):
     except Exception:
         role_surplus = None
 
+    acquisition = None
+    try:
+        if org_id and org_id == get_cfg().my_team_id:
+            import acquisition as _acq
+            _dr = conn.execute(
+                "SELECT draft_year, draft_round, draft_pick, draft_overall_pick, draft_team_id "
+                "FROM players WHERE player_id=?", (pid,)).fetchone()
+            _dr = dict(zip(("draft_year", "draft_round", "draft_pick", "draft_overall_pick", "draft_team_id"), _dr or ()))
+            acquisition = _acq.describe(pid, org_id, _dr, os.path.basename(str(get_cfg().league_dir)).lower(), team_abbr_map())
+    except Exception:
+        acquisition = None
+
     return {
+        "acquisition": acquisition,
         "pid": pid, "player_id": pid, "name": name, "age": age, "pos": pos_str,
         "role_surplus": role_surplus,
         "year": get_cfg().year,

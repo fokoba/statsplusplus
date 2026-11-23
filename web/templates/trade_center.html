@@ -3,7 +3,7 @@
 {% macro money(v) -%}{%- if v is none -%}–{%- else -%}{{ '-' if v < 0 else '' }}${{ '%.1f'|format((v|abs) / divisor) }}{{ unit|lower }}{%- endif -%}{%- endmacro %}
 {% macro pct(v) -%}{{ '%.1f'|format(v * 100) }}%{%- endmacro %}
 
-<h1 class="page-title">🤝 Trade Center — {{ team_name }}</h1>
+<h1 class="page-title">🤝 Trade Center — {{ team_name }} <a href="/trades" style="font-size:13px; font-weight:500; margin-left:12px">⚖️ Trade Winners &amp; Losers →</a></h1>
 <p class="tc-sub">{{ d.games_left }} games left of {{ d.gps }}{% if d.magic %} · magic number <strong>{{ d.magic }}</strong>{% endif %}. Odds come from simulating every remaining game {{ '{:,}'.format(20000) }} times from each club's run-differential strength (regressed toward .500), then a best-of-7 World Series.</p>
 
 {# ── Win value ── #}

@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block content %}
+{% macro money(v) -%}{{ '-' if v < 0 else '' }}{% if (v|abs) >= 1000000 %}${{ '%.2f'|format((v|abs) / 1000000) }}M{% else %}${{ '%.1f'|format((v|abs) / divisor) }}{{ unit|lower }}{% endif %}{%- endmacro %}
+{% macro pkg(players, cash) -%}
+  {% for x in players %}<div class="tl-p"><a href="/player/{{ x.pid }}">{{ x.name }}</a>
+    {% if x.gone %}<span class="tl-dim">({{ x.gone }})</span>{% elif x.now %}<span class="tl-dim">· now {{ x.now }}</span>{% endif %}
+    <span class="tl-v {{ 'pos' if x.surplus > 0 else 'neg' if x.surplus < 0 }}">{{ money(x.surplus) }}</span></div>{% endfor %}
+  {% if cash %}<div class="tl-p">Cash <span class="tl-v pos">{{ money(cash) }}</span></div>{% endif %}
+  {% if not players and not cash %}<span class="tl-dim">nothing</span>{% endif %}
+{%- endmacro %}
+<style>
+  .tl-table { width:100%; border-collapse:collapse; font-size:13px; }
+  .tl-table th, .tl-table td { padding:8px 10px; border-bottom:1px solid var(--border, #2a2a2e); vertical-align:top; text-align:left; }
+  .tl-table th { font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-dim); }
+  .tl-p { white-space:nowrap; line-height:1.6; }
+  .tl-v { margin-left:6px; font-variant-numeric:tabular-nums; }
+  .tl-dim { color:var(--text-dim); font-size:11px; }
+  .tl-tot { font-weight:700; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .tl-team { font-weight:700; white-space:nowrap; }
+  .tl-win { color:#4caf50; }
+  .tl-tag { display:inline-block; padding:3px 9px; border-radius:999px; font-size:11px; font-weight:700; white-space:nowrap; }
+  .tl-heavy  { background:#1b5e20; color:#c8f7c5; border:1px solid #4caf50; }
+  .tl-favors { background:#3e3a12; color:#ffe082; border:1px solid #c9a227; }
+  .tl-neutral{ background:#2a2a2e; color:#b0b0b8; border:1px solid #44444c; }
+  .tl-mine td { background:rgba(255,152,0,.05); }
+  .tl-filter { display:flex; gap:10px; align-items:center; margin-bottom:12px; font-size:13px; }
+  .tl-legend { font-size:12px; color:var(--text-dim); margin:4px 0 12px; }
+</style>
+
+<h1 class="page-title">⚖️ Trade Winners &amp; Losers</h1>
+
+<div class="panel">
+  <form class="tl-filter" method="get">
+    <label>Team <select name="team" onchange="this.form.submit()">
+      <option value="">All teams</option>
+      {% for tid, name in all_teams %}<option value="{{ tid }}"{% if tid == team_filter %} selected{% endif %}>{{ name }}</option>{% endfor %}
+    </select></label>
+    <span class="tl-dim">{{ d.rows|length }} trades</span>
+  </form>
+  <div class="tl-legend">
+    Each side is scored by what it <em>received</em>: today's long-term surplus of every player it got, plus cash.
+    Hindsight view — players since retired or released count $0; players since flipped still count at current value.
+    <span class="tl-tag tl-heavy">Heavily favors</span> margin ≥ $250k and ≥ 60% of combined value ·
+    <span class="tl-tag tl-favors">Favors</span> margin ≥ $50k and ≥ 20% ·
+    <span class="tl-tag tl-neutral">Neutral</span> otherwise.
+  </div>
+  <table class="tl-table">
+    <thead><tr><th data-sort="text">Date</th><th>Team 1</th><th>Team 1 received</th><th data-sort="num">Value</th>
+      <th>Team 2</th><th>Team 2 received</th><th data-sort="num">Value</th><th data-sort="num">Verdict</th></tr></thead>
+    <tbody>{% for r in d.rows %}
+      <tr class="{{ 'tl-mine' if my_tid in (r.a, r.b) }}">
+        <td data-sort-value="{{ r.date }}" style="white-space:nowrap">{{ r.month }}</td>
+        <td class="tl-team {{ 'tl-win' if r.winner == r.a }}"><a href="/team/{{ r.a }}">{{ r.a_abbr }}</a></td>
+        <td>{{ pkg(r.a_got, r.a_cash) }}</td>
+        <td class="tl-tot {{ 'pos' if r.a_val > 0 else 'neg' if r.a_val < 0 }}" data-sort-value="{{ r.a_val }}">{{ money(r.a_val) }}</td>
+        <td class="tl-team {{ 'tl-win' if r.winner == r.b }}"><a href="/team/{{ r.b }}">{{ r.b_abbr }}</a></td>
+        <td>{{ pkg(r.b_got, r.b_cash) }}</td>
+        <td class="tl-tot {{ 'pos' if r.b_val > 0 else 'neg' if r.b_val < 0 }}" data-sort-value="{{ r.b_val }}">{{ money(r.b_val) }}</td>
+        <td data-sort-value="{{ r.margin if r.level != 'neutral' else 0 }}">
+          {% if r.level == 'heavy' %}<span class="tl-tag tl-heavy">Heavily favors {{ r.winner_abbr }}</span>
+          {% elif r.level == 'favors' %}<span class="tl-tag tl-favors">Favors {{ r.winner_abbr }}</span>
+          {% else %}<span class="tl-tag tl-neutral">Neutral</span>{% endif %}
+          {% if r.level != 'neutral' %}<div class="tl-dim" style="margin-top:3px">by {{ money(r.margin) }}</div>{% endif %}
+        </td>
+      </tr>{% else %}<tr><td colspan="8" class="tl-dim">No trades found in the transaction logs.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="panel">
+  <h2>Team scoreboard</h2>
+  <table class="tl-table" style="max-width:640px">
+    <thead><tr><th data-sort="text">Team</th><th data-sort="num">Trades</th><th data-sort="num">Won</th><th data-sort="num">Lost</th><th data-sort="num">Net surplus gained</th></tr></thead>
+    <tbody>{% for t in d.teams %}<tr class="{{ 'tl-mine' if t.tid == my_tid }}">
+      <td class="tl-team"><a href="/trades?team={{ t.tid }}">{{ t.team }}</a></td><td>{{ t.n }}</td><td>{{ t.won }}</td><td>{{ t.lost }}</td>
+      <td class="tl-tot {{ 'pos' if t.net > 0 else 'neg' if t.net < 0 }}" data-sort-value="{{ t.net }}">{{ money(t.net) }}</td></tr>{% endfor %}</tbody>
+  </table>
+</div>
+{% endblock %}

@@ -76,6 +76,9 @@ def _parse_entry(d: date, raw: str, ev: dict) -> None:
         xp, xc = _side(x)
         yp, yc = _side(y)
         names = {int(p): _text(n) for p, n in re.findall(_P + r"(.*?)</a>", raw)}
+        ev.setdefault("_trades", []).append({
+            "date": d, "a": a, "b": b, "a_sent": xp, "a_cash": xc, "b_sent": yp, "b_cash": yc,
+            "names": names, "text": _text(raw)})
         for pid in yp:   # moved B -> A
             add(pid, kind="trade", to=a, frm=b, gave=[names.get(p) for p in xp], gave_cash=xc,
                 got=[names.get(p) for p in yp], got_cash=yc)
@@ -142,10 +145,16 @@ def _load(slug: str) -> dict:
                     continue
                 seen.add(sig)
                 _parse_entry(cur, m.group(1), ev)
+    ev.setdefault("_trades", [])
     for lst in ev.values():
         lst.sort(key=lambda e: e["date"])
     _cache.update(key=key, events=ev)
     return ev
+
+
+def trades(slug: str) -> list[dict]:
+    """Every logged trade, newest first."""
+    return list(reversed(_load(slug).get("_trades", [])))
 
 
 def _ord(n: int) -> str:

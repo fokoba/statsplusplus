@@ -751,6 +751,24 @@ def trade_center():
     )
 
 
+@app.route("/trades")
+def trade_ledger():
+    """Trade Winners & Losers: every logged trade scored by current surplus."""
+    import trade_ledger_queries as tl
+    from web_league_context import money_unit, money_divisor
+    cfg = _get_cfg()
+    ln = cfg.settings.get("league", "League")
+    team = request.args.get("team", type=int)
+    return render_template(
+        "trade_ledger.html",
+        breadcrumbs=[{"label": ln, "url": "/league"},
+                     {"label": "Trade Center", "url": "/trade-center"},
+                     {"label": "Winners & Losers", "url": "/trades"}],
+        d=tl.build(team), team_filter=team, my_tid=queries.get_my_team_id(),
+        unit=money_unit(), divisor=money_divisor(),
+    )
+
+
 @app.route("/international")
 def international():
     """Multi-scout international amateur valuation + bid planner."""

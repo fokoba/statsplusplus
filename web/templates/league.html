@@ -2567,7 +2567,7 @@ function renderDraftBoard(view) {
     '<th data-sort="num" title="Expected draft round on draft day (POT rank in the pool, frozen)">DD ExpRd</th>' : '') +
     '<th data-sort="num" title="Risk-adjusted surplus value over 6 years of team control. Hover cells for raw (undiscounted) value.">$Val</th>' +
     '<th data-sort="num" title="One-time signing bonus demand from the uploaded draft pool export (DEM column). &#39;Slot&#39; = will sign for the pick&#39;s assigned slot bonus — shown as an estimated $ cost from the slot-value curve, NOT free; &#39;Impos.&#39; = will not sign for any realistic bonus.">Bonus Ask</th>' +
-    '<th data-sort="num" title="0-100 bang-for-buck score: 100 * (1 - ask/surplus), using the estimated slot cost for &#39;Slot&#39; asks. A $10 ask against $100K surplus scores ~100 (barely gives up any value); a $75K ask against $100K surplus scores 25 (gives up 3/4 the value). Unsignable = 0. Blank = no ask on file.">Bonus Value</th>' +
+    (DRAFT_SHOW_DD ? '<th data-sort="num" title="0-100 bang-for-buck score: 100 * (1 - ask/surplus), using the estimated slot cost for &#39;Slot&#39; asks. A $10 ask against $100K surplus scores ~100 (barely gives up any value); a $75K ask against $100K surplus scores 25 (gives up 3/4 the value). Unsignable = 0. Blank = no ask on file.">Bonus Value</th>' : '') +
     '<th data-sort="str">Acc</th>' +
     '<th data-sort="str" class="col-sep" title="Estimated next-year development risk where calibrated, not lifetime failure odds. Incomplete evidence uses a fallback estimate.">Risk</th>' +
     '<th data-sort="str" title="Heuristic summary of development risk, scouting accuracy, readiness and makeup; not a calibrated success probability">Conf</th>' +
@@ -2787,7 +2787,7 @@ function applyDraftFilters() {
       if (negTrait) persCls = ' draft-pers-dim';
       else if (posTrait) persCls = ' draft-pers-highlight';
     }
-    var cls = 'draft-row' + (picked ? ' draft-picked' : '') + (isMine ? ' draft-mine' : '') + persCls;
+    var cls = 'draft-row' + (picked ? ' draft-picked' : '') + (isMine ? ' draft-mine' : '') + persCls + (_isUnsignable(p) ? ' draft-unsignable' : '');
     var isPit = p.pos === 'SP' || p.pos === 'RP' || p.pos === 'CL';
     var posNote = p.pos_note ? ' <span class="draft-pos-note" title="Defense suggests ' + p.pos_note + '">→' + p.pos_note + '</span>' : '';
     var tr = '<tr class="' + cls + '" data-pid="' + p.pid + '" data-rank="' + p.rank + '" data-fv="' + p.fv_str + '">';
@@ -2826,8 +2826,10 @@ function applyDraftFilters() {
       bonusAskDisplay = 'Slot <span class="text-dim" title="Estimated real cost from the pick-slot value curve — a Slot ask is NOT free, it just means they\'ll sign for whatever their draft slot pays">(~' + fmtSurplus(p.bonus_ask) + ')</span>';
     }
     tr += '<td data-sort-value="' + bonusAskSort + '">' + bonusAskDisplay + '</td>';
-    var bonusScoreSort = p.bonus_score != null ? p.bonus_score : -1;
-    tr += '<td data-sort-value="' + bonusScoreSort + '"><span class="ptype-' + (p.bonus_verdict_class || 'unscouted') + '">' + (p.bonus_score != null ? p.bonus_score.toFixed(0) : 'No Ask') + '</span></td>';
+    if (DRAFT_SHOW_DD) {
+      var bonusScoreSort = p.bonus_score != null ? p.bonus_score : -1;
+      tr += '<td data-sort-value="' + bonusScoreSort + '"><span class="ptype-' + (p.bonus_verdict_class || 'unscouted') + '">' + (p.bonus_score != null ? p.bonus_score.toFixed(0) : 'No Ask') + '</span></td>';
+    }
     tr += '<td>' + charPill(p.acc) + '</td>';
     var riskClr = p.risk === 'Low' ? 'pos' : p.risk === 'Extreme' ? 'neg' : '';
     tr += '<td class="col-sep ' + riskClr + '">' + (p.risk || '-') + '</td>';
